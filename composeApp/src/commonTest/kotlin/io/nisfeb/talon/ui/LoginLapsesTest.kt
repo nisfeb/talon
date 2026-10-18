@@ -22,5 +22,9 @@ class LoginLapsesTest {
         assertFalse(LoginLapses.take("~nec"), "said once")
         assertFalse("~nec" in LoginLapses.ships.value)
         assertEquals("You were signed out of ~nec. Sign in again to keep getting its messages.", lapsedLoginNotice("~nec"))
+        // Review B1-12: a comet by its word name, not its full @p.
+        val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
+        assertEquals("You were signed out of ${shipHandle(comet)}. Sign in again to keep getting its messages.", lapsedLoginNotice(comet))
+        assertTrue(comet !in lapsedLoginNotice(comet))
     }
 }

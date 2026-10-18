@@ -110,7 +110,7 @@ object LoginLapses {
 
 /** What the login form says to a ship whose sign-in lapsed. */
 fun lapsedLoginNotice(ship: String): String =
-    "You were signed out of $ship. Sign in again to keep getting its messages."
+    "You were signed out of ${io.nisfeb.talon.ui.shipHandle(ship)}. Sign in again to keep getting its messages."
 
 @Composable
 fun LoginScreen(
@@ -291,7 +291,7 @@ fun LoginScreen(
                                 .onSuccess { ship ->
                                     // login() keeps the leading ~ on the
                                     // ship name — don't prepend another.
-                                    status = "Connected as $ship"
+                                    status = "Connected as ${io.nisfeb.talon.ui.shipHandle(ship)}"
                                     LoginDraft.clear()
                                     onLoginCode(ship, typedCode)
                                     onLoggedIn(ship)

@@ -73,4 +73,23 @@ class ShipSwitcherDrawerTest {
     fun `where signing out is not wired there is no menu`() = drawer(wired = false) {
         assertTrue(onAllNodesWithContentDescription("What to do with ~zod").fetchSemanticsNodes().isEmpty())
     }
+
+    // Review B1-12: a comet's menu and the delete prompt said its whole @p.
+    @Test
+    fun `a comet's menu and delete prompt use its word name`() = runComposeUiTest {
+        val comet = "~doznec-binwes-samper-siglet--fidpen-sogdur-wacser-wissun"
+        setContent {
+            TalonTheme(darkTheme = false) {
+                ShipSwitcherDrawer(
+                    ships = listOf(comet), activeShip = comet, nicknames = emptyMap(),
+                    onPick = {}, onAdd = {}, onForget = { did += "forget" },
+                )
+            }
+        }
+        onNodeWithContentDescription("What to do with ${io.nisfeb.talon.ui.shipHandle(comet)}").performClick()
+        onNodeWithText("Sign out and delete data").performClick()
+        waitForIdle()
+        assertTrue(shows("Delete ${io.nisfeb.talon.ui.shipHandle(comet)}'s data?"))
+        assertTrue(!shows(comet), "no full @p anywhere")
+    }
 }

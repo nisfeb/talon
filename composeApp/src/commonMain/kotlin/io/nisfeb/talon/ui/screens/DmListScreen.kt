@@ -1925,10 +1925,10 @@ internal fun ShipSwitcherDrawer(
                     if (onSignOut != null || onForget != null) {
                         Spacer(Modifier.weight(1f))
                         Box {
-                            io.nisfeb.talon.ui.IconButton(tip = "What to do with $ship", onClick = { menuFor = ship }) {
+                            io.nisfeb.talon.ui.IconButton(tip = "What to do with ${io.nisfeb.talon.ui.shipHandle(ship)}", onClick = { menuFor = ship }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
-                                    contentDescription = "What to do with $ship",
+                                    contentDescription = "What to do with ${io.nisfeb.talon.ui.shipHandle(ship)}",
                                 )
                             }
                             DropdownMenu(
@@ -1984,11 +1984,11 @@ internal fun ShipSwitcherDrawer(
     confirmForget?.let { ship ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmForget = null },
-            title = { Text("Delete $ship's data?") },
+            title = { Text("Delete ${io.nisfeb.talon.ui.shipHandle(ship)}'s data?") },
             text = {
                 Text(
                     "Signs out and removes everything stored on this device for " +
-                        "$ship: its chats, groups and unread marks. Nothing on the " +
+                        "${io.nisfeb.talon.ui.shipHandle(ship)}: its chats, groups and unread marks. Nothing on the " +
                         "ship itself is touched, and signing in again downloads it " +
                         "afresh.",
                 )
