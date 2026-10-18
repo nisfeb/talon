@@ -241,21 +241,42 @@ class MainActivity : ComponentActivity() {
      * doesn't stay visible over the lock screen afterwards.
      */
     private fun showOverLockScreenIfRinging(intent: Intent?) {
-        if (intent == null || !io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)) return
+        if (intent == null || !callsTrusted(intent) || !io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         }
     }
 
+    /**
+     * Whether this intent's call extras count: it came from Talon's own
+     * notification, through the alias no other app can start. This
+     * activity is exported, and any app could have it place a call or
+     * answer a ring.
+     */
+    private fun callsTrusted(intent: Intent): Boolean =
+        io.nisfeb.talon.call.RingIntents.trusted(intent.component?.className)
+
     private fun consumeIntent(intent: Intent?) {
         if (intent == null) return
         var consumedDeepLink = false
+        val trusted = callsTrusted(intent)
+        val ring = trusted && io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)
         // Read before the target, though order does not matter here:
         // what matters is that TalonApp switches ships before it acts
         // on any of the rest.
         intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
-            deepLinkForShip.value = it
+            if (ring) {
+                // A ring for another of the owner's ships: only that ship's
+                // controller hears it, so go there now. Not as a deep link,
+                // which with nothing else in it TalonApp never consumes: the
+                // next switch away would have come straight back.
+                val app = applicationContext as TalonApplication
+                io.nisfeb.talon.call.RingIntents.shipToSwitch(it, app.activeShipFlow.value, app.allShipsFlow.value)
+                    ?.let(app::switchShip)
+            } else {
+                deepLinkForShip.value = it
+            }
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_OPEN_WHOM)?.let {
@@ -291,9 +312,11 @@ class MainActivity : ComponentActivity() {
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
-            pendingAnswerFrom.value = it
-            pendingAnswerCallId.value =
-                intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            if (trusted) {
+                pendingAnswerFrom.value = it
+                pendingAnswerCallId.value =
+                    intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            }
             // Cleared here as well as in the block below: a retained
             // answer extra would re-accept on the next cold launch.
             intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)
@@ -309,7 +332,7 @@ class MainActivity : ComponentActivity() {
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_CALL_BACK)?.let {
-            pendingCallBack.value = it
+            if (trusted) pendingCallBack.value = it
             intent.removeExtra(Notifications.EXTRA_CALL_BACK)
             consumedDeepLink = true
         }

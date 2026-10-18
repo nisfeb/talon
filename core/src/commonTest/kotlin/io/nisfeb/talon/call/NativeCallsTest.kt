@@ -31,6 +31,29 @@ class NativeCallsTest {
         assertFalse(RingIntents.isRing { it == "open_whom" })
     }
 
+    // B3-1: MainActivity is exported, and any app could have it place a
+    // call or answer a ring. The call extras count only through the alias.
+    @Test
+    fun callExtrasCountOnlyThroughTheNotificationAlias() {
+        assertTrue(RingIntents.trusted("io.nisfeb.talon.NotificationTap"))
+        assertEquals("io.nisfeb.talon.NotificationTap", RingIntents.TAP_ALIAS, "the manifest declares this name")
+        assertFalse(RingIntents.trusted("io.nisfeb.talon.MainActivity"), "the launcher's, exported")
+        assertFalse(RingIntents.trusted(null), "an intent with no component")
+        assertFalse(RingIntents.trusted("io.nisfeb.talon.HealthPermissionsRationale"), "another exported alias")
+        assertFalse(RingIntents.trusted("NotificationTap"))
+    }
+
+    // B3-5: only the rung ship's controller hears the ring.
+    @Test
+    fun aRingForAnotherSignedInShipGoesThereFirst() {
+        val ships = listOf("~zod", "~bus")
+        assertEquals("~bus", RingIntents.shipToSwitch("~bus", active = "~zod", ships = ships))
+        assertNull(RingIntents.shipToSwitch("~zod", active = "~zod", ships = ships), "already there")
+        assertNull(RingIntents.shipToSwitch("~nec", active = "~zod", ships = ships), "not signed in here")
+        assertNull(RingIntents.shipToSwitch(null, active = "~zod", ships = ships), "an older ring names no ship")
+        assertEquals("~bus", RingIntents.shipToSwitch("~bus", active = null, ships = ships), "from the login screen")
+    }
+
     @Test
     fun aRingAnsweredOnAnotherDeviceIsFiledSo() {
         val none = CallUiState.None

@@ -293,7 +293,9 @@ fun TalonApp(
         // arrived over SSE yet, so wait for it rather than firing once
         // and missing.
         if (initialAnswerFrom != null) {
-            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom, initialAnswerCallId) {
+            // Keyed on the controller too: a ring for another ship switches
+            // first (MainActivity), and the wait must be on that ship's.
+            androidx.compose.runtime.LaunchedEffect(callController, initialAnswerFrom, initialAnswerCallId) {
                 // Matched to the ring timeout rather than picked: a
                 // cold start has to open the channel and run its
                 // scries before the ring can land, and giving up

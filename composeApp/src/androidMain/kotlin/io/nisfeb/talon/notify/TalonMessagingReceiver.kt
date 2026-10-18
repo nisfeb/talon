@@ -132,7 +132,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
                 (context.applicationContext as? io.nisfeb.talon.TalonApplication)?.activeShipFlow?.value,
                 io.nisfeb.talon.ui.LastContactMap.value,
             ).displayName(from)
-            io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId, name)
+            io.nisfeb.talon.Notifications.showIncomingCall(context, from, eventId, name, forShip = patp)
             // Telecom hears about the ring from here, not only from the
             // app: this is the path a phone in a pocket takes, and a
             // call telecom never saw is not in the call log. If the

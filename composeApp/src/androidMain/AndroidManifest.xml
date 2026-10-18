@@ -168,6 +168,16 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <!-- Every notification opens Talon through this alias. Not
+             exported, so only Talon can start it: a ring, an answer or a
+             call back counts only from here (RingIntents.trusted).
+             MainActivity is exported as the launcher's, and any app can
+             start it with any extras. -->
+        <activity-alias
+            android:name="io.nisfeb.talon.NotificationTap"
+            android:exported="false"
+            android:targetActivity="io.nisfeb.talon.MainActivity" />
+
         <service
             android:name="io.nisfeb.talon.TalonSyncService"
             android:exported="false"

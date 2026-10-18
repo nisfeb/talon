@@ -93,6 +93,14 @@ object Notifications {
     /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
     const val EXTRA_OPEN_CALENDAR = "open_calendar"
 
+    /**
+     * MainActivity, through the alias whose call extras count
+     * ([io.nisfeb.talon.call.RingIntents.TAP_ALIAS]). Every notification
+     * opens Talon with this.
+     */
+    fun tapIntent(context: Context): Intent =
+        Intent().setClassName(context, io.nisfeb.talon.call.RingIntents.TAP_ALIAS)
+
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(NotificationManager::class.java) ?: return
@@ -257,7 +265,7 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
             context, tag.hashCode(),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
                 if (openCalendar != null) putExtra(EXTRA_OPEN_CALENDAR, openCalendar)
@@ -296,7 +304,11 @@ object Notifications {
      * showed the in-app ring and the user had to press Answer twice.
      * Declining works from here alone, being one poke and no media.
      */
-    fun showIncomingCall(context: Context, from: String, callId: String, name: String = from) {
+    fun showIncomingCall(
+        context: Context, from: String, callId: String, name: String = from,
+        /** The ship rung. Answer and Show go to it first: only its controller hears the ring. */
+        forShip: String? = null,
+    ) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
@@ -327,9 +339,10 @@ object Notifications {
 
         fun open(tap: io.nisfeb.talon.call.RingIntents.Tap) = PendingIntent.getActivity(
             context, io.nisfeb.talon.call.RingIntents.requestCode(tap, callId),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 io.nisfeb.talon.call.RingIntents.extras(tap, from, callId).forEach { (k, v) -> putExtra(k, v) }
+                if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -455,7 +468,7 @@ object Notifications {
             ?: return
         val callBack = PendingIntent.getActivity(
             context, from.hashCode(),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_CALL_BACK, from)
             },
@@ -463,7 +476,7 @@ object Notifications {
         )
         val message = PendingIntent.getActivity(
             context, from.hashCode() + 1,
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(EXTRA_OPEN_WHOM, from)
             },
@@ -549,7 +562,7 @@ object Notifications {
         )
         if (alert == io.nisfeb.talon.notify.ChatAlert.Skip) return
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
             if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
@@ -606,7 +619,7 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
         ensureChannel(context)
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_MAIL, true)
         }
@@ -639,7 +652,7 @@ object Notifications {
             ?: return
         ensureChannel(context)
         val tag = "action:" + actionId.ifBlank { "more" }
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_ACTIONS, true)
         }

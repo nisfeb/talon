@@ -38,6 +38,28 @@ object RingIntents {
 
     /** Whether an intent is about a ring, and so may show over the lock screen. */
     fun isRing(has: (String) -> Boolean): Boolean = has(ANSWER_FROM) || has(RINGING_FROM)
+
+    /**
+     * The activity-alias every notification opens Talon through. It is not
+     * exported, so only Talon can start it. MainActivity is exported, as
+     * the launcher's, and placed a call or answered a ring for any app.
+     */
+    const val TAP_ALIAS = "io.nisfeb.talon.NotificationTap"
+
+    /**
+     * Whether an intent's call extras (a ring, an answer, a call back) are
+     * Talon's own: they count only when it came through [TAP_ALIAS].
+     * [componentClass] is the class the intent was started for.
+     */
+    fun trusted(componentClass: String?): Boolean = componentClass == TAP_ALIAS
+
+    /**
+     * The ship to go to before a ring is shown or answered: only that
+     * ship's controller hears it. Null when it is the active one already,
+     * or is not signed in here (nowhere right to go).
+     */
+    fun shipToSwitch(forShip: String?, active: String?, ships: List<String>): String? =
+        forShip?.takeIf { it != active && it in ships }
 }
 
 /** How a call is filed in the system's call log. */
