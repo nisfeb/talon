@@ -85,3 +85,11 @@ Calls, sync and the shells were reviewed in depth hours ago; their new code is i
 - A4-19 Low, privacy, DECISION: every http(s) link in a received message is fetched from the reader's device (`LinkPreviewCache.kt:102-103`, `DmChatScreen.kt:1830-1838`), with no setting.
 - A4-20 Low: "Hide composer buttons" is ignored in threads (`RightPaneHost.kt:85-99`, `TalonApp.kt:2529-2555`, `App.kt:2715-2735`).
 - New angles: M14 via fetchCitePost and fetchThread storing isolated old rows; F1's multi-file drop loop still on the screen scope (`ChatComposer.kt:717-720`); raw `it.message` in `SlashCommands.kt` 219, 316, 343, 387; ReactionDetailsSheet names clip without ellipsis.
+
+### Area 3, shells, voice and platform half of #42
+
+- A3-1 Med: the sync stream started at boot notifies nothing, since the message, DM-request and invite listeners are set only by TalonApp's screen (`TalonSyncService.kt:67`, `BootReceiver.kt:40`, `TalonApp.kt:1264-1345`, `TalonApplication.kt:483`). Also, a process kept alive after the Activity is destroyed goes silent. Fix: wire the listeners in buildShipScoped beside readListener, with a process-level open-chat check; or don't start the stream from the service.
+- A3-2 Low-Med: erased drafts come back within the session on desktop and iOS, because FileDraftStore's in-memory map is never cleared (`DraftStore.kt:85`, `DesktopShipDataEraser.kt:36`). Fix: forget(ship), called on the erase path in both shells.
+- A3-3 Low: Android leaves the profile sheet over a link's target (`TalonApp.kt:1450-1466`, closeSections at `:761`). Fix: closeSections clears profileSheetShip and the image viewer, as desktop's leaveAllFor does.
+- A3-4 Low: desktop and iOS draft previews are missing after launch and wrong after a ship switch (`DraftStore.kt:113-128`). Fix: fill backing from the active ship at construction and on ship change.
+- A3-5 Low: picking another ship from the Android drawer drops unsaved profile edits with no prompt (`TalonApp.kt` ~1892, ~3128). Fix: sections.leave around both.
