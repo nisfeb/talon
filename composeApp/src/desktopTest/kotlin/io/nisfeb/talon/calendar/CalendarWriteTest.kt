@@ -447,6 +447,56 @@ class CalendarWriteTest {
         }
     }
 
+    // Every screen reads the window and the month, so what an edit puts
+    // there at Save must be that event alone, as the ship will have it.
+    @Test
+    fun `an event's edit moves that event alone and keeps what it does not edit`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        val day = LocalDate(2026, 9, 25)
+        val dentist = """{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"meta":{"name":"Dentist","conference":"https://meet.example/x"},"l":$soon,"r":${soon + 3_600_000}}"""
+        val standup = """{"id":"s1","cal":"default","idx":2,"cat":"timed","kind":"daily","all":false,"meta":{"name":"Standup"},"l":${soon + 7_200_000},"r":${soon + 8_100_000}}"""
+        calendar(window = { """{"rows":[$dentist,$standup,${event("e2", "Swim", soon + 60_000)}]}""" }) { repo, _ ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            val before = repo.rows.value
+            // An id the lists do not have changes neither.
+            repo.writeEvent(eventBody(EventDraft(name = "Elsewhere", date = day, cal = "default"), "e9"), readBack = false)
+            assertEquals(before, repo.rows.value)
+            // A day out on another calendar, all day: its days, its calendar,
+            // its link kept; nothing else moves.
+            val allDay = EventDraft(name = "Dentist, all day", cat = EventCat.ALLDAY, date = day, spanDays = 2, cal = "work")
+            repo.writeEvent(eventBody(allDay, "e1"), readBack = false)
+            val dayStart = day.atTime(0, 0).toInstant(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds()
+            for (rows in listOf(repo.rows.value!!, repo.rangeRows.value!!)) {
+                val e1 = rows.single { it.id == "e1" }
+                assertEquals(Triple(dayStart, dayStart + 2 * 86_400_000L, true), Triple(e1.l, e1.r, e1.all))
+                assertEquals("work" to "https://meet.example/x", e1.cal to io.nisfeb.talon.calendar.joinLink(e1.meta))
+                assertEquals("Dentist, all day", e1.name)
+                assertEquals("Swim" to (soon + 60_000), rows.single { it.id == "e2" }.let { it.name to it.l }, "the rest as it was")
+            }
+            // A series keeps its occurrences: its words change, not its times.
+            repo.writeEvent(eventBody(EventDraft(name = "Standup, renamed", date = day, cal = "default"), "s1"), readBack = false)
+            val s1 = repo.rows.value!!.single { it.id == "s1" }
+            assertEquals("Standup, renamed" to (soon + 7_200_000), s1.name to s1.l)
+        }
+    }
+
+    // "Only this one" on a calendar with it (34) is that occurrence alone.
+    @Test
+    fun `only this one moves that occurrence and no other of its series`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        val tomorrow = soon + 86_400_000
+        fun occ(idx: Int, l: Long) = """{"id":"s1","cal":"default","idx":$idx,"cat":"timed","kind":"daily","all":false,"meta":{"name":"Standup"},"l":$l,"r":${l + 900_000}}"""
+        calendar(window = { """{"rows":[${occ(1, soon)},${occ(2, tomorrow)}]}""" }) { repo, _ ->
+            val day = LocalDate(2026, 9, 25)
+            val moved = EventDraft(name = "Standup, moved", date = day, minuteOfDay = 15 * 60, durMin = 15, cal = "default")
+            repo.writeEvent(io.nisfeb.talon.calendar.editAtBody(moved, "s1", home = "default", atMs = soon), readBack = false)
+            val at3 = day.atTime(15, 0).toInstant(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds()
+            val rows = repo.rows.value!!
+            assertEquals(listOf(at3 to "Standup, moved"), rows.filter { it.idx == 1 }.map { it.l to it.name })
+            assertEquals(listOf(tomorrow to "Standup"), rows.filter { it.idx == 2 }.map { it.l to it.name }, "the next one stays")
+        }
+    }
+
     @Test
     fun `undoing an edit leaves alone a copy the ship has read back since`() {
         val soon = System.currentTimeMillis() + 3_600_000
@@ -465,13 +515,20 @@ class CalendarWriteTest {
     @Test
     fun `a task the calendar refuses after taking it is said and kept for later and leaves the list`() = calendar(
         setup = { refuseLater = { if ("Buy bread" in it) "the task could not be read" else null } },
-    ) { repo, _ ->
+        tasks = { ship -> if (ship.pokes.any { "Buy eggs" in it }) """[$undated,$dated,{"id":"t3","cal":"default","cat":"todo","meta":{"name":"Buy eggs"}}]""" else """[$undated,$dated]""" },
+    ) { repo, ship ->
         val said = CopyOnWriteArrayList<String>()
         repo.addTask(EventDraft(name = "Buy bread", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")) { said += it }
         assertEquals(1, repo.pendingTasks.value.size, "on the list at once")
         kotlinx.coroutines.withTimeout(10_000) { while (repo.pendingTasks.value.isNotEmpty()) kotlinx.coroutines.delay(50) }
         assertEquals(listOf("\"Buy bread\" was not added: the task could not be read"), said.toList())
         assertEquals("\"Buy bread\" was not added: the task could not be read", repo.unheard.value, "said when the calendar next opens, if no screen heard it")
+        // One it keeps is read into the list.
+        ship.clear()
+        repo.addTask(EventDraft(name = "Buy eggs", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")) { said += it }
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.pendingTasks.value.isNotEmpty()) kotlinx.coroutines.delay(50) }
+        assertEquals(1, said.size, "nothing more said")
+        assertTrue(repo.tasks.value.orEmpty().any { it.name == "Buy eggs" }, "the list read back: ${ship.reads}")
     }
 
     @Test
@@ -553,6 +610,9 @@ class CalendarWriteTest {
         ship.down = true
         val thrown = runCatching { repo.share("default", "~nec", edit = false) }.exceptionOrNull()
         assertTrue(thrown is io.nisfeb.talon.mail.AuspexError.Unreachable, "$thrown")
+        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "said in words")
+        assertTrue(repo.refreshTasks().isFailure)
+        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "a read too")
         ship.down = false
         assertTrue(repo.revoke("default", "~nec"), "the repo's scope still runs writes")
     }

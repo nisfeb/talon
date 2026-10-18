@@ -292,7 +292,8 @@ class MailRepoWriteTest {
     // came, and the Mail section's pip stood still.
     @Test
     fun `new mail is announced and lights the pip while another folder is open`() {
-        val inboxRows = AtomicReference(listOf(row("0v1", "one")))
+        // Unread when Talon opened: the baseline, never announced.
+        val inboxRows = AtomicReference(listOf(row("0v1", "one"), unread("0v5", "old news")))
         withRepo({ req ->
             val path = req.url.encodedPath
             when {
@@ -308,8 +309,9 @@ class MailRepoWriteTest {
             settle(r)
             r.selectFolder(MailFolder.View(MailView.SENT))
             until("the sent listing") { r.page.value?.threads?.isEmpty() == true }
-            inboxRows.set(listOf(row("0v1", "one"), unread("0v9", "news")))
+            inboxRows.set(listOf(row("0v1", "one"), unread("0v5", "old news"), unread("0v9", "news")))
             until("the new mail's notice") { news.isNotEmpty() }
+            assertEquals(listOf("0v9"), news.map { it.threadId }, "only what came since; what was unread at the start is the baseline")
             assertTrue(r.inboxUnread.value, "the pip")
             assertEquals(MailFolder.View(MailView.SENT), r.folder.value, "and the reader stays where they were")
             assertTrue(r.page.value!!.threads.isEmpty(), "the listing on screen is still Sent's")
@@ -424,6 +426,8 @@ class MailRepoWriteTest {
                 sheet.cancel()
                 until("$route to land") { route in landed }
             }
+            // Awaited, each says it went.
+            assertEquals(listOf(true, true, true, true), writes.map { it.second() })
             until("the lists read again behind them") { hits.any { it.endsWith("/api/rules") } && hits.any { it.endsWith("/api/lists") } }
         }
     }
