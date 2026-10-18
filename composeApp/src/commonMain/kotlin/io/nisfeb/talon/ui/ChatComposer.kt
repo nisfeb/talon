@@ -235,6 +235,48 @@ object PendingQuotes {
 }
 
 /**
+ * Files shared into a chat from another app, by whom, waiting for that
+ * chat's composer to stage them. Observable, so a chat already open takes
+ * one too. The composer takes it once and it then goes only on Send.
+ */
+object SharedAttachments {
+    private val byWhom = androidx.compose.runtime.mutableStateMapOf<String, PendingAttachment>()
+
+    fun put(whom: String, attachment: PendingAttachment) { byWhom[whom] = attachment }
+
+    fun peek(whom: String): PendingAttachment? = byWhom[whom]
+
+    fun take(whom: String): PendingAttachment? = byWhom.remove(whom)
+}
+
+/** What a share from another app does with the chat it is for ([shareStep]). */
+enum class ShareStep {
+    /** Its text goes into the chat's draft. */
+    Draft,
+    /** Its file waits in the chat's composer ([SharedAttachments]) for Send. */
+    Stage,
+    /** Posted now. */
+    Post,
+    /** Shown in Talon's picker, so the owner chooses. */
+    Pick,
+}
+
+/**
+ * [direct]: the share sheet named the chat (a Sharing Shortcut). Any app
+ * can send that, so a direct share never posts by itself (B3-2): its text
+ * goes into the draft and its file waits in the composer for the owner's
+ * Send. A gallery has no composer, so a direct share to one goes to the
+ * picker. A chat the owner picked in Talon takes a file or a gallery post
+ * at once, as before.
+ */
+fun shareStep(whom: String, text: Boolean, direct: Boolean): ShareStep = when {
+    whom.startsWith("heap/") -> if (direct) ShareStep.Pick else ShareStep.Post
+    text -> ShareStep.Draft
+    direct -> ShareStep.Stage
+    else -> ShareStep.Post
+}
+
+/**
  * A file's post: its name, linked. The upload's URL no longer carries the
  * name (uploadName), so a bare URL would leave nobody knowing what it is.
  */
@@ -571,6 +613,15 @@ fun ChatComposer(
     // [uploadDroppedFiles] (the preview holds one item).
     val stageDropped: (DroppedFile) -> Unit = { file ->
         stage(file.bytes, file.mimeType, file.name, file.isImage)
+    }
+
+    // A file shared into this chat from another app: staged as a pick is,
+    // so nothing goes until the owner sends it.
+    val shared = SharedAttachments.peek(whom)
+    LaunchedEffect(shared) {
+        if (shared != null && SharedAttachments.take(whom) != null) {
+            stage(shared.bytes, shared.mimeType, shared.displayName, shared.isImage)
+        }
     }
 
     // The clipboard's image staged, or said to be too large. True when

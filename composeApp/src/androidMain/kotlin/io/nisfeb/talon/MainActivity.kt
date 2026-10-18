@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
      *  emits), Android adds [Intent.EXTRA_SHORTCUT_ID] alongside
      *  ACTION_SEND. The id is the channel's `whom`, so we use it to
-     *  bypass the picker and deliver the share directly. */
+     *  bypass the picker and open that chat with the share waiting in
+     *  its composer. Any app can send one, so nothing posts by itself. */
     private val pendingShareTarget = mutableStateOf<String?>(null)
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -372,8 +373,8 @@ class MainActivity : ComponentActivity() {
             // Sharing Shortcut routing: Android attaches the picked
             // shortcut id to the ACTION_SEND intent. We publish one
             // per channel keyed on `whom`, so this is the conversation
-            // the user already chose in the system share sheet — skip
-            // the in-app picker and deliver straight there.
+            // the share sheet named. The in-app picker is skipped and the
+            // share waits in that chat's composer for Send.
             intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.let { id ->
                 pendingShareTarget.value = id
             }

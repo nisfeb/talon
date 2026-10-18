@@ -128,4 +128,20 @@ class AndroidLifecycleGuardTest {
         assertTrue("putExtra(Notifications.EXTRA_FOR_SHIP, ship)" in shortcuts)
         assertTrue("ShortcutsPublisher(this, db, ship)" in application)
     }
+
+    // ---- sneagan's decisions of 2026-10-18; what each decides is common ----
+
+    // B3-2: shareStep (ShareStepTest); the staging, AppShellTest.
+    @Test
+    fun `a direct share waits in the composer and nothing posts before Send`() {
+        val dispatch = talonApp.substringAfter("val dispatchShare: (ShareIntent, String, Boolean) -> Unit = dispatch@{").substringBefore("\n    }\n")
+        assertTrue("io.nisfeb.talon.ui.ShareStep.Stage -> return@dispatch stageShare(share, whom)" in dispatch, dispatch)
+        assertTrue("io.nisfeb.talon.ui.ShareStep.Pick -> return@dispatch" in dispatch, dispatch)
+        val stage = talonApp.substringAfter("val stageShare: (ShareIntent, String) -> Unit = {").substringBefore("\n    }\n")
+        assertTrue("SharedAttachments.put(whom," in stage, stage)
+        for (sent in listOf("uploadImage", "sendImage", ".send(", "sendGalleryPost")) assertTrue(sent !in stage, "staging calls $sent")
+        assertTrue("dispatchShare(share, target, true)" in talonApp, "the share sheet's chat is not marked direct")
+        assertTrue("shareStep(target, share is ShareIntent.Text, direct = true) != io.nisfeb.talon.ui.ShareStep.Pick" in talonApp)
+        assertTrue("dispatchShare(pendingShare, whom, false)" in talonApp, "the in-app pick is marked direct")
+    }
 }

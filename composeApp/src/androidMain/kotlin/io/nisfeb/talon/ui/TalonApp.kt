@@ -148,9 +148,9 @@ fun TalonApp(
     /** A tapped calendar reminder: open the Calendar on its occurrence (the push's tag). */
     initialOpenCalendarTag: String? = null,
     pendingShare: ShareIntent? = null,
-    /** When non-null, the user already picked the share target in
-     *  the system share sheet (Sharing Shortcut). Skip the in-app
-     *  picker and dispatch [pendingShare] straight to this whom. */
+    /** When non-null, the system share sheet named the share target
+     *  (Sharing Shortcut). Skip the in-app picker and open this whom
+     *  with [pendingShare] waiting in its composer (shareStep). */
     pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
     /** Called once TalonApp has consumed an `initialOpen*` /
@@ -1113,7 +1113,34 @@ fun TalonApp(
             ).show()
         }
     }
-    val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
+    // A direct share's file waits in the chat's composer for Send. Its bytes
+    // are read now: the grant to read them came with the share.
+    val stageShare: (ShareIntent, String) -> Unit = { share, whom ->
+        appScope.launch {
+            runCatching {
+                val (uri, mime) = when (share) {
+                    is ShareIntent.Image -> share.uri to share.mimeType
+                    is ShareIntent.File -> share.uri to share.mimeType
+                    is ShareIntent.Text -> return@launch
+                }
+                val isImage = share is ShareIntent.Image
+                val resolver = context.contentResolver
+                val (name, bytes) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolveFileName(resolver, uri, default = if (isImage) "image" else "file") to
+                        (resolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot read shared bytes"))
+                }
+                io.nisfeb.talon.ui.SharedAttachments.put(whom, io.nisfeb.talon.ui.PendingAttachment(bytes, mime, name, isImage))
+            }.onFailure { shareFailedToast(it) }
+        }
+    }
+    // [direct]: the share sheet named the chat, and any app can do that,
+    // so nothing is posted until the owner sends it (shareStep).
+    val dispatchShare: (ShareIntent, String, Boolean) -> Unit = dispatch@{ share, whom, direct ->
+        when (io.nisfeb.talon.ui.shareStep(whom, share is ShareIntent.Text, direct)) {
+            io.nisfeb.talon.ui.ShareStep.Pick -> return@dispatch
+            io.nisfeb.talon.ui.ShareStep.Stage -> return@dispatch stageShare(share, whom)
+            else -> {}
+        }
         // A gallery is not a chat: its posts are gallery essays, and
         // there is no draft box to drop text into. Post directly.
         if (whom.startsWith("heap/")) {
@@ -1211,14 +1238,16 @@ fun TalonApp(
     // A share arriving puts the sections down: the picker is drawn
     // beneath them, so with one open it was hidden, and Back threw the
     // share away. A chat stays; the picker is drawn over it and its Back
-    // comes back to it. On the Sharing Shortcut path the user already
-    // chose the channel in the system share sheet, so the share goes at
-    // once and that conversation opens without the in-app picker.
+    // comes back to it. On the Sharing Shortcut path the share sheet named
+    // the channel, so that conversation opens without the in-app picker,
+    // the share waiting in its composer. A gallery has none: the picker.
     LaunchedEffect(pendingShare, pendingShareTarget) {
         val share = pendingShare ?: return@LaunchedEffect
         val target = pendingShareTarget
-        if (!target.isNullOrBlank()) {
-            dispatchShare(share, target)
+        if (!target.isNullOrBlank() &&
+            io.nisfeb.talon.ui.shareStep(target, share is ShareIntent.Text, direct = true) != io.nisfeb.talon.ui.ShareStep.Pick
+        ) {
+            dispatchShare(share, target, true)
             sections.leave { closeSections(); openWhom = target }
             onShareConsumed()
         } else {
@@ -2448,7 +2477,7 @@ fun TalonApp(
                 db = app.db,
                 share = pendingShare,
                 onPick = { whom ->
-                    dispatchShare(pendingShare, whom)
+                    dispatchShare(pendingShare, whom, false)
                     openWhom = whom
                     onShareConsumed()
                 },
