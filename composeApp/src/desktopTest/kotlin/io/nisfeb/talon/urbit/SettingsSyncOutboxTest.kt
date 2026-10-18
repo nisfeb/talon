@@ -142,6 +142,28 @@ class SettingsSyncOutboxTest {
         assertEquals(emptyList(), db.settingsOutbox().all())
     }
 
+    // Kept changes go oldest first, each once the one before is answered:
+    // one the ship still does not take keeps those behind it for the next
+    // try, and a change made after a flush still goes.
+    @Test
+    fun `kept changes go in the order made, and stop at the first the ship does not take`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.setNotifyLevel("~bus", NotifyLevel.NONE)
+        sync.addBookmark("chat/~bus/general", "170.1", 5)
+        ship.lose = { if ("notify-prefs" in it.json.toString()) lost else null }
+        sync.flushPending()
+        assertTrue(ship.pokesTo("settings").isEmpty(), "the first is still not taken: the second waits behind it")
+        assertEquals(2, db.settingsOutbox().all().size)
+        ship.lose = { null }
+        sync.flushPending()
+        val buckets = ship.pokesTo("settings").map { it.json.toString().substringAfter("\"bucket-key\":\"").substringBefore("\"") }
+        assertEquals(listOf("notify-prefs", "bookmarks"), buckets)
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        kotlinx.coroutines.withTimeout(5_000) { sync.setNotifyLevel("~nec", NotifyLevel.ALL) }
+        assertTrue(ship.pokesTo("settings").any { "~nec" in it.json.toString() })
+    }
+
     // A seed is this device's state against what the ship held as read:
     // sent days later, it would overwrite what other devices wrote since.
     @Test
