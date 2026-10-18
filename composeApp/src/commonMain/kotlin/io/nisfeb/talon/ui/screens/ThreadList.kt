@@ -828,7 +828,8 @@ private fun ThreadMessage(
                 onImageTap = onImageTap,
                 reactions = reactions,
                 ourPatp = ourPatp,
-                onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
+                // A poll the ship has not taken yet has no post to vote on.
+                onPollVote = if (isLocalOnly(m.id)) null else { emoji -> onPollVote(m, reactions, emoji) },
                 // Touch only: null on desktop so a left-press-drag selects
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
