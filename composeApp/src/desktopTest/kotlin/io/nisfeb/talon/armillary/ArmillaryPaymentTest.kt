@@ -338,6 +338,10 @@ class ArmillaryPaymentTest {
             assertEquals(5_000_000L, repo.payment.value!!.addedMicro)
         }
         balance = 10_000_000
+        // The second checkout starts from no rows: the first half's paid
+        // row, read by the new repo's own background reads before the test
+        // swapped in its expired one, settled it as paid.
+        checkouts = "{}"
         ship(setUp) { repo, _ ->
             repo.topUp("stripe", "five", null).getOrThrow()
             checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"expired"}}"""
