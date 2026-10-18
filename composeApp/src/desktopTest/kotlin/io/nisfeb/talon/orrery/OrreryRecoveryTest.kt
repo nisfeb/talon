@@ -110,6 +110,24 @@ class OrreryRecoveryTest {
         }
     }
 
+    // Tried again every quarter hour with the app behind: a read of the
+    // ship for nobody. A check due meanwhile goes once the app is back.
+    @Test
+    fun `a failed check waits while the app is behind and goes once it is back`() {
+        downFor.set(1_000)
+        attached { repo, _ ->
+            until("the failed check is said") { repo.error.value != null }
+            repo.setForeground(false)
+            delay(150)
+            val behind = asked.count { it == "/apps/orrery/api/state" }
+            delay(600)
+            assertEquals(behind, asked.count { it == "/apps/orrery/api/state" }, "nothing asked while behind")
+            downFor.set(0)
+            repo.setForeground(true)
+            until("asked again once back, and answered") { repo.availability.value == OrreryAvailability.PRESENT }
+        }
+    }
+
     @Test
     fun `a ship that answers its first check is not asked again`() = attached { repo, _ ->
         until("present") { repo.availability.value == OrreryAvailability.PRESENT }

@@ -829,10 +829,20 @@ class OrreryRepo(
 
     private var retrying: Job? = null
 
+    /** The app is in front or behind ([setForeground]); in front until told. */
+    private val inFront = MutableStateFlow(true)
+
+    /** The app came to the front, or went behind it: a failed check waits for it to come back. */
+    fun setForeground(on: Boolean) {
+        inFront.value = on
+    }
+
     /**
      * A check that failed, tried again further apart each time and never
      * in step with other clients, until the ship answers. Whoever asked:
-     * the first check at attach, or Settings opening.
+     * the first check at attach, or Settings opening. Not while the app
+     * is behind, every quarter hour for nobody: one due then goes as it
+     * comes back.
      */
     private fun retryProbe() {
         if (retrying?.isActive == true || api == null) return
@@ -840,6 +850,7 @@ class OrreryRepo(
             var failures = 0
             while (_availability.value == OrreryAvailability.UNKNOWN && probeSaid != null) {
                 delay(io.nisfeb.talon.urbit.jittered(probeRetryMs(++failures, probeRetryFirstMs)))
+                inFront.first { it }
                 probe()
             }
         }

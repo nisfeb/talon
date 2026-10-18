@@ -13,6 +13,7 @@ import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.ui.platformLabel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.util.Log
@@ -126,7 +127,7 @@ class ArmillaryRepo(
     @kotlin.concurrent.Volatile private var resumedAtMs = 0L
 
     /** The app is in front ([resumed]) or behind ([paused]); in front until told. */
-    @kotlin.concurrent.Volatile private var inFront = true
+    private val inFront = MutableStateFlow(true)
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -153,7 +154,7 @@ class ArmillaryRepo(
         ticking = scope.launch {
             while (isActive) {
                 delay(picksEveryMs)
-                if (inFront && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
+                if (inFront.value && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
             }
         }
         // The ship already buys from a vendor, set up on some device: this
@@ -261,6 +262,9 @@ class ArmillaryRepo(
             var failures = 0
             while (_availability.value == ArmillaryAvailability.UNKNOWN && _error.value != null) {
                 delay(io.nisfeb.talon.urbit.jittered(io.nisfeb.talon.orrery.probeRetryMs(++failures, probeRetryFirstMs)))
+                // Not while the app is behind: every quarter hour, for nobody.
+                // A check due meanwhile goes as it comes back.
+                inFront.first { it }
                 refresh()
             }
         }
@@ -290,7 +294,7 @@ class ArmillaryRepo(
      * triggers.
      */
     fun resumed() {
-        inFront = true
+        inFront.value = true
         val at = now()
         if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
         resumedAtMs = at
@@ -307,7 +311,7 @@ class ArmillaryRepo(
 
     /** The app went behind: the picks are not read again until it is back ([resumed] reads them then). */
     fun paused() {
-        inFront = false
+        inFront.value = false
     }
 
     /**
