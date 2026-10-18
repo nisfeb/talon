@@ -50,14 +50,10 @@ import io.nisfeb.talon.ui.MediaKind
 import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.rememberAutofillModifier
 import io.nisfeb.talon.ui.rememberLocationProvider
-import io.nisfeb.talon.data.MessageEntity
-import io.nisfeb.talon.notify.isMentioned
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonPrimitive
-import io.nisfeb.talon.data.NotifyLevel
-import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.ui.screens.ShareTargetScreen
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
@@ -597,10 +593,11 @@ fun TalonApp(
     // plain `remember { mutableStateOf(initialX) }` would silently
     // ignore — that was the rc23-era "tap a notification, nothing
     // happens" bug.
-    // A "group:~host/name" deep link (group-invite notification) opens
-    // the group, not a chat, so keep it out of openWhom.
+    // A "group:~host/name" deep link opens the group and an
+    // "invite:~host/name" one (a group-invite notification) the invites,
+    // not a chat, so keep both out of openWhom.
     var openWhom by remember {
-        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
+        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") || it.startsWith("invite:") })
     }
     // True exactly while the chat's partyLineBar slot is composing the
     // inline call/party surfaces (a DisposableEffect in that slot flips
@@ -917,10 +914,12 @@ fun TalonApp(
             initialScrollMessageId != null
         if (chatTargeted) closeSections()
         if (initialOpenWhom != null) {
-            // A group-invite notification deep-links as "group:~host/name"
-            // — route it to the group screen, not openWhom (which only
-            // understands channel nests and DM ships).
-            if (initialOpenWhom.startsWith("group:")) {
+            // A group deep link goes to the group screen, not openWhom
+            // (which only understands channel nests and DM ships), and a
+            // group invite to Invites, the one place it can be accepted.
+            if (initialOpenWhom.startsWith("invite:")) {
+                invitesOpen = true
+            } else if (initialOpenWhom.startsWith("group:")) {
                 openGroupFlag = initialOpenWhom.removePrefix("group:")
             } else {
                 openWhom = initialOpenWhom
@@ -1241,9 +1240,6 @@ fun TalonApp(
         }
     }
 
-    // Latest-value refs so the callback below doesn't close over stale state.
-    val openWhomState = rememberUpdatedState(openWhom)
-
     // Keep the shared ship-profile cache in sync with the active
     // ship's self-contact nickname. Fires whenever %contacts pushes a
     // new value through the contactMap flow.
@@ -1254,99 +1250,9 @@ fun TalonApp(
         }
     }
 
-    // Register a single message listener with the repo for the lifetime
-    // of the composition. Each new non-self message fires a notification
-    // unless the user is currently viewing that exact conversation in the
-    // foreground. Keyed on the repo: a switch builds the next ship's, and
-    // listeners set once stayed on the old one, so the new ship notified
-    // nothing until Talon restarted.
-    val listenedRepo = app.repo
-    DisposableEffect(listenedRepo, noticeRepo) {
-        listenedRepo.messageListener = { m: MessageEntity, replyToUs: Boolean ->
-            val lifecycle = ProcessLifecycleOwner.get().lifecycle
-            val foreground = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            val focused = foreground && openWhomState.value == m.whom
-            if (!focused) {
-                // Per-whom preference filter. DB read is async; do the
-                // check + fire in a coroutine rather than blocking the
-                // repo's event pump.
-                appScope.launch {
-                    val level = app.db.notifyLevelOf(m.whom)
-                    val muted = level == NotifyLevel.NONE
-
-                    // ── existing notification path ─────────────────────
-                    val shouldFire = !muted && when (level) {
-                        NotifyLevel.MENTIONS ->
-                            replyToUs || isMentioned(m.contentJson, loggedInShip ?: "")
-                        else -> true
-                    }
-                    if (shouldFire) {
-                        val title = contactMap.conversationLabel(m.whom)
-                        val authorLabel = contactMap.displayName(m.author)
-                        val preview = StoryCache.previewFor(m)
-                            .replace('\n', ' ')
-                            .take(160)
-                        Notifications.showMessage(
-                            context = context,
-                            whom = m.whom,
-                            forShip = loggedInShip,
-                            postId = m.id,
-                            parentId = m.parentId,
-                            title = title,
-                            body = if (m.whom.startsWith("~")) preview else "$authorLabel: $preview",
-                            sentMs = m.sentMs,
-                        )
-                    }
-                }
-            }
-        }
-        // New pending DM request → notify. Always fires (there's no
-        // "open" state for an unaccepted request), so a brand-new DM no
-        // longer arrives silently.
-        listenedRepo.dmInviteListener = { ship ->
-            noticeRepo.record(
-                "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
-                contactMap.displayName(ship), "wants to message you", "dm:$ship",
-            )
-            appScope.launch {
-                Notifications.showMessage(
-                    context = context,
-                    whom = ship,
-                    forShip = loggedInShip,
-                    postId = ship,
-                    parentId = null,
-                    title = contactMap.displayName(ship),
-                    body = "wants to message you",
-                    sentMs = System.currentTimeMillis(),
-                )
-            }
-        }
-        // New group invite → notify, same as a DM request. Tapping opens
-        // the group (its flag doubles as the whom via the "group:" route).
-        listenedRepo.groupInviteListener = { invite ->
-            val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
-            noticeRepo.record(
-                "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
-                invite.title ?: invite.flag, "invited you to a group$from", "invite:${invite.flag}",
-            )
-            appScope.launch {
-                Notifications.showMessage(
-                    context = context,
-                    whom = "group:${invite.flag}",
-                    postId = invite.flag,
-                    parentId = null,
-                    title = invite.title ?: invite.flag,
-                    body = "invited you to a group$from",
-                    sentMs = System.currentTimeMillis(),
-                )
-            }
-        }
-        onDispose {
-            listenedRepo.messageListener = null
-            listenedRepo.dmInviteListener = null
-            listenedRepo.groupInviteListener = null
-        }
-    }
+    // The message, DM-request and invite notifications are set on each
+    // ship's repo in TalonApplication (listenForAlerts), for the process's
+    // life: set here, they went with the screen.
 
     // Foreground catch-up: when the app returns to the front, force a
     // fresh SSE reconnect (the channel may have been quietly killed by

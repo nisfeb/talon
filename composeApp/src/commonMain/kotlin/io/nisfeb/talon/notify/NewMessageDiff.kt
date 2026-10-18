@@ -173,3 +173,45 @@ fun notifyAllowed(whom: String, level: String?, mention: Boolean): Boolean = whe
     NotifyLevel.MENTIONS -> mention || !whom.contains('/')
     else -> true
 }
+
+/** Older than this, a message is a replay or a backlog, not news: neither shell alerts for it. */
+const val ALERT_FRESH_MS = 5L * 60_000L
+
+/**
+ * Whether a message the repo heard live alerts (Android's in-process
+ * path). [replyToUs] is a reply in a thread that counts, which passes a
+ * "mentions" level: following is asking. Anything else takes the chat's
+ * level as [notifyAllowed] reads it, so a DM or club at the default
+ * level alerts, as on desktop and through push. Not for a chat on
+ * screen ([onScreen]), and not for one replayed after a resume: eyre
+ * hands those back however old they are.
+ */
+fun liveMessageAlerts(
+    whom: String,
+    level: String?,
+    mention: Boolean,
+    replyToUs: Boolean,
+    sentMs: Long,
+    nowMs: Long,
+    onScreen: Boolean,
+): Boolean {
+    if (onScreen || nowMs - sentMs > ALERT_FRESH_MS) return false
+    return if (replyToUs) level != NotifyLevel.NONE else notifyAllowed(whom, level, mention)
+}
+
+/** How a chat notification goes up over the one showing under its tag. */
+enum class ChatAlert { Post, Quiet, Skip }
+
+/**
+ * A relay hint and the app's own notification for one message: both
+ * alerted. A hint says only "new activity", so over a notification shown
+ * a moment ago it is dropped; the message itself replacing a hint shown a
+ * moment ago replaces it without a second alert. Anything shown longer
+ * ago than [windowMs], or none ([shownAgoMs] null), alerts as new.
+ */
+fun chatAlert(hint: Boolean, shownAgoMs: Long?, shownIsHint: Boolean, windowMs: Long = 60_000L): ChatAlert = when {
+    shownAgoMs == null || shownAgoMs > windowMs -> ChatAlert.Post
+    hint -> ChatAlert.Skip
+    shownIsHint -> ChatAlert.Quiet
+    else -> ChatAlert.Post
+}

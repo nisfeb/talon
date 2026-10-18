@@ -6,6 +6,8 @@ import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.data.notifyLevelOf
+import io.nisfeb.talon.ui.contactMapNow
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
 import io.nisfeb.talon.ui.UiSettings
@@ -428,6 +430,73 @@ class TalonApplication : Application() {
         }
     }
 
+    /**
+     * New messages, DM requests and group invites, for the life of
+     * [ship]'s repo rather than a screen's. Set by TalonApp's screen, they
+     * went with it: a stream the sync service kept (started at boot, or
+     * Talon swiped from recents) notified nobody. The ship, its database
+     * and its notices are this repo's own, since a dying repo still hears
+     * for a moment after a switch.
+     */
+    private fun listenForAlerts(ship: String, shipRepo: TlonChatRepo, shipDb: AppDatabase) {
+        val notices = io.nisfeb.talon.notify.NoticeRepo(shipDb.notices(), appScope)
+        suspend fun names() = runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { shipDb.contactMapNow() } }.getOrNull()
+            ?: io.nisfeb.talon.ui.ContactMap(alwaysPatp = io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
+        shipRepo.messageListener = { m, replyToUs ->
+            appScope.launch {
+                // On screen is the chat open in front, for the ship signed in now.
+                val onScreen = ship == _activeShip.value && m.whom in io.nisfeb.talon.notify.ShownConversation.keys
+                val alerts = io.nisfeb.talon.notify.liveMessageAlerts(
+                    m.whom, shipDb.notifyLevelOf(m.whom), io.nisfeb.talon.notify.isMentioned(m.contentJson, ship),
+                    replyToUs, m.sentMs, System.currentTimeMillis(), onScreen,
+                )
+                if (!alerts) return@launch
+                val names = names()
+                val preview = io.nisfeb.talon.urbit.StoryCache.previewFor(m).replace('\n', ' ').take(160)
+                Notifications.showMessage(
+                    context = this@TalonApplication,
+                    whom = m.whom,
+                    forShip = ship,
+                    postId = m.id,
+                    parentId = m.parentId,
+                    title = names.conversationLabel(m.whom),
+                    body = if (m.whom.startsWith("~")) preview else "${names.displayName(m.author)}: $preview",
+                    sentMs = m.sentMs,
+                )
+            }
+        }
+        // A new DM request: there is no open state for one not yet accepted.
+        shipRepo.dmInviteListener = { from ->
+            appScope.launch {
+                val name = names().displayName(from)
+                notices.record(
+                    "dm:$from", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
+                    name, "wants to message you", "dm:$from",
+                )
+                Notifications.showMessage(
+                    context = this@TalonApplication, whom = from, forShip = ship, postId = from, parentId = null,
+                    title = name, body = "wants to message you", sentMs = System.currentTimeMillis(),
+                )
+            }
+        }
+        // A new group invite. The tap opens Invites, where it can be
+        // accepted; the group's own page only offered to ask to join.
+        shipRepo.groupInviteListener = { invite ->
+            appScope.launch {
+                val from = invite.inviter?.let { " from " + names().displayName(it) } ?: ""
+                val title = invite.title ?: invite.flag
+                notices.record(
+                    "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
+                    title, "invited you to a group$from", "invite:${invite.flag}",
+                )
+                Notifications.showMessage(
+                    context = this@TalonApplication, whom = "invite:${invite.flag}", forShip = ship, postId = null, parentId = null,
+                    title = title, body = "invited you to a group$from", sentMs = System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
     private fun buildShipScoped(ship: String, afterPriorClose: (() -> Unit)? = null) {
         // A device registered with the relay before it asked what the app
         // understands has said nothing, and gets no read pushes: say it,
@@ -481,6 +550,7 @@ class TalonApplication : Application() {
             // Here, for the app's lifetime: the screens come and go, and a
             // chat read elsewhere should leave no notification behind.
             r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
+            listenForAlerts(ship, r, db)
         }
         startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
