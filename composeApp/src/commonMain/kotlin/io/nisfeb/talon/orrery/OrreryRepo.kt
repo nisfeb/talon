@@ -949,10 +949,12 @@ class OrreryRepo(
                 // succeeds from elsewhere, a push from the screen or a
                 // confirm, ends a long wait at the next step.
                 var left = if (failuresInARow > 0) backoff(failuresInARow) + kotlin.random.Random.nextLong(0, 60_000) else PUSH_EVERY_MS
+                var waited = 0L
                 while (left > 0) {
                     val step = minOf(left, PUSH_EVERY_MS)
                     delay(step)
-                    left = if (failuresInARow == 0) 0 else left - step
+                    waited += step
+                    left = passWaitLeft(left - step, waited, failing = failuresInARow > 0, inFront = inFront.value)
                 }
             }
         }
@@ -2138,6 +2140,21 @@ internal const val PROBE_RETRY_MAX_MS = 15 * 60_000L
 /** The pause before the [failures]th retry of a failed check: [first], doubling, to [PROBE_RETRY_MAX_MS]. */
 internal fun probeRetryMs(failures: Int, first: Long = PROBE_RETRY_FIRST_MS): Long =
     (first shl (failures - 1).coerceIn(0, 10)).coerceAtMost(PROBE_RETRY_MAX_MS)
+
+/** The pass while the app is behind: every half hour, for nobody's screen, where in front it is ten minutes. */
+internal const val BEHIND_PUSH_EVERY_MS = 3 * OrreryRepo.PUSH_EVERY_MS
+
+/**
+ * What is left of the pass loop's wait after a step, [waited] in all. A
+ * failing pass waits out its backoff, [left]. Otherwise the next pass is
+ * due now in front, and behind once [BEHIND_PUSH_EVERY_MS] has gone by;
+ * one due behind goes at the next step after the app comes back.
+ */
+internal fun passWaitLeft(left: Long, waited: Long, failing: Boolean, inFront: Boolean): Long = when {
+    failing -> left
+    inFront -> 0
+    else -> (BEHIND_PUSH_EVERY_MS - waited).coerceAtLeast(0)
+}
 
 /** The beacon's first pause after a stream ends, and the floor it goes back to. */
 internal const val BEACON_FIRST_PAUSE_MS = 3_000L
