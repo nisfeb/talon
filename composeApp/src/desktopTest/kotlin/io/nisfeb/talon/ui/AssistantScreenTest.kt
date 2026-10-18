@@ -91,6 +91,12 @@ class AssistantScreenTest {
     /** What orrery's ship answers an instruct with. */
     @Volatile private var instructed = """{"ok":true,"reply":"","actions":[],"note":""}"""
 
+    /** How long orrery's ship takes to answer an instruct. */
+    @Volatile private var holdInstruct = 0L
+
+    /** The host's session, for its dot. */
+    private lateinit var session: AssistantSession
+
     /** How orrery's ship answers the owner's word on an action. */
     @Volatile private var answerStatus = io.ktor.http.HttpStatusCode.OK
 
@@ -101,7 +107,7 @@ class AssistantScreenTest {
             val json = io.ktor.http.headersOf("Content-Type", "application/json")
             if (req.method == io.ktor.http.HttpMethod.Post) orreryPosts += path to req.body.toByteArray().decodeToString()
             when {
-                path.endsWith("/api/instruct") -> respond(instructed, io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/instruct") -> { kotlinx.coroutines.delay(holdInstruct); respond(instructed, io.ktor.http.HttpStatusCode.OK, json) }
                 path.endsWith("/api/brief/last") -> respond(brief, io.ktor.http.HttpStatusCode.OK, json)
                 req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond("""{"ok":true}""", answerStatus, json)
                 path.endsWith("/api/actions") -> respond("[]", io.ktor.http.HttpStatusCode.OK, json)
@@ -203,7 +209,7 @@ class AssistantScreenTest {
         val mail = if (withMail) mailOn(sessionScope) else null
         val orrery = if (withOrrery) orreryOn(sessionScope, db) else null
         // The host's, as the shells keep it: it outlives the screen.
-        val session = AssistantSession(sessionScope)
+        session = AssistantSession(sessionScope)
         try {
             runComposeUiTest {
                 setContent {
@@ -231,6 +237,8 @@ class AssistantScreenTest {
         onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
     private fun ComposeUiTest.ask(question: String) {
+        // The last run shows its answer before it has kept its turn, and the box waits for that.
+        waitUntil(timeoutMillis = 10_000) { !shows("Working…") }
         onNode(hasSetTextAction()).performTextInput(question)
         onNodeWithText("Send").performClick()
     }
@@ -465,6 +473,25 @@ class AssistantScreenTest {
         assertEquals(listOf("""{"status":"approved"}"""), answered("a1"), "as the Actions page answers it")
         assertTrue("Tell Rose (approved)" in asked.last(), "the model reads what the owner decided")
         assertTrue(shows("Approved.") && onAllNodesWithText("Approve").fetchSemanticsNodes().isEmpty(), "the buttons give way to the word")
+    }
+
+    // It waits for the owner: one that comes while they are away says so
+    // with the Assistant's dot, as a confirmation does.
+    @Test
+    fun `a proposal that comes while the assistant is away lights its dot`() = assistant(withOrrery = true) {
+        instructed = proposal
+        holdInstruct = 1_500
+        toolCall = call("c1", "orrery_instruct", """{"text":"tell Rose I am running late"}""")
+        ask("tell her I'm late")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        showing.value = false
+        waitUntil(timeoutMillis = 10_000) { session.news.value }
+        assertTrue(answered("a1").isEmpty(), "still asking")
+        showing.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("Send this?") && !session.news.value }
+        onNodeWithText("Don't").performClick()
+        waitUntil(timeoutMillis = 10_000) { answered("a1").isNotEmpty() }
     }
 
     @Test
