@@ -269,6 +269,82 @@ class OrreryWritesTest {
         assertTrue(t.answered.isEmpty())
     }
 
+    // ─── marking one high, and snoozing it (orrery 110) ────────────
+
+    private fun high(a: OrreryAction, snoozeUntil: String? = null) = a.copy(payload = buildJsonObject {
+        put("priority", "high"); snoozeUntil?.let { put("snooze_until", it) }
+    })
+
+    @Test
+    fun `a high mark goes through the repo and is read back from the open list`() = runTest {
+        val t = OrreryToolsTest.Tap()
+        t.open.clear(); t.open += listOf(listOf(late), listOf(late), listOf(high(late)))
+        val said = run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) })
+        assertEquals(listOf("a1 high=true snooze=null"), t.marks)
+        assertEquals("Confirmed: orrery shows Say you are running late to Park at JAX for DL 2627 as high.", said)
+        assertEquals(3, t.actionReads, "read first, then until it shows")
+
+        val off = OrreryToolsTest.Tap().apply { open.clear(); open += listOf(listOf(high(late)), listOf(late)) }
+        assertEquals("Confirmed: orrery shows Say you are running late to Park at JAX for DL 2627 as not high.", run(off, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", false) }))
+        assertEquals(listOf("a1 high=false snooze=null"), off.marks)
+    }
+
+    @Test
+    fun `a snooze is read back with the time the ship holds`() = runTest {
+        val until = kotlin.time.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs() + 3_600_000).toString()
+        val t = OrreryToolsTest.Tap().apply { open.clear(); open += listOf(listOf(high(late)), listOf(high(late, until))) }
+        assertEquals(
+            "Confirmed: orrery shows Say you are running late to Park at JAX for DL 2627 as snoozed until $until.",
+            run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 60) }),
+        )
+        assertEquals(listOf("a1 high=null snooze=60"), t.marks)
+        val ended = OrreryToolsTest.Tap().apply { open.clear(); open += listOf(listOf(high(late, until)), listOf(high(late))) }
+        assertTrue("as not snoozed" in run(ended, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 0) }))
+    }
+
+    @Test
+    fun `a mark the list does not show is not confirmed`() = runTest {
+        val t = OrreryToolsTest.Tap().apply { open[0] = listOf(late) }
+        assertEquals(
+            "Not confirmed (orrery still shows Say you are running late to Park at JAX for DL 2627 as not high). $NOT_CONFIRMED",
+            run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }),
+        )
+        val gone = OrreryToolsTest.Tap().apply { open.clear(); open += listOf(listOf(late), emptyList()) }
+        assertEquals("Not confirmed: orrery no longer lists Say you are running late to Park at JAX for DL 2627 as open.", run(gone, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+    }
+
+    @Test
+    fun `a mark refused or unheard or out of reach is said and nothing claimed`() = runTest {
+        val t = OrreryToolsTest.Tap().apply { open[0] = listOf(late, late.copy(id = "c1", status = "claimed")) }
+        t.markFails = OrreryError.Refused(409, "only an open action is marked")
+        assertEquals("Orrery did not take it: only an open action is marked. Nothing was changed.", run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+        t.markFails = OrreryError.Refused(403, "read only key")
+        assertEquals("Orrery did not take it: read only key. Nothing was changed.", run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 60) }))
+        t.markFails = OrreryError.Unreachable(RuntimeException("timeout"))
+        assertTrue("may or may not have taken it" in run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+        t.markFails = null
+        assertTrue("no open action a9" in run(t, "orrery_mark", buildJsonObject { put("id", "a9"); put("high", true) }))
+        assertTrue("marks only a proposed or approved action" in run(t, "orrery_mark", buildJsonObject { put("id", "c1"); put("high", true) }))
+        assertTrue("Error" in run(t, "orrery_mark", buildJsonObject { put("id", "a1") }), "nothing to change")
+        assertTrue("Error" in run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true); put("snooze_minutes", 60) }), "one change a call")
+        assertTrue("Error" in run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 10_081) }))
+        t.shipVersion = 109
+        assertEquals(
+            "Orrery on the owner's ship is older than 110, which marks an action high and snoozes it. Nothing was changed.",
+            run(t, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }),
+        )
+        assertTrue(t.marks.isEmpty())
+    }
+
+    @Test
+    fun `the open list says which are high and which are snoozed`() = runTest {
+        val t = OrreryToolsTest.Tap().apply { open[0] = listOf(high(late, "2026-10-18T21:45:00Z")) }
+        assertEquals(
+            "id=a1 kind=message status=proposed due=2026-10-18T20:45:00Z priority=high snooze_until=2026-10-18T21:45:00Z about=$jax title=Say you are running late to Park at JAX for DL 2627",
+            run(t, "orrery_actions", buildJsonObject { }),
+        )
+    }
+
     @Test
     fun `an approved fact is read back from the record`() = runTest {
         val fact = action("f1", "Plan is a drop-off", kind = "fact", payload = buildJsonObject { put("subject", jax); put("attr", "needs"); put("value", "terminal drop-off") })

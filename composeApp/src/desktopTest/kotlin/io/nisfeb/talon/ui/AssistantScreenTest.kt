@@ -138,6 +138,7 @@ class AssistantScreenTest {
             when {
                 path.endsWith("/api/instruct") -> { kotlinx.coroutines.delay(holdInstruct); respond(instructed, io.ktor.http.HttpStatusCode.OK, json) }
                 path.endsWith("/api/brief/last") -> respond(brief, io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/version") -> respond("""{"version":110}""", io.ktor.http.HttpStatusCode.OK, json)
                 req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond(answerBody, answerStatus, json)
                 // What is open, in turn; a look at one status sees none.
                 path.endsWith("/api/actions") ->
@@ -654,6 +655,23 @@ class AssistantScreenTest {
         assertEquals(listOf("""{"status":"dismissed","note":"dropped off, not parking"}"""), answered("a7"), "orrery's serve-set-action: status and note")
         assertEquals("Confirmed: orrery no longer lists Say you are running late to Park at JAX for DL 2627 as waiting.", toolSaid())
         assertTrue(orrery.actions.value.none { it.id == "a7" }, "the Actions page shows it gone too")
+    }
+
+    // Orrery 110: a deadline that matters is marked high, through the card
+    // and with the read back, and the Actions page shows it at once.
+    @Test
+    fun `an action is marked high through the card and read back and the Actions list shows it`() = assistant(withOrrery = true) {
+        openLists.clear(); openLists += listOf("[$late]", "[${late.replace("\"payload\":{", "\"payload\":{\"priority\":\"high\",")}]")
+        answerBody = """{"ok":true,"id":"a7","priority":"high"}"""
+        answer = "Marked it high."
+        toolCall = call("c1", "orrery_mark", """{"id":"a7","high":true}""")
+        ask("make the running late one high priority")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 15_000) { shows("Marked it high.") }
+        assertEquals(listOf("/apps/orrery/api/actions/a7/priority" to """{"priority":"high"}"""), orreryPosts.filter { "/priority" in it.first }, "orrery's serve-mark")
+        assertEquals("Confirmed: orrery shows Say you are running late to Park at JAX for DL 2627 as high.", toolSaid())
+        assertTrue(orrery.actions.value.single { it.id == "a7" }.payload["priority"].toString() == "\"high\"", "the Actions page shows it high")
     }
 
     @Test

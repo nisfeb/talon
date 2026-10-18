@@ -119,6 +119,15 @@ class OrreryToolsTest {
             struck = "$subject $attr $value $why".trim()
             return Result.success(buildJsonObject { put("id", "c1") })
         }
+        val marks = mutableListOf<String>()
+        var markFails: Throwable? = null
+        var shipVersion: Int? = null
+        override suspend fun mark(id: String, high: Boolean?, snoozeMinutes: Int?): Result<Unit> {
+            markFails?.let { return Result.failure(it) }
+            marks += "$id high=$high snooze=$snoozeMinutes"
+            return Result.success(Unit)
+        }
+        override suspend fun version() = shipVersion
     }
 
     // ─── telling orrery, and striking what it holds ─────────────────
@@ -357,7 +366,7 @@ class OrreryToolsTest {
     @Test
     fun `changing the ship asks first, looking does not`() {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
-        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct", "orrery_set", "orrery_answer"), byWrite[true]?.toSet())
+        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct", "orrery_set", "orrery_answer", "orrery_mark"), byWrite[true]?.toSet())
         assertEquals(
             setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences", "orrery_actions"),
             byWrite[false]?.toSet(),
