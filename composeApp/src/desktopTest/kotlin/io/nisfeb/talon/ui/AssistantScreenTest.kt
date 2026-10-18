@@ -442,7 +442,12 @@ class AssistantScreenTest {
             db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null))
             db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "170.1", "~bus", now - 60_000, """[{"inline":["Seeds are in the shed"]}]""", "/chat"))
         }
-        calRows = listOf("""{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":${now - 60_000},"r":${now + 3_600_000},"meta":{"name":"Seed swap"}}""")
+        // Inside today in the calendar's zone (UTC here): an hour on from
+        // 23:00 crossed midnight and drew the event under two days.
+        val day = 86_400_000L
+        val from = maxOf(now - 60_000, now / day * day)
+        val to = minOf(now + 3_600_000, (now / day + 1) * day - 1)
+        calRows = listOf("""{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":$from,"r":$to,"meta":{"name":"Seed swap"}}""")
         inbox = """{"total":1,"offset":0,"limit":50,"view":"inbox","threads":[
             {"id":"0v1","subject":"Seed catalogue","from":"~nec","snippet":"The spring list","verdict":"verified",
              "forged":false,"count":1,"last":$now,"unread":true,"participants":[],
