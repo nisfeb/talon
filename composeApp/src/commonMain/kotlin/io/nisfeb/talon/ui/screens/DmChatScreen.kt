@@ -1826,10 +1826,10 @@ private fun MessageRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Channel-chat send-state indicator. status is set
-                    // only on our own outgoing channel posts (see
-                    // TlonChatRepo.postContent / reply); DM rows leave
-                    // status null and render nothing here. "failed"
+                    // Send-state indicator. status is set only on our own
+                    // outgoing messages (see TlonChatRepo.postContent /
+                    // reply), DMs included: they are "pending" until the
+                    // ship acks them, so a send cut off is requeued. "failed"
                     // renders below the body instead — grouped rows
                     // (a burst of your own sends) have no header, and
                     // a failed send must never be invisible.

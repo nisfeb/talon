@@ -392,6 +392,8 @@ fun GroupAdminScreen(
                     }.onSuccess {
                         creatingChannel = false
                         newChannelOpen = false
+                        // The ship confirmed it; read the channels again so it shows here.
+                        refresh()
                     }.onFailure {
                         creatingChannel = false
                         // Into the dialog, not the screen: the screen-level
