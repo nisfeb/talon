@@ -301,6 +301,15 @@ internal suspend fun sendVoice(
 }
 
 /**
+ * What Ctrl+V takes: the clipboard's text where it has any, which the
+ * field then pastes, and its image only where it has none. An app that
+ * copies both had its image staged and the words lost. [hasText] is asked
+ * first, so an image is not decoded only to be put aside.
+ */
+internal fun ctrlVPaste(hasText: () -> Boolean, read: () -> DroppedFile?): ClipboardPaste =
+    if (hasText()) ClipboardPaste.None else clipboardPaste(read)
+
+/**
  * Re-keys on [whom] so switching conversations starts the composer
  * fresh. Loads any persisted draft text from [drafts], and the quote
  * that was waiting on this composer's surface.
@@ -559,13 +568,14 @@ fun ChatComposer(
     // The clipboard's image staged, or said to be too large. True when
     // there was one either way, so the field does not paste the
     // clipboard's text in its place.
-    val pasteClipboardImage: () -> Boolean = {
-        when (val found = clipboardPaste()) {
+    val takePaste: (ClipboardPaste) -> Boolean = { found ->
+        when (found) {
             is ClipboardPaste.Image -> { stageDropped(found.file); true }
             is ClipboardPaste.Problem -> { state.sendError = found.message; true }
             ClipboardPaste.None -> false
         }
     }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     // A mention reads in the box as it will once sent, by this device's
     // naming settings; a draft with no @p keeps the plain look (on iOS a
@@ -1056,7 +1066,7 @@ fun ChatComposer(
                 }
                 if (hasImage) {
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
-                            pasteClipboardImage()
+                            takePaste(clipboardPaste())
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -1203,15 +1213,18 @@ fun ChatComposer(
                             return@onPreviewKeyEvent true
                         }
                         // Ctrl+V (or Cmd+V on macOS) — if the
-                        // clipboard holds an image, intercept the
-                        // paste, stage it into the review preview, and
+                        // clipboard holds an image and no text, intercept
+                        // the paste, stage it into the review preview, and
                         // consume the event so the text field doesn't
                         // ALSO try to paste (which would insert garbage
-                        // like the file path or nothing). Plain text
-                        // paste falls through normally.
+                        // like the file path or nothing). Text pastes
+                        // normally, even beside an image (see [ctrlVPaste]);
+                        // the Paste image button takes that one.
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
-                        if (pasteCombo && canSend && !state.uploading && pasteClipboardImage()) {
+                        if (pasteCombo && canSend && !state.uploading &&
+                            takePaste(ctrlVPaste(clipboard::hasText, ::readClipboardImageOrNull))
+                        ) {
                             return@onPreviewKeyEvent true
                         }
                         if (e.key != Key.Enter) return@onPreviewKeyEvent false
