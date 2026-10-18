@@ -46,7 +46,9 @@ import kotlin.test.assertTrue
  */
 class SettingsSyncOutboxTest {
     private val dbs = mutableListOf<AppDatabase>()
+    private val dirs = mutableListOf<File>()
     private fun newDb(): AppDatabase = createTempDirectory(prefix = "talon-outbox-").toFile().let { dir ->
+        dirs += dir
         Room.databaseBuilder<AppDatabase>(File(dir, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
     }.also { dbs += it }
@@ -55,8 +57,12 @@ class SettingsSyncOutboxTest {
     private val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings())
     private val lost = java.io.IOException("The network connection was lost.")
 
+    // Left behind, a run under PIT filled a shared tmpfs with them.
     @AfterTest
-    fun close() = dbs.forEach { it.close() }
+    fun close() {
+        dbs.forEach { it.close() }
+        dirs.forEach { it.deleteRecursively() }
+    }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
         val events = ship.channel.events().launchIn(this)
