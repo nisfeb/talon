@@ -1227,6 +1227,23 @@ class AppShellTest {
         }
     }
 
+    // A5-18 end to end: the ship refuses a lapsed login (every channel
+    // request a 403), the repo says signed out, and the shell opens the
+    // login form saying so, with the ship still saved.
+    @Test
+    fun `a login the ship refuses is said on the login form, the ship kept`() {
+        val store = twoShips()
+        app(sessions = { store }) { ship ->
+            // Signed in, then the login lapses and the stream drops: the
+            // reconnect's fresh channel is refused.
+            ship.signedOut = true
+            kotlinx.coroutines.runBlocking { ship.endStreams() }
+            waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
+            assertTrue(showing("https://ship.test"), "the address is filled in")
+            assertEquals(setOf("~zod", "~bus"), store.all().map { it.ship }.toSet(), "nothing forgotten")
+        }
+    }
+
     // A3-4: the list's "Draft:" previews were missing after a launch, until
     // a chat had been opened.
     @Test

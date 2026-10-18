@@ -820,6 +820,12 @@ fun App(
             } else {
                 null
             }
+        // A login that lapsed (the repo's signedOut): the shell offers to
+        // sign in again (LoginLapses), with the session and data kept.
+        LaunchedEffect(repo) {
+            val ship = loggedInShip ?: return@LaunchedEffect
+            repo.signedOut.collect { if (it) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship) }
+        }
         // iOS: notifications from the owner's own ship once its %trunk can
         // send them (wire 11), with the relay only the Apple hop. Again when
         // the phone's tokens change, so the gateway has the new ones.

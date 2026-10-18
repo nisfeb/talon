@@ -374,6 +374,9 @@ class TalonApplication : Application() {
      */
     private var shipPushMove: kotlinx.coroutines.Job? = null
 
+    /** The current repo's lapsed-login watch, replaced with the repo on a ship switch. */
+    private var lapseWatch: kotlinx.coroutines.Job? = null
+
     /**
      * Notifications from the ship itself, where its %trunk can (wire 11):
      * once a test push from the ship reaches this phone, the phone leaves
@@ -553,6 +556,9 @@ class TalonApplication : Application() {
             // chat read elsewhere should leave no notification behind.
             r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
             listenForAlerts(ship, r, db)
+            // A login that lapsed: TalonApp offers to sign in again (LoginLapses).
+            lapseWatch?.cancel()
+            lapseWatch = appScope.launch { r.signedOut.collect { if (it) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship) } }
         }
         startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
