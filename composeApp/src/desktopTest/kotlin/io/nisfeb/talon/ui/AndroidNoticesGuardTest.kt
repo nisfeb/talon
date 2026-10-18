@@ -85,4 +85,16 @@ class AndroidNoticesGuardTest {
         assertTrue("app.repo.start(app.session)" in worker)
         assertTrue("loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }" in talonApp)
     }
+
+    // A3-3: a link or notice opened from a profile or an image landed
+    // under it. A3-5: picking another ship dropped unsaved profile edits.
+    @Test
+    fun `leaving for a link or a ship puts overlays down and asks about edits`() {
+        val close = talonApp.substringAfter("fun closeSections() {").substringBefore("\n    }\n")
+        for (overlay in listOf("profileSheetShip = null", "viewerImageUrl = null", "viewerImageList = null")) {
+            assertTrue(overlay in close, "closeSections leaves $overlay up")
+        }
+        assertTrue("if (picked != loggedInShip) sections.leave {" in talonApp, "the drawer's pick skips the guard")
+        assertTrue("if (ship != loggedInShip) sections.leave {" in talonApp, "the list's switcher skips the guard")
+    }
 }

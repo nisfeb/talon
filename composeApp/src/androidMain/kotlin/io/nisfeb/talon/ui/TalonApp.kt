@@ -769,6 +769,11 @@ fun TalonApp(
         // chat and appeared to do nothing at all.
         openWhom = null
         openThread = null
+        // A profile or an image is drawn over everything, so a link or
+        // a notice opened from one landed under it (as App.kt's leaveAllFor).
+        profileSheetShip = null
+        viewerImageUrl = null
+        viewerImageList = null
     }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
@@ -1796,7 +1801,9 @@ fun TalonApp(
                         nicknames = shipNicknamesMap,
                         onPick = { picked ->
                             drawerScope.launch { drawerState.close() }
-                            if (picked != loggedInShip) {
+                            // Through the guard: unsaved profile edits ask
+                            // first rather than going with the old ship.
+                            if (picked != loggedInShip) sections.leave {
                                 // Every section, the old ship's group and
                                 // admin pages too, not the two that were listed.
                                 closeSections()
@@ -3032,7 +3039,7 @@ fun TalonApp(
                 activeShip = loggedInShip,
                 shipNicknames = app.shipProfiles.nicknames.collectAsState().value,
                 onSwitchShip = { ship ->
-                    if (ship != loggedInShip) {
+                    if (ship != loggedInShip) sections.leave {
                         closeSections()
                         switchShipAction()
                         app.switchShip(ship)
