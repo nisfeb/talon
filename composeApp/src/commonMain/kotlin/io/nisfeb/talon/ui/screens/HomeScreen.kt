@@ -1306,6 +1306,9 @@ private fun CalendarPanel(
     // A tick the ship did not take; the box goes back by itself, and said
     // nothing of why.
     var tickError by remember { mutableStateOf<String?>(null) }
+    // One read at a time from Try again: each tap stacked a full read,
+    // up to nine requests of the ship's one thread.
+    var retrying by remember { mutableStateOf(false) }
     // The minute decides what is "now" and what is "today".
     var tick by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(Unit) {
@@ -1345,7 +1348,11 @@ private fun CalendarPanel(
             rows == null && error != null -> {
                 Empty(error)
                 TextButton(
-                    onClick = { scope.launch { calendar.refreshAll() } },
+                    enabled = !retrying,
+                    onClick = {
+                        retrying = true
+                        scope.launch { try { calendar.refreshAll() } finally { retrying = false } }
+                    },
                     modifier = Modifier.padding(horizontal = 6.dp),
                 ) { Text("Try again") }
             }
@@ -1388,7 +1395,7 @@ private fun CalendarPanel(
                                 onCheckedChange = { done ->
                                     tickError = null
                                     scope.launch {
-                                        if (!calendar!!.setDone(t.id, done)) tickError = calendar.failedLine("\"${t.name.ifBlank { "The task" }}\" was not ticked: the ship did not take it.")
+                                        if (!calendar!!.setDone(t.id, done)) tickError = calendar.failedLine(tickFailedLine(t.name, done))
                                     }
                                 },
                                 enabled = t.cal !in readOnly,
@@ -1496,9 +1503,14 @@ private fun EventRow(
  * trace), which reached the home page and the mail list as it came.
  */
 internal fun installFailedLine(e: Throwable, what: String = "The calendar"): String = when {
-    io.nisfeb.talon.util.isTransientNetworkError(e) -> "Your ship did not answer. Try again when it's back."
+    // A proxy's 502 too: said as a phrase in a sentence, it began in lower case.
+    io.nisfeb.talon.util.isShipSlow(e) -> "Your ship did not answer. Try again when it's back."
     else -> io.nisfeb.talon.util.readableReason(e.message) ?: "$what did not install. Try again shortly."
 }
+
+/** What a tick the ship did not take says: an untick said "was not ticked". */
+internal fun tickFailedLine(name: String, done: Boolean): String =
+    "\"${name.ifBlank { "The task" }}\" was not ${if (done) "ticked" else "unticked"}: the ship did not take it."
 
 /** When a row is, said the way somebody glancing at it needs. */
 internal fun whenLabel(row: CalendarRow, nowMs: Long, zone: TimeZone, twentyFourHour: Boolean): String {

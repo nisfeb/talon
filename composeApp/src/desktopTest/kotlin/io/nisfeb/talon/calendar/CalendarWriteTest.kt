@@ -58,6 +58,8 @@ class CalendarWriteTest {
          * to keep it: it answers 200 and keeps the refusal in outcomes.json.
          */
         @Volatile var refuseLater: (String) -> String? = { null }
+        /** How long after taking a poke the calendar refuses it: a busy one, seconds. */
+        @Volatile var refuseAfterMs = 0L
         val refusals = CopyOnWriteArrayList<String>()
         /** Down: the web server in front of the ship answers everything with its 502 page. */
         @Volatile var down = false
@@ -77,6 +79,8 @@ class CalendarWriteTest {
         pollMs: Long = 60 * 60_000L,
         /** The app's scope is a screen's, whose Job is plain: one failed child cancels it. */
         plainJob: Boolean = false,
+        /** The first pause between reads back after a write. */
+        readBackPauseMs: Long = 500L,
         setup: Ship.() -> Unit = {},
         block: suspend (CalendarRepo, Ship) -> Unit,
     ) = runBlocking {
@@ -98,12 +102,16 @@ class CalendarWriteTest {
                         ship.pokes += body
                         ship.refuseLater(body)?.let { why ->
                             val poke = kotlinx.serialization.json.Json.parseToJsonElement(body) as kotlinx.serialization.json.JsonObject
-                            ship.refusals += buildJsonObject {
-                                put("at_ms", System.currentTimeMillis())
-                                put("action", (poke["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
-                                put("id", (poke["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
-                                put("why", why)
-                            }.toString()
+                            val record = {
+                                ship.refusals += buildJsonObject {
+                                    put("at_ms", System.currentTimeMillis())
+                                    put("action", (poke["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
+                                    put("id", (poke["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
+                                    put("why", why)
+                                }.toString()
+                            }
+                            val after = ship.refuseAfterMs
+                            if (after > 0) scope.launch { kotlinx.coroutines.delay(after); record() } else record()
                         }
                         ship.writtenAt.set(System.currentTimeMillis())
                         return@MockEngine respond("", HttpStatusCode.OK, json)
@@ -133,6 +141,7 @@ class CalendarWriteTest {
             ),
             scope,
             pollIntervalMs = pollMs,
+            readBackPauseMs = readBackPauseMs,
         )
         try {
             repo.attach("https://ship.test")
@@ -545,6 +554,24 @@ class CalendarWriteTest {
         }
     }
 
+    // The chat card compared unheard before and after its add to find its
+    // own refusal: another write's, waiting there, read as this one's.
+    @Test
+    fun `an add from a chat card answers its own refusal and not another write's`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(
+            setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },
+            window = { ship -> """{"rows":[${if (ship.pokes.any { "Tea" in it }) event("e9", "Tea", soon) else ""}]}""" },
+        ) { repo, ship ->
+            assertEquals("\"Picnic\" was not added: no such calendar", repo.addSharedWhyNot("default", "Picnic", soon, soon + 3_600_000))
+            assertEquals(null, repo.addSharedWhyNot("default", "Tea", soon, soon + 3_600_000), "added, though Picnic's still waits in unheard")
+            assertEquals("\"Picnic\" was not added: no such calendar", repo.unheard.value)
+            ship.down = true
+            val down = repo.addSharedWhyNot("default", "Tea", soon, soon + 3_600_000)
+            assertTrue(down != null && "isn't answering" in down, "$down")
+        }
+    }
+
     @Test
     fun `an event written behind a chat says why it did not land`() = calendar(
         setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },
@@ -558,6 +585,94 @@ class CalendarWriteTest {
         repo.writeInBackground(picnic) { said += it }
         kotlinx.coroutines.withTimeout(10_000) { while (said.size < 2) kotlinx.coroutines.delay(50) }
         assertTrue("isn't answering" in said[1] && "did not take" !in said[1], said[1])
+    }
+
+    // One look at outcomes.json, 1.5 s after the write: a busy ship that
+    // refused later made a task silently vanish and an event called added.
+    @Test
+    fun `a refusal a busy calendar makes after the first look is found behind the reading and said`() = calendar(
+        readBackPauseMs = 100,
+        setup = {
+            refuseAfterMs = 2_200
+            refuseLater = { if ("Buy bread" in it || "Picnic" in it) "the calendar was too busy to read it" else null }
+        },
+    ) { repo, _ ->
+        val said = CopyOnWriteArrayList<String>()
+        repo.addTask(EventDraft(name = "Buy bread", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")) { said += it }
+        kotlinx.coroutines.withTimeout(15_000) { while (repo.pendingTasks.value.isNotEmpty()) kotlinx.coroutines.delay(50) }
+        assertEquals(listOf("\"Buy bread\" was not added: the calendar was too busy to read it"), said.toList(), "said before the stand-in went")
+        assertEquals(said.single(), repo.unheard.value)
+        repo.heard()
+
+        val soon = System.currentTimeMillis() + 3_600_000
+        val picnic = sharedDraft("Picnic", soon, soon + 3_600_000, "default", kotlinx.datetime.TimeZone.UTC, "UTC")
+        val w = repo.writeEvent(eventBody(picnic))
+        assertTrue(w.ok && w.placed)
+        assertTrue(repo.rows.value.orEmpty().any { it.name == "Picnic" }, "on show once taken")
+        assertEquals(null, repo.refusal("", System.currentTimeMillis() - 1_000, "add-event"), "not yet at the first look")
+        assertEquals("the calendar was too busy to read it", kotlinx.coroutines.withTimeout(15_000) { w.shown.await() })
+        assertTrue(repo.rows.value.orEmpty().none { it.name == "Picnic" }, "taken off again")
+        assertEquals("\"Picnic\" was not added: the calendar was too busy to read it", repo.unheard.value, "kept for whoever was told it was added")
+    }
+
+    // Matched by id alone, an add (id "") took the refusal of any other
+    // poke with no id of its own made in the same minute: a zone change.
+    @Test
+    fun `an add's refusal is its own action's and not a zone change's`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(readBackPauseMs = 50) { repo, ship ->
+            ship.refusals += """{"at_ms":${System.currentTimeMillis()},"action":"config","id":"","why":"no such zone"}"""
+            assertTrue(repo.addShared("default", "Tea", soon, soon + 3_600_000), "the zone change's refusal is not the add's")
+            ship.refusals += """{"at_ms":${System.currentTimeMillis()},"action":"","id":"","why":"a record that names no action"}"""
+            assertTrue(!repo.addShared("default", "Tea", soon, soon + 3_600_000), "one that names none is matched by its id")
+        }
+    }
+
+    // A refusal cleared by name: a write that failed some other way said
+    // its own line, and wiped the refusal another screen was to say.
+    @Test
+    fun `heard clears only the line it was given`() = calendar(setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } }) { repo, _ ->
+        val soon = System.currentTimeMillis() + 3_600_000
+        assertTrue(!repo.addShared("default", "Picnic", soon, soon + 3_600_000))
+        val line = "\"Picnic\" was not added: no such calendar"
+        assertEquals(line, repo.unheard.value)
+        repo.heard("The ship did not take \"Tea\".")
+        assertEquals(line, repo.unheard.value, "another write's line leaves it")
+        repo.heard(line)
+        assertEquals(null, repo.unheard.value)
+    }
+
+    // A new event reached the home page's today only on the reading back,
+    // seconds and more on a busy ship; the calendar screen alone showed it.
+    @Test
+    fun `a new one-off event is in the window and the month once taken and leaves if refused`() {
+        // On a minute: the editor's times are, and the row is where they put it.
+        val soon = (System.currentTimeMillis() / 60_000 + 60) * 60_000
+        calendar(window = { """{"rows":[${dentist(soon)}]}""" }) { repo, ship ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            val tea = eventBody(sharedDraft("Tea", soon + 3_600_000, soon + 7_200_000, "default", kotlinx.datetime.TimeZone.UTC, "UTC"))
+            ship.holdWriteMs = 600
+            val w = CoroutineScope(SupervisorJob()).async { repo.writeEvent(tea, readBack = false) }
+            kotlinx.coroutines.delay(200)
+            assertTrue(repo.rows.value.orEmpty().none { it.name == "Tea" }, "not before the ship has it")
+            val taken = w.await()
+            assertTrue(taken.ok && taken.placed)
+            for (rows in listOf(repo.rows.value, repo.rangeRows.value)) {
+                val row = rows?.single { it.name == "Tea" }
+                assertEquals(soon + 3_600_000 to soon + 7_200_000, row?.l to row?.r, "at its time, on the home page's today and the month")
+                assertTrue(row!!.id.startsWith("saved-"), row.id)
+            }
+            taken.undo()
+            assertEquals(listOf("Dentist"), repo.rows.value?.map { it.name }, "refused after it was taken: gone")
+            assertEquals(listOf("Dentist"), repo.rangeRows.value?.map { it.name })
+            ship.holdWriteMs = 0
+            ship.refuse = true
+            assertTrue(!repo.writeEvent(tea, readBack = false).ok)
+            assertEquals(listOf("Dentist"), repo.rows.value?.map { it.name }, "not taken: never shown")
+            ship.refuse = false
+            val weekly = eventBody(EventDraft(name = "Swim", date = LocalDate(2026, 9, 25), repeat = Repeat.WEEKLY, cal = "default"))
+            assertTrue(!repo.writeEvent(weekly, readBack = false).placed, "a series waits for the reading")
+        }
     }
 
     // ─── a ship down is not a refusal, nor a refusal a ship down ────

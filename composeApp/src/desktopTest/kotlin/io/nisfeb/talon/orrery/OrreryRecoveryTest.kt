@@ -110,6 +110,24 @@ class OrreryRecoveryTest {
         }
     }
 
+    // Tried again every quarter hour with the app behind: a read of the
+    // ship for nobody. A check due meanwhile goes once the app is back.
+    @Test
+    fun `a failed check waits while the app is behind and goes once it is back`() {
+        downFor.set(1_000)
+        attached { repo, _ ->
+            until("the failed check is said") { repo.error.value != null }
+            repo.setForeground(false)
+            delay(150)
+            val behind = asked.count { it == "/apps/orrery/api/state" }
+            delay(600)
+            assertEquals(behind, asked.count { it == "/apps/orrery/api/state" }, "nothing asked while behind")
+            downFor.set(0)
+            repo.setForeground(true)
+            until("asked again once back, and answered") { repo.availability.value == OrreryAvailability.PRESENT }
+        }
+    }
+
     @Test
     fun `a ship that answers its first check is not asked again`() = attached { repo, _ ->
         until("present") { repo.availability.value == OrreryAvailability.PRESENT }
@@ -146,10 +164,15 @@ class OrreryRecoveryTest {
             until("the check failed") { repo.error.value != null }
             assertEquals(OrreryAvailability.UNKNOWN, repo.availability.value)
             var off = false
+            val before = asked.size
             assertEquals(
                 listOf("reading your chats", "reading your mail", "writing your brief", "taking back this device's key"),
                 repo.switchOff { off = true },
             )
+            // The chat reader's state, its write, and the key: after the first
+            // write found nobody there, the mail reader and the brief were not
+            // asked. It made eleven requests, each a timeout on a real ship.
+            assertEquals(5, asked.size - before, asked.drop(before).toString())
             assertTrue(off, "off here all the same")
             assertTrue(db.orreryAccounts().get("~zod") != null, "the key is kept, to give back at the next start")
         }

@@ -707,18 +707,25 @@ class OrreryRepo(
         if (api != null && _availability.value != OrreryAvailability.MISSING) {
             // Skipped only when known off. One whose state could not be read
             // is sent off too (each write is a merge), and a ship that has no
-            // such reader answers 404, which is nothing to stop.
+            // such reader answers 404, which is nothing to stop. A ship that
+            // did not answer one is not asked the rest: each was a timeout
+            // more, ten requests one behind another, and each is said missed.
+            var down = false
             suspend fun stop(on: Boolean?, what: String, write: suspend () -> Result<Unit>) {
                 if (on == false) return
-                write().onFailure { if (it !is OrreryError.Refused || it.status != 404) missed += what }
+                if (down) { missed += what; return }
+                write().onFailure {
+                    if (it is OrreryError.Unreachable) down = true
+                    if (it !is OrreryError.Refused || it.status != 404) missed += what
+                }
             }
             if (_chatReader.value == null) loadChatReader()
             stop(_chatReader.value?.let { it.enabled || it.sendDms }, "reading your chats") {
                 setChatReader(buildJsonObject { put("enabled", false); put("send_dms", false) })
             }
-            if (_mailReader.value == null) loadMailReader()
+            if (_mailReader.value == null && !down) loadMailReader()
             stop(_mailReader.value, "reading your mail") { setMailReader(false) }
-            if (_generatorSettings.value == null) runCatching { loadGenerator() }
+            if (_generatorSettings.value == null && !down) runCatching { loadGenerator() }
             stop(_generatorSettings.value?.enabled, "writing your brief") { setGenerator(false) }
         }
         val u = shipUrl
@@ -822,10 +829,20 @@ class OrreryRepo(
 
     private var retrying: Job? = null
 
+    /** The app is in front or behind ([setForeground]); in front until told. */
+    private val inFront = MutableStateFlow(true)
+
+    /** The app came to the front, or went behind it: a failed check waits for it to come back. */
+    fun setForeground(on: Boolean) {
+        inFront.value = on
+    }
+
     /**
      * A check that failed, tried again further apart each time and never
      * in step with other clients, until the ship answers. Whoever asked:
-     * the first check at attach, or Settings opening.
+     * the first check at attach, or Settings opening. Not while the app
+     * is behind, every quarter hour for nobody: one due then goes as it
+     * comes back.
      */
     private fun retryProbe() {
         if (retrying?.isActive == true || api == null) return
@@ -833,6 +850,7 @@ class OrreryRepo(
             var failures = 0
             while (_availability.value == OrreryAvailability.UNKNOWN && probeSaid != null) {
                 delay(io.nisfeb.talon.urbit.jittered(probeRetryMs(++failures, probeRetryFirstMs)))
+                inFront.first { it }
                 probe()
             }
         }
@@ -852,7 +870,7 @@ class OrreryRepo(
     suspend fun ensureEnabled(): Result<Unit> {
         if (_enabled.value) return Result.success(Unit)
         val job = enabling?.takeIf { it.isActive } ?: scope.async { enable() }.also { enabling = it }
-        return job.await().onFailure { _error.value = it.message ?: "Orrery did not answer." }
+        return job.await().onFailure { _error.value = readProblemSentence(it) }
     }
     private var enabling: kotlinx.coroutines.Deferred<Result<Unit>>? = null
 
@@ -924,7 +942,7 @@ class OrreryRepo(
                     // Throwable: an Error from a local model's runtime
                     // ended the loop here, and nothing said so.
                     Log.w(TAG, "pass failed", e)
-                    _error.value = e.message ?: e::class.simpleName
+                    _error.value = readProblemSentence(e)
                 }
                 // A failed pass waits longer each time (see the failure rule
                 // in [push]), in steps of ten minutes, so a pass that
@@ -1187,15 +1205,14 @@ class OrreryRepo(
         // [observeSplitting]) and is not here; a model that did not answer
         // holds what it would have read and is not a failure either.
         } catch (e: OrreryError.Refused) {
-            _error.value = e.message
+            // In words: "HTTP 500: <its reason>" was the line under the row.
+            _error.value = readProblemSentence(e)
             // Only "forbidden" is the key refused. The ship answers 403
             // too for a batch reaching past the key's scope, and for a
             // read-only key, neither of which is the key gone; and for a
             // key it has minted and not stored yet, which is a key not
             // there yet, and was turning the pipe off as it was turned on.
-            val fresh = token?.let { t -> db.orreryAccounts().get(s)?.takeIf { it.token == t } }
-                ?.let { r -> db.orrerySent().get(s, "minted:${r.clientId}")?.atMs }
-                ?.let { now() - it < KEY_GRACE_MS } == true
+            val fresh = token?.let { keyFresh(s, it) } == true
             if (e.status == 403 && e.reason == "forbidden" && !fresh) {
                 // Deleted before anything is cancelled: turning off cancels
                 // the loop this pass may run in, and a delete after that
@@ -1224,7 +1241,7 @@ class OrreryRepo(
         } catch (e: Throwable) {
             // Throwable: an Error here skipped the put back, and the calls
             // it took exist nowhere else. The loop carries on after it.
-            _error.value = e.message ?: e::class.simpleName
+            _error.value = readProblemSentence(e)
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
             if (ran > 0 || costTheShip(e)) failuresInARow++
             requeue()
@@ -1238,6 +1255,28 @@ class OrreryRepo(
     private data class Heard(val address: String, val lines: List<Spoken>, val from: Int = 0)
 
     /** When a key was minted, for the grace it gets while the ship stores it. */
+    /**
+     * Whether [token] is this ship's key here, made within [KEY_GRACE_MS]:
+     * one the ship may not have stored yet, whose 403 is not the key gone.
+     */
+    private suspend fun keyFresh(s: String, token: String): Boolean =
+        db.orreryAccounts().get(s)?.takeIf { it.token == token }
+            ?.let { r -> db.orrerySent().get(s, "minted:${r.clientId}")?.atMs }
+            ?.let { now() - it < KEY_GRACE_MS } == true
+
+    /**
+     * "Set up this device again", where the ship refused this device's key:
+     * a new one, unless the key here was made within [KEY_GRACE_MS], which
+     * the ship refuses until it has stored it. Minted again then, it made a
+     * key more for each tap while the first was still landing.
+     */
+    suspend fun setUpAgain(): Result<Unit> {
+        val s = ship
+        val row = s?.let { db.orreryAccounts().get(it) }
+        if (s != null && row != null && keyFresh(s, row.token)) return Result.success(Unit)
+        return enable()
+    }
+
     private suspend fun minted(s: String, clientId: String) =
         db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, "minted:$clientId", "", now()))
 

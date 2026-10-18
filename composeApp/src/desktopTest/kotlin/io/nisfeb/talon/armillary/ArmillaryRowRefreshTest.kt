@@ -179,6 +179,32 @@ class ArmillaryRowRefreshTest {
         }
     }
 
+    // Tried again every quarter hour with the app behind: the ship's cost
+    // for nobody. A check due meanwhile goes once the app is back.
+    @Test
+    fun `behind, a failed check waits for the app to come back`() {
+        downFor.set(1_000)
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = ArmillaryRepo(http, scope, FakeAiSettings(), probeRetryFirstMs = 50)
+        try {
+            repo.attach("https://ship.test", "~zod")
+            runBlocking {
+                withTimeout(5_000) { while (repo.error.value == null) delay(10) }
+                repo.paused()
+                delay(150)
+                val asked = 1_000 - downFor.get()
+                delay(600)
+                assertEquals(asked, 1_000 - downFor.get(), "nothing asked while behind")
+                downFor.set(0)
+                repo.resumed()
+                withTimeout(5_000) { while (repo.availability.value != ArmillaryAvailability.PRESENT) delay(10) }
+            }
+        } finally {
+            repo.detach()
+            runBlocking { scope.coroutineContext.job.cancelAndJoin() }
+        }
+    }
+
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
         assertEquals("Your ship did not answer. Talon asks again by itself.", checkProblemLine(ArmillaryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))))

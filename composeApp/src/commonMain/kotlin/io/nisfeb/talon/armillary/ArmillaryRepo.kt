@@ -13,6 +13,7 @@ import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.ui.platformLabel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.util.Log
@@ -126,7 +127,7 @@ class ArmillaryRepo(
     @kotlin.concurrent.Volatile private var resumedAtMs = 0L
 
     /** The app is in front ([resumed]) or behind ([paused]); in front until told. */
-    @kotlin.concurrent.Volatile private var inFront = true
+    private val inFront = MutableStateFlow(true)
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -153,7 +154,7 @@ class ArmillaryRepo(
         ticking = scope.launch {
             while (isActive) {
                 delay(picksEveryMs)
-                if (inFront && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
+                if (inFront.value && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
             }
         }
         // The ship already buys from a vendor, set up on some device: this
@@ -261,6 +262,9 @@ class ArmillaryRepo(
             var failures = 0
             while (_availability.value == ArmillaryAvailability.UNKNOWN && _error.value != null) {
                 delay(io.nisfeb.talon.urbit.jittered(io.nisfeb.talon.orrery.probeRetryMs(++failures, probeRetryFirstMs)))
+                // Not while the app is behind: every quarter hour, for nobody.
+                // A check due meanwhile goes as it comes back.
+                inFront.first { it }
                 refresh()
             }
         }
@@ -290,7 +294,7 @@ class ArmillaryRepo(
      * triggers.
      */
     fun resumed() {
-        inFront = true
+        inFront.value = true
         val at = now()
         if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
         resumedAtMs = at
@@ -307,7 +311,7 @@ class ArmillaryRepo(
 
     /** The app went behind: the picks are not read again until it is back ([resumed] reads them then). */
     fun paused() {
-        inFront = false
+        inFront.value = false
     }
 
     /**
@@ -405,7 +409,9 @@ class ArmillaryRepo(
         val a = api ?: error("Not attached to a ship.")
         val first = a.checkout(rail, plan, amountMicro)
         val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
-        val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
+        // Unknown where the account could not be read: taken as 0, any
+        // balance read next settled the checkout as paid.
+        val start = _account.value?.takeIf { it.hasView }?.balanceMicro
         when (answer) {
             is CheckoutAnswer.Url -> {
                 watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING, url = answer.url))
@@ -529,7 +535,13 @@ class ArmillaryRepo(
         val p = _payment.value ?: return false
         if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
         val row = acct.checkouts.firstOrNull { p.nonce.isNotBlank() && it.nonce == p.nonce }
-        val rose = if (acct.hasView) acct.balanceMicro - p.startMicro else 0L
+        // A start not known when the checkout opened is the first balance
+        // read after it: a rise is only a rise past what was there.
+        if (p.startMicro == null && acct.hasView && row == null) {
+            _payment.value = p.copy(startMicro = acct.balanceMicro)
+            return false
+        }
+        val rose = if (acct.hasView && p.startMicro != null) acct.balanceMicro - p.startMicro else 0L
         if (row?.status == "paid" || (row == null && rose > 0)) {
             val added = row?.amountMicro?.takeIf { it > 0 } ?: rose.coerceAtLeast(0L)
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
@@ -697,8 +709,8 @@ data class Payment(
     val nonce: String,
     /** `stripe` or `btcpay`. */
     val rail: String,
-    /** The balance when the checkout opened; anything above it is the payment. */
-    val startMicro: Long,
+    /** The balance when the checkout opened, anything above it the payment; null where it could not be read then. */
+    val startMicro: Long?,
     val phase: Phase,
     /** How much the balance rose, once it has. */
     val addedMicro: Long = 0L,

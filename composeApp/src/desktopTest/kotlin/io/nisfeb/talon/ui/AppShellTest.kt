@@ -597,6 +597,52 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { showing("\"Standup, moved\" was not saved: no repeating event has an occurrence there") }
     }
 
+    /** A task typed into the calendar's task list and added. */
+    private fun ComposeUiTest.addTask(name: String) {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Open") }
+        onNodeWithContentDescription("New task").performClick()
+        field("New task").performTextInput(name)
+        onNodeWithContentDescription("Add task").performClick()
+    }
+
+    // The task's refusal came back to the screen that added it, gone by
+    // then, and that screen's callback cleared it from what the calendar
+    // says on opening: never said at all.
+    @Test
+    fun `a task refused after the calendar was left is said when it opens again`() = app(
+        setup = withCalendar {
+            hold = kotlinx.coroutines.CompletableDeferred()
+            refuseLater = { if ("Buy bread" in it) "the task could not be read" else null }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        addTask("Buy bread")
+        waitUntil(timeoutMillis = 5_000) { ship.requests.any { it.endsWith("/calendar.calendar") } }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        cal.hold!!.complete(Unit)
+        waitUntil(timeoutMillis = 10_000) { cal.outcomesRead.get() > 0 }
+        waitForIdle()
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("\"Buy bread\" was not added: the task could not be read") }
+    }
+
+    @Test
+    fun `a task refused while the calendar is open is said there once and not again`() = app(
+        setup = withCalendar { refuseLater = { if ("Buy bread" in it) "the task could not be read" else null } },
+    ) { ship ->
+        openCalendar()
+        addTask("Buy bread")
+        waitUntil(timeoutMillis = 10_000) { showing("\"Buy bread\" was not added: the task could not be read") }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        openCalendar()
+        waitForIdle()
+        assertTrue(!showing("was not added"), "said once")
+    }
+
     // A card for an event the calendar then refused pointed at nothing.
     @Test
     fun `a new event's card goes to its chat only once the calendar has kept it`() = app(

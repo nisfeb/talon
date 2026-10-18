@@ -121,7 +121,12 @@ class CalendarScreenTest {
 
     private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun calendar(pushTag: String? = null, block: ComposeUiTest.(CalendarRepo) -> Unit) {
+    private fun calendar(
+        pushTag: String? = null,
+        /** The app's own link handler, as the shells provide one; the platform's where null. */
+        links: androidx.compose.ui.platform.UriHandler? = null,
+        block: ComposeUiTest.(CalendarRepo) -> Unit,
+    ) {
         val scope = CoroutineScope(SupervisorJob())
         val repo = CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
         runBlocking { repo.refresh(); repo.refreshAll() }
@@ -129,7 +134,11 @@ class CalendarScreenTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        CalendarScreen(repo = repo, twentyFourHour = true, onBack = {}, openPushTag = pushTag, onOpenedPush = { opened += "opened" })
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.ui.platform.LocalUriHandler provides (links ?: androidx.compose.ui.platform.LocalUriHandler.current),
+                        ) {
+                            CalendarScreen(repo = repo, twentyFourHour = true, onBack = {}, openPushTag = pushTag, onOpenedPush = { opened += "opened" })
+                        }
                     }
                 }
                 waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Dentist", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -167,6 +176,15 @@ class CalendarScreenTest {
         waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
         val body = writes.single().second
         assertTrue("Lunch with Bus" in body, body)
+        // On show once the ship has it, though its window never has: the
+        // repo's own stand-in, which every screen reads, and not this
+        // screen's beside it as well.
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch with Bus") }
+        assertEquals(
+            onAllNodesWithText("Dentist").fetchSemanticsNodes().size,
+            onAllNodesWithText("Lunch with Bus").fetchSemanticsNodes().size,
+            "shown as often as an event the ship has, not twice",
+        )
     }
 
     // ─── task priority ────────────────────────────────────────────
@@ -327,6 +345,24 @@ class CalendarScreenTest {
     private fun ComposeUiTest.open(name: String) {
         onAllNodesWithText(name, substring = true)[0].performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Close") }
+    }
+
+    // The details are a window of their own, handed the platform's link
+    // handler again: a talon:// link in an event's note went to the system
+    // instead of to the app.
+    @Test
+    fun `a talon link in an event's note goes to the app's own handler`() {
+        moreRows = """,{"id":"e7","cal":"default","meta":{"name":"Seed swap","note":"Notes in talon://chat/~bus/seeds"},"l":${soon + 4 * HOUR},"r":${soon + 5 * HOUR}}"""
+        val toApp = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val app = object : androidx.compose.ui.platform.UriHandler {
+            override fun openUri(uri: String) { toApp += uri }
+        }
+        calendar(links = app) {
+            open("Seed swap")
+            onNodeWithText("talon://chat/~bus/seeds").performScrollTo().performClick()
+            waitForIdle()
+            assertEquals(listOf("talon://chat/~bus/seeds"), toApp.toList())
+        }
     }
 
     private fun ComposeUiTest.wrote(action: String): String {

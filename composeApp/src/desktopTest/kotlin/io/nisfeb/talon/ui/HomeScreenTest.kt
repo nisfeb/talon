@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -225,6 +226,8 @@ class HomeScreenTest {
     @Volatile private var calendarDown = false
     /** The ship refuses every calendar write. */
     @Volatile private var calendarRefuses = false
+    /** How long the ship takes over a read of the window: a busy one. */
+    @Volatile private var calendarReadMs = 0L
 
     /** A calendar app on the ship, or none where [present] is false. */
     private fun calendar(
@@ -244,7 +247,7 @@ class HomeScreenTest {
                     if (calendarRefuses) return@MockEngine respond("", io.ktor.http.HttpStatusCode.BadRequest)
                     calendarWrites += String(req.body.toByteArray()); json("")
                 }
-                path.endsWith("/window.json") -> json("""{"rows":[$rows]}""")
+                path.endsWith("/window.json") -> { kotlinx.coroutines.delay(calendarReadMs); json("""{"rows":[$rows]}""") }
                 // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
                     json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"$taskName"},"due_ms":$taskDueMs${if (calendarWrites.any { "done-event" in it && "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
@@ -368,7 +371,10 @@ class HomeScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("isn't answering") }
             assertTrue(!shows("Looking") && !shows("<html"), "said, in words")
             calendarDown = false
+            calendarReadMs = 1_500
             onNodeWithText("Try again").performClick()
+            // One read at a time: each tap stacked another full read.
+            onNodeWithText("Try again").assertIsNotEnabled()
             waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
         }
     }
@@ -424,6 +430,27 @@ class HomeScreenTest {
             waitUntil(timeoutMillis = 1_500) { shows("Dentist, again") }
             // Refused: back to what the ship has.
             waitUntil(timeoutMillis = 5_000) { !shows("Dentist, again") && shows("Dentist, moved") }
+        }
+    }
+
+    // Added on the calendar screen or from a chat, a new event reached the
+    // home page's today only on the reading back, a minute and more on a
+    // busy ship. Here once the ship has taken it, before any reading.
+    @Test
+    fun `a new event added elsewhere is on today here once the ship takes it`() {
+        val cal = calendar(writeTakesMs = 1_000)
+        home(calendar = cal) {
+            waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
+            val at = now + 30 * 60_000L
+            val tea = io.nisfeb.talon.calendar.eventBody(
+                io.nisfeb.talon.calendar.sharedDraft("Tea with Ana", at, at + 30 * 60_000L, "default", kotlinx.datetime.TimeZone.UTC, "UTC"),
+            )
+            val adding = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()).launch { cal.writeEvent(tea, readBack = false) }
+            waitForIdle()
+            assertTrue(!shows("Tea with Ana"), "not before the ship has it")
+            runBlocking { adding.join() }
+            // The window the ship answers never has it: what shows is the repo's own.
+            waitUntil(timeoutMillis = 2_000) { shows("Tea with Ana") }
         }
     }
 
