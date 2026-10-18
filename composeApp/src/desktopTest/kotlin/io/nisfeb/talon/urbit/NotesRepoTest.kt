@@ -305,6 +305,30 @@ class NotesRepoTest {
         assertNull(db.notes().note(book.flagString, 11), "the host took it: it stays gone")
     }
 
+    // Read again three seconds on, a busy host's notebook still had the
+    // note, and it came back before the host took it away: a delete that
+    // looked refused. Hidden until the settle is over, unless the host has
+    // let it go before then.
+    @Test
+    fun `a note deleted in a slow host's notebook stays hidden through a read before the settle`() = live {
+        val slow = NotesRepo(db, CoroutineScope(SupervisorJob()), deleteSettleMs = 1_500).apply { attach(ship.channel) }
+        slow.bootstrap()
+        assertTrue(slow.deleteNote(book, 11))
+        // Another change to the notebook is read while the host still has it.
+        slow.refreshNotebook(book)
+        assertNull(db.notes().note(book.flagString, 11), "still hidden: the host has not answered")
+        // The host kept it: back once the settle is over.
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().note(book.flagString, 11) == null) delay(50) }
+        // Taken this time: a read without it ends the hiding, so a note of
+        // that id the host makes later is not hidden.
+        assertTrue(slow.deleteNote(book, 11))
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[]"
+        slow.refreshNotebook(book)
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[${note(11, "Pho", "Again.")}]"
+        slow.refreshNotebook(book)
+        assertNotNull(db.notes().note(book.flagString, 11), "the host's own again")
+    }
+
     // Made from a group's page, on that page's scope: leaving while the
     // host answered lost the notebook it made from the cache and the stream.
     @Test
