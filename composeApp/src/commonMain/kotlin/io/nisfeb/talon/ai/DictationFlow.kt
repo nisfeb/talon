@@ -84,19 +84,26 @@ class DictationFlow(
             val reply = said.reply.ifBlank { "Orrery took it." }
             val waiting = said.actions.filter { it.status == "proposed" }
             if (waiting.isEmpty()) return reply
-            return when (decide(reply, waiting)) {
-                true -> {
-                    waiting.forEach { answer(it.id, true) }
-                    "Done. $reply"
-                }
-                false -> {
-                    waiting.forEach { answer(it.id, false) }
-                    "Dropped. Nothing was done."
-                }
+            return when (putToOwner(reply, waiting, decide, answer)) {
+                true -> "Done. $reply"
+                false -> "Dropped. Nothing was done."
                 // Not an error: it waits where every proposal waits.
                 null -> "$reply Waiting for you under Actions."
             }
         }
+
+        /**
+         * What orrery left [waiting] put to the owner with its [reply]
+         * ([decide]), and each answered as they said ([answer]): their
+         * word, or null for none, which leaves it all under Actions.
+         * The voice card's and the Assistant's.
+         */
+        suspend fun putToOwner(
+            reply: String,
+            waiting: List<OrreryAction>,
+            decide: suspend (reply: String, waiting: List<OrreryAction>) -> Boolean?,
+            answer: suspend (id: String, approve: Boolean) -> Unit,
+        ): Boolean? = decide(reply, waiting)?.also { ok -> waiting.forEach { answer(it.id, ok) } }
 
         /** What instruct takes; more is read instead ([OrreryApi.instruct] clips at it). */
         const val INSTRUCT_BYTES = 2000

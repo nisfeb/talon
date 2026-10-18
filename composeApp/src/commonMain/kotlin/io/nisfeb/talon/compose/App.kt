@@ -3823,6 +3823,10 @@ fun App(
                                         // layout so the 64dp rail can't trip the
                                         // stacked/hamburger fallback.
                                         forceExpanded = expanded,
+                                        twentyFourHour = homeTwentyFourHour,
+                                        onOpenChat = jumpToChat,
+                                        onOpenCalendar = { showAssistant = false; assistantListen = false; onOpenCalendar() },
+                                        http = http,
                                         // Opened over Home, Mail or Calendar, which
                                         // take the whole area: the chat goes to a
                                         // tab that shows it.

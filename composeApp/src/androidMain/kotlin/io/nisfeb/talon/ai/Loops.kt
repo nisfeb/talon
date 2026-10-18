@@ -276,7 +276,7 @@ class Loops(
             started.await()
             val cfg = aiSettings.state.value
             val known = contacts.await()
-            val seen = Seen()
+            val seen = CardSeen()
             val actions = AssistantActions(
                 db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
@@ -315,7 +315,7 @@ class Loops(
                     name = known::conversationLabel,
                     locked = lockedNow,
                     unlock = unlock,
-                ).run(transcript, earlier).also { card = seen.card(actions.zone(), known) }
+                ).run(transcript, earlier).also { card = cardOf(seen, actions.zone(), known) }
             }
         }
 
@@ -323,85 +323,27 @@ class Loops(
         @Volatile var card: DictationCard? = null
             private set
 
-        /** What the calendar tools showed during one run. */
-        private inner class Seen {
-            private var events: Triple<List<io.nisfeb.talon.calendar.CalendarRow>, kotlinx.datetime.LocalDate, kotlinx.datetime.LocalDate>? = null
-            private var tasks: List<io.nisfeb.talon.calendar.CalendarTask>? = null
-            private val people = mutableListOf<PersonMatch>()
-            private var messages: List<io.nisfeb.talon.data.MessageEntity>? = null
-            private var mail: List<io.nisfeb.talon.mail.InboxEntry>? = null
-            fun people(found: List<PersonMatch>) { people += found }
-            fun messages(m: List<io.nisfeb.talon.data.MessageEntity>) { messages = m }
-            fun mail(m: List<io.nisfeb.talon.mail.InboxEntry>) { mail = m }
-            fun events(rows: List<io.nisfeb.talon.calendar.CalendarRow>, from: kotlinx.datetime.LocalDate, to: kotlinx.datetime.LocalDate) { events = Triple(rows, from, to) }
-            fun tasks(t: List<io.nisfeb.talon.calendar.CalendarTask>) { tasks = t }
-            /** Forget what was seen, for the next of a conversation's turns. */
-            fun reset() { events = null; tasks = null; people.clear(); messages = null; mail = null }
-            fun card(zone: kotlinx.datetime.TimeZone, known: io.nisfeb.talon.ui.ContactMap): DictationCard {
-                val now = System.currentTimeMillis()
-                val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
-                val name = { ship: String -> known.displayName(ship) }
-                return DictationCard(
-                    days = events?.let { (r, f, t) -> DictationCards.days(r, f, t, zone, now, twentyFour) }.orEmpty(),
-                    tasks = tasks?.let { DictationCards.tasks(it, zone, now) }.orEmpty(),
-                    people = DictationCards.people(people),
-                    messages = messages?.let { m ->
-                        DictationCards.messages(m, name, { io.nisfeb.talon.urbit.StoryCache.textFor(it.id, it.contentJson) }, zone, now, twentyFour)
-                    }.orEmpty(),
-                    mail = mail?.let { DictationCards.mail(it, name, zone, now, twentyFour) }.orEmpty(),
-                )
-            }
-        }
-
-        /** The day as Archie opens with it ([day]). */
-        inner class Day(val mail: Int?, val mailLate: Boolean, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
+        /** A card of what [seen] saw, as the phone's clock says times. */
+        private fun cardOf(seen: CardSeen, zone: kotlinx.datetime.TimeZone, known: io.nisfeb.talon.ui.ContactMap): DictationCard =
+            seen.card(zone, { known.displayName(it) }, android.text.format.DateFormat.is24HourFormat(context), System.currentTimeMillis())
 
         private fun zone() = io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value)
 
         private fun today(): kotlinx.datetime.LocalDate =
             kotlin.time.Instant.fromEpochMilliseconds(System.currentTimeMillis()).toLocalDateTime(zone()).date
 
-        /**
-         * What Archie opens with: the unread mail (null where the inbox
-         * could not be listed, never zero from a list not read), the chat
-         * list's unread, how many of those wait for the owner ([decider];
-         * null where it did not say), the next event today, and the card.
-         */
-        suspend fun day(decider: io.nisfeb.talon.orrery.Decider?): Day = kotlinx.coroutines.coroutineScope {
-            val db = getDb()
-            val owner = sessionStore.active()?.ship.orEmpty()
-            val inbox = async { runCatching { mail?.listing(io.nisfeb.talon.mail.MailView.INBOX) }.getOrNull() }
-            val questions = async {
-                if (decider == null) null
-                else runCatching { Briefing.questions(decider, owner, Briefing.unreadSaid(db, owner, io.nisfeb.talon.urbit.StoryCache::textFor)) }.getOrNull()
-            }
-            val chats = runCatching { Briefing.chatUnread(db) }.getOrNull()
-            // Capped: a slow calendar or mail held the opener, with nothing said.
-            withTimeoutOrNull(OPENER_WAIT_MS) { read.await() }
-            val zone = zone()
-            val now = System.currentTimeMillis()
-            val today = today()
-            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
-            val rows = calendar?.rows?.value.orEmpty()
-            val next = rows.filter { !it.isTask && !it.all && it.l > now && kotlin.time.Instant.fromEpochMilliseconds(it.l).toLocalDateTime(zone).date == today }.minByOrNull { it.l }
-            val unreadMail = withTimeoutOrNull(OPENER_WAIT_MS) { inbox.await() }?.threads?.filter { it.unread }
-            val mailLate = mail != null && unreadMail == null
+        /** What Archie opens with ([Briefing.day]), once the calendar is read, a while at most. */
+        suspend fun day(decider: io.nisfeb.talon.orrery.Decider?): Briefing.Day {
             val known = contacts.await()
-            Day(
-                mail = unreadMail?.size,
-                mailLate = mailLate,
-                chats = chats,
-                questions = withTimeoutOrNull(Briefing.QUESTIONS_WAIT_MS) { questions.await() },
-                firstEvent = next?.let { "${it.name.ifBlank { "an event" }} at ${DictationCards.clock(it.l, zone, twentyFour)}, ${Briefing.soon(it.l - now)}" },
-                card = DictationCard(
-                    days = DictationCards.days(rows, today, today, zone, now, twentyFour),
-                    mail = DictationCards.mail(unreadMail.orEmpty(), { known.displayName(it) }, zone, now, twentyFour),
-                ),
+            return Briefing.day(
+                getDb(), sessionStore.active()?.ship.orEmpty(), mail, calendar, decider, ::zone,
+                android.text.format.DateFormat.is24HourFormat(context), { known.displayName(it) }, CardSeen(),
+                calendarRead = { read.await() },
             )
         }
 
         /** What Archie's turns read, for each turn's card. */
-        private val talkSeen = Seen()
+        private val talkSeen = CardSeen()
 
         /**
          * Archie's conversation ([VoiceConversation]): a dictation's tools,
@@ -449,7 +391,7 @@ class Loops(
         }
 
         /** What the last of Archie's turns read, for its card; forgotten for the next. */
-        suspend fun turnCard(): DictationCard = talkSeen.card(zone(), contacts.await()).also { talkSeen.reset() }
+        suspend fun turnCard(): DictationCard = cardOf(talkSeen, zone(), contacts.await()).also { talkSeen.reset() }
 
         /** Today's brief from [orrery], for the opener; null for none today or no answer. */
         suspend fun brief(orrery: io.nisfeb.talon.orrery.OrreryRepo?): io.nisfeb.talon.orrery.Brief? =
@@ -496,7 +438,7 @@ class Loops(
             if (!cfg.loopsCanRun()) return DictationRun.NO_MODEL_FOR_QUESTIONS
             started.await()
             val known = contacts.await()
-            val seen = Seen()
+            val seen = CardSeen()
             val actions = AssistantActions(
                 db = getDb(), contacts = { known }, mail = mail, calendar = calendar,
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
@@ -511,7 +453,7 @@ class Loops(
                 systemPrompt = DictationAgent.askPrompt,
                 locked = locked,
                 unlock = unlock,
-            ).run(question, earlier).also { card = seen.card(actions.zone(), known) }
+            ).run(question, earlier).also { card = cardOf(seen, actions.zone(), known) }
         }
 
         /**
@@ -524,29 +466,11 @@ class Loops(
         suspend fun calendarAnswer(text: String, earlier: List<DictationFlow.Earlier>, decider: io.nisfeb.talon.orrery.Decider?): String? {
             val cal = calendar ?: return null
             if (decider == null) return null
-            val zone = io.nisfeb.talon.ui.screens.zoneFor(cal.zone.value)
-            val now = System.currentTimeMillis()
-            val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
-            val asked = System.currentTimeMillis()
-            val span = CalendarQuestion.decide(decider, text, earlier, today) {
-                io.nisfeb.talon.util.Log.i("Dictation", "$it, in ${System.currentTimeMillis() - asked} ms")
-            } ?: return null
-            val t0 = System.currentTimeMillis()
-            read.await()
-            val b = CalendarQuestion.bounds(span, zone)
-            // The read covers six hours back to a month ahead; earlier today, or further, is asked for.
-            val covered = b.first >= now - io.nisfeb.talon.calendar.CalendarRepo.BEHIND_MS + 60_000 &&
-                b.last <= now + io.nisfeb.talon.calendar.CalendarRepo.AHEAD_MS - 60_000
-            val rows = (if (covered) cal.rows.value else null) ?: cal.windowRows(b.first, b.last + 1) ?: return null
-            val tasks = cal.tasks.value.orEmpty()
-            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
-            val due = tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true }
-            card = DictationCard(
-                days = DictationCards.days(rows, span.from, span.to, zone, now, twentyFour),
-                tasks = DictationCards.tasks(due, zone, now),
-            )
-            io.nisfeb.talon.util.Log.i("Dictation", "calendar answered on the phone in ${System.currentTimeMillis() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
-            return CalendarQuestion.answer(span, rows, tasks, zone, now, twentyFour)
+            val seen = CardSeen()
+            return CalendarQuestion.fromCalendar(
+                cal, decider, text, earlier, android.text.format.DateFormat.is24HourFormat(context), seen,
+                ready = { read.await() },
+            ) { io.nisfeb.talon.util.Log.i("Dictation", it) }?.also { card = cardOf(seen, zone(), contacts.await()) }
         }
 
         /** Orrery for [block], attached headless, or null where Orrery is off. */
@@ -635,7 +559,5 @@ class Loops(
         // with a write loop due — long enough for an SSE connect on mobile
         // data, short enough to leave the run budget intact.
         private val CONNECT_WAIT_MS = TimeUnit.SECONDS.toMillis(15)
-        // How long Archie's opener waits for the calendar read and the mail listing.
-        private const val OPENER_WAIT_MS = 5_000L
     }
 }

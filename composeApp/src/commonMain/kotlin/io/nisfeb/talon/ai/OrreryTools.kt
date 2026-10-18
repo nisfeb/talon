@@ -261,6 +261,33 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
         this@asTap.correct(subject, attr, value, why)
 }
 
+/**
+ * [this] with what an instruct not applied leaves waiting put to the
+ * owner at once ([DictationFlow.putToOwner]), as the voice card does,
+ * and not only under Actions. What orrery_instruct then reads says what
+ * they decided; with no word, it waits under Actions as before.
+ */
+fun OrreryTap.puttingToOwner(
+    decide: suspend (reply: String, waiting: List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
+    answer: suspend (id: String, approve: Boolean) -> Unit,
+): OrreryTap = object : OrreryTap by this {
+    override suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed> {
+        val said = this@puttingToOwner.instruct(text, apply).getOrElse { return Result.failure(it) }
+        val waiting = said.actions.filter { it.status == "proposed" }
+        if (apply || waiting.isEmpty()) return Result.success(said)
+        val ok = try {
+            DictationFlow.putToOwner(said.reply.ifBlank { "Orrery took it." }, waiting, decide, answer)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            return Result.success(said.copy(note = (said.note + " The owner answered, but orrery did not take the answer: ${e.message}. It waits under Actions.").trim()))
+        }
+        if (ok == null) return Result.success(said)
+        val now = if (ok) "approved" else "dismissed"
+        return Result.success(said.copy(actions = said.actions.map { if (it in waiting) it.copy(status = now) else it }))
+    }
+}
+
 /** Orrery's tools, where this install is attached to a ship that has it. */
 fun orreryTools(repo: OrreryRepo): List<Tool> = orreryTools(repo.asTap())
 
