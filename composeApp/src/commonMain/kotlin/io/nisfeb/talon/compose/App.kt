@@ -289,6 +289,12 @@ fun App(
     // The ship "Add ship" left, which the login form's Cancel goes back
     // to. Null when there was none: a first sign-in has nowhere to return.
     var addingFrom by remember { mutableStateOf<String?>(null) }
+    // The ship whose lapse opened the form, and the ships whose lapse the
+    // owner put off with Cancel. Cancel builds the ship anew, and its
+    // fresh repo is refused again: without this the form came straight
+    // back. Put off until that ship is signed in to.
+    var lapsing by remember { mutableStateOf<String?>(null) }
+    var lapseHeldOff by remember { mutableStateOf(emptySet<String>()) }
     // Local comet: the setup screen replaces the login form, and a
     // first login lands in the public Nisfeb Software group.
     var localShipSetupOpen by remember { mutableStateOf(false) }
@@ -575,8 +581,10 @@ fun App(
     LaunchedEffect(lapsedShips, loggedInShip) {
         val ship = loggedInShip ?: return@LaunchedEffect
         if (!io.nisfeb.talon.ui.screens.LoginLapses.take(ship)) return@LaunchedEffect
+        if (ship in lapseHeldOff) return@LaunchedEffect
         sessionStore.all().firstOrNull { it.ship == ship }?.let { io.nisfeb.talon.ui.screens.LoginDraft.url.value = it.shipUrl }
         addingFrom = ship
+        lapsing = ship
         leaveShip()
         loggedInShip = null
         loginNotice = io.nisfeb.talon.ui.screens.lapsedLoginNotice(ship)
@@ -2398,11 +2406,18 @@ fun App(
                     )
                     ship == null -> LoginScreen(
                         session = session,
-                        onLoggedIn = { addingFrom = null; loggedInShip = it },
+                        onLoggedIn = { addingFrom = null; lapsing = null; lapseHeldOff = lapseHeldOff - it; loggedInShip = it },
                         onLoginCode = { who, code ->
                             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) notifyCode = who to code
                         },
-                        onCancel = addingFrom?.let { from -> { addingFrom = null; switchShip(from) } },
+                        onCancel = addingFrom?.let { from ->
+                            {
+                                if (lapsing == from) lapseHeldOff = lapseHeldOff + from
+                                addingFrom = null
+                                lapsing = null
+                                switchShip(from)
+                            }
+                        },
                         notice = loginNotice,
                         onRunLocalShip = if (io.nisfeb.talon.ui.isLocalCometSupported) {
                             { localShipSetupOpen = true }

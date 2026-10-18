@@ -1241,6 +1241,18 @@ class AppShellTest {
             waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
             assertTrue(showing("https://ship.test"), "the address is filled in")
             assertEquals(setOf("~zod", "~bus"), store.all().map { it.ship }.toSet(), "nothing forgotten")
+            // B6-2: Cancel goes back to the ship, still refused, and the
+            // form stays away. It came straight back: the ship's fresh
+            // repo was refused again and said so. Real time, since the
+            // refusal is a request.
+            onNodeWithText("Cancel").performClick()
+            home()
+            val until = System.currentTimeMillis() + 8_000
+            while (System.currentTimeMillis() < until) {
+                Thread.sleep(250)
+                waitForIdle()
+                assertTrue(!showing("Connect"), "the form came back after Cancel")
+            }
         }
     }
 
