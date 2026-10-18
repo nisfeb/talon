@@ -249,4 +249,29 @@ class VoiceConversationTest {
         assertEquals(VoiceConversation.Next.End(VoiceConversation.TOO_LONG), t.next("and more"))
         assertTrue(long.calls.last().second.size <= VoiceConversation.MAX_CONTEXT * 2 + 1, "only the recent turns go to the model")
     }
+
+    @Test
+    fun `a locked conversation reads no messages until the fingerprint, and asks again on a later turn`() = runBlocking {
+        var unlocks = 0
+        val model = Model(
+            AgentTurn.Calls(null, listOf(call("list_unread", "aloud" to true))),
+            AgentTurn.Final("Unlock your phone to hear them."),
+            AgentTurn.Calls(null, listOf(call("list_unread", "aloud" to true))),
+        )
+        val unread = tool("list_unread", false) { "Andrea:\nThe code is 4471.\n\n${Briefing.UNREAD_IDS} Andrea = ~bus" }
+        val t = VoiceConversation(
+            model.completer, listOf(unread, tool("list_events", false)), tell = null, brief = { null },
+            locked = { true }, unlock = { ++unlocks > 1 },
+        )
+        val first = t.next("read me my messages") as VoiceConversation.Next.Say
+        assertEquals("Unlock your phone to hear them.", first.line)
+        assertTrue(first.inFull.isEmpty() && "4471" !in first.shown, "read out on a locked phone")
+        val result = model.calls[1].second.last() as AgentMessage.ToolResults
+        assertEquals(DictationAgent.UNLOCK_TO_READ, result.results.single().content)
+        val second = t.next("okay, read them") as VoiceConversation.Next.Say
+        assertEquals(VoiceConversation.UNREAD_READING, second.line)
+        assertTrue("4471" in second.shown)
+        assertEquals(2, unlocks, "a no on one turn held the next one too")
+        assertTrue("send_message" !in t.toolNames && "send_mail" !in t.toolNames)
+    }
 }

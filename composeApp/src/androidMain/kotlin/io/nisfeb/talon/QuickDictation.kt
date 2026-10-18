@@ -64,7 +64,8 @@ import java.io.File
  * by tap or by saying it, with the fingerprint first on a locked phone
  * for anything that reaches another person. With Orrery off the agent
  * acts on the words itself ([io.nisfeb.talon.ai.Loops.DictationPrep.dictate]),
- * and a message or mail it would send waits on the same card.
+ * and a message or mail it would send waits on the same card. On a locked
+ * phone, a read of messages or mail waits for the fingerprint.
  * A failure keeps what it had, the audio or the words, behind a Retry.
  *
  * Android-only: no desktop analog. The widget, the tile and the assistant
@@ -101,6 +102,9 @@ object QuickDictation {
             val unlock: Boolean,
             val unlockNow: Boolean = false,
         ) : Stage
+
+        /** A locked phone asked to read messages or mail: the fingerprint first, and [line] says so. */
+        data class Unlock(val line: String) : Stage
 
         /**
          * How it ended: the [line], the events and tasks the answer read
@@ -438,7 +442,7 @@ class DictationService : Service() {
             }
             prep.orrery { orrery ->
                 kotlinx.coroutines.coroutineScope {
-                    val talk = prep.conversation(locked, orrery) { reply, waiting -> ownerDecides(reply, waiting, transcribe) }
+                    val talk = prep.conversation(locked, orrery, { reply, waiting -> ownerDecides(reply, waiting, transcribe) }, ::ownerUnlocks)
                     Log.i(TAG, "talking: ${talk.toolNames.size} tools, orrery ${if (orrery == null) "off" else "on"}, locked=${locked()}")
                     val t0 = System.currentTimeMillis()
                     val day = prep.day(io.nisfeb.talon.ai.CalendarQuestion.decider(app.ktorHttp, cfg, Briefing.QUESTIONS_WAIT_MS))
@@ -643,12 +647,12 @@ class DictationService : Service() {
                         QuickDictation.show(QuickDictation.Stage.Working("Working on it…"))
                         went(DictationRoute.Ask)
                         p.calendarAnswer(words, thread?.earlier.orEmpty(), decider)
-                            ?: p.dictate(words, locked, thread?.earlier.orEmpty(), { ownerSends(it, transcribe) })
+                            ?: p.dictate(words, locked, thread?.earlier.orEmpty(), { ownerSends(it, transcribe) }, ::isLocked, ::ownerUnlocks)
                     } else {
                         DictationFlow(
                             ask = { q, earlier ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Looking it up…"))
-                                p.ask(q, earlier, orrery)
+                                p.ask(q, earlier, orrery, ::isLocked, ::ownerUnlocks)
                             },
                             instruct = { t ->
                                 QuickDictation.show(QuickDictation.Stage.Working("Asking orrery…"))
@@ -754,6 +758,37 @@ class DictationService : Service() {
             shade.cancel()
             NotificationManagerCompat.from(this@DictationService).cancel(ASK_ID)
             QuickDictation.show(QuickDictation.Stage.Working(after))
+        }
+    }
+
+    private fun isLocked(): Boolean = getSystemService(KeyguardManager::class.java)?.isDeviceLocked == true
+
+    /**
+     * The fingerprint before a locked phone reads out messages or mail
+     * ([io.nisfeb.talon.ai.unlockingReads]): the card asks for it at once,
+     * and an unlock from the lock screen counts too. True once unlocked;
+     * false for Not now, or no unlock in [APPROVE_WAIT_MS].
+     */
+    private suspend fun ownerUnlocks(): Boolean {
+        if (!isLocked()) return true
+        val word = QuickDictation.asking()
+        val was = QuickDictation.stage.value
+        val line = io.nisfeb.talon.ai.DictationAgent.UNLOCK_TO_READ
+        QuickDictation.show(QuickDictation.Stage.Unlock(line))
+        update(line)
+        return try {
+            kotlinx.coroutines.coroutineScope {
+                val saying = launch { say(line) }
+                withTimeoutOrNull(APPROVE_WAIT_MS) {
+                    // Until unlocked or Not now: a yes alone is no unlock.
+                    while (isLocked() && (word.isActive || word.await())) kotlinx.coroutines.delay(250)
+                }
+                saying.cancel()
+                !isLocked()
+            }.also { Log.i(TAG, "a read waited for the fingerprint: ${if (it) "unlocked" else "still locked"}") }
+        } finally {
+            word.cancel()
+            QuickDictation.show(was)
         }
     }
 

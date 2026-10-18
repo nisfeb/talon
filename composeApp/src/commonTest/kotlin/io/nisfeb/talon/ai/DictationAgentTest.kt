@@ -275,4 +275,74 @@ class DictationAgentTest {
         assertEquals(1, asked)
         assertTrue(tools.all { it.write }, "a wrapped send is still a write")
     }
+
+    // ─── a locked phone reads no one's words (B2-8) ───────────────
+
+    @Test
+    fun `the private reads are every dictation tool that gives messages or mail, and no other`() {
+        assertEquals(
+            setOf("search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail"),
+            DictationAgent.PRIVATE_READS,
+        )
+        assertTrue(DictationAgent.TOOLS.containsAll(DictationAgent.PRIVATE_READS))
+        assertTrue(DictationAgent.CALENDAR_TOOLS.none { it in DictationAgent.PRIVATE_READS }, "the calendar's reads stay free")
+    }
+
+    @Test
+    fun `while locked a message or mail read waits for the fingerprint, and without it nothing is read`() = runBlocking {
+        val read = mutableListOf<String>()
+        var unlocks = 0
+        val tools = listOf("list_unread", "read_mail", "list_events", "find_person").map { n -> tool(n, false) { read += n; "$n said" } }
+            .unlockingReads(locked = { true }) { unlocks++; false }
+        assertEquals(DictationAgent.UNLOCK_TO_READ, tools[0].execute(JsonObject(emptyMap())))
+        assertEquals(DictationAgent.UNLOCK_TO_READ, tools[1].execute(JsonObject(emptyMap())))
+        assertEquals(1, unlocks, "a no is asked once a run, not at every read")
+        assertEquals("list_events said", tools[2].execute(JsonObject(emptyMap())))
+        assertEquals("find_person said", tools[3].execute(JsonObject(emptyMap())))
+        assertEquals(listOf("list_events", "find_person"), read, "a message or mail was read on a locked phone")
+        assertEquals(1, unlocks, "the calendar or a contact asked for the fingerprint")
+    }
+
+    @Test
+    fun `an unlock reads it, an unlocked phone is never asked, and a later unlock lifts a no`() = runBlocking {
+        var locked = true
+        var unlocks = 0
+        var answer = true
+        val tools = listOf(tool("search_history", false) { "found" }).unlockingReads({ locked }) { unlocks++; answer }
+        assertEquals("found", tools[0].execute(JsonObject(emptyMap())))
+        assertEquals(1, unlocks)
+        val refused = listOf(tool("read_conversation", false) { "said" }).unlockingReads({ locked }) { unlocks++; answer }
+        answer = false
+        assertEquals(DictationAgent.UNLOCK_TO_READ, refused[0].execute(JsonObject(emptyMap())))
+        locked = false
+        assertEquals("said", refused[0].execute(JsonObject(emptyMap())), "unlocked by hand after a no")
+        assertEquals("found", tools[0].execute(JsonObject(emptyMap())))
+        assertEquals(2, unlocks, "an unlocked phone was asked to unlock")
+    }
+
+    @Test
+    fun `a dictation on a locked phone draws and says nothing it was not unlocked for`() = runBlocking {
+        val drawn = mutableListOf<String>()
+        val seen = mutableListOf<String>()
+        val said = DictationAgent(
+            completer = once(call("list_unread"), seen),
+            // As the catalog's list_unread hands what it read to the card.
+            tools = listOf(tool("list_unread", false) { drawn += "Andrea: the code is 4471"; "Andrea: the code is 4471" }),
+            locked = { true },
+            unlock = { false },
+        ).run("read me my messages")
+        assertTrue(drawn.isEmpty(), "the card was handed messages")
+        assertEquals(listOf(DictationAgent.UNLOCK_TO_READ), seen)
+        assertEquals(DictationAgent.UNLOCK_TO_READ, said)
+        // With nothing wired, a locked phone is refused, not read, and an unlocked one reads.
+        assertEquals(DictationAgent.UNLOCK_TO_READ, DictationAgent(once(call("list_unread")), listOf(tool("list_unread", false) { "x" }), locked = { true }).run("read them"))
+        assertEquals("x", DictationAgent(once(call("list_unread")), listOf(tool("list_unread", false) { "x" })).run("read them"))
+    }
+
+    @Test
+    fun `with no names given a send is asked by its id`() = runBlocking {
+        val asked = mutableListOf<CardProposal>()
+        DictationAgent(once(call("send_message", "whom" to "~bus", "text" to "hi")), listOf(tool("send_message", true)), ownerSends = { asked += it; false }).run("tell bus hi")
+        assertEquals("~bus", asked.single().to)
+    }
 }

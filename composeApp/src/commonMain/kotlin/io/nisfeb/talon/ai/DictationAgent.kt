@@ -16,7 +16,8 @@ import kotlinx.serialization.json.JsonObject
  * the calendar directly and the result notification is the only
  * after-the-fact signal. A message or a mail is the exception: the run
  * reads other people's words, so each send waits for the owner's word
- * ([ownerSends], sneagan 2026-10-18).
+ * ([ownerSends], sneagan 2026-10-18). While [locked], a read of messages
+ * or mail waits for the fingerprint ([unlock]).
  *
  * A blank transcript runs nothing, so a mis-fire or a silent recording
  * is a no-op rather than an empty agent round-trip.
@@ -36,6 +37,10 @@ class DictationAgent(
     private val ownerSends: suspend (CardProposal) -> Boolean? = { null },
     /** A conversation's or a ship's name, for the card that asks. */
     private val name: (String) -> String = { it },
+    /** Whether the phone is locked now, read at each read of messages or mail. */
+    private val locked: () -> Boolean = { false },
+    /** The fingerprint while [locked] ([unlockingReads]): true once the phone is unlocked. */
+    private val unlock: suspend () -> Boolean = { false },
 ) {
     /**
      * Run [transcript] and return the agent's own summary of what it
@@ -47,7 +52,7 @@ class DictationAgent(
         if (text.isEmpty()) return ""
         // A follow-up goes on from what was asked and answered before it.
         val prior = earlier.flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
-        val gated = tools.askingToSend(name, ownerSends)
+        val gated = tools.askingToSend(name, ownerSends).unlockingReads(locked, unlock)
         return AgentLoop(completer, gated, systemPrompt, maxSteps)
             .run(question = text, priorTurns = prior, confirm = { _, _ -> true }, finish = ::plainly)
     }
@@ -176,6 +181,18 @@ class DictationAgent(
         const val NOT_SENT = "The owner did not send it."
 
         /**
+         * The reads that give other people's words, their messages and
+         * mail: a locked phone asks for the fingerprint first
+         * ([unlockingReads]). Not the calendar's, nor orrery's own record.
+         */
+        val PRIVATE_READS: Set<String> = setOf(
+            "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
+        )
+
+        /** What the model reads, and the card shows, while the phone stays locked. */
+        const val UNLOCK_TO_READ = "Unlock your phone to hear messages."
+
+        /**
          * What a send would do, as the card asks it: a message or a mail,
          * to whom by [name], and what it says. Null where the call lacks
          * what the tool needs to send at all.
@@ -258,6 +275,28 @@ fun List<Tool>.askingToSend(name: (String) -> String, ask: suspend (CardProposal
             if (ask(p) == true) t.execute(args) else DictationAgent.NOT_SENT
         }
     }
+
+/**
+ * These tools with each read of other people's words
+ * ([DictationAgent.PRIVATE_READS]) waiting, while [locked], for [unlock]:
+ * refused with [DictationAgent.UNLOCK_TO_READ] where the phone stays
+ * locked, so nothing private is said or drawn. One refusal stands for
+ * these tools' run while the phone stays locked, so it is asked once.
+ */
+fun List<Tool>.unlockingReads(locked: () -> Boolean, unlock: suspend () -> Boolean): List<Tool> {
+    var refused = false
+    return map { t ->
+        if (t.spec.name !in DictationAgent.PRIVATE_READS) t
+        else Tool(t.spec, t.write) { args ->
+            if (locked() && (refused || !unlock())) {
+                refused = true
+                DictationAgent.UNLOCK_TO_READ
+            } else {
+                t.execute(args)
+            }
+        }
+    }
+}
 
 /** How one dictation ended. Every one of them is a notification. */
 sealed interface DictationOutcome {
