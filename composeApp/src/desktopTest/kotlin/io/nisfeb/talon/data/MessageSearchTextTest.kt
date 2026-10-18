@@ -48,6 +48,66 @@ class MessageSearchTextTest {
         }
     }
 
+    // A link's address and a mention's @p were not found: the words
+    // carried the label (cut short, or named otherwise) and the reader's
+    // name for the ship (review A5-14).
+    @Test
+    fun `a link's address and a mention's at-p are found`() = runBlocking<Unit> {
+        val long = "https://example.test/a/very/long/path/to/a/page"
+        val story = """[{"inline":[{"ship":"~nec"}," see ",{"link":{"href":"https://x.test/plan","content":"the plan"}}," and ",{"link":{"href":"$long","content":"$long"}}]}]"""
+        val db = db()
+        val names = io.nisfeb.talon.ui.ShipNames.resolve
+        val generation = io.nisfeb.talon.ui.ShipNames.generation.value
+        io.nisfeb.talon.ui.ShipNames.setResolver(generation - 1) { if (it == "~nec") "Nec" else names(it) }
+        try {
+            db.messages().upsert(MessageEntity("~bus", "1", "~bus", 1, story, "/chat"))
+            for (word in listOf("~nec", "https://x.test/plan", "x.test/plan", long, "Nec", "the plan")) assertEquals(listOf("1"), db.find(word), word)
+        } finally {
+            io.nisfeb.talon.ui.ShipNames.setResolver(generation) { names(it) }
+            db.close()
+        }
+    }
+
+    /** The search text of row [id] set as an older Talon left it, straight in the file. */
+    private fun storedAsBefore(id: String, text: String) = BundledSQLiteDriver().open(path).also { c ->
+        c.execSQL("UPDATE messages SET searchText = '$text' WHERE id = '$id'")
+        c.close()
+    }
+
+    private fun started(db: AppDatabase, block: suspend () -> Unit) = runBlocking<Unit> {
+        val ship = io.nisfeb.talon.urbit.FakeShip("~zod")
+        val repo = io.nisfeb.talon.urbit.TlonChatRepo(db)
+        repo.start(io.nisfeb.talon.urbit.UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") })
+        try { kotlinx.coroutines.withTimeout(20_000) { block() } } finally { repo.stopAndJoinForTest() }
+    }
+
+    @Test
+    fun `rows from before the extras get them at the next start, once`() = runBlocking<Unit> {
+        val link = """[{"inline":[{"link":{"href":"https://x.test/plan","content":"the plan"}}]}]"""
+        db().also {
+            it.messages().upsert(MessageEntity("~bus", "1", "~bus", 1, link, "/chat"))
+            it.messages().upsert(MessageEntity("~bus", "2", "~bus", 2, """[{"inline":["plain words"]}]""", "/chat"))
+            it.close()
+        }
+        storedAsBefore("1", "the plan")
+        var db = db()
+        try {
+            assertEquals(emptyList(), db.find("https://x.test/plan"))
+            started(db) { while (db.find("https://x.test/plan") != listOf("1")) kotlinx.coroutines.delay(20) }
+            assertEquals(listOf("2"), db.find("plain"), "a row with no link or mention keeps what it had")
+        } finally {
+            db.close()
+        }
+        storedAsBefore("1", "the plan")
+        db = db()
+        try {
+            started(db) { kotlinx.coroutines.delay(500) }
+            assertEquals(emptyList(), db.find("https://x.test/plan"), "once: the second start leaves it")
+        } finally {
+            db.close()
+        }
+    }
+
     @Test
     fun `rows from before the column keep their data and get their words at start`() = runBlocking<Unit> {
         db().also { it.messages().upsert(MessageEntity("~bus", "1", "~bus", 1, story, "/chat")); it.close() }

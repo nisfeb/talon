@@ -50,6 +50,25 @@ interface GroupDao {
         }
     }
 
+    /**
+     * A channel heard of live, added or edited: its group and title, with
+     * its pin and its place kept. A new one goes after its group's others,
+     * where a host puts a new channel, until the next read of the groups
+     * gives its place. Written with ordinal 0, an edit took a channel to
+     * the top of its group's host order.
+     */
+    @Query(
+        """
+        INSERT INTO channel_groups (nest, groupFlag, title, pinnedPostId, ordinal)
+        VALUES (:nest, :groupFlag, :title, NULL,
+            (SELECT COALESCE(MAX(ordinal) + 1, 0) FROM channel_groups WHERE groupFlag = :groupFlag))
+        ON CONFLICT(nest) DO UPDATE SET
+            groupFlag = excluded.groupFlag,
+            title = excluded.title
+        """,
+    )
+    suspend fun upsertLiveChannel(nest: String, groupFlag: String, title: String?)
+
     @Query("SELECT * FROM groups")
     fun streamGroups(): Flow<List<GroupEntity>>
 

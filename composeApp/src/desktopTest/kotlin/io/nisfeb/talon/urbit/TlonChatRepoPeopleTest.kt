@@ -142,6 +142,21 @@ class TlonChatRepoPeopleTest {
         assertEquals(1, ship.pokesTo("contacts").size, "the page waits on the meet")
     }
 
+    // A ship that never answered a removal was taken for one that took
+    // it, and the screen said they were gone (coordinator, 2026-10-18:
+    // "removeContact confirm"). Real time: the channel's 15 s wait.
+    @Test
+    fun `a removal the ship refuses or never answers leaves them in the book`() = live {
+        repo.addContact("~bus")
+        ship.refuse = { if (it.app == "contacts") "nope" else null }
+        assertFailsWith<PokeNacked> { repo.removeContact("~bus") }
+        assertTrue("~bus" in repo.bookContacts.value)
+        ship.refuse = { null }
+        ship.silent = { it.app == "contacts" }
+        assertFailsWith<PokeUnacked> { repo.removeContact("~bus") }
+        assertTrue("~bus" in repo.bookContacts.value)
+    }
+
     @Test
     fun `removing a contact wipes them from the book`() = live {
         repo.addContact("~bus")

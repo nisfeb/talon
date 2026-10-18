@@ -21,16 +21,18 @@ import kotlinx.coroutines.withContext
  * If no scheme is present, prepend `https://` — matches the
  * security-preferred posture and means users only have to type
  * `http://` when they explicitly want cleartext (e.g. a LAN ship).
- * Trailing slashes are stripped so the saved-session entry is stable.
+ * Only the origin is kept, so the saved-session entry is stable: a page
+ * of the ship pasted from a browser (`…/apps/groups/`) kept its path,
+ * and every request went under it.
  */
 internal fun normalizeShipUrl(input: String): String {
-    val trimmed = input.trim().trimEnd('/')
+    val trimmed = input.trim()
     val lower = trimmed.lowercase()
-    return if (lower.startsWith("http://") || lower.startsWith("https://")) {
-        trimmed
-    } else {
-        "https://$trimmed"
-    }
+    val url = if (lower.startsWith("http://") || lower.startsWith("https://")) trimmed else "https://$trimmed"
+    // ponytail: a ship served under a path (a proxy at /urbit) would need it kept; none is known.
+    val host = url.indexOf("://") + 3
+    val end = url.indexOfAny(charArrayOf('/', '?', '#'), host)
+    return if (end < 0) url else url.substring(0, end)
 }
 
 /**

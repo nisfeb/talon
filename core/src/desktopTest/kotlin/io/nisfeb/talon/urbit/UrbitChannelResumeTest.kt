@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -69,6 +70,20 @@ class UrbitChannelResumeTest {
         assertEquals(0, gets)
     }
 
+    @Test
+    fun `a channel given up twice is ended on the ship once`() = runBlocking<Unit> {
+        val puts = CopyOnWriteArrayList<String>()
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") puts += String(req.body.toByteArray())
+            respond("", HttpStatusCode.NoContent)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        ch.delete()
+        ch.delete()
+        assertEquals(1, puts.size, "$puts")
+        assertTrue("\"action\":\"delete\"" in puts.single())
+    }
+
     // Eyre ties a channel to the login that made it: anyone else gets 403,
     // on the stream and on a PUT, for good.
     @Test
@@ -100,6 +115,23 @@ class UrbitChannelResumeTest {
         val ended = kotlinx.coroutines.withTimeout(5_000) { stream.await() }
         held.complete(Unit)
         assertTrue(ended is ChannelGone && ended.forbidden, "the stream ended with it: $ended")
+    }
+
+    // A stream asked for after the refusal said only "gone", and the
+    // session took that as a channel reaped: a new one at once, and on a
+    // lapsed login every two seconds (review A5-18).
+    @Test
+    fun `a stream asked for after a refused PUT says it was refused`() = runBlocking<Unit> {
+        var gets = 0
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "GET") gets++
+            respond("", HttpStatusCode.Forbidden)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        assertFailsWith<ChannelGone> { ch.subscribe("chat", "/v4") }
+        val e = assertFailsWith<ChannelGone> { ch.events().toList() }
+        assertTrue(e.forbidden, "refused, not reaped")
+        assertEquals(0, gets, "not asked: it is gone")
     }
 
     // Vere answers /~_~/healthz itself, no login and no event on the ship.

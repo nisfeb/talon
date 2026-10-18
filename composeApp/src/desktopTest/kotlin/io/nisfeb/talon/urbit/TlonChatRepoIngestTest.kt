@@ -232,6 +232,23 @@ class TlonChatRepoIngestTest {
         assertNull(db.groups().channelGroupFor(nest))
     }
 
+    // Written with ordinal 0, a live rename took a channel to the top of
+    // its group's host order, and a live add put the new one there too
+    // (review Low, TlonChatRepo.kt:3995-4012).
+    @Test
+    fun `a channel renamed live keeps its place and one added live goes last`() = runBlocking<Unit> {
+        db.groups().upsertChannelGroups(listOf(
+            ChannelGroupEntity("chat/~bus/general", flag, title = "general", ordinal = 0),
+            ChannelGroupEntity("chat/~bus/beds", flag, title = "beds", ordinal = 7),
+        ))
+        fact(group("""{"channel":{"nest":"chat/~bus/beds","r-channel":{"edit":{"meta":{"title":"Beds"}}}}}"""))
+        assertEquals("Beds" to 7, db.groups().channelGroupFor("chat/~bus/beds")?.let { it.title to it.ordinal })
+        fact(group("""{"channel":{"nest":"chat/~bus/shed","r-channel":{"add":{"meta":{"title":"shed"}}}}}"""))
+        assertEquals(8, db.groups().channelGroupFor("chat/~bus/shed")?.ordinal)
+        fact("""{"flag":"~nec/new","r-group":{"channel":{"nest":"chat/~nec/first","r-channel":{"add":{"meta":{"title":"first"}}}}}}""")
+        assertEquals(0, db.groups().channelGroupFor("chat/~nec/first")?.ordinal, "the first of its group")
+    }
+
     @Test
     fun `a group's new title and picture replace the old, and a deleted group takes its channels`() = runBlocking<Unit> {
         db.groups().upsertGroups(listOf(GroupEntity(flag, "Old name", null)))

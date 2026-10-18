@@ -2,6 +2,7 @@ package io.nisfeb.talon.data
 
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
@@ -105,6 +106,19 @@ class MessageReapDaoTest {
         assertNull(db.messages().getOne(whom, "~author/1701"))
         for (kept in listOf("local_2", "local_3", "local_4", "170141184506")) assertNotNull(db.messages().getOne(whom, kept), kept)
         Unit
+    }
+
+    // A queued DM deleted the usual way (soft) was still in the queue, and
+    // the drain sent it (review A4-1).
+    @Test
+    fun `a deleted message is not in the queue or its counts`() = runBlocking {
+        db.messages().upsert(row("local_1", 1000, status = "queued"))
+        db.messages().upsert(row("local_2", 2000, status = "queued").copy(isDeleted = true))
+        db.messages().upsert(row("local_3", 3000, status = "queued").copy(whom = "~bus", isDeleted = true))
+        assertEquals(listOf("local_1"), db.messages().queued().map { it.id })
+        assertEquals(1, db.messages().queuedIn(whom))
+        assertEquals(0, db.messages().queuedIn("~bus"))
+        assertEquals(1, db.messages().queuedCount().first())
     }
 
     @Test
