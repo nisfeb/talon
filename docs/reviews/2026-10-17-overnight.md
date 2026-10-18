@@ -7,15 +7,15 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Night: 2026-10-17 (started 2026-10-18 00:07 EDT).
 - Integration worktree: `~/software/personal/talon-ov-2026-10-17`, branch `polish/overnight-2026-10-17`.
 - Base: `github/master` at 60d99a39 (release 1.8.30-rc11). The fetch worked.
-- Pass: 2 (pass 1 merged; its full suite running).
-- Step: fix. Triage done 01:25 EDT; six fixers launched in the worktrees below.
-- Pass 1 started: 00:10 EDT.
-- Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
-- Merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
-- Pass 2 started 03:30 EDT: six read-only reviewers (UI polish; voice and the assistant; Android services and lifecycle; desktop and iOS leaves; performance and ship cost; pass 1's own commits), launched while pass 1's full suite runs.
+- Pass: 2.
+- Step: fix. Pass 2's triage done 03:50 EDT (see "Pass 2 triage"); six fixers launched in the worktrees below, asked to report by 05:30.
+- Pass 1: 00:10 to 03:30 EDT. Pass 2 started 03:30 EDT. Pass 3 will not start: a pass takes two hours or more, and the cutoff is 04:30.
+- Fixer branches in flight: `polish/ov-2026-10-17-p2-<group>` for shells, android, voice, desktop-ios, chat, screens, in `~/software/personal/talon-ov-2026-10-17-p2-<group>`.
+- Pass 1's lattice entry saved at 03:48 (`/project/talon/overnight-2026-10-17`).
+- Next firing: merge each pass-2 fixer as it reports (check the branch, merge --no-ff, apply asked-for changes elsewhere), then the full suite and four compiles, then the morning report.
+- Pass 1 merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
 - Pass 1's full suite (03:30): 3816 tests, 1 failure, OrreryKeysTest "turning it on finishes though the page that asked is left". It passes alone (8 of 8); it timed out on a 5 s poll under the suite's load, so the poll cap is now 15 s. All four compiles passed.
-- Next firing: record the remaining pass-2 reports (B2, B3, B5, B6), then triage all of pass 2 into fix groups.
-- Left for pass 2 (found while merging): `dm:` and `invite:` keys in IosNotifier's postsLocally (desktop and iOS DM-request and invite clicks only raise the window); A1-10 (the 5 s and 3 s caps cut a slow PUT off; needs an ack-wait option on UrbitChannel.poke); the other test classes' temp-dir cleanup (contained by build/test-tmp now); AndroidRelaySettings not persisting registeredEndpointFor; ingestPosts never notifying (a worker catch-up notifies nothing); the DmChatScreenTest "emoji alone" flake (ChatRowsSnapshot shared across tests); an AppShellTest hang seen once ("Escape in a chat's composer closes the chat", a Compose deadlock in the test).
+- Left for pass 2 by pass 1's merge (now triaged into the groups): `dm:` and `invite:` keys in IosNotifier's postsLocally (desktop and iOS DM-request and invite clicks only raise the window); A1-10 (the 5 s and 3 s caps cut a slow PUT off; needs an ack-wait option on UrbitChannel.poke); the other test classes' temp-dir cleanup (contained by build/test-tmp now); AndroidRelaySettings not persisting registeredEndpointFor; ingestPosts never notifying (a worker catch-up notifies nothing); the DmChatScreenTest "emoji alone" flake (ChatRowsSnapshot shared across tests); an AppShellTest hang seen once ("Escape in a chat's composer closes the chat", a Compose deadlock in the test).
 
 ## Pass 1
 
@@ -265,3 +265,39 @@ Fix groups, one owner per file:
 - B6-7 Low polish: Android keeps an old search query for a later search (SearchDraft is cleared in App.kt only). Fix: clear it in TalonApp when Search closes.
 - B6-8 Low perf: every smart Search open runs a whole indexer pass and re-runs the query up to three times (`SearchScreen.kt:173, 193`).
 - Traced clean (reviewer's): the settings outbox, the drain and echo reaper, pending DMs, NetErrors' SHIP_DOWN and the walks, calendar late refusals, the search-text extras, allShipsFlow at cold start, the API 26 upsert, a backgrounded chat on screen, the recorder start, samePost over a hint, listenForAlerts on a closing DB, deleteSoon, the 403 signal. Armillary's payment wait when the balance is unknown is money: with the decisions.
+
+### Area B5, performance and ship cost
+
+Idle cost, one foreground device with every app: about 47 requests an hour (mail 6, calendar about 19, orrery 12, armillary 6, permits 4), plus the party-line pokes below.
+
+- B5-1 High bug (consent): Record in another group's chat records the line we are on but announces to the open chat's host (`PartyRecording.kt:115-121`; `onThisLine` is Live anywhere at `App.kt:3007-3008`, `TalonApp.kt:2679`). Lead: holds. Fix: on this line means Live on this chat's own host and room, in both shells.
+- B5-2 Med bug and cost: Android still runs the screen-level presence beat that 6a52df5f moved into CallController (`TalonApp.kt:2679-2694`): a double beat, a false leave on opening a DM, and enter-room to another group's host. Lead: holds. Fix: delete the effect.
+- B5-3 Med cost: a focused group chat with a line asks who is recording every 15 s, even with nobody on it (`PartyRecording.kt:80-87`). Fix: poll only while someone is on the line or we are.
+- B5-4 Med cost: the Party lines tab's 20 s poll has no focus gate (`PartyLinesList.kt:76-86`). Fix: askWhileInFront.
+- B5-5 Med perf: every launch scans `messages` for `searchText IS NULL` (no index), and with smart features the indexer reads and hashes every row (`TlonChatRepo.kt:432`, `MessageIndexer.kt:51-60`). Fix: a done mark for the fill; a high-water mark for the indexer.
+- B5-6 Low-Med cost: Mark group read pokes %activity once per channel, forced and concurrent (`TlonChatRepo.kt:2482-2488`). Fix: unforced, in turn. The one-poke form changes the poke: DECISION.
+- B5-7 Low-Med cost: a failed furum or urb card is fetched again on every compose (`FurumPreview.kt:48-66`, `UrbUnfurlCache.kt:84-91`). Fix: a 5-minute failure memory and one in-flight fetch per URL.
+- B5-8 Low-Med cost: the 10-minute orrery pass runs while the app is behind, reading full state (`OrreryRepo.kt:931-958`). Fix: space passes out while behind. Reading `brief=1` is unverified against orrery: not done.
+- B5-9 Low-Med perf (iOS): every keystroke writes the drafts file on the main thread (`DraftStore.kt:141-156`, `IosFiles.ios.kt:94-103`). Fix: a background serial queue, as desktop does.
+- B5-10 Low bug (desktop): any interface's address change counts as a network change and drops a party line (`DesktopNetworkWatcher.kt:31-34`). Fix: skip link-local and virtual interfaces.
+- B5-11 Low perf: search results are a live Room flow, re-scanning on every write (`SearchScreen.kt:106-116`).
+- B5-12 Low cost: notebooks and galleries read 30 posts on every open (`NotebookListScreen.kt:112-118`, `GalleryGridScreen.kt:115-118`). Fix: refreshOnOpen.
+- B5-13 Low cost: the permits banner reads every 30 min whatever the focus (`PermitsBanner.kt:93-97`).
+- B5-14 Low cost: a listed font that never reached the ship is asked about every 10 min forever (`FontRepo.kt:185, 194-200`).
+- B5-15 Low cost: every 30 s heartbeat also asks the host's occupancy (`CallController.kt:1154-1158`).
+- B5-16 Low, DECISION: desktop mail notices fire only while Talon's window is focused (c0f499fc maps in front to focus).
+
+## Pass 2 triage (03:50)
+
+The lead read every High and Medium against the code (the "hold" lines above); the Lows are taken on the reviewers' quoted proof. The fix IDs are the finding IDs. Must-fix: B6-1, B6-2 and B6-6, the regressions pass 1 brought in. B6-2 and B6-7 are fixed by the lead on the integration branch before the groups branch.
+
+Decisions, not fixed: B2-2, B2-6, B2-8, B2-11, B2-12, B2-14, B2-20, B3-2, B3-3's reboot and swipe cases, B3-10, B3-12, B3-16, B4-3, B4-15, B4-17, B5-6's one-poke form, B5-8's brief form, B5-16, B6-3 (with pass 1's leftover "ingestPosts never notifies"). Held: B3-17 (needs a design). Unconfirmed: the AppShellTest Escape hang (seen once).
+
+Fix groups, one owner per file:
+
+- shells: TalonApp.kt except android's carve-out; App.kt; SectionsDrawer, DmListScreen except chat's carve-out, DesktopShell, KeyboardShortcuts, SidebarSettingsScreen, ContactsScreen, LoginScreen, LoginQrShareScreen, PartyRecording, PartyLinesList, PermitsBanner, FontRepo, NotebookListScreen, GalleryGridScreen, core CallController. B1-1, B1-2, B1-3, B1-7, B1-8, B1-9 (App.kt:2389), B1-12 (LoginScreen and DmListScreen sites), B1-13, B1-14 (SidebarSettingsScreen, LoginQrShareScreen), B1-18, B5-1, B5-2, B5-3, B5-4, B5-12, B5-13, B5-14, B5-15.
+- android: MainActivity, Notifications.kt, AndroidManifest.xml, TalonApplication, BootReceiver, LeaveAlarm, ShortcutsPublisher, CatchUpWorker, TalonMessagingReceiver, CallActionReceiver, AndroidRelaySettings; and in TalonApp.kt the call and keep-alive wiring above the section flags (lines 1-665) and the mail-service block near line 1240. B3-1, B3-3 (background case), B3-5, B3-6, B3-7, B3-8, B3-9, B3-11, B3-13, B3-14, B3-15, and pass 1's leftover AndroidRelaySettings registeredEndpointFor.
+- voice: QuickDictation, androidMain ai/Loops, DictationSpeech, DictationFlow, DictationAgent, VoiceConversation, AgentClient, LoopRunner, ToolCatalog, AssistantActions, AssistantScreen, CalendarRepo. B2-1, B2-3, B2-4, B2-5, B2-7, B2-9, B2-10, B2-13, B2-15, B2-16, B2-17, B2-18, B2-19.
+- desktop-ios: SystemNotifier, IosSessionStore, IosFiles, the iOS text and draft stores, DraftStore, VoiceMessages.ios, LocalShipSection, core DesktopLocalShip, DesktopUriHandler, SingleInstance, Tarball, ExitPolicy, desktop Main.kt, Dictation.ios, DesktopSessionStore, desktop Files.kt, Log.desktop, MainViewController, IosNotifier, core DesktopNetworkWatcher, CLAUDE.md's notification line; StoryRenderer's .ics line only. B4-1, B4-2, B4-4 to B4-14, B4-16, B4-18, B5-9, B5-10, and pass 1's leftover dm: and invite: keys in IosNotifier.
+- chat: TlonChatRepo, ActivityParser, ActivityList, DmChatScreen, GalleryPostScreen, NotebookPostScreen, MessageEntity, StoryCache, SearchScreen, MessageIndexer, MessageDao, EmbeddingDao, FurumPreview, UrbUnfurlCache, UrbUnfurlCard, DmChatScreenTest, ChatRowsSnapshot; and in DmListScreen the empty-state lines (about 1495-1515) and Mark group read (about 1725-1740). B6-1, B6-4, B6-5 (in TlonChatRepo), B6-6, B6-8, B3-4, B1-4, B1-5, B1-17 (ActivityList), B5-5, B5-6 (the safe half), B5-7, B5-11, and pass 1's leftover "emoji alone" flake.
+- screens: ContactProfileSheet, GroupAdminScreen, GroupInvitesScreen, BookmarksList, BookmarksScreen, SettingsScreen, NotificationSetupDialog, IosVoipBridge, UrbLinkHost, AppsSettingsScreen, SignVerifyDialog, OrreryRepo, core UrbitChannel and its settings-sync callers. B1-6, B1-9 (the other three sites), B1-10, B1-11, B1-12 (SettingsScreen, GroupAdminScreen, GroupInvitesScreen), B1-14 (SettingsScreen, GroupAdminScreen), B1-15, B1-16, B1-17 (BookmarksScreen, GroupInvitesScreen), B5-8 (cadence only), and pass 1's leftover A1-10 (verify first; hold if it needs more than an ack-wait option on poke and its callers).
