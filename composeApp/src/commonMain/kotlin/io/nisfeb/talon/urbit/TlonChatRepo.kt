@@ -3603,13 +3603,15 @@ class TlonChatRepo(
      * we prepend [postId] to the current order (dropping any existing
      * occurrence) and ship the new list.
      */
-    suspend fun pinPost(nest: String, postId: String) {
+    // On the repo's scope (carry), as an edit is: from the chat's own,
+    // leaving the chat mid-poke left the pin shown here and never sent.
+    suspend fun pinPost(nest: String, postId: String): Unit = carry {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
         val ch = channel ?: error("not connected")
         val current = db.groups().pinnedPostIdFor(nest)
         // The banner only ever reads order[0]; keeping just [postId]
         // matches behavior and dodges a full scry on every pin.
-        val next = if (current == postId) return else listOf(postId)
+        val next = if (current == postId) return@carry else listOf(postId)
         Log.i(TAG, "pinPost nest=$nest post=$postId")
         // Pinned now, the ship told after; a refusal puts back what was pinned.
         ensureChannelGroupRow(nest)
@@ -3629,7 +3631,7 @@ class TlonChatRepo(
     }
 
     /** Unpin whatever is currently pinned in [nest]. */
-    suspend fun unpinPost(nest: String) {
+    suspend fun unpinPost(nest: String): Unit = carry {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
         val ch = channel ?: error("not connected")
         Log.i(TAG, "unpinPost nest=$nest")

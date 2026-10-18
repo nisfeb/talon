@@ -292,6 +292,26 @@ class TlonChatRepoSendTest {
         assertEquals("170141184506", db.groups().pinnedPostIdFor(nest), "and so is a refused unpin")
     }
 
+    // Pin ran on the chat's scope: leaving the chat mid-poke put the old
+    // pin back here and never told the ship (review A4-7). Real time.
+    @Test
+    fun `a pin or an unpin whose chat is left mid-poke still reaches the ship`() = live {
+        seedChannel()
+        ship.holdPoke = 600
+        for ((write, pinned) in listOf<Pair<suspend () -> Unit, String?>>(suspend { repo.pinPost(nest, "170141184506") } to "170141184506", suspend { repo.unpinPost(nest) } to null)) {
+            val before = ship.pokesTo("channels").size
+            val chat = CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            chat.launch { write() }
+            delay(200)
+            chat.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            kotlinx.coroutines.withTimeout(5_000) { while (ship.pokesTo("channels").size == before) delay(20) }
+            delay(100)
+            assertEquals(pinned, db.groups().pinnedPostIdFor(nest), "kept, not put back")
+        }
+        val orders = ship.pokesTo("channels").map { it.json.at("channel", "action", "order").jsonArray.map { e -> e.jsonPrimitive.content } }
+        assertEquals(listOf(listOf("170.141.184.506"), emptyList()), orders)
+    }
+
     @Test
     fun `pinning what is already pinned sends nothing`() = live {
         seedChannel()
