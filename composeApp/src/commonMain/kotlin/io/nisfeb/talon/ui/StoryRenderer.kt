@@ -917,11 +917,17 @@ private fun CalWidgetBlock(
                                 why = null
                                 addScope.launch {
                                     val cal = shipCalendar!!
+                                    // What was waiting before this add, so only a
+                                    // refusal this add left is taken for its own:
+                                    // a write that failed outright leaves none, and
+                                    // the card said someone else's.
+                                    val waiting = cal.unheard.value
                                     val ok = cal.addShared(c.id, title, startEpochMs, endEpochMs)
                                     addedDone = ok
                                     added = if (ok) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
                                     // The calendar's own refusal, said here and so not again on the calendar.
-                                    if (!ok) why = cal.unheard.value?.also { cal.heard() } ?: cal.failedLine("The calendar did not take it.")
+                                    if (!ok) why = cal.unheard.value?.takeIf { it !== waiting }?.also { cal.heard() }
+                                        ?: cal.failedLine("The calendar did not take it.")
                                 }
                             },
                         )
