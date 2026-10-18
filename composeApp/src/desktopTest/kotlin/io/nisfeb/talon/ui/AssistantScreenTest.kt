@@ -32,6 +32,7 @@ import java.net.InetSocketAddress
 import kotlin.io.path.createTempDirectory
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
+import io.ktor.client.engine.mock.toByteArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -71,6 +72,31 @@ class AssistantScreenTest {
     /** The inbox the mail app answers with. */
     @Volatile private var inbox = """{"total":0,"offset":0,"limit":50,"view":"inbox","threads":[]}"""
 
+    /** Each POST orrery's ship was sent: its path and body. */
+    private val orreryPosts: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** What orrery's ship answers an instruct with. */
+    @Volatile private var instructed = """{"ok":true,"reply":"","actions":[],"note":""}"""
+
+    /** How orrery's ship answers the owner's word on an action. */
+    @Volatile private var answerStatus = io.ktor.http.HttpStatusCode.OK
+
+    /** Orrery on a ship of its own, built as the Actions tests build it. */
+    private fun orreryOn(scope: CoroutineScope, db: AppDatabase): io.nisfeb.talon.orrery.OrreryRepo {
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            val path = req.url.encodedPath
+            val json = io.ktor.http.headersOf("Content-Type", "application/json")
+            if (req.method == io.ktor.http.HttpMethod.Post) orreryPosts += path to req.body.toByteArray().decodeToString()
+            when {
+                path.endsWith("/api/instruct") -> respond(instructed, io.ktor.http.HttpStatusCode.OK, json)
+                req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond("""{"ok":true}""", answerStatus, json)
+                path.endsWith("/api/actions") -> respond("[]", io.ktor.http.HttpStatusCode.OK, json)
+                else -> respond("", io.ktor.http.HttpStatusCode.NotFound)
+            }
+        })
+        return io.nisfeb.talon.orrery.OrreryRepo(http, scope, db, "test", bareClient = http).apply { attach("https://ship.test", "~zod") }
+    }
+
     /** A mail app whose ship answers every listing with [inbox]. */
     private fun mailOn(scope: CoroutineScope): io.nisfeb.talon.mail.MailRepo {
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
@@ -108,7 +134,7 @@ class AssistantScreenTest {
         return io.nisfeb.talon.calendar.CalendarRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
     }
 
-    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, block: ComposeUiTest.(AppDatabase) -> Unit) {
+    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, withOrrery: Boolean = false, block: ComposeUiTest.(AppDatabase) -> Unit) {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
@@ -144,6 +170,7 @@ class AssistantScreenTest {
         ship.channel.events().launchIn(sessionScope)
         val calendar = if (withCalendar) calendarOn(sessionScope) else null
         val mail = if (withMail) mailOn(sessionScope) else null
+        val orrery = if (withOrrery) orreryOn(sessionScope, db) else null
         // The host's, as the shells keep it: it outlives the screen.
         val session = AssistantSession(sessionScope)
         try {
@@ -152,7 +179,7 @@ class AssistantScreenTest {
                     TalonTheme(darkTheme = false) {
                         if (showing.value) AssistantScreen(
                             db = db, aiSettings = ai, embedder = null, onOpenMessage = { _, _, _ -> }, repo = repo,
-                            session = session, forceExpanded = true, calendar = calendar, mail = mail,
+                            session = session, forceExpanded = true, calendar = calendar, mail = mail, orrery = orrery,
                             onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" },
                         )
                     }
@@ -369,6 +396,87 @@ class AssistantScreenTest {
         ask("thanks")
         waitUntil(timeoutMillis = 10_000) { shows("Nothing else.") }
         assertEquals(1, onAllNodesWithText("Seed catalogue").fetchSemanticsNodes().size)
+    }
+
+    // ─── what orrery leaves waiting ───────────────────────────────
+
+    private val proposal = """{"ok":true,"reply":"On it.","actions":[{"id":"a1","kind":"message","title":"Tell Rose",""" +
+        """"payload":{"to":"person/rose","text":"Running late, sorry"},"about":[],"status":"proposed","by":"owner"}],"note":""}"""
+
+    /** Asks orrery to tell Rose, allows the telling, and waits for the proposal it leaves. */
+    private fun ComposeUiTest.proposed() {
+        instructed = proposal
+        toolCall = call("c1", "orrery_instruct", """{"text":"tell Rose I am running late"}""")
+        ask("tell her I'm late")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Send this?") }
+    }
+
+    private fun answered(id: String) = orreryPosts.filter { it.first.endsWith("/api/actions/$id") }.map { it.second }
+
+    // The voice card puts orrery's proposals to the owner at once, Send or
+    // Don't send; the text assistant left them under Actions. The same
+    // card in the transcript, answered on the same path.
+    @Test
+    fun `orrery's proposal is put to the owner in the transcript and Approve answers it`() = assistant(withOrrery = true) {
+        answer = "Rose will hear you are late."
+        proposed()
+        assertTrue(shows("Rose") && shows("Running late, sorry") && shows("On it."), "who it goes to and what it says")
+        assertEquals("""{"text":"tell Rose I am running late","apply":false}""", orreryPosts.single { it.first.endsWith("/api/instruct") }.second)
+        // Left and opened again while it waits: it still asks, and its run goes on.
+        showing.value = false
+        waitUntil(timeoutMillis = 5_000) { !shows("Send this?") }
+        showing.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("Send this?") }
+        onNodeWithText("Approve").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Rose will hear you are late.") }
+        assertEquals(listOf("""{"status":"approved"}"""), answered("a1"), "as the Actions page answers it")
+        assertTrue("Tell Rose (approved)" in asked.last(), "the model reads what the owner decided")
+        assertTrue(shows("Approved.") && onAllNodesWithText("Approve").fetchSemanticsNodes().isEmpty(), "the buttons give way to the word")
+    }
+
+    @Test
+    fun `Don't on orrery's proposal dismisses it`() = assistant(withOrrery = true) {
+        answer = "I won't tell her."
+        proposed()
+        onNodeWithText("Don't").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("I won't tell her.") }
+        assertEquals(listOf("""{"status":"dismissed"}"""), answered("a1"))
+        assertTrue("Tell Rose (dismissed)" in asked.last())
+        assertTrue(shows("Dropped. Nothing was done."))
+    }
+
+    @Test
+    fun `a proposal unanswered at Stop waits under Actions`() = assistant(withOrrery = true) {
+        proposed()
+        onNodeWithText("Stop").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Waiting for you under Actions.") }
+        assertTrue(onAllNodesWithText("Approve").fetchSemanticsNodes().isEmpty(), "nothing left to tap that would do nothing")
+        Thread.sleep(300)
+        assertTrue(answered("a1").isEmpty(), "nothing answered")
+    }
+
+    @Test
+    fun `a new conversation while a proposal asks leaves it under Actions and the run finishes`() = assistant(withOrrery = true) { db ->
+        answer = "It waits for you under Actions."
+        proposed()
+        onNodeWithText("New conversation").performClick()
+        waitUntil(timeoutMillis = 10_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+        assertTrue("Tell Rose (proposed)" in asked.last(), "the model is told it still waits")
+        assertTrue(answered("a1").isEmpty())
+        assertTrue(!shows("Send this?"), "the transcript is clear")
+    }
+
+    @Test
+    fun `an answer orrery does not take is said to the model`() = assistant(withOrrery = true) {
+        answerStatus = io.ktor.http.HttpStatusCode.InternalServerError
+        answer = "Orrery did not take it."
+        proposed()
+        onNodeWithText("Approve").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Orrery did not take it.") }
+        assertEquals(1, answered("a1").size)
+        assertTrue("orrery did not take the answer" in asked.last() && "It waits under Actions." in asked.last(), asked.last().takeLast(600))
     }
 
     // ─── Stop ──────────────────────────────────────────────────────

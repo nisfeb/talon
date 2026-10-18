@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ai.asTap
 import io.nisfeb.talon.ai.braveSearch
+import io.nisfeb.talon.ai.puttingToOwner
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.ai.loopsCanRun
 import io.nisfeb.talon.util.nowMs
@@ -122,6 +124,31 @@ internal sealed interface Line {
     data class Said(val text: String) : Line
     /** What the answer read, drawn under it: not kept, so a conversation opened again shows text only. */
     data class Card(val card: io.nisfeb.talon.ai.DictationCard) : Line
+
+    /**
+     * What orrery left waiting, with orrery's [reply], put to the owner
+     * as the voice card puts it: Approve or Don't, and the run waits for
+     * their word. Left unanswered, it waits under Actions.
+     */
+    class Proposals(val reply: String, val items: List<io.nisfeb.talon.ai.CardProposal>) : Line {
+        private val word = CompletableDeferred<Boolean?>()
+
+        /** Null while it asks; then what became of it, in place of the buttons. */
+        var outcome by mutableStateOf<String?>(null)
+            private set
+
+        /** The owner's word: true, false, or null for none, which leaves it under Actions. */
+        fun answer(ok: Boolean?) {
+            if (word.complete(ok)) outcome = when (ok) {
+                true -> "Approved."
+                false -> "Dropped. Nothing was done."
+                null -> "Waiting for you under Actions."
+            }
+        }
+
+        /** Their word; a run stopped meanwhile leaves it unanswered. */
+        suspend fun await(): Boolean? = try { word.await() } finally { answer(null) }
+    }
 }
 
 /**
@@ -201,6 +228,21 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     val news: kotlinx.coroutines.flow.StateFlow<Boolean> = _news
 
     internal fun tell() { if (!shown) _news.value = true }
+
+    /** What orrery left waiting, in the transcript, and the owner's word on it. */
+    internal suspend fun propose(reply: String, items: List<io.nisfeb.talon.ai.CardProposal>): Boolean? {
+        val line = Line.Proposals(reply, items)
+        transcript.add(line)
+        // It cannot go on without the owner: say so.
+        tell()
+        return line.await()
+    }
+
+    /** The transcript cleared: what still asks is left under Actions, and its run goes on. */
+    internal fun clear() {
+        transcript.forEach { (it as? Line.Proposals)?.answer(null) }
+        transcript.clear()
+    }
     internal fun seen() { shown = true; _news.value = false }
 }
 
@@ -395,7 +437,7 @@ fun AssistantScreen(
             if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -428,7 +470,16 @@ fun AssistantScreen(
                     onMessages = session.seen::messages,
                     conversationLabel = contactMap::conversationLabel,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
-                    orrery?.let { io.nisfeb.talon.ai.orreryTools(it) }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
+                    orrery?.let { o ->
+                        // What orrery leaves waiting is put to the owner here,
+                        // as the voice card puts it, and answered the same way.
+                        io.nisfeb.talon.ai.orreryTools(o.asTap().puttingToOwner(
+                            decide = { reply, waiting ->
+                                session.propose(reply, waiting.map { io.nisfeb.talon.ai.DictationCards.proposal(it, zoneFor(calendarZone), nowMs(), twentyFourHour) })
+                            },
+                            answer = { id, ok -> o.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
+                        ))
+                    }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null
@@ -746,7 +797,7 @@ fun AssistantScreen(
         currentCentroid = null
         currentTurnCount = 0
         explicitConv = false
-        transcript.clear()
+        session.clear()
         error = null
         mobileShowSidebar = false
     }
@@ -763,7 +814,7 @@ fun AssistantScreen(
         // Picking a conversation means "continue this one".
         explicitConv = true
         error = null
-        transcript.clear()
+        session.clear()
         scope.launch {
             val turns = historyDao.forConversation(c.id)
             // Guard the async replay: a second select (or a New) while this
@@ -960,6 +1011,10 @@ fun AssistantScreen(
                                 }
                                 is Line.Said -> {
                                     MarkdownText(line.text)
+                                    i++
+                                }
+                                is Line.Proposals -> {
+                                    androidx.compose.foundation.text.selection.DisableSelection { ProposalLine(line, openCard) }
                                     i++
                                 }
                                 is Line.Card -> {
@@ -1282,6 +1337,27 @@ private fun ConversationRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+    }
+}
+
+/** What orrery left waiting, drawn as the voice card draws it, with Approve and Don't. */
+@Composable
+private fun ProposalLine(p: Line.Proposals, open: (String) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (p.items.any { it.kind == "message" }) "Send this?" else "Do this?", style = MaterialTheme.typography.titleSmall)
+            p.items.forEach { io.nisfeb.talon.ui.ProposalCard(it, open) }
+            if (p.reply.isNotBlank()) Text(p.reply, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val outcome = p.outcome
+            if (outcome == null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { p.answer(true) }) { Text("Approve") }
+                    OutlinedButton(onClick = { p.answer(false) }) { Text("Don't") }
+                }
+            } else {
+                Text(outcome, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
         }
     }
 }
