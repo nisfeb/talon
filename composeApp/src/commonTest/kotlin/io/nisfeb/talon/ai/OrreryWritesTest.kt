@@ -374,6 +374,14 @@ class OrreryWritesTest {
         t.viewReads = 0
         assertEquals("Orrery says: On it.\nFiled:\n- fact: Plan is a drop-off (proposed)", run(waits, "orrery_instruct", buildJsonObject { put("text", "it is a drop-off") }))
         assertEquals(0, t.viewReads, "a proposal changes nothing yet, so nothing is read")
+        val dropped = t.puttingToOwner(decide = { _, _ -> false }, answer = { _, _ -> })
+        assertEquals("Orrery says: On it.\nFiled:\n- fact: Plan is a drop-off (dismissed)", run(dropped, "orrery_instruct", buildJsonObject { put("text", "it is a drop-off") }))
+        assertEquals(0, t.viewReads, "nor is one the owner dropped")
+
+        // A fact beside a preference is a change, so the preference note is not said.
+        t.instructed = Instructed(actions = listOf(fact.copy(status = "done"), action("p1", "Drop-offs, not parking", "approved", "preference")))
+        val both = run(t, "orrery_instruct", buildJsonObject { put("text", "it is a drop-off") })
+        assertTrue(PREFERENCE_ONLY !in both && "Confirmed: $jax needs shows" in both, both)
     }
 
     // ─── what the record carries ────────────────────────────────────

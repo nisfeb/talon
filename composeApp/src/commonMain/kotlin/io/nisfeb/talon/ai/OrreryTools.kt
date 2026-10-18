@@ -1051,7 +1051,6 @@ internal fun leaveBasis(b: JsonObject, plan: JsonObject?): String? {
     val from = when (next.s("from")) {
         "position" -> "where the phone last was"
         "previous" -> "the appointment before it"
-        "home" -> "home"
         else -> next.s("from") ?: "a start the plan does not say"
     }
     return buildString {
