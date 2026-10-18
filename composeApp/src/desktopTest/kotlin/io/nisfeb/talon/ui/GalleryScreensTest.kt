@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -194,5 +195,19 @@ class GalleryScreensTest {
         assertEquals(listOf("back"), did)
     }) { repo, _ ->
         GalleryComposeScreen(repo, web, whom, onBack = { did += "back" }, onPosted = {})
+    }
+
+    // A post not here drew a blank page with a live comment box.
+    @Test
+    fun `a post not here waits and then says so with no comment box to post into`() = gallery({ _ ->
+        waitForIdle()
+        // A field turned off takes no text: none here can be typed into.
+        onAllNodes(androidx.compose.ui.test.hasSetTextAction()).assertCountEquals(0)
+        mainClock.advanceTimeBy(7_000)
+        showing("This post isn't here")
+        onAllNodes(androidx.compose.ui.test.hasSetTextAction()).assertCountEquals(0)
+        onNodeWithContentDescription("Send").assertIsNotEnabled()
+    }) { repo, db ->
+        GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500999", onBack = {})
     }
 }
