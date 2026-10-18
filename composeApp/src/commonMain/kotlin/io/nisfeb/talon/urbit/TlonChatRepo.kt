@@ -975,11 +975,13 @@ class TlonChatRepo(
      * channel's bootstrap scries were torn down by the second
      * reconnect before they completed. Coalesce repeats inside a
      * 3-second window — well under the 90s watchdog interval, so
-     * legitimate doze-recovery reconnects still go through.
+     * legitimate doze-recovery reconnects still go through. Not while
+     * signed out: the loop then waits on this alone, and a sign-in just
+     * after a refused try was dropped, leaving chat asleep.
      */
     fun forceReconnect() {
         val now = nowMs()
-        if (now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
+        if (!_signedOut.value && now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
             Log.i(TAG, "forceReconnect skipped (recent)")
             return
         }

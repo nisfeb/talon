@@ -616,7 +616,9 @@ class TlonChatRepoStartupTest {
         until("asked once more") { ship.requests.size > asked }
         delay(1_000)
         assertEquals(listOf("PUT"), ship.requests.drop(asked).map { it.substringBefore(' ') }, "a new channel's subscribe, and no pass")
-        // The ship takes the login again: one more try brings chat back.
+        // The ship takes the login again: one more try brings chat back,
+        // at once. Signed out, the debounce dropped a sign-in made within
+        // 3 s of the refused try, and chat slept (B6-5).
         ship.signedOut = false
         delay(3_100) // forceReconnect's debounce
         repo.forceReconnect()
