@@ -226,7 +226,7 @@ Fix groups, one owner per file:
 - B2-20 Low, DECISION: lattice-save runs unconfirmed alongside chat and mail reads (`LatticeMemory.kt:18-23`).
 - False positives (reviewer's): DictationService is not exported; LOCKED_OK calendar; orrery_instruct in LOCKED_WRITES unreachable; LoopWorker overlap; the desktop ticker restart; the Ask route label; M4 and M5 guards present; Retry re-reads the lock; AskUrbit and friends have no tools.
 
-### Lead's verification so far (03:50)
+### Lead's verification so far (03:40)
 
 - Hold, read in the code: B1-1 (no Contacts path where isDrawerNavigation, since c5fc4f85 on 2026-09-11), B1-2 (no RailItem.Actions case; App.kt passes no onOpenHome), B1-3, B1-6, B1-7 (no verticalScroll in the four), B1-4, B1-5 (title and tap; the author is unverified), B2-1, B2-3, B2-4, B2-5, B2-7, B2-10, B4-1 (run locally: gdbus prints usage for a bare "-1" and exits 1, and "--" fixes it), B4-2.
 - B2-11 moved to decisions: the 11-minute wait is deliberate.
@@ -252,3 +252,16 @@ Fix groups, one owner per file:
 - B3-17 Low (ship cost), HELD: background repo starts from loops and CatchUpWorker are never stopped. Stopping them is unsafe while the activity may share the repo; needs a design.
 - False positives (reviewer's): PendingIntent request codes, request code 0 sharing, the camera FGS type, the boot start on Android 15, TripService, LocationWatch and HealthWatch, the clock widget, catch-up with no channel, the onScreen check, the sticky restart, DictationService's starts, LoopWorker below 12.
 - Needs a device (reviewer's): the 45 s ring stop under the freezer on 16.1+; background writes in a cached process; the in-app ring tone in the background.
+- Also hold: B3-1, B3-3 (the background case), B3-4, B4-4 (playback sets the Playback category with no callLive check), B4-5 (start runs on the Settings screen's scope; the catch destroys the booting comet on cancellation), B4-6, B6-1 (the hint's id is the dotted wire form; rows are kept undotted, and channel rows bare), B6-2 (from the lead's own lapse bridge, 7940b183).
+
+### Area B6, pass 1's own commits
+
+- B6-1 High bug, a regression from tonight (a9890d35, e557f1eb): tapping a push hint always says "That message isn't loaded here yet", because the hint's raw activity id (`~author/<dotted ud>`) is never normalized before `reach()` (`DmChatScreen.kt:629-637, 274`). The same id reaches gallery and notebook posts, which now say the post may have been deleted. Fix: normalize with `undotAtom(canonicalPostIdForWhom(whom, id))` in the chat screen's reach and scroll match and in the heap and diary anchors.
+- B6-2 Med bug, from the lead's lapse bridge: on desktop and iOS, Cancel on the lapsed-login form calls `switchShip(from)`, whose fresh repo is refused again and reopens the form (`App.kt:2405`, `:574-583`, `:827`). AppShellTest's Cancel case injects the lapse on a ship that is not refusing. Fix: a Cancel holds off that ship's lapse until a sign-in.
+- B6-3 Med, DECISION: Android's new 5-minute alert gate (`NewMessageDiff.kt:200`) silences messages replayed after an outage on a phone without push. New angle on A5-11. Option: gate on already alerted or read, not age.
+- B6-4 Med-Low bug: deleting a channel post that is still sending hides it, but the poke lands and the post comes back (`MessageEntity.kt:80` isUnsent counts a pending local_ row as never taken). Fix: no Delete on a pending local row.
+- B6-5 Low-Med bug: on Android, signing in again to the same ship within 3 s of a refused reconnect leaves chat asleep (forceReconnect's debounce, `TalonApplication.kt:737-740`). Fix: a login's wake is not debounced.
+- B6-6 Low polish, a regression from tonight: `textFor` now writes full link addresses, and it is also the preview text, so long URLs show in the home list, quote bar, cite cards and notification bodies (`StoryCache.kt:124`). Fix: a separate copy text for Copy, notes and the assistant.
+- B6-7 Low polish: Android keeps an old search query for a later search (SearchDraft is cleared in App.kt only). Fix: clear it in TalonApp when Search closes.
+- B6-8 Low perf: every smart Search open runs a whole indexer pass and re-runs the query up to three times (`SearchScreen.kt:173, 193`).
+- Traced clean (reviewer's): the settings outbox, the drain and echo reaper, pending DMs, NetErrors' SHIP_DOWN and the walks, calendar late refusals, the search-text extras, allShipsFlow at cold start, the API 26 upsert, a backgrounded chat on screen, the recorder start, samePost over a hint, listenForAlerts on a closing DB, deleteSoon, the 403 signal. Armillary's payment wait when the balance is unknown is money: with the decisions.
