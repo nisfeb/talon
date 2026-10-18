@@ -261,6 +261,54 @@ class ThreadListTest {
         assertTrue(ship.pokesTo("groups").any { "~bus/crew" in it.json.toString() })
     }
 
+    // Offered to everyone in a channel, the ship refused it and nothing said why.
+    @Test
+    fun `in a channel we do not host another's reply offers no delete`() = thread(whom = nest, parentId = "170141184506", seed = {
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest, "~bus/crew")))
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~nec", "their answer", 2_000, parentId = "170141184506"))
+    }) { _, _ ->
+        menuOf("their answer")
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("Delete (admin)").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `in a channel we host another's reply is deleted as an admin`() = thread(whom = "chat/~zod/general", parentId = "170141184506", seed = {
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~zod/general", "~zod/crew")))
+        messages().upsert(MessageEntity("chat/~zod/general", "170141184506", "~bus", 1_000, """[{"inline":["the question"]}]""", "/chat"))
+        messages().upsert(MessageEntity("chat/~zod/general", "170141184507", "~nec", 2_000, """[{"inline":["their answer"]}]""", "/chat", parentId = "170141184506"))
+    }) { ship, _ ->
+        menuOf("their answer")
+        onNodeWithText("Delete (admin)").performClick()
+        shows("Delete message?")
+        onAllNodesWithText("Delete (admin)").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        assertTrue("\"del\"" in ship.pokesTo("channels").single().json.toString())
+    }
+
+    // The repo edits a chat's posts only: Edit on a gallery comment always failed.
+    @Test
+    fun `our comment on a gallery post offers delete and no edit`() = thread(whom = "heap/~bus/pics", parentId = "170141184506", seed = {
+        messages().upsert(MessageEntity("heap/~bus/pics", "170141184506", "~bus", 1_000, """[{"inline":["a picture"]}]""", "/heap"))
+        messages().upsert(MessageEntity("heap/~bus/pics", "170141184507", "~zod", 2_000, """[{"inline":["my comment"]}]""", "/heap", parentId = "170141184506"))
+    }) { _, _ ->
+        menuOf("my comment")
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty())
+        onNodeWithText("Delete").assertExists()
+    }
+
+    @Test
+    fun `a reply the ship has not taken offers no reaction or edit`() = thread(whom = nest, parentId = "170141184506", seed = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(MessageEntity(nest, "local_170141184599", "~zod", 2_000, """[{"inline":["still going"]}]""", "/chat", parentId = "170141184506", status = "failed"))
+    }) { _, _ ->
+        menuOf("still going")
+        assertTrue(onAllNodesWithText("React").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty())
+        onNodeWithText("Delete").assertExists()
+    }
+
     private fun ComposeUiTest.editReply(to: String) {
         menuOf("first try")
         onNodeWithText("Edit").performClick()
