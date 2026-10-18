@@ -677,8 +677,8 @@ class TlonChatRepo(
                     Triple(spec, all, subServed["${spec.app}${spec.path}"] ?: 0)
                 }
                 // All in one PUT: one each was an event on the ship apiece.
-                runCatching { ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) }
-                    .onSuccess { ids ->
+                runCatching {
+                    ch.subscribeAll(plans.map { (spec, all, from) -> spec.app to all[from] }) { ids ->
                         ids.zip(plans).forEach { (id, plan) ->
                             val (spec, all, from) = plan
                             subPaths[id] = spec.app to all[from]
@@ -686,7 +686,7 @@ class TlonChatRepo(
                             if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
                         }
                     }
-                    .onFailure { Log.e(TAG, "subscribe failed", it) }
+                }.onFailure { Log.e(TAG, "subscribe failed", it) }
             }
             streaming = stream()
 
@@ -3809,11 +3809,13 @@ class TlonChatRepo(
                         Log.w(TAG, "$app subscribe rejected; falling back to $path")
                         val ch = channel
                         scope.launch {
-                            io.nisfeb.talon.util.runSuspendCatching { ch?.subscribe(app, path) }
-                                .onSuccess { id ->
-                                    if (id != null) subPaths[id] = app to path
-                                    if (id != null && paths.size > 1) subFallbacks[id] = app to paths.drop(1)
+                            // Registered before the PUT returns: its refusal can come first.
+                            io.nisfeb.talon.util.runSuspendCatching {
+                                ch?.subscribe(app, path) { id ->
+                                    subPaths[id] = app to path
+                                    if (paths.size > 1) subFallbacks[id] = app to paths.drop(1)
                                 }
+                            }
                                 // The PUT failed, not a refusal: one with no
                                 // fallback left is an older ship, and stays.
                                 .onFailure { abandonChannel(ch, "$app fallback subscribe failed: ${it.message}") }
@@ -3837,12 +3839,11 @@ class TlonChatRepo(
             if (sub != null && live != null && resubscribeAfterQuit(before, now)) {
                 Log.w(TAG, "${sub.first}${sub.second} dropped by the ship; watching it again")
                 scope.launch {
-                    val id = io.nisfeb.talon.util.runSuspendCatching { live.subscribe(sub.first, sub.second) }
+                    io.nisfeb.talon.util.runSuspendCatching { live.subscribe(sub.first, sub.second) { subPaths[it] = sub } }
                         .getOrElse {
                             abandonChannel(live, "${sub.first}${sub.second} not watched again: ${it.message}")
                             return@launch
                         }
-                    subPaths[id] = sub
                     runCatching { catchUpAfterQuit(live, sub.first, sub.second) }
                         .onFailure { Log.w(TAG, "${sub.first}${sub.second} not caught up", it) }
                 }

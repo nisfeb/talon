@@ -256,16 +256,22 @@ class UrbitChannel internal constructor(
     @Volatile
     private var lastStreamMs: Long = 0L
 
-    suspend fun subscribe(app: String, path: String): Long = subscribeAll(listOf(app to path)).single()
+    suspend fun subscribe(app: String, path: String, registered: (Long) -> Unit = {}): Long =
+        subscribeAll(listOf(app to path)) { registered(it.single()) }.single()
 
     /**
      * Several subscriptions in one PUT, answering their request ids in the
      * order given. One PUT each, as it was, was an event on the ship for
      * every one of them, on every connect.
+     *
+     * [registered] gets the ids before the PUT goes: eyre may answer a
+     * watch down the stream before the PUT returns, and a refusal read
+     * then found nothing to fall back to.
      */
-    suspend fun subscribeAll(watches: List<Pair<String, String>>): List<Long> {
+    suspend fun subscribeAll(watches: List<Pair<String, String>>, registered: (List<Long>) -> Unit = {}): List<Long> {
         if (watches.isEmpty()) return emptyList()
         val ids = watches.map { nextRequestId() }
+        registered(ids)
         put(buildJsonArray {
             watches.forEachIndexed { i, (app, path) ->
                 add(buildJsonObject {

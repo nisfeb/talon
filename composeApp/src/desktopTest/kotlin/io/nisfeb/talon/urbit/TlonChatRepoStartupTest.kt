@@ -183,9 +183,13 @@ class TlonChatRepoStartupTest {
 
     // ─── Tlon 12.3.0's N-1 policy: newer paths first, older ones behind ───
 
+    // Each refusal reaches the stream before its PUT returns, as eyre's can:
+    // the fallback was registered only once the PUT returned, so the walk
+    // stopped at /v5 now and then (the startup flake).
     @Test
     fun `an older ship's activity and groups subscriptions walk back to what it has`() = started(prepare = {
         refuseWatch = { w -> if (w == "activity/v6" || w == "activity/v5" || w == "groups/v3/groups" || w == "groups/v1/foreigns") "no such path" else null }
+        holdWatchAnswer = 300
     }) {
         until("activity on /v4") { "activity/v4" in ship.subscribed }
         until("groups on /v1") { "groups/v1/groups" in ship.subscribed }

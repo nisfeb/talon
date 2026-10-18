@@ -102,6 +102,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var refuseWatch: (String) -> String? = { null }
     /** A subscription whose PUT is lost on the way, by `app/path`: what the request fails with, or null to deliver it. */
     @Volatile var loseWatch: (String) -> Throwable? = { null }
+    /** How long a subscribe's PUT waits to return after its answer is on the stream: eyre's answer can come first. */
+    @Volatile var holdWatchAnswer: Long = 0
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     /** Each event stream asked for: its channel, and the Last-Event-ID it carried. */
@@ -306,6 +308,7 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                                 if (err == null) """{"id":$id,"response":"subscribe","ok":"ok"}"""
                                 else """{"id":$id,"response":"subscribe","err":${JsonPrimitive(err)}}""",
                             )
+                            if (holdWatchAnswer > 0) kotlinx.coroutines.delay(holdWatchAnswer)
                         }
                         "delete" -> if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete)
                     }
