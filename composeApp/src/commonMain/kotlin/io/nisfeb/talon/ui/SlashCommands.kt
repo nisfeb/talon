@@ -23,7 +23,8 @@ sealed interface CommandResult {
     data class Send(val body: String) : CommandResult
     object Handled : CommandResult
     object NotACommand : CommandResult
-    data class Error(val message: String) : CommandResult
+    /** [message] over the composer; [details], the error whole, behind Copy error details. */
+    data class Error(val message: String, val details: String? = null) : CommandResult
 }
 
 data class SlashCommandSpec(
@@ -216,9 +217,13 @@ private suspend fun runPoke(
         toast("/poke %$app · $mark sent")
         CommandResult.Handled as CommandResult
     }.getOrElse { err ->
-        CommandResult.Error("/poke failed: ${err.message ?: err::class.simpleName}")
+        failure("/poke failed", err)
     }
 }
+
+/** [err] said in words after [what], never as raw exception text; the error whole goes behind Copy error details. */
+private fun failure(what: String, err: Throwable): CommandResult.Error =
+    io.nisfeb.talon.util.problemOf(what, err).let { CommandResult.Error(it.line, it.details) }
 
 // ─────────── /cal ───────────
 
@@ -277,10 +282,11 @@ private suspend fun runLoc(
     val result = locationProvider()
     return result.fold(
         onSuccess = { (lat, lng) -> CommandResult.Send(formatLocationShare(lat, lng)) },
+        // The platforms say why in words ("/loc: no fix available");
+        // anything else is said plainly, the error whole behind the button.
         onFailure = { err ->
-            CommandResult.Error(
-                err.message ?: "/loc: location fetch failed"
-            )
+            val why = io.nisfeb.talon.util.readableReason(err.message?.removePrefix("/loc: "))
+            CommandResult.Error("/loc: ${why ?: "couldn't get your location"}", io.nisfeb.talon.util.errorDetailsOf(err))
         },
     )
 }
@@ -313,7 +319,7 @@ private suspend fun runNick(
                 toast("nickname set to \"$name\"")
                 CommandResult.Handled
             },
-            onFailure = { CommandResult.Error("/nick: ${it.message ?: it::class.simpleName}") },
+            onFailure = { failure("/nick", it) },
         )
 }
 
@@ -340,7 +346,7 @@ private suspend fun runPet(
                 toast("pet name for $ship: \"$name\"")
                 CommandResult.Handled
             },
-            onFailure = { CommandResult.Error("/pet: ${it.message ?: it::class.simpleName}") },
+            onFailure = { failure("/pet", it) },
         )
 }
 
@@ -384,7 +390,10 @@ private suspend fun runHn(http: io.ktor.client.HttpClient): CommandResult {
         val scorePart = story["score"]?.let { " · $it pts" }.orEmpty()
         val comments = "https://news.ycombinator.com/item?id=$id"
         CommandResult.Send("📰 $title$scorePart\n$url\n💬 $comments")
-    }.getOrElse { CommandResult.Error("/hn: ${it.message ?: it::class.simpleName}") }
+    }.getOrElse {
+        // Not the ship: Hacker News, which problemOf would call the ship.
+        CommandResult.Error("/hn: couldn't reach Hacker News", io.nisfeb.talon.util.errorDetailsOf(it))
+    }
 }
 
 private suspend fun fetchJsonArray(

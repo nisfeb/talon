@@ -20,6 +20,15 @@ class EmojiQueryTest {
         assertNull(detectEmojiQuery(":ta b", 5), "the caret is past a space")
         assertNull(detectEmojiQuery(":ta!", 4), "a character no name has")
         assertNull(detectEmojiQuery("", 0))
+        assertNull(detectEmojiQuery("taco", 4), "no colon at all")
+    }
+
+    // ":D" then Enter put an emoji in place of the smiley.
+    @Test
+    fun oneCharacterAfterAColonIsASmileyNotAQuery() {
+        assertNull(detectEmojiQuery(":D", 2))
+        assertNull(detectEmojiQuery("ok :p", 5))
+        assertEquals("Dx" to 0, detectEmojiQuery(":Dx", 3), "two is a name begun")
     }
 
     @Test

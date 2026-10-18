@@ -33,6 +33,8 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class CalWidgetAddTest {
     private val refusals = CopyOnWriteArrayList<String>()
+    /** What the calendar answers a poke with: OK and a refusal a beat after, or a failure outright. */
+    @Volatile private var pokeStatus = HttpStatusCode.OK
     private val json = headersOf("Content-Type", "application/json")
 
     private val http = HttpClient(MockEngine { req ->
@@ -40,8 +42,10 @@ class CalWidgetAddTest {
         when {
             // Acked first and refused a beat after, as the calendar does.
             path.startsWith("/grubbery/api/poke/") -> {
-                refusals += """{"at_ms":${System.currentTimeMillis()},"action":"add-event","id":"","from":"","why":"no such calendar"}"""
-                respond("", HttpStatusCode.OK, json)
+                if (pokeStatus == HttpStatusCode.OK) {
+                    refusals += """{"at_ms":${System.currentTimeMillis()},"action":"add-event","id":"","from":"","why":"no such calendar"}"""
+                }
+                respond("", pokeStatus, json)
             }
             path.endsWith("/outcomes.json") -> respond("""{"refusals":[${refusals.joinToString(",")}],"faults":{}}""", HttpStatusCode.OK, json)
             path.endsWith("/calendars.json") -> respond("""[{"id":"default","name":"Personal","kind":"local"}]""", HttpStatusCode.OK, json)
@@ -76,6 +80,41 @@ class CalWidgetAddTest {
                 waitUntil(timeoutMillis = 15_000) { shows("Not added") }
                 assertTrue(shows("no such calendar"), "the calendar's own words")
                 assertNull(cal.unheard.value, "heard here, so not said again on the calendar")
+            }
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    // An add whose write failed outright left no refusal of its own, and
+    // the card said whatever older one was waiting for the calendar.
+    @Test
+    fun `an add that fails outright says so and leaves another's refusal waiting`() {
+        val scope = CoroutineScope(SupervisorJob())
+        val cal = CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply {
+            attach("https://ship.example")
+            runBlocking { refresh(); refreshAll() }
+        }
+        val since = System.currentTimeMillis()
+        refusals += """{"at_ms":$since,"action":"edit-event","id":"lunch-1","from":"","why":"that event is gone"}"""
+        val older = runBlocking { cal.refusalOfSave("lunch-1", since) { "\"Lunch\" was not saved: $it" } }
+        kotlin.test.assertEquals("\"Lunch\" was not saved: that event is gone", cal.unheard.value, "waiting from $older")
+        pokeStatus = HttpStatusCode.InternalServerError
+        val start = System.currentTimeMillis() + 3_600_000
+        try {
+            runComposeUiTest {
+                setContent {
+                    CompositionLocalProvider(LocalCalendarRepo provides cal) {
+                        TalonTheme(darkTheme = false) {
+                            StoryRenderer(listOf(StoryPart.CalWidget(start, start + 3_600_000, "Picnic")), onMentionTap = {}, onLinkTap = {})
+                        }
+                    }
+                }
+                onNodeWithText("Add").performClick()
+                onNodeWithText("Personal").performClick()
+                waitUntil(timeoutMillis = 15_000) { shows("Not added") }
+                assertTrue(!shows("that event is gone"), "not the other save's reason")
+                kotlin.test.assertEquals("\"Lunch\" was not saved: that event is gone", cal.unheard.value, "still for the calendar to say")
             }
         } finally {
             scope.cancel()

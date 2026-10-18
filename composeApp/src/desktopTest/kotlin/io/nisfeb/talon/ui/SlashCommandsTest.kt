@@ -158,10 +158,12 @@ class SlashCommandsTest {
         // attached. Either error proves we made it past validation.
         val r = run("/pet ~zod fred")
         assertTrue(r is CommandResult.Error)
-        val msg = (r as CommandResult.Error).message
+        // Said in words now; the repo's own error is behind the button.
+        val details = (r as CommandResult.Error).details.orEmpty()
+        assertTrue(r.message.startsWith("/pet: "), r.message)
         assertTrue(
-            msg.contains("not connected") || msg.contains("nack"),
-            "expected repo-layer error, got: $msg",
+            details.contains("not connected") || details.contains("nack"),
+            "expected repo-layer error, got: $details",
         )
     }
 
@@ -365,5 +367,28 @@ class SlashCommandsTest {
         assertEquals("📰 Ships at sea · 99 pts\nhttps://a.test\n💬 https://news.ycombinator.com/item?id=42", story)
         val empty = HttpClient(MockEngine { respond("[]", HttpStatusCode.OK) })
         assertEquals("/hn: empty top-stories list", (runBlocking { runCommand("/hn", repo, empty) } as CommandResult.Error).message)
+    }
+
+    // A command that failed put the exception's own text over the
+    // composer: "/pet: not connected", "/hn: Unable to resolve host…".
+    @Test
+    fun `a command that fails says why in words and keeps the error whole behind the button`() {
+        val nick = run("/nick Bus") as CommandResult.Error
+        assertEquals("/nick: your ship is slow or out of reach. Try again when it's back.", nick.message)
+        assertTrue("not connected" in nick.details.orEmpty(), "${nick.details}")
+        val down = HttpClient(MockEngine { throw java.net.UnknownHostException("hacker-news.firebaseio.com: Name or service not known") })
+        val hn = runBlocking { runCommand("/hn", repo, down) } as CommandResult.Error
+        assertTrue(hn.message.startsWith("/hn: ") && "firebaseio" !in hn.message && "Exception" !in hn.message, hn.message)
+        assertTrue("UnknownHostException" in hn.details.orEmpty(), "${hn.details}")
+    }
+
+    @Test
+    fun `loc says a technical failure plainly`() {
+        val provider: LocationProvider = { Result.failure(IllegalStateException("kCLErrorDomain error 1: {\"code\":1}")) }
+        val r = run("/loc", locationProvider = provider) as CommandResult.Error
+        assertEquals("/loc: couldn't get your location", r.message)
+        assertTrue("kCLErrorDomain" in r.details.orEmpty())
+        val worded: LocationProvider = { Result.failure(IllegalStateException("Location permission was not granted.")) }
+        assertEquals("/loc: Location permission was not granted.", (run("/loc", locationProvider = worded) as CommandResult.Error).message)
     }
 }

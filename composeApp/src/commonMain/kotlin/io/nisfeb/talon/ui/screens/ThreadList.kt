@@ -300,6 +300,15 @@ fun ThreadList(
     val canSend = remember(whom) {
         io.nisfeb.talon.urbit.isDirect(whom) || isChannelNest(whom)
     }
+    // Your own always; another's only where you can moderate, as in the
+    // chat: offered to everyone, the ship refused it and nothing said why.
+    val adminGroups by repo.adminGroupsFlow.collectAsState()
+    val mayDelete: (MessageEntity) -> Boolean = { m ->
+        m.author == ourPatp || (
+            isChannelNest(whom) &&
+                io.nisfeb.talon.urbit.canPinInGroup(ourPatp, contactMap.groupOfChannel(whom), adminGroups)
+            )
+    }
     var pendingDelete by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var pendingReport by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
     var editing by remember(parentId) { mutableStateOf<MessageEntity?>(null) }
@@ -352,11 +361,18 @@ fun ThreadList(
     val threadActionMenuFor: @Composable (MessageEntity) -> Unit = { target ->
         val isMine = target.author == ourPatp
         val isChannel = isChannelNest(whom)
+        // Read here, not at launch: a scry per group, cached 5 minutes.
+        if (isChannel) LaunchedEffect(Unit) { repo.prefetchAdminGroups() }
+        val onShip = !isLocalOnly(target.id)
         ThreadActionMenu(
             db = db,
             ourPatp = ourPatp,
-            canDelete = isMine || isChannel,
-            canEdit = isMine && isChannel,
+            canReact = onShip,
+            canDelete = mayDelete(target),
+            mine = isMine,
+            // A chat's only: an edit to a gallery or notebook comment is
+            // refused by the repo, so offering it was a promise that failed.
+            canEdit = isMine && whom.startsWith("chat/") && onShip,
             canReport = !isMine && isChannel,
             onPickReaction = { code ->
                 actionTarget = null
@@ -538,8 +554,7 @@ fun ThreadList(
 
     pendingDelete?.let { target ->
         val isMine = target.author == ourPatp
-        val isChannel = isChannelNest(whom)
-        if (!(isMine || isChannel)) {
+        if (!mayDelete(target)) {
             pendingDelete = null
             return@let
         }
@@ -620,17 +635,26 @@ fun ThreadList(
     }
 
     editing?.let { target ->
+        // Open until the ship has the edit, then closed; a failed one stays
+        // open with its words and says why. Closed at once, a failure threw
+        // the changed words away.
+        var saving by remember(target.id) { mutableStateOf(false) }
+        var failure by remember(target.id) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         EditThreadMessageDialog(
             // Editable text only — a quoted post's cite (and images /
             // link previews) ride along untouched via originalContentJson.
             initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
+            saving = saving,
+            failure = failure,
             onDismiss = { editing = null },
             onSave = { newText ->
-                editing = null
+                saving = true
+                failure = null
                 scope.launch {
-                    runCatching {
-                        // parentId == null on the thread's parent row;
-                        // non-null on the replies. The repo handles both.
+                    // parentId == null on the thread's parent row;
+                    // non-null on the replies. The repo handles both, on
+                    // its own scope, so leaving the thread keeps the write.
+                    io.nisfeb.talon.util.runSuspendCatching {
                         repo.edit(
                             whom = whom,
                             postId = target.id,
@@ -639,9 +663,9 @@ fun ThreadList(
                             parentId = target.parentId,
                             originalContentJson = target.contentJson,
                         )
-                    }.onFailure {
-                        composerState.failed("edit", it)
-                    }
+                    }.onSuccess { if (editing?.id == target.id) editing = null }
+                        .onFailure { failure = io.nisfeb.talon.util.problemOf("Couldn't save the edit", it) }
+                    saving = false
                 }
             },
         )
@@ -657,6 +681,10 @@ fun ThreadList(
 @Composable
 private fun EditThreadMessageDialog(
     initial: String,
+    /** The edit is on its way: Save waits, and says so. */
+    saving: Boolean,
+    /** Why the last save did not land, shown under the words kept for another try. */
+    failure: io.nisfeb.talon.util.Problem?,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
@@ -671,18 +699,21 @@ private fun EditThreadMessageDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit message") },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                )
+                failure?.let { io.nisfeb.talon.ui.ProblemLine(it) }
+            }
         },
         confirmButton = {
             TextButton(
                 onClick = { onSave(value.text.trim()) },
-                enabled = value.text.isNotBlank(),
+                enabled = value.text.isNotBlank() && !saving,
             ) {
-                Text("Save")
+                Text(if (saving) "Saving…" else "Save")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -797,7 +828,8 @@ private fun ThreadMessage(
                 onImageTap = onImageTap,
                 reactions = reactions,
                 ourPatp = ourPatp,
-                onPollVote = { emoji -> onPollVote(m, reactions, emoji) },
+                // A poll the ship has not taken yet has no post to vote on.
+                onPollVote = if (isLocalOnly(m.id)) null else { emoji -> onPollVote(m, reactions, emoji) },
                 // Touch only: null on desktop so a left-press-drag selects
                 // text rather than opening the menu (hover "⋯" opens it).
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
@@ -899,7 +931,11 @@ private data class ReplyRow(
 private fun ThreadActionMenu(
     db: AppDatabase,
     ourPatp: String,
+    /** False for a reply the ship has not taken yet: there is nothing there to react to. */
+    canReact: Boolean,
     canDelete: Boolean,
+    /** Our own: Delete says so, and another's says it is an admin's. */
+    mine: Boolean,
     canEdit: Boolean,
     canReport: Boolean,
     onPickReaction: (String) -> Unit,
@@ -917,60 +953,62 @@ private fun ThreadActionMenu(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-            // Suggested row blends the user's most-used reactions with
-            // the default palette — same blend DmChatScreen uses, so
-            // the thread sheet feels consistent with the chat sheet.
-            val topUsage by remember {
-                db.reactionUsage().streamTop(8)
-            }.collectAsState(initial = emptyList())
-            // De-dupe by canonical reaction (normalize) so a used glyph
-            // and its palette code don't both show — see DmChatScreen.
-            val suggested = remember(topUsage) {
-                val seen = mutableSetOf<String>()
-                val out = mutableListOf<String>()
-                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                    .forEach { item ->
-                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                    }
-                out.take(8)
-            }
+            if (canReact) {
+                // Suggested row blends the user's most-used reactions with
+                // the default palette — same blend DmChatScreen uses, so
+                // the thread sheet feels consistent with the chat sheet.
+                val topUsage by remember {
+                    db.reactionUsage().streamTop(8)
+                }.collectAsState(initial = emptyList())
+                // De-dupe by canonical reaction (normalize) so a used glyph
+                // and its palette code don't both show — see DmChatScreen.
+                val suggested = remember(topUsage) {
+                    val seen = mutableSetOf<String>()
+                    val out = mutableListOf<String>()
+                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                        .forEach { item ->
+                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                        }
+                    out.take(8)
+                }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "React",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 4.dp),
-                )
-                io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = "Browse emojis",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(horizontal = 4.dp),
-            ) {
-                suggested.forEach { code ->
-                    val glyph = ReactionPalette.display(code)
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        glyph,
-                        fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                        style = MaterialTheme.typography.titleLarge,
+                        "React",
+                        style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPickReaction(code) }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .weight(1f)
+                            .padding(start = 4.dp),
                     )
+                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Browse emojis",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) {
+                    suggested.forEach { code ->
+                        val glyph = ReactionPalette.display(code)
+                        Text(
+                            glyph,
+                            fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onPickReaction(code) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             @Composable
             fun ActionRow(
                 onClick: () -> Unit,
@@ -1008,7 +1046,7 @@ private fun ThreadActionMenu(
             if (canDelete) {
                 ActionRow(
                     onClick = onDelete,
-                    label = "Delete",
+                    label = if (mine) "Delete" else "Delete (admin)",
                     color = MaterialTheme.colorScheme.error,
                 )
             }

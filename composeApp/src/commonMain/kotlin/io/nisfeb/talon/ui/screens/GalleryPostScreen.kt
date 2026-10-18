@@ -112,6 +112,14 @@ fun GalleryPostScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isOurs = post?.author == ourPatp
+    /** False only while we're still waiting for the row to show up. */
+    var settled by remember(postId) { mutableStateOf(false) }
+    LaunchedEffect(postId, post) {
+        // Long enough for a sync on a slow ship, short enough that a
+        // deleted post does not read as a hang. As NotebookPostScreen.
+        if (post == null) kotlinx.coroutines.delay(6_000)
+        settled = true
+    }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -156,7 +164,25 @@ fun GalleryPostScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val p = post ?: return@Column
+            // As the notebook's post: a bounded spinner, then say the post
+            // is gone. A blank body with a live comment box read as broken.
+            val p = post
+            if (p == null) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!settled) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    } else {
+                        Text(
+                            "This post isn't here — it may have been deleted.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                return@Column
+            }
             val parts = remember(p.id, p.contentJson) {
                 StoryCache.partsFor(p.id, p.contentJson)
             }
@@ -266,9 +292,10 @@ fun GalleryPostScreen(
                 onValueChange = { replyText = it },
                 placeholder = { Text("Write a comment") },
                 modifier = Modifier.weight(1f),
-                enabled = !sending,
+                // No post to comment on while its row is missing.
+                enabled = !sending && post != null,
             )
-            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending,
+            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending && post != null,
                 onClick = {
                     val text = replyText.trim()
                     replyText = ""

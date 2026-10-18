@@ -152,4 +152,17 @@ class NotebookDiaryScreensTest {
     }) { repo, _ ->
         NotebookComposeScreen(repo, whom, onBack = { did += "back" }, onPosted = {})
     }
+
+    // A refused post read as published on the notebook's list.
+    @Test
+    fun `a post the ship refused says so on its card`() = diary({ _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Autumn") }
+        waitUntil(timeoutMillis = 5_000) { shows("Not sent") }
+        assertEquals(1, onAllNodesWithText("Not sent").fetchSemanticsNodes().size, "only the refused one")
+    }) { repo, db ->
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            db.messages().upsert(MessageEntity(whom, "local_170141184500300", "~zod", 300, """[{"inline":["fall words"]}]""", "/diary", title = "Autumn", status = "failed"))
+        }
+        NotebookListScreen(db, repo, whom, onBack = {}, onOpenPost = {}, onCompose = {})
+    }
 }

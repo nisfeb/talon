@@ -89,6 +89,7 @@ fun ReactionDetailsSheet(
                             label,
                             style = MaterialTheme.typography.bodyLarge,
                             maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
                         val handle = contactMap.handle(r.author)
                         if (label != handle) {
@@ -97,6 +98,7 @@ fun ReactionDetailsSheet(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                         }
                     }
