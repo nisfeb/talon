@@ -3533,6 +3533,10 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
+                                        // Below 840dp this menu is the only
+                                        // navigation, so Home and Orrery are here.
+                                        onOpenHome = { onRailItemClicked(RailItem.Home) },
+                                        onOpenActions = { onRailItemClicked(RailItem.Actions) }.takeIf { orreryOn },
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         onOpenSidebarSettings = {
