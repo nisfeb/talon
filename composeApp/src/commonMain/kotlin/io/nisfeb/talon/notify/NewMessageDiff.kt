@@ -179,7 +179,7 @@ fun notifyAllowed(whom: String, level: String?, mention: Boolean): Boolean = whe
 }
 
 /**
- * Whether a message the repo heard alerts (Android's in-process path).
+ * Whether a message the repo hands on alerts (Android's in-process path).
  * [replyToUs] is a reply in a thread that counts, which passes a
  * "mentions" level: following is asking. Anything else takes the chat's
  * level as [notifyAllowed] reads it, so a DM or club at the default

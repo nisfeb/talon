@@ -102,6 +102,31 @@ class MessageAlertsTest {
         assertEquals(listOf("~bus/170141184508", "~bus/170141184509"), alerted)
     }
 
+    // A reply's read state is its thread's; the chat's level and a mention
+    // still decide the rest. The pieces messageAlerts reads, one by one.
+    @Test
+    fun `a reply is read by its thread and a channel needs a mention or its level`() = runBlocking<Unit> {
+        val nest = "chat/~bus/general"
+        db.unreads().upsert(io.nisfeb.talon.data.UnreadEntity(nest, count = 3, notifyCount = 0, recencyMs = 9_000))
+        db.threadUnreads().upsert(io.nisfeb.talon.data.ThreadUnreadEntity(nest, "100", count = 0, notifyCount = 0, recencyMs = 9_000))
+        fun msg(sent: Long, parent: String? = null, text: String = "[]") =
+            io.nisfeb.talon.data.MessageEntity(nest, "m$sent", "~bus", sent, text, "/chat", parentId = parent)
+        suspend fun alerts(m: io.nisfeb.talon.data.MessageEntity, toUs: Boolean = false, heard: Boolean = false, onScreen: Boolean = false) =
+            db.messageAlerts(m, toUs, heard, "~zod", onScreen)
+        assertEquals(false, alerts(msg(8_000, parent = "100"), toUs = true), "read in its thread")
+        assertEquals(true, alerts(msg(10_000, parent = "100"), toUs = true), "after the thread's read")
+        assertEquals(true, alerts(msg(8_000, parent = "200"), toUs = true), "a thread with no row is unread")
+        assertEquals(false, alerts(msg(8_000)), "a channel at the default level, no mention")
+        assertEquals(true, alerts(msg(8_000, text = """[{"inline":[{"ship":"~zod"}]}]""")), "a mention, unread in the chat")
+        db.notifyPrefs().upsert(io.nisfeb.talon.data.NotifyPreferenceEntity(nest, io.nisfeb.talon.data.NotifyLevel.ALL))
+        assertEquals(true, alerts(msg(8_000)), "every message at all")
+        assertEquals(false, alerts(msg(8_000), heard = true))
+        assertEquals(false, alerts(msg(8_000), onScreen = true))
+        db.unreads().upsert(io.nisfeb.talon.data.UnreadEntity(nest, count = 0, notifyCount = 0, recencyMs = 20_000))
+        assertEquals(false, alerts(msg(8_000)), "read in the chat")
+        assertEquals(true, alerts(msg(10_000, parent = "100"), toUs = true), "a chat's read is not its threads'")
+    }
+
     // ─── a catch-up's read ─────────────────────────────────────────
 
     private val now = System.currentTimeMillis()
