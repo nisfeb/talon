@@ -470,6 +470,12 @@ fun TalonApp(
         if (orreryGate == true && mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
     }
+    // The leave plan's poll follows the switch: on, it reads; off, it stops
+    // waking the phone, here or from another device.
+    LaunchedEffect(orreryGate == true) {
+        if (orreryGate == true) io.nisfeb.talon.orrery.LeaveAlarm.schedule(app)
+        else io.nisfeb.talon.orrery.LeaveAlarm.stop(app)
+    }
     LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
         val url = mailShipUrl ?: return@LaunchedEffect
         val ship = loggedInShip ?: return@LaunchedEffect

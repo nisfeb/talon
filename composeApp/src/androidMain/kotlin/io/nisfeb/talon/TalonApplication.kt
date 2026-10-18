@@ -122,7 +122,8 @@ class TalonApplication : Application() {
      *  kept in sync by the login / switch / signout paths. */
     val allShipsFlow: StateFlow<List<String>> = _allShips.asStateFlow()
 
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // The handler: one uncaught throw in a launch here took the app down.
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + io.nisfeb.talon.util.backgroundExceptionHandler)
 
     /**
      * The Activity feed's own notices, for the ship signed in now. On the
@@ -312,8 +313,11 @@ class TalonApplication : Application() {
         // The ship's own pushes here, and the time-to-leave alarm that
         // stands behind its leave push. A no-op with no ship, no UnifiedPush
         // distributor, or no grubbery push on the ship.
-        runCatching { io.nisfeb.talon.notify.ShipPushes.ensure(this) }
+        ensureShipPushes()
+        // Off, the plan is not read: the half-hourly poll went on waking the
+        // phone for nothing after Orrery was turned off.
         if (aiSettings.state.value.orreryOn()) runCatching { io.nisfeb.talon.orrery.LeaveAlarm.schedule(this) }
+        else runCatching { io.nisfeb.talon.orrery.LeaveAlarm.stop(this) }
 
 
         // User loops — headless scheduled agent runs. Ship-scoped deps
@@ -564,7 +568,7 @@ class TalonApplication : Application() {
         startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
         menuSeen = io.nisfeb.talon.ui.AndroidMenuSeenStore(this, ship)
-        shortcuts = ShortcutsPublisher(this, db)
+        shortcuts = ShortcutsPublisher(this, db, ship)
         embeddingIndexer = io.nisfeb.talon.ai.EmbeddingIndexer(db, embedder, appScope)
         searchEmbedderClient = io.nisfeb.talon.ai.AndroidSearchEmbedderClient(
             db, embedder, embeddingIndexer,
@@ -637,6 +641,16 @@ class TalonApplication : Application() {
         // rows / previews / counts.
         io.nisfeb.talon.ui.screens.resetHomeListSnapshot()
         _activeShip.value = ship
+        ensureShipPushes()
+    }
+
+    /**
+     * The ship's own pushes for the ship now active. Only the one active
+     * at the process's start was subscribed: after a switch, a new sign-in
+     * or a sign-out to another ship, its reminders never reached the phone.
+     */
+    private fun ensureShipPushes() {
+        runCatching { io.nisfeb.talon.notify.ShipPushes.ensure(this) }
     }
 
     /**
@@ -657,6 +671,7 @@ class TalonApplication : Application() {
             buildShipScoped(next)
             sessionStore.setActive(next)
             _activeShip.value = next
+            ensureShipPushes()
         } else {
             // Leave the lateinit fields pointing at the previous "none"
             // placeholder; the tree won't touch them while it renders
@@ -719,6 +734,7 @@ class TalonApplication : Application() {
             buildShipScoped(next, afterPriorClose = erase)
             sessionStore.setActive(next)
             _activeShip.value = next
+            ensureShipPushes()
         } else {
             _activeShip.value = null
             scheduleShipScopedTeardown(dying, dyingIndexer, dyingRepo, afterClose = erase)
@@ -747,6 +763,7 @@ class TalonApplication : Application() {
         refreshAllShips()
         io.nisfeb.talon.ui.screens.resetHomeListSnapshot()
         _activeShip.value = ship
+        ensureShipPushes()
     }
 
     private fun refreshAllShips() {
