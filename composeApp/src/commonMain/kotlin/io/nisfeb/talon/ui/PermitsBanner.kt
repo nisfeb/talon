@@ -96,8 +96,10 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?, inApp: Boolean = isUrbWeb
                 if (f && nowMs() - checkedAt > FOCUS_RECHECK_MS) check()
             }
         }
+        // Only while in front (review B5-13): behind, it read every half
+        // hour for a line nobody saw. Coming back is the collector above.
         while (true) {
-            if (nowMs() - checkedAt > FOCUS_RECHECK_MS) check()
+            if (focused.isWindowFocused && nowMs() - checkedAt > FOCUS_RECHECK_MS) check()
             delay(RECHECK_MS)
         }
     }

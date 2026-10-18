@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -84,5 +86,31 @@ class PermitsBannerShowsTest {
         assertEquals(emptyList(), opened, "not the browser")
         onNodeWithContentDescription("Close").performClick()
         waitUntil(timeoutMillis = 5_000) { reads.get() > before }
+    }
+
+    private class Window(focused: Boolean) : androidx.compose.ui.platform.WindowInfo {
+        var focused by androidx.compose.runtime.mutableStateOf(focused)
+        override val isWindowFocused: Boolean get() = focused
+    }
+
+    // Review B5-13: it read the approvals every half hour with the app behind.
+    @Test
+    fun `behind it reads nothing, and back in front it reads`() = runComposeUiTest {
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val http = HttpClient(MockEngine { req ->
+            if (req.url.encodedPath.endsWith("/asks.json")) reads.incrementAndGet()
+            respond("[]", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+        })
+        val window = Window(focused = false)
+        setContent {
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalWindowInfo provides window) {
+                PermitsBanner(http, "https://ship.example")
+            }
+        }
+        Thread.sleep(1_000)
+        waitForIdle()
+        assertEquals(0, reads.get(), "behind")
+        window.focused = true
+        waitUntil(timeoutMillis = 5_000) { reads.get() == 1 }
     }
 }
