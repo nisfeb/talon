@@ -67,6 +67,7 @@ import io.nisfeb.talon.ui.UpdateBanner
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.urbit.UrbitSession
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ui.icons.TalonIcons
 
@@ -83,6 +84,31 @@ internal object LoginDraft {
     val code = mutableStateOf("")
     fun clear() { url.value = ""; code.value = "" }
 }
+
+/**
+ * Ships whose sign-in lapsed: the ship refuses their saved cookie, so
+ * nothing reaches it until the owner signs in again, and the chat only
+ * retried. Held until a shell takes it ([take]) and opens the login form
+ * saying so; held, not sent, so a screen that comes up later still sees
+ * it. Fed from TlonChatRepo's signed-out flow by the shells.
+ */
+object LoginLapses {
+    private val held = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+    val ships: kotlinx.coroutines.flow.StateFlow<Set<String>> = held
+
+    fun lapsed(ship: String) = held.update { it + ship }
+
+    /** True once for a lapse of [ship]: the shell that takes it shows the form. */
+    fun take(ship: String): Boolean {
+        var had = false
+        held.update { had = ship in it; it - ship }
+        return had
+    }
+}
+
+/** What the login form says to a ship whose sign-in lapsed. */
+fun lapsedLoginNotice(ship: String): String =
+    "You were signed out of $ship. Sign in again to keep getting its messages."
 
 @Composable
 fun LoginScreen(

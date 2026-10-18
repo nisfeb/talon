@@ -586,6 +586,19 @@ fun TalonApp(
     }
 
     var addingAnotherShip by remember { mutableStateOf(false) }
+    // A lapsed sign-in (the ship refuses the saved cookie): the login form,
+    // saying so, over the ship as it is (App.kt does the same). The
+    // session stays; signing in again replaces its cookie.
+    var lapseNotice by remember { mutableStateOf<String?>(null) }
+    val lapsedShips by io.nisfeb.talon.ui.screens.LoginLapses.ships.collectAsState()
+    LaunchedEffect(lapsedShips, loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        if (!io.nisfeb.talon.ui.screens.LoginLapses.take(ship)) return@LaunchedEffect
+        app.sessionStore.all().firstOrNull { it.ship == ship }?.let { io.nisfeb.talon.ui.screens.LoginDraft.url.value = it.shipUrl }
+        lapseNotice = io.nisfeb.talon.ui.screens.lapsedLoginNotice(ship)
+        addingAnotherShip = true
+    }
+    LaunchedEffect(addingAnotherShip) { if (!addingAnotherShip) lapseNotice = null }
     // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
     // LaunchedEffect below routes any LATER param updates from
@@ -1912,6 +1925,7 @@ fun TalonApp(
                 },
                 // The ship open underneath was never left.
                 onCancel = { addingAnotherShip = false },
+                notice = lapseNotice,
                 usernameAutofill = { onFill ->
                     rememberAutofillModifier(
                         types = listOf(

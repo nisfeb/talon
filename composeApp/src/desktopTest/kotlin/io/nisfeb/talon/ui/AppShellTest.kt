@@ -69,6 +69,10 @@ class AppShellTest {
         setup: FakeShip.() -> Unit = {},
         /** Media for 1:1 calls; null keeps calls dark, as on a platform without them. */
         calls: io.nisfeb.talon.call.CallEngineProvider? = null,
+        /** The saved ships; the fake ship's own, ~zod alone, by default. */
+        sessions: ((FakeShip) -> io.nisfeb.talon.urbit.SessionStore)? = null,
+        relay: io.nisfeb.talon.notify.RelaySettings = io.nisfeb.talon.notify.InMemoryRelaySettings(),
+        drafts: DraftStore = InMemoryDraftStore(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -86,13 +90,14 @@ class AppShellTest {
             setup()
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val store = sessions?.invoke(ship) ?: ship.session
         try {
             runComposeUiTest {
                 setContent {
                     Box(Modifier.size(width = width, height = 800.dp)) {
                         App(
                             http = ship.http,
-                            sessionStore = ship.session,
+                            sessionStore = store,
                             aiSettings = ai,
                             createDb = { key ->
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)
@@ -100,7 +105,8 @@ class AppShellTest {
                                     .fallbackToDestructiveMigration(dropAllTables = true)
                                     .build().also { runBlocking { it.seed() } }
                             },
-                            drafts = InMemoryDraftStore(),
+                            drafts = drafts,
+                            relaySettings = relay,
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             createUiSettings = { ui },
                             callEngineProvider = calls,
@@ -1091,5 +1097,130 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit profile").fetchSemanticsNodes().isNotEmpty() }
         }
     }
-}
 
+    /** ~zod, active, and ~bus, both at the fake ship, saved in a file as on desktop. */
+    private fun twoShips(): io.nisfeb.talon.urbit.SessionStore {
+        val store = io.nisfeb.talon.urbit.DesktopSessionStore(File(createTempDirectory("talon-ships-").toFile(), "sessions.json"))
+        store.save(io.nisfeb.talon.urbit.SavedSession("https://ship.test", "~bus", "test-session", "0v2", "ship.test"), makeActive = false)
+        store.save(io.nisfeb.talon.urbit.SavedSession("https://ship.test", "~zod", "test-session", "0v1", "ship.test"))
+        return store
+    }
+
+    // A5-4: the chat list's Sign out logged out with no push cleanup and
+    // landed on the login form, though another ship was saved.
+    @Test
+    fun `Sign out from the chat list stops the ship's pushes and opens the other saved ship`() {
+        val store = twoShips()
+        val relay = io.nisfeb.talon.notify.InMemoryRelaySettings().apply { setDeviceIdFor("~zod", "dev-zod") }
+        app(sessions = { store }, relay = relay) { ship ->
+            onAllNodesWithContentDescription("More").onFirst().performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+            onNodeWithText("Sign out").performClick()
+            waitUntil(timeoutMillis = 10_000) { store.activeShip() == "~bus" && present("New message") }
+            assertTrue(!showing("Connect"), "the other ship, not the login form")
+            assertEquals(listOf("~bus"), store.all().map { it.ship })
+            waitUntil(timeoutMillis = 5_000) { "DELETE /devices/dev-zod" in ship.requests }
+            waitUntil(timeoutMillis = 5_000) { relay.deviceIdFor("~zod").isBlank() }
+        }
+    }
+
+    // A5-7: Add ship restored the ship it left into the signed-out tree,
+    // which then polled that ship's mail and calendar into its database.
+    @Test
+    fun `Add ship asks nothing of the ship it left`() = app { ship ->
+        waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/auspex" in it } }
+        Thread.sleep(1_000)
+        waitForIdle()
+        onNodeWithContentDescription("Switch ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        val before = ship.requests.size
+        onNodeWithText("Add ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Connect") }
+        mainClock.advanceTimeBy(30_000)
+        Thread.sleep(3_000)
+        waitForIdle()
+        val after = ship.requests.drop(before)
+        assertTrue(after.none { "/apps/auspex" in it || "/apps/calendar" in it }, after.toString())
+        assertTrue(after.none { it.startsWith("GET /~/channel/") }, "no stream for a ship not open: $after")
+    }
+
+    // Picking the ship already open in the switcher closed the chat on screen.
+    @Test
+    fun `picking the ship already open keeps the chat`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("hello there") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        onNodeWithContentDescription("Switch ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        onAllNodesWithText("~zod").onLast().performClick()
+        waitForIdle()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!showing("Select a chat to begin"), "the chat is still open")
+    }
+
+    // A5-18, the screens' half: a lapsed sign-in is said, calmly, on the
+    // login form, with the ship's address in it; the ship stays saved, and
+    // Cancel goes back to it.
+    @Test
+    fun `a lapsed sign-in opens the login form saying so and keeps the ship`() {
+        val store = twoShips()
+        app(sessions = { store }) {
+            io.nisfeb.talon.ui.screens.LoginLapses.lapsed("~zod")
+            waitUntil(timeoutMillis = 5_000) { showing("Connect") }
+            assertTrue(showing("You were signed out of ~zod. Sign in again"), "the login form says why")
+            assertTrue(showing("https://ship.test"), "the address is filled in")
+            assertEquals(setOf("~zod", "~bus"), store.all().map { it.ship }.toSet(), "nothing forgotten")
+            onNodeWithText("Cancel").performClick()
+            home()
+            assertTrue(!showing("Connect"))
+            assertTrue(io.nisfeb.talon.ui.screens.LoginLapses.ships.value.isEmpty(), "said once")
+        }
+    }
+
+    // A3-4: the list's "Draft:" previews were missing after a launch, until
+    // a chat had been opened.
+    @Test
+    fun `a draft kept from the last run shows in the list at launch`() {
+        val files = mutableMapOf(draftsFileName("~zod") to """{"~bus":"half a thought"}""")
+        app(
+            seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
+            drafts = FileDraftStore({ "~zod" }, read = { files[it] }, write = { name, text -> files[name] = text }),
+        ) {
+            onNodeWithText("DMs").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Draft: half a thought") }
+        }
+    }
+
+    // A4-20: "Hide composer buttons" hid them in the chat and not in its
+    // thread, in the side pane of a wide window and over the chat in a
+    // narrower one.
+    @Test
+    fun `hidden composer buttons stay hidden in a thread`() = threadWithButtonsHidden(1200.dp)
+
+    @Test
+    fun `hidden composer buttons stay hidden in a thread over the chat`() = threadWithButtonsHidden(900.dp)
+
+    private fun threadWithButtonsHidden(width: androidx.compose.ui.unit.Dp) = app(
+        width = width,
+        ui = InMemoryUiSettings(initialHide = true),
+        seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat")) },
+    ) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("shall we meet") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        val opened = { onAllNodesWithText("Reply in thread").fetchSemanticsNodes().isNotEmpty() }
+        for (attempt in 1..3) {
+            onAllNodesWithContentDescription("Message actions").onFirst().performClick()
+            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) break
+        }
+        onNodeWithText("Reply in thread").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Thread").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        assertTrue(!present("Attach file") && !present("Attach image"), "no composer shows them")
+    }
+}

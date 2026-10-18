@@ -568,6 +568,19 @@ fun App(
             openChatFocusMessageId = r.postId
         }
     }
+    // A lapsed sign-in (the ship refuses the saved cookie): the login form,
+    // saying so, with the ship's address filled in. The session stays saved,
+    // and Cancel goes back to the ship as it is, as from Add ship.
+    val lapsedShips by io.nisfeb.talon.ui.screens.LoginLapses.ships.collectAsState()
+    LaunchedEffect(lapsedShips, loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        if (!io.nisfeb.talon.ui.screens.LoginLapses.take(ship)) return@LaunchedEffect
+        sessionStore.all().firstOrNull { it.ship == ship }?.let { io.nisfeb.talon.ui.screens.LoginDraft.url.value = it.shipUrl }
+        addingFrom = ship
+        leaveShip()
+        loggedInShip = null
+        loginNotice = io.nisfeb.talon.ui.screens.lapsedLoginNotice(ship)
+    }
 
     // Keyboard-shortcut request flags. Hoisted outside key() so the
     // onPreviewKeyEvent handler (on the Surface inside key()) can flip

@@ -97,4 +97,12 @@ class AndroidNoticesGuardTest {
         assertTrue("if (picked != loggedInShip) sections.leave {" in talonApp, "the drawer's pick skips the guard")
         assertTrue("if (ship != loggedInShip) sections.leave {" in talonApp, "the list's switcher skips the guard")
     }
+
+    // A4-20 and A5-18's screen half, on the shell with no harness.
+    @Test
+    fun `a thread hides composer buttons and a lapsed sign-in opens the form`() {
+        val thread = talonApp.substringAfter("ThreadScreen(").substringBefore("modifier = mod,")
+        assertTrue("hideComposerButtons = app.uiSettings.hideComposerButtons" in thread, thread)
+        assertTrue("LoginLapses.take(ship)" in talonApp && "notice = lapseNotice" in talonApp)
+    }
 }
