@@ -33,7 +33,7 @@ class AndroidLifecycleGuardTest {
         assertTrue("""android:targetActivity="io.nisfeb.talon.MainActivity"""" in alias, alias)
         assertTrue(manifest.indexOf(alias) > manifest.indexOf("""android:name="io.nisfeb.talon.MainActivity""""), "an alias comes after its target")
         assertFalse("MainActivity::class" in notifications, "a notification opens the exported MainActivity")
-        assertEquals(7, Regex("""tapIntent\(context\)""").findAll(notifications).count(), "a notification tap was added or lost")
+        assertEquals(8, Regex("""tapIntent\(context\)""").findAll(notifications).count(), "a notification tap was added or lost")
         val redial = read("$android/call/TalonConnectionService.kt")
         assertTrue("Notifications.tapIntent(this)" in redial && "MainActivity::class" !in redial, "the telecom redial's call back no longer counts")
     }
@@ -176,5 +176,26 @@ class AndroidLifecycleGuardTest {
         val noPush = talonApp.substringAfter("noPush = io.nisfeb.talon.notify.keepAliveNeeded(").substringBefore(")\n")
         assertTrue("mailNeedsProcess" !in noPush, noPush)
         assertTrue("noPush = noPush," in talonApp, "Settings is not told")
+    }
+
+    // B3-16: LapseNotices (LapseNoticesTest).
+    @Test
+    fun `a lapse heard with Talon behind posts a notice whose tap opens the form`() {
+        val build = application.substringAfter("private fun buildShipScoped(").substringBefore("\n    }\n")
+        assertTrue("lapseNotices.heard(ship, before, now, inFront)" in build, build)
+        assertTrue("LapseStep.Post -> Notifications.showSignedOut(this@TalonApplication, ship)" in build)
+        assertTrue("LapseStep.Clear -> Notifications.clearSignedOut(this@TalonApplication, ship)" in build)
+        assertTrue("before = now" in build && "if (now || before != null) TalonSyncService.refresh(this@TalonApplication)" in build)
+        assertTrue("currentStateFlow.value.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)" in build)
+        val loggedIn = application.substringAfter("fun onShipLoggedIn(").substringBefore("\n    }\n")
+        assertTrue("lapseNotices.signedIn(ship)" in loggedIn && "Notifications.clearSignedOut(this, ship)" in loggedIn, loggedIn)
+        val show = notifications.substringAfter("fun showSignedOut(").substringBefore("\n    }\n")
+        assertTrue("putExtra(EXTRA_SIGN_IN, ship)" in show && "putExtra(EXTRA_FOR_SHIP, ship)" in show, show)
+        val consume = activity.substringAfter("private fun consumeIntent(").substringBefore("\n    }\n")
+        assertTrue("if (trusted && it in app.allShipsFlow.value) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(it)" in consume, consume)
+        assertTrue("intent.hasExtra(Notifications.EXTRA_SIGN_IN)" in consume, "the tap does not go to its ship")
+        val service = read("$android/TalonSyncService.kt")
+        assertTrue("syncNoticeLine(signedOutOf)" in service && "if (!live) return" in service, "the line still says it is listening")
+        assertTrue("live = true" in service && "live = false" in service)
     }
 }

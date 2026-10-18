@@ -263,17 +263,19 @@ class MainActivity : ComponentActivity() {
         var consumedDeepLink = false
         val trusted = callsTrusted(intent)
         val ring = trusted && io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)
-        // A call back acts on its ship, as a ring does.
-        val actsOnShip = ring || trusted && intent.hasExtra(Notifications.EXTRA_CALL_BACK)
+        // A call back or a sign-in acts on its ship, as a ring does.
+        val actsOnShip = ring || trusted &&
+            (intent.hasExtra(Notifications.EXTRA_CALL_BACK) || intent.hasExtra(Notifications.EXTRA_SIGN_IN))
         // Read before the target, though order does not matter here:
         // what matters is that TalonApp switches ships before it acts
         // on any of the rest.
         intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
             if (actsOnShip) {
-                // A ring or call back for another of the owner's ships: only
-                // that ship's controller acts on it, so go there now. Not as
-                // a deep link, which with nothing else in it TalonApp never
-                // consumes: the next switch away would have come straight back.
+                // A ring, call back or sign-in for another of the owner's
+                // ships: only that ship's controller or login acts on it, so
+                // go there now. Not as a deep link, which with nothing else
+                // in it TalonApp never consumes: the next switch away would
+                // have come straight back.
                 val app = applicationContext as TalonApplication
                 io.nisfeb.talon.call.RingIntents.shipToSwitch(it, app.activeShipFlow.value, app.allShipsFlow.value)
                     ?.let(app::switchShip)
@@ -337,6 +339,14 @@ class MainActivity : ComponentActivity() {
         intent.getStringExtra(Notifications.EXTRA_CALL_BACK)?.let {
             if (trusted) pendingCallBack.value = it
             intent.removeExtra(Notifications.EXTRA_CALL_BACK)
+            consumedDeepLink = true
+        }
+        // The signed-out notice: the login form for its ship, held again
+        // (LoginLapses) in case it was shown and put away.
+        intent.getStringExtra(Notifications.EXTRA_SIGN_IN)?.let {
+            val app = applicationContext as TalonApplication
+            if (trusted && it in app.allShipsFlow.value) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(it)
+            intent.removeExtra(Notifications.EXTRA_SIGN_IN)
             consumedDeepLink = true
         }
         // The Phone app's integrated call log (16.1+) calling one of our

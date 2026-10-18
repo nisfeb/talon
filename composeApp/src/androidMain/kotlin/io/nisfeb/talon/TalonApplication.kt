@@ -382,6 +382,9 @@ class TalonApplication : Application() {
     /** The current repo's lapsed-login watch, replaced with the repo on a ship switch. */
     private var lapseWatch: kotlinx.coroutines.Job? = null
 
+    /** When the signed-out notice posts and goes, across each ship's repos. */
+    private val lapseNotices = io.nisfeb.talon.ui.screens.LapseNotices()
+
     /**
      * Notifications from the ship itself, where its %trunk can (wire 11):
      * once a test push from the ship reaches this phone, the phone leaves
@@ -562,8 +565,26 @@ class TalonApplication : Application() {
             r.readListener = { whom -> Notifications.cancelAllForChat(this, whom, forShip = ship) }
             listenForAlerts(ship, r, db)
             // A login that lapsed: TalonApp offers to sign in again (LoginLapses).
+            // With Talon not in front, a notice says so, and the sync
+            // service's line too.
             lapseWatch?.cancel()
-            lapseWatch = appScope.launch { r.signedOut.collect { if (it) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship) } }
+            lapseWatch = appScope.launch {
+                var before: Boolean? = null
+                r.signedOut.collect { now ->
+                    if (now) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship)
+                    val inFront = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle
+                        .currentStateFlow.value.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                    when (lapseNotices.heard(ship, before, now, inFront)) {
+                        io.nisfeb.talon.ui.screens.LapseStep.Post -> Notifications.showSignedOut(this@TalonApplication, ship)
+                        io.nisfeb.talon.ui.screens.LapseStep.Clear -> Notifications.clearSignedOut(this@TalonApplication, ship)
+                        io.nisfeb.talon.ui.screens.LapseStep.None -> Unit
+                    }
+                    // Not on a new repo's first word: it can come before the
+                    // field holds the repo, and the line would read the old one.
+                    if (now || before != null) TalonSyncService.refresh(this@TalonApplication)
+                    before = now
+                }
+            }
         }
         startShipPushMove(ship, repo)
         drafts = io.nisfeb.talon.ui.AndroidDraftStore(this, ship)
@@ -747,6 +768,10 @@ class TalonApplication : Application() {
      * the case where the ship just became known.
      */
     fun onShipLoggedIn(ship: String) {
+        // Its signed-out notice goes. A ship signed in while another was
+        // open gets a new repo, which never says it is signed in again.
+        lapseNotices.signedIn(ship)
+        Notifications.clearSignedOut(this, ship)
         // Signed in again to the ship already open: it takes the new cookie
         // and reconnects. Rebuilt, its new repo was never started, since
         // the active ship did not change and nothing ran start again, and

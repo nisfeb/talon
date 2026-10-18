@@ -108,6 +108,48 @@ object LoginLapses {
     }
 }
 
+/** What to do with the signed-out notice ([LapseNotices]). */
+enum class LapseStep { Post, Clear, None }
+
+/**
+ * When Android's signed-out notice posts and goes (B3-16). Without it a
+ * lapsed login left "Listening for new messages" up and said nothing. A
+ * lapse is heard again from each new repo of the ship, so the notice
+ * posts once a lapse, and only with Talon not in front, where the form
+ * opens. It goes when the ship takes a login again.
+ */
+class LapseNotices {
+    private val posted = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * A repo of [ship] says [now] (signed out or not), after [before], what
+     * the same repo said last (null: nothing yet). [inFront]: Talon is on
+     * screen.
+     */
+    fun heard(ship: String, before: Boolean?, now: Boolean, inFront: Boolean): LapseStep = when {
+        now && inFront -> LapseStep.None
+        now -> {
+            var first = false
+            posted.update { first = ship !in it; it + ship }
+            if (first) LapseStep.Post else LapseStep.None
+        }
+        // Refused, then a channel taken: signed in again.
+        before == true -> { signedIn(ship); LapseStep.Clear }
+        else -> LapseStep.None
+    }
+
+    /** [ship] took a login again: the next lapse posts its notice. */
+    fun signedIn(ship: String) = posted.update { it - ship }
+}
+
+/** The signed-out notice's title and body. */
+fun signedOutNotice(ship: String): Pair<String, String> =
+    "Signed out of ${io.nisfeb.talon.ui.shipHandle(ship)}" to "Sign in again to keep getting its messages."
+
+/** The sync service's line: what the stream it keeps hears, or [signedOutOf]'s lapse. */
+fun syncNoticeLine(signedOutOf: String?): String =
+    if (signedOutOf == null) "Listening for new messages" else "Signed out of ${io.nisfeb.talon.ui.shipHandle(signedOutOf)}"
+
 /** What the login form says when a ship run here booted but did not sign
  *  in: the sign-in's own plain words, not the exception's text. */
 fun bootedLoginNotice(err: Throwable): String = "The ship booted. " + friendlyError(err)

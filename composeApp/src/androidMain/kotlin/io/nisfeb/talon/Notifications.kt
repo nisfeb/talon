@@ -92,6 +92,8 @@ object Notifications {
     const val EXTRA_OPEN_ORRERY = "open_orrery"
     /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
     const val EXTRA_OPEN_CALENDAR = "open_calendar"
+    /** A tapped signed-out notice: the login form for this ship. */
+    const val EXTRA_SIGN_IN = "sign_in"
 
     /**
      * MainActivity, through the alias whose call extras count
@@ -510,6 +512,46 @@ object Notifications {
             .build()
         mgr.notify(MISSED_CALL_NOTIFICATION_ID, n)
     }
+
+    /**
+     * The ship refused the saved login with Talon not in front (B3-16):
+     * nothing comes from it until the owner signs in again. A tap opens
+     * the login form for [ship]. When to post it is LapseNotices'.
+     */
+    fun showSignedOut(context: Context, ship: String) {
+        ensureChannel(context)
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        val (title, body) = io.nisfeb.talon.ui.screens.signedOutNotice(ship)
+        val tap = PendingIntent.getActivity(
+            context, (SIGNED_OUT_TAG + ship).hashCode(),
+            tapIntent(context).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_SIGN_IN, ship)
+                putExtra(EXTRA_FOR_SHIP, ship)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        mgr.notify(SIGNED_OUT_TAG + ship, NOTIFICATION_ID, n)
+    }
+
+    /** [ship] took a login again: its signed-out notice goes. */
+    fun clearSignedOut(context: Context, ship: String) {
+        ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?.cancel(SIGNED_OUT_TAG + ship, NOTIFICATION_ID)
+    }
+
+    private const val SIGNED_OUT_TAG = "signed-out:"
 
     fun cancelIncomingCall(context: Context) {
         // Stop the noise first: the notification going away while the
