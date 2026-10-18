@@ -1300,6 +1300,7 @@ fun TalonApp(
                     // cover the moment somebody actually looks at it.
                     mailRepo.setForeground(true)
                     calendarRepo.setForeground(true)
+                    orreryRepo.setForeground(true)
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
@@ -1307,6 +1308,7 @@ fun TalonApp(
                     app.repo.setForeground(false)
                     mailRepo.setForeground(false)
                     calendarRepo.setForeground(false)
+                    orreryRepo.setForeground(false)
                 }
                 else -> {}
             }

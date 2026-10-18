@@ -1526,6 +1526,7 @@ fun App(
                         repo.setForeground(front)
                         mailRepo.setForeground(front)
                         calendarRepo.setForeground(front)
+                        orreryRepo.setForeground(front)
                         if (front && !was) repo.forceReconnect()
                         was = front
                     }
@@ -1537,6 +1538,7 @@ fun App(
                             // things that makes the mailbox ask again.
                             mailRepo.setForeground(focused)
                             calendarRepo.setForeground(focused)
+                            orreryRepo.setForeground(focused)
                         }
                 }
             }
