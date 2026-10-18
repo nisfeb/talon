@@ -1,5 +1,6 @@
 package io.nisfeb.talon.util
 
+import io.nisfeb.talon.ui.theme.followAppTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -114,6 +115,8 @@ private fun present(picker: UIViewController, wanted: () -> Boolean, attempt: In
             PresentStep.GIVE_UP -> onDropped()
             PresentStep.PRESENT -> {
                 var shown = false
+                // In the app's light or dark, not the phone's (IosAppearance).
+                picker.followAppTheme()
                 root!!.presentViewController(picker, animated = true, completion = { shown = true })
                 after(PRESENT_CONFIRM_MS) {
                     if (!shown && picker.presentingViewController == null) onDropped()
