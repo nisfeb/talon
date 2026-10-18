@@ -165,4 +165,29 @@ class NotebookDiaryScreensTest {
         }
         NotebookListScreen(db, repo, whom, onBack = {}, onOpenPost = {}, onCompose = {})
     }
+
+    // Review B5-12: it read 30 posts from the ship on every open.
+    @Test
+    fun `a notebook opened again in one connect does not read the ship again`() {
+        // Shown once the ship is set to answer: a read that failed is
+        // tried again on the next open, as it should be.
+        val shown = androidx.compose.runtime.mutableStateOf(false)
+        diary({ ship ->
+            ship.scries["channels/v4/$whom/posts/newest/50/post"] = """{"posts":{}}"""
+            val reads = { ship.requests.count { "/posts/newest/" in it && "blog" in it } }
+            shown.value = true
+            waitUntil(timeoutMillis = 5_000) { reads() >= 1 }
+            Thread.sleep(500)
+            waitForIdle()
+            val first = reads()
+            shown.value = false
+            waitForIdle()
+            shown.value = true
+            waitForIdle()
+            Thread.sleep(500)
+            assertEquals(first, reads(), ship.requests.toString())
+        }) { repo, db ->
+            if (shown.value) NotebookListScreen(db, repo, whom, onBack = {}, onOpenPost = {}, onCompose = {})
+        }
+    }
 }
