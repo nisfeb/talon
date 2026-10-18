@@ -435,7 +435,8 @@ class OrreryRepo(
             // Settings saw orrery there after.
             launch {
                 _availability.first { it == OrreryAvailability.PRESENT }
-                readVersion()
+                // Beside the list, not before it: one request more on a busy ship.
+                launch { readVersion() }
                 refreshActions()
                 // Orrery's beacon moves once for every write that changed
                 // something: a new proposal, or an answer given anywhere.
