@@ -12,10 +12,20 @@ import kotlinx.coroutines.CoroutineScope
  * per-device preference — naming style, accent, density, rail order —
  * silently reset on each launch.
  */
-/** A JSON file in Application Support, as ui.json is. */
-internal class IosTextStore(private val file: String) : UiSettingsStore {
-    override fun read(): String? = IosFiles.read(file)
-    override fun write(text: String) = IosFiles.write(file, text)
+/**
+ * A JSON file in Application Support, as ui.json is. Read while the
+ * device is locked it is nothing, so a write is refused until a read has
+ * worked: the settings in memory were never the file's.
+ */
+internal class IosTextStore(name: String) : UiSettingsStore {
+    private val file = io.nisfeb.talon.util.LockableFile(
+        name,
+        readText = { IosFiles.read(name) },
+        exists = { IosFiles.exists(name) },
+        writeText = { IosFiles.write(name, it) },
+    )
+    override fun read(): String? = file.text()
+    override fun write(text: String) { file.write(text) }
 }
 
 fun createUiSettings(db: AppDatabase, scope: CoroutineScope): UiSettings =

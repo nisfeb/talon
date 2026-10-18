@@ -59,3 +59,35 @@ internal fun pruneOlderThan(dir: okio.Path, cutoffMs: Long) {
         }
     }
 }
+
+/**
+ * A file that can be there but not readable for a while: iOS keeps
+ * Talon's files locked while the device is, and a store built then (a
+ * call's push waking the app) reads nothing. [text] marks the file known
+ * once a read works or it is absent, and [write] refuses a file that is
+ * there and not yet known, so a store that saw nothing never writes over
+ * what it could not see.
+ */
+class LockableFile(
+    private val name: String,
+    private val readText: () -> String?,
+    private val exists: () -> Boolean,
+    private val writeText: (String) -> Unit,
+) {
+    /** Whether the file was read, or was not there to read. */
+    var known: Boolean = false
+        private set
+
+    fun text(): String? = readText().also { if (it != null || !exists()) known = true }
+
+    /** Writes, unless the file is there and unread; [overUnread] is for replacing it whatever it holds. */
+    fun write(text: String, overUnread: Boolean = false): Boolean {
+        if (!known && !overUnread && exists()) {
+            Log.w("LockableFile", "not writing over $name, which could not be read")
+            return false
+        }
+        writeText(text)
+        known = true
+        return true
+    }
+}

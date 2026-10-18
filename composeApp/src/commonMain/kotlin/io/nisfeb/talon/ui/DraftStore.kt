@@ -85,6 +85,9 @@ open class FileDraftStore(
     private val activeShip: () -> String?,
     private val read: (name: String) -> String?,
     private val write: (name: String, text: String) -> Unit,
+    // Whether a file is there, readable or not. iOS keeps it locked
+    // while the device is, and a read then is not an empty file.
+    private val exists: (name: String) -> Boolean = { false },
 ) : DraftStore() {
 
     /** Every loaded ship's drafts, keyed so a save can only ever land
@@ -93,13 +96,23 @@ open class FileDraftStore(
     @Volatile
     private var byShip: Map<String, Map<String, String>> = emptyMap()
 
-    private fun draftsFor(ship: String): Map<String, String> =
-        byShip[ship] ?: runCatching {
-            read(draftsFileName(ship))?.let { Json.decodeFromString<Map<String, String>>(it) }
-        }.getOrNull().orEmpty().also { byShip = byShip + (ship to it) }
+    private fun draftsFor(ship: String): Map<String, String> = loaded(ship).orEmpty()
 
-    private fun change(ship: String, edit: (Map<String, String>) -> Map<String, String>) {
-        byShip = byShip + (ship to edit(draftsFor(ship)))
+    /** The ship's drafts, or null while its file is there but cannot be
+     *  read: kept as empty, a save then wrote over every other draft. */
+    private fun loaded(ship: String): Map<String, String>? {
+        byShip[ship]?.let { return it }
+        val name = draftsFileName(ship)
+        val text = runCatching { read(name) }.getOrNull()
+        if (text == null && runCatching { exists(name) }.getOrDefault(false)) return null
+        return runCatching { text?.let { Json.decodeFromString<Map<String, String>>(it) } }
+            .getOrNull().orEmpty().also { byShip = byShip + (ship to it) }
+    }
+
+    private fun change(ship: String, edit: (Map<String, String>) -> Map<String, String>): Boolean {
+        val now = loaded(ship) ?: return false
+        byShip = byShip + (ship to edit(now))
+        return true
     }
 
     // The list's "Draft:" previews were empty after a launch and the last
@@ -139,14 +152,14 @@ open class FileDraftStore(
     }
 
     private fun saveFor(ship: String, whom: String, draft: String) {
-        change(ship) { if (draft.isBlank()) it - whom else it + (whom to draft) }
+        if (!change(ship) { if (draft.isBlank()) it - whom else it + (whom to draft) }) return
         persist(ship)
         // The list's "Draft:" previews follow the active ship only.
         if (ship == activeShip()) backing.value = draftsFor(ship)
     }
 
     private fun clearFor(ship: String, whom: String) {
-        change(ship) { it - whom }
+        if (!change(ship) { it - whom }) return
         persist(ship)
         if (ship == activeShip()) backing.value = draftsFor(ship)
     }

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.urbit
 
 import io.nisfeb.talon.util.IosFiles
+import io.nisfeb.talon.util.LockableFile
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -19,22 +20,35 @@ private data class SessionsBlob(
 
 class IosSessionStore : SessionStore {
     private val json = Json { ignoreUnknownKeys = true }
-    private var blob: SessionsBlob = load()
+    // Built while the device is locked (a call's push), the file reads as
+    // nothing; a save after unlock then wrote over every saved ship.
+    private val file = LockableFile(
+        SESSIONS_FILE,
+        readText = { IosFiles.read(SESSIONS_FILE) },
+        exists = { IosFiles.exists(SESSIONS_FILE) },
+        writeText = { IosFiles.write(SESSIONS_FILE, it) },
+    )
+    private var loaded: SessionsBlob = load() ?: SessionsBlob()
 
-    private fun load(): SessionsBlob =
-        IosFiles.read(SESSIONS_FILE)?.let {
+    private fun load(): SessionsBlob? =
+        file.text()?.let {
             runCatching { json.decodeFromString<SessionsBlob>(it) }.getOrNull()
-        } ?: SessionsBlob()
+        }
 
-    private fun persist() {
-        IosFiles.write(SESSIONS_FILE, json.encodeToString(SessionsBlob.serializer(), blob))
+    /** The sessions, read again while the file has not been readable, so a
+     *  store built while locked finds the ships once the device unlocks. */
+    private var blob: SessionsBlob
+        get() { if (!file.known) load()?.let { loaded = it }; return loaded }
+        set(value) { loaded = value }
+
+    private fun persist(overUnread: Boolean = false) {
+        file.write(json.encodeToString(SessionsBlob.serializer(), loaded), overUnread)
     }
 
     override fun all(): List<SavedSession> = blob.sessions
 
     override fun active(): SavedSession? =
-        blob.activeShip?.let { a -> blob.sessions.firstOrNull { it.ship == a } }
-            ?: blob.sessions.firstOrNull()
+        blob.let { b -> b.activeShip?.let { a -> b.sessions.firstOrNull { it.ship == a } } ?: b.sessions.firstOrNull() }
 
     override fun activeShip(): String? = active()?.ship
 
@@ -64,6 +78,6 @@ class IosSessionStore : SessionStore {
 
     override fun clearAll() {
         blob = SessionsBlob()
-        persist()
+        persist(overUnread = true)
     }
 }
