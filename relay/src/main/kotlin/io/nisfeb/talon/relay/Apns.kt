@@ -269,6 +269,10 @@ internal fun alertPayload(
 /** APNs' limit for an alert's payload, less a little for safety. */
 internal const val MAX_ALERT_BYTES = 4000
 
+/** Orrery's tag on its nag about a late action, and the iOS category that gives it buttons. */
+internal const val OVERDUE_TAG_PREFIX = "orrery-overdue-"
+internal const val OVERDUE_CATEGORY = "orrery-overdue"
+
 private fun buildAlert(
     title: String,
     body: String,
@@ -285,6 +289,9 @@ private fun buildAlert(
     append("\",\"body\":\"").append(jsonEscape(body))
     append("\"},\"sound\":\"default\",\"thread-id\":\"").append(jsonEscape(whom)).append('"')
     if (badge != null) append(",\"badge\":").append(badge)
+    // Orrery's nag about a late action (orrery 110) gets the app's Done
+    // and Snooze 1 h buttons (CallPush.swift registers the category).
+    if (event == "notice" && whom.startsWith(OVERDUE_TAG_PREFIX)) append(",\"category\":\"").append(OVERDUE_CATEGORY).append('"')
     append("},\"event\":\"").append(jsonEscape(if (nonce != null) "push-test" else event ?: "new-message"))
     append("\",\"patp\":\"").append(jsonEscape(patp))
     append("\",\"whom\":\"").append(jsonEscape(whom))
