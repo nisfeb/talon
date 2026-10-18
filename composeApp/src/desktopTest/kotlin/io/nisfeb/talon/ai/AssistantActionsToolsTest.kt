@@ -400,6 +400,21 @@ class AssistantActionsToolsTest {
         }
     }
 
+    // The tick was said "Done" when the calendar took it and then refused.
+    @Test
+    fun `a tick the calendar refuses after taking it is said`() {
+        var refusing = true
+        withHarness(
+            events = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"done":false}]""",
+            refuseLater = { b -> "the task is not there".takeIf { refusing && b["id"]?.jsonPrimitive?.content == "t1" } },
+        ) { h ->
+            assertEquals("The calendar refused it: the task is not there.", h.run("complete_task", argsOf("task" to "milk")))
+            assertEquals(listOf("""{"action":"done-event","id":"t1","done":true}"""), h.pokes.map { it.toString() }, "one tick, not retried")
+            refusing = false
+            assertEquals("Done: Buy milk.", h.run("complete_task", argsOf("task" to "t1")))
+        }
+    }
+
     // Taken is not kept: skipping on the add's ack alone lost the
     // occurrence whenever the calendar then refused the add.
     @Test

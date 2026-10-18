@@ -646,7 +646,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 hits.isEmpty() -> "No ${if (reopen) "done" else "open"} task matches \"$q\"."
                 hits.size == 1 && hits[0].cal in cal.readOnly -> "That task is on a calendar shared with the user read-only; its host ticks it."
                 hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
-                else -> if (cal.setDone(hits[0].id, !reopen)) "${if (reopen) "Reopened" else "Done"}: ${hits[0].name}." else "The calendar did not take it."
+                // Through wrote(): setDone said "Done" of a tick the calendar took and then refused.
+                else -> cal.wrote(io.nisfeb.talon.calendar.doneBody(hits[0].id, !reopen)) ?: "${if (reopen) "Reopened" else "Done"}: ${hits[0].name}."
             }
         })
         add(Tool(
