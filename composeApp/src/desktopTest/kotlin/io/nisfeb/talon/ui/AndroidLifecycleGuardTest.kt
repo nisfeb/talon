@@ -129,6 +129,27 @@ class AndroidLifecycleGuardTest {
         assertTrue("ShortcutsPublisher(this, db, ship)" in application)
     }
 
+    // Orrery 110's nag about a late high action: its own loud channel, the
+    // action's own slot, and the Late card's buttons, which only Talon can
+    // press. What each button sends is common (OrreryLateTest).
+    @Test
+    fun `a late nag is loud and carries Done and Snooze 1 h that only Talon can press`() {
+        val ensure = notifications.substringAfter("fun ensureChannel(").substringBefore("\n    }\n")
+        assertTrue("NotificationChannel(CHANNEL_LATE, \"Late\", NotificationManager.IMPORTANCE_HIGH)" in ensure, ensure)
+        val push = notifications.substringAfter("fun showShipPush(").substringBefore("\n    }\n")
+        assertTrue("late = io.nisfeb.talon.orrery.isOverdueTag(push.tag)" in push, push)
+        val show = notifications.substringAfter("fun showAction(").substringBefore("\n    }\n")
+        assertTrue("if (late) CHANNEL_LATE else CHANNEL_ORRERY" in show && "setOnlyAlertOnce(quiet)" in show, show)
+        assertTrue("LateMove.entries.forEach" in show && "OrreryLateReceiver.intent(context, actionId, title, move)" in show, show)
+        val receiver = manifest.substringAfter("android:name=\"io.nisfeb.talon.OrreryLateReceiver\"").substringBefore("/>")
+        assertTrue("android:exported=\"false\"" in receiver, receiver)
+        val late = read("$android/OrreryLateReceiver.kt")
+        assertTrue("val pending = goAsync()" in late && "app.appScope.launch" in late && "pending.finish()" in late, "on the app's scope")
+        assertTrue(".lateMove(id, move)" in late && "Notifications.clearAction(app, id)" in late, "taken back when it went through")
+        assertTrue("Notifications.showAction(app, id, title, failed, late = true, quiet = true)" in late, "what failed, in its place")
+        assertTrue("PendingIntent.FLAG_IMMUTABLE" in late)
+    }
+
     // ---- sneagan's decisions of 2026-10-18; what each decides is common ----
 
     // B3-2: shareStep (ShareStepTest); the staging, AppShellTest.

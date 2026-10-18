@@ -27,6 +27,8 @@ object Notifications {
     const val CHANNEL_MESSAGES = "messages"
     const val CHANNEL_MAIL = "mail"
     const val CHANNEL_ORRERY = "orrery"
+    /** Orrery's nag about a late high-priority action (orrery 110): heads-up with sound, apart from proposals and nudges. */
+    const val CHANNEL_LATE = "orrery_late"
     const val CHANNEL_SYNC = "sync"
     const val CHANNEL_LOOPS = "loops"
     /** The ship's own pushes (grubbery web push): calendar reminders and the like. */
@@ -181,6 +183,12 @@ object Notifications {
                 ).apply { description = "Proposals waiting for your answer" },
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_LATE) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_LATE, "Late", NotificationManager.IMPORTANCE_HIGH)
+                    .apply { description = "A high-priority action past its due, every 15 minutes until it is done or snoozed" },
+            )
+        }
         // Watchwords were taken out; their channel would stay in the
         // phone's settings with nothing ever posted to it. The same for
         // the first calls channel (now calls_v2) and the daily digest.
@@ -246,7 +254,11 @@ object Notifications {
         // An orrery action: under the app's own slot for it, so the pushed
         // copy and the app's replace each other, and an answer anywhere
         // takes back both ([clearAction]).
-        io.nisfeb.talon.orrery.actionIdOfTag(push.tag)?.let { return showAction(context, it, push.title, push.body) }
+        // A late one's nag (orrery 110) shares that slot, so each replaces
+        // the last, on its own loud channel with Done and Snooze 1 h.
+        io.nisfeb.talon.orrery.actionIdOfTag(push.tag)?.let {
+            return showAction(context, it, push.title, push.body, late = io.nisfeb.talon.orrery.isOverdueTag(push.tag))
+        }
         // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
         val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
         post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,
@@ -702,9 +714,11 @@ object Notifications {
     /**
      * An orrery proposal waiting for an answer. Tagged by the action, so
      * one answered anywhere can be taken back with [clearAction]; a tap
-     * opens Actions.
+     * opens Actions. A [late] one's nag goes on [CHANNEL_LATE] with the
+     * Late card's buttons, which [OrreryLateReceiver] carries out; posted
+     * again over itself with what failed, it is [quiet].
      */
-    fun showAction(context: Context, actionId: String, title: String, body: String) {
+    fun showAction(context: Context, actionId: String, title: String, body: String, late: Boolean = false, quiet: Boolean = false) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
         ensureChannel(context)
@@ -719,7 +733,7 @@ object Notifications {
             tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ORRERY)
+        val builder = NotificationCompat.Builder(context, if (late) CHANNEL_LATE else CHANNEL_ORRERY)
             .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(title)
             .setContentText(body)
@@ -727,8 +741,13 @@ object Notifications {
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .build()
-        mgr.notify(tag, NOTIFICATION_ID, notification)
+        if (late) {
+            builder.setPriority(NotificationCompat.PRIORITY_HIGH).setOnlyAlertOnce(quiet)
+            io.nisfeb.talon.orrery.LateMove.entries.forEach { move ->
+                builder.addAction(0, move.label, OrreryLateReceiver.intent(context, actionId, title, move))
+            }
+        }
+        mgr.notify(tag, NOTIFICATION_ID, builder.build())
     }
 
     /** Take back the notification for an action answered here or anywhere. */
