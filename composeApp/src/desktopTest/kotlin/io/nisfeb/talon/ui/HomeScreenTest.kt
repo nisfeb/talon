@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -225,6 +226,8 @@ class HomeScreenTest {
     @Volatile private var calendarDown = false
     /** The ship refuses every calendar write. */
     @Volatile private var calendarRefuses = false
+    /** How long the ship takes over a read of the window: a busy one. */
+    @Volatile private var calendarReadMs = 0L
 
     /** A calendar app on the ship, or none where [present] is false. */
     private fun calendar(
@@ -244,7 +247,7 @@ class HomeScreenTest {
                     if (calendarRefuses) return@MockEngine respond("", io.ktor.http.HttpStatusCode.BadRequest)
                     calendarWrites += String(req.body.toByteArray()); json("")
                 }
-                path.endsWith("/window.json") -> json("""{"rows":[$rows]}""")
+                path.endsWith("/window.json") -> { kotlinx.coroutines.delay(calendarReadMs); json("""{"rows":[$rows]}""") }
                 // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
                     json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"$taskName"},"due_ms":$taskDueMs${if (calendarWrites.any { "done-event" in it && "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
@@ -368,7 +371,10 @@ class HomeScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("isn't answering") }
             assertTrue(!shows("Looking") && !shows("<html"), "said, in words")
             calendarDown = false
+            calendarReadMs = 1_500
             onNodeWithText("Try again").performClick()
+            // One read at a time: each tap stacked another full read.
+            onNodeWithText("Try again").assertIsNotEnabled()
             waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
         }
     }
