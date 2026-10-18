@@ -2689,6 +2689,10 @@ class TlonChatRepo(
         /** When the event is about a reply, the parent post id.
          *  Tap routes into ThreadScreen anchored on [postId]. */
         val parentPostId: String? = null,
+        /** The group a group event (an ask, a join, a kick, a role, an
+         *  invite) is about, from a `group/<flag>` source. Not a [whom]:
+         *  that feeds unread counts, and a group has none of its own. */
+        val groupFlag: String? = null,
     )
 
     /**
@@ -5857,6 +5861,8 @@ class TlonChatRepo(
                         "group-kick" -> "Removed from group"
                         "group-join" -> "Joined the group"
                         "group-role" -> "Role changed"
+                        "note-create" -> "Added a note"
+                        "note-edit" -> "Edited a note"
                         // Unknown wire tags: humanize rather than leaking
                         // a raw hyphenated key into the row header.
                         else -> tag.replace('-', ' ')
@@ -5880,6 +5886,7 @@ class TlonChatRepo(
                             title = title,
                             postId = canonicalPostIdForWhom(sourceWhom, target.postId),
                             parentPostId = canonicalPostIdForWhom(sourceWhom, target.parentPostId),
+                            groupFlag = sourceKey?.takeIf { it.startsWith("group/") }?.removePrefix("group/"),
                         )
                     )
                 }
