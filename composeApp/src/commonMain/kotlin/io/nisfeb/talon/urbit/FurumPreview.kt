@@ -35,8 +35,16 @@ object FurumPreview {
     private val results = HashMap<FurumRef, Card?>()
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** A fetch that failed, by when: asked again only after [FAILED_RETRY_MS]. */
+    private val failedAt = HashMap<FurumRef, Long>()
+    /** One fetch per ref at a time: a second card for it waits for the first's answer. */
+    private val fetching = HashMap<FurumRef, Mutex>()
+
     /** The ship asked the host and was still waiting: once more, this long after. */
     private const val PENDING_RETRY_MS = 5_000L
+
+    /** A failed card is not asked again on every compose, only this long after. */
+    const val FAILED_RETRY_MS = 5 * 60_000L
 
     suspend fun await(
         http: HttpClient,
@@ -44,8 +52,20 @@ object FurumPreview {
         cookie: String,
         ref: FurumRef,
         wait: suspend (Long) -> Unit = { delay(it) },
-    ): Card? {
-        lock.withLock { if (results.containsKey(ref)) return results[ref] }
+        now: () -> Long = { io.nisfeb.talon.util.nowMs() },
+    ): Card? = lock.withLock { fetching.getOrPut(ref) { Mutex() } }.withLock {
+        lock.withLock {
+            if (results.containsKey(ref)) return results[ref]
+            failedAt[ref]?.let { if (now() - it < FAILED_RETRY_MS) return null }
+        }
+        ask(http, shipUrl, cookie, ref, wait) ?: run {
+            lock.withLock { if (!results.containsKey(ref)) failedAt[ref] = now() }
+            null
+        }
+    }
+
+    /** The card, kept as the answer; null for none or for no answer. */
+    private suspend fun ask(http: HttpClient, shipUrl: String, cookie: String, ref: FurumRef, wait: suspend (Long) -> Unit): Card? {
         repeat(2) { attempt ->
             val resp = runSuspendCatching {
                 http.get(ref.previewUrl(shipUrl)) { header(HttpHeaders.Cookie, cookie) }
@@ -93,5 +113,5 @@ object FurumPreview {
     private fun JsonObject?.num(k: String): Long? = (this?.get(k) as? JsonPrimitive)?.longOrNull
 
     /** For tests: forget every answer. */
-    internal suspend fun clear() = lock.withLock { results.clear() }
+    internal suspend fun clear() = lock.withLock { results.clear(); failedAt.clear() }
 }
