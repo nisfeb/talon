@@ -223,6 +223,17 @@ class AssistantScreenTest {
         assertTrue(ship.pokesTo("chat").isEmpty(), "nothing was posted")
     }
 
+    // The card named the recipient by nickname only.
+    @Test
+    fun `the card names whom it goes to by name and ship`() = assistant { db ->
+        runBlocking { db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null)) }
+        toolCall = postEvent
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        assertTrue(shows("whom: Bus (~bus)"), "name and ship")
+        onNodeWithText("Deny").performClick()
+    }
+
     @Test
     fun `an action allowed is done, and the answer follows`() = assistant {
         toolCall = postEvent

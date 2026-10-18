@@ -1240,10 +1240,12 @@ private fun describe(
         val raw = v.toString().trim('"')
         // Resolve conversation ids to titles so the user is approving a
         // legible target, not an opaque "chat/~zod/general" / "0v..." id.
+        // A ship by its name and its @p: a nickname alone could be anyone's.
+        fun named(name: String) = if (raw.startsWith("~") && name != raw) "$name ($raw)" else name
         val shown = when {
-            k == "whom" -> contactMap.conversationLabel(raw)
+            k == "whom" -> named(contactMap.conversationLabel(raw))
             k == "event" || k == "task" -> entryLabel(raw)
-            raw.startsWith("~") -> contactMap.displayName(raw)
+            raw.startsWith("~") -> named(contactMap.displayName(raw))
             else -> raw
         }
         "  $k: $shown"
