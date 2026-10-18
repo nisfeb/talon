@@ -49,6 +49,9 @@ import kotlin.test.assertTrue
 class LoginScreenTest {
     private val store = DesktopSessionStore(File(createTempDirectory("talon-login-").toFile(), "sessions.json"))
 
+    /** The ship and +code each sign-in handed the notifications offer. */
+    private val codes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
+
     /** Each login asked for, as URL and form body. */
     private val asked: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -82,6 +85,7 @@ class LoginScreenTest {
                     LoginScreen(
                         session = UrbitSession(http, store),
                         onLoggedIn = { loggedIn += it },
+                        onLoginCode = { who, code -> codes += who to code },
                         notice = notice,
                         qrScanIntegration = if (qr != null || scanCancels) { onResult -> { onResult(qr) } } else null,
                         onRunLocalShip = onRunLocalShip,
@@ -163,6 +167,9 @@ class LoginScreenTest {
         val (url, form) = asked.single()
         assertEquals("https://zod.example.com/~/login", url, "a bare host gets https")
         assertEquals("password=lidlut-tabwed", form, "trimmed, without the +")
+        // The draft is cleared on success: read after, the offer to turn
+        // notifications on enrolled with an empty code (iOS).
+        assertEquals(listOf("~zod" to "lidlut-tabwed"), codes.toList(), "the code as the ship took it")
         assertTrue(shows("Connected as ~zod"))
         assertEquals("~zod" to "https://zod.example.com", store.active()?.let { it.ship to it.shipUrl })
     }

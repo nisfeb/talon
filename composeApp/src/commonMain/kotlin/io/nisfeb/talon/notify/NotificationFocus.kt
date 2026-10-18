@@ -29,3 +29,16 @@ object OpenChatRequests {
         _requests.tryEmit(Request(whom, postId, forShip))
     }
 }
+
+/**
+ * A clicked desktop notification, by the key it was shown with: a chat
+ * (a whom has no ':') opens, and a notice's tag opens its place. Others
+ * (mail, an orrery action) only bring the window up. It used to do only
+ * that for every one, the chat included.
+ */
+fun openNotificationKey(key: String) {
+    when {
+        noticeLanding(key) != null -> OpenNoticeRequests.request(key)
+        ':' !in key -> OpenChatRequests.request(key, null)
+    }
+}

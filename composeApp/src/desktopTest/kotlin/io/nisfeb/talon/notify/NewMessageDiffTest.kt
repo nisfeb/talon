@@ -55,7 +55,7 @@ class NewMessageDiffTest {
                 msg("~bus", "id-2"),
             ),
         )
-        assertEquals(mapOf("~zod" to "id-1", "~bus" to "id-2"), baseline)
+        assertEquals(mapOf("~zod" to "id-1", "~bus" to "id-2"), baseline.mapValues { it.value.id })
     }
 
     // ── diffNewMessageNotifications: staleness guard ────────────
@@ -76,7 +76,7 @@ class NewMessageDiffTest {
         // 1h-old message with a 5min window → suppressed.
         assertTrue(diff.notifications.isEmpty())
         // But baseline advanced, so it won't fire on a later pass.
-        assertEquals(mapOf("~zod" to "old"), diff.newLastSeen)
+        assertEquals(mapOf("~zod" to "old"), diff.newLastSeen.mapValues { it.value.id })
     }
 
     @Test
@@ -176,9 +176,9 @@ class NewMessageDiffTest {
                 msg("0vclub", "id-2", author = "~bar"),
             ),
             lastSeen = mapOf(
-                "~zod" to "id-1",
-                "~bus" to "id-1",
-                "0vclub" to "id-1",
+                "~zod" to msg("~zod", "id-1"),
+                "~bus" to msg("~bus", "id-1"),
+                "0vclub" to msg("0vclub", "id-1"),
             ),
             ourPatp = "~me",
             openChat = null,
@@ -207,13 +207,7 @@ class NewMessageDiffTest {
                 msg("~self", "id-new", author = "~me"),
                 msg("~stable", "id-old", author = "~external"),
             ),
-            lastSeen = mapOf(
-                "~zod" to "id-old",
-                "~bus" to "id-old",
-                "0vclub" to "id-old",
-                "~self" to "id-old",
-                "~stable" to "id-old",
-            ),
+            lastSeen = listOf("~zod", "~bus", "0vclub", "~self", "~stable").associateWith { msg(it, "id-old") },
             ourPatp = "~me",
             openChat = "~bus",
             levels = mapOf("0vclub" to "none"),
@@ -230,7 +224,7 @@ class NewMessageDiffTest {
                 "~self" to "id-new",
                 "~stable" to "id-old",
             ),
-            diff.newLastSeen,
+            diff.newLastSeen.mapValues { it.value.id },
         )
     }
 
@@ -307,5 +301,24 @@ class NewMessageDiffTest {
         )
         assertEquals(listOf("chat/~bus/loud"), diff.notifications.map { it.whom })
     }
-}
 
+    // Deleting a chat's newest message makes the one before it the latest
+    // again: a changed id, but nothing new, and it used to notify.
+    @Test
+    fun `the newest deleted brings back an earlier message that does not notify`() {
+        val now = 1_000_000_000L
+        val earlier = msg("~bus", "a", author = "~bus", sentMs = now - 2_000)
+        val newest = msg("~bus", "b", author = "~bus", sentMs = now - 1_000)
+        fun diff(rows: List<MessageEntity>, seen: Map<String, MessageEntity>) = diffNewMessageNotifications(
+            rows = rows, lastSeen = seen, ourPatp = "~zod", openChat = null,
+            levels = emptyMap(), storyText = storyText, nowMs = now, freshnessMaxAgeMs = 5L * 60_000L,
+        )
+        val back = diff(listOf(earlier), mapOf("~bus" to newest))
+        assertTrue(back.notifications.isEmpty())
+        assertEquals("a", back.newLastSeen["~bus"]?.id)
+        val next = diff(listOf(msg("~bus", "c", author = "~bus", sentMs = now - 1_500)), back.newLastSeen)
+        assertEquals(listOf("~bus"), next.notifications.map { it.whom }, "newer than the one shown now is news")
+        val tie = diff(listOf(msg("~bus", "d", author = "~bus", sentMs = now - 1_000)), mapOf("~bus" to newest))
+        assertEquals(1, tie.notifications.size, "the same moment, another id, is another message")
+    }
+}

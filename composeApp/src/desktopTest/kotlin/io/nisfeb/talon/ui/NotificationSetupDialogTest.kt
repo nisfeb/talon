@@ -49,7 +49,7 @@ class NotificationSetupDialogTest {
 
     @Test
     fun `from Settings it asks for the code`() = prompt(null, Enrollment.On("dev-1", alerts = true)) {
-        onNode(hasSetTextAction()).performTextInput("  sampel-code  ")
+        onNode(hasSetTextAction()).performTextInput("  +sampel-code  ")
         onNodeWithText("Turn on").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Notifications are on") }
         assertEquals("enroll sampel-code", did.first())

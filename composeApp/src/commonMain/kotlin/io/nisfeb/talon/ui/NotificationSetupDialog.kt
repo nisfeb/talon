@@ -79,7 +79,7 @@ fun NotificationSetupDialog(
                         busy = true
                         why = null
                         scope.launch {
-                            when (val r = enroll(code ?: typed.trim())) {
+                            when (val r = enroll(code ?: typed.trim().removePrefix("+"))) {
                                 is Enrollment.On -> on = r
                                 is Enrollment.NoToken -> why = r.why
                                 is Enrollment.Refused -> why = r.why

@@ -115,16 +115,20 @@ class TalonSyncService : Service() {
          * until the mail app is asked, so it does not count here.
          */
         fun startIfNeeded(app: TalonApplication) {
-            val ship = app.activeShipFlow.value ?: return
+            if (streamNeeded(app)) runCatching { start(app) }.onFailure { Log.w(TAG, "could not start after boot: ${it.message}") }
+        }
+
+        /** No push reaches this phone for the active ship, so only a stream of its own tells it anything. */
+        fun streamNeeded(app: TalonApplication): Boolean {
+            val ship = app.activeShipFlow.value ?: return false
             // An endpoint with no distributor left to deliver to is none.
             val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(app)?.takeIf {
                 runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(app).isNotEmpty() }.getOrDefault(true)
             }
-            val needed = io.nisfeb.talon.notify.keepAliveNeeded(
+            return io.nisfeb.talon.notify.keepAliveNeeded(
                 app.relaySettings, ship, endpoint,
                 shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
             )
-            if (needed) runCatching { start(app) }.onFailure { Log.w(TAG, "could not start after boot: ${it.message}") }
         }
     }
 }

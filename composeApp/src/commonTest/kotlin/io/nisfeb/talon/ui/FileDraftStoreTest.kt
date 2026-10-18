@@ -70,4 +70,41 @@ class FileDraftStoreTest {
         active = "~zod"
         assertEquals("", store().load("~bus"))
     }
+
+    // Desktop and iOS: the list's "Draft:" previews were empty after a
+    // launch and the last ship's after a switch, until a composer loaded.
+    @Test
+    fun `the previews are the active ship's from launch and after a switch`() {
+        files[draftsFileName("~zod")] = """{"~bus":"zod's"}"""
+        files[draftsFileName("~nec")] = """{"~dev":"nec's"}"""
+        val s = store()
+        assertEquals(emptyMap(), s.state.value)
+        s.showActiveShip()
+        assertEquals(mapOf("~bus" to "zod's"), s.state.value)
+        active = "~nec"
+        s.showActiveShip()
+        assertEquals(mapOf("~dev" to "nec's"), s.state.value)
+        active = null
+        s.showActiveShip()
+        assertEquals(emptyMap(), s.state.value)
+    }
+
+    // Erasing a ship deleted its file, but the store kept its drafts in
+    // memory, and they came back when the ship was added again.
+    @Test
+    fun `an erased ship's drafts do not come back in the same session`() {
+        val s = store()
+        val zod = s.bound()
+        zod.save("~bus", "half typed")
+        active = "~nec"
+        files.remove(draftsFileName("~zod"))
+        assertEquals("half typed", zod.load("~bus"), "held until the erase is done")
+        s.forget("~zod")
+        active = "~zod"
+        assertEquals("", s.load("~bus"))
+        assertEquals(emptyMap(), s.state.value)
+        s.save("~dev", "new")
+        s.forget("~zod")
+        assertEquals(emptyMap(), s.state.value, "the active ship forgotten shows none")
+    }
 }

@@ -40,7 +40,8 @@ class SystemNotifier(
     private val trayFallback: (String, String) -> Unit,
     // Invoked when the user clicks the notification (Linux
     // notify-send path only — Main.kt passes its bring-to-front
-    // routine). Other backends have no click signal to hook.
+    // routine). Other backends have no click signal to hook. The
+    // notification's key then opens its place (openNotificationKey).
     private val onActivate: () -> Unit = {},
 ) : Notifier {
 
@@ -178,7 +179,10 @@ class SystemNotifier(
             // retry lands on gdbus instead of silently dropping toasts.
             throw IOException("notify-send exited ${process.exitValue()}")
         }
-        if (action?.trim() == "default") onActivate()
+        if (action?.trim() == "default") {
+            onActivate()
+            key?.let(::openNotificationKey)
+        }
     }
 
     private fun notifyGdbus(title: String, body: String, key: String?) {
