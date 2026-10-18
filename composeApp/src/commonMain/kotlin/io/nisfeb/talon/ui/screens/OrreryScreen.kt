@@ -82,6 +82,7 @@ fun OrreryRepoScreen(
     val error by orreryRepo.error.collectAsState()
     val generator by orreryRepo.generator.collectAsState()
     val on by orreryRepo.enabled.collectAsState()
+    val version by orreryRepo.version.collectAsState()
     val store = orreryRepo.view
     OrreryScreen(
         onBack = onBack,
@@ -109,6 +110,9 @@ fun OrreryRepoScreen(
             },
             twentyFourHour = twentyFourHour,
             header = false,
+            marks = (version ?: 0) >= io.nisfeb.talon.orrery.MARKS_VERSION,
+            onSnooze = { orreryRepo.mark(it.id, snoozeMinutes = io.nisfeb.talon.orrery.SNOOZE_MINUTES) },
+            onPriority = { a, high -> orreryRepo.mark(a.id, high = high) },
             onOpen = onOpenAction,
         )
     }

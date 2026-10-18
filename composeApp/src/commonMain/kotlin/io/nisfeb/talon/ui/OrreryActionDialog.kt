@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,9 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.orrery.OrreryAction
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.eventToAdd
+import io.nisfeb.talon.orrery.high
+import io.nisfeb.talon.orrery.marked
+import io.nisfeb.talon.orrery.shipCarriesOut
 import io.nisfeb.talon.orrery.messageToSend
 import io.nisfeb.talon.orrery.shipChange
 import io.nisfeb.talon.urbit.asText
@@ -63,6 +67,8 @@ fun OrreryActionDialog(
     val event = remember(action) { action.eventToAdd() }
     val how = message?.let { if (it.via == "chat") "as a DM" else "by ${it.via}" }
     val change = remember(action) { action.shipChange() }
+    // Orrery 110 keeps a priority and nags about a late high one.
+    val marks = (orrery.version.collectAsState().value ?: 0) >= io.nisfeb.talon.orrery.MARKS_VERSION
 
     // Taken at once: the dialog closes and the ship is told behind it.
     fun move(status: String, why: String = "") {
@@ -161,6 +167,15 @@ fun OrreryActionDialog(
                         }
                         TextButton(onClick = { saying = Saying.TELL }) {
                             io.nisfeb.talon.ui.FitText("Note for Orrery")
+                        }
+                        // As orrery's page has it: only a due makes one late,
+                        // and one already high can always be unmarked.
+                        if (marks && (action.due != null || action.high)) {
+                            TextButton(onClick = {
+                                val high = !action.high
+                                orrery.mark(action.id, high = high)
+                                shown = action.marked("priority", if (high) "high" else "")
+                            }) { io.nisfeb.talon.ui.FitText(if (action.high) "Not high" else "Mark high") }
                         }
                     }
                 }
@@ -291,7 +306,7 @@ fun OrreryActionDialog(
                             io.nisfeb.talon.ui.DestructiveTextButton(onClick = { saying = Saying.REJECT }) { Text(noWord) }
                             // What the ship carries out reports itself; marking
                             // it done here would skip the doing.
-                            if (event == null && message == null && change == null) {
+                            if (!action.shipCarriesOut) {
                                 io.nisfeb.talon.ui.Button(onClick = { move("done") }) { Text("Mark done") }
                             }
                         }
