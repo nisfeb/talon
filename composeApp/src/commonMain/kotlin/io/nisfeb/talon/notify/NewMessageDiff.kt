@@ -241,10 +241,22 @@ enum class ChatAlert { Post, Quiet, Skip }
  * moment ago replaces it without a second alert. Anything shown longer
  * ago than [windowMs], or none ([shownAgoMs] null), alerts as new; but
  * the very message showing ([samePost]), which eyre replays after a
- * resume, is left alone however long ago it went up.
+ * resume, is left alone however long ago it went up. A hint showing for
+ * that very message is filled in with it, quietly, however long ago.
  */
+/**
+ * Whether the post a notification shows ([shownPostId]) is [postId]. A
+ * relay's hint carries the %activity id, `~author/<dotted ud>`; the app's
+ * own notification carries the id as kept, undotted (and bare in a
+ * channel). Compared as raw strings they never matched, so a message
+ * arriving after its hint alerted a second time.
+ */
+fun samePostShown(whom: String, shownPostId: String?, postId: String?): Boolean =
+    shownPostId != null && postId != null &&
+        io.nisfeb.talon.urbit.keptPostId(whom, shownPostId) == io.nisfeb.talon.urbit.keptPostId(whom, postId)
+
 fun chatAlert(hint: Boolean, shownAgoMs: Long?, shownIsHint: Boolean, samePost: Boolean = false, windowMs: Long = 60_000L): ChatAlert = when {
-    shownAgoMs != null && samePost -> ChatAlert.Skip
+    shownAgoMs != null && samePost -> if (shownIsHint && !hint) ChatAlert.Quiet else ChatAlert.Skip
     shownAgoMs == null || shownAgoMs > windowMs -> ChatAlert.Post
     hint -> ChatAlert.Skip
     shownIsHint -> ChatAlert.Quiet

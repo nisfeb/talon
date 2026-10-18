@@ -124,7 +124,27 @@ class LiveMessageAlertTest {
     @Test
     fun `the very message showing is not posted again`() {
         assertEquals(ChatAlert.Skip, chatAlert(hint = false, shownAgoMs = 3_600_000, shownIsHint = false, samePost = true))
-        assertEquals(ChatAlert.Skip, chatAlert(hint = false, shownAgoMs = 1_000, shownIsHint = true, samePost = true))
+        assertEquals(ChatAlert.Skip, chatAlert(hint = true, shownAgoMs = 3_600_000, shownIsHint = false, samePost = true), "a late hint for it")
         assertEquals(ChatAlert.Post, chatAlert(hint = false, shownAgoMs = null, shownIsHint = false, samePost = true), "dismissed, it is news again")
+    }
+
+    // The message arriving after its own hint fills the hint in, without a
+    // second alert, however long the hint has been up. Before the ids were
+    // compared as kept, it went up again as a new alert after a minute.
+    @Test
+    fun `a hint showing is filled in by its message quietly`() {
+        assertEquals(ChatAlert.Quiet, chatAlert(hint = false, shownAgoMs = 1_000, shownIsHint = true, samePost = true))
+        assertEquals(ChatAlert.Quiet, chatAlert(hint = false, shownAgoMs = 3_600_000, shownIsHint = true, samePost = true))
+        assertEquals(ChatAlert.Skip, chatAlert(hint = true, shownAgoMs = 3_600_000, shownIsHint = true, samePost = true), "the same hint twice")
+    }
+
+    @Test
+    fun `a hint's dotted id is the post kept here`() {
+        assertTrue(samePostShown("~bus", "~bus/170.141.184.507", "~bus/170141184507"), "a DM")
+        assertTrue(samePostShown("chat/~bus/general", "~bus/170.141.184.507", "170141184507"), "a channel, kept bare")
+        assertTrue(samePostShown("~bus", "~bus/170141184507", "~bus/170141184507"))
+        assertFalse(samePostShown("~bus", "~bus/170.141.184.507", "~bus/170141184508"), "another post")
+        assertFalse(samePostShown("~bus", null, "~bus/170141184507"), "nothing showing")
+        assertFalse(samePostShown("~bus", "~bus/170141184507", null), "a hint with no id")
     }
 }

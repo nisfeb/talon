@@ -615,7 +615,7 @@ object Notifications {
             hint = hint,
             shownAgoMs = shown?.let { System.currentTimeMillis() - it.postTime },
             shownIsHint = shown?.notification?.extras?.getBoolean(EXTRA_HINT) == true,
-            samePost = postId != null && shown?.notification?.extras?.getString(EXTRA_POST) == postId,
+            samePost = io.nisfeb.talon.notify.samePostShown(whom, shown?.notification?.extras?.getString(EXTRA_POST), postId),
         )
         if (alert == io.nisfeb.talon.notify.ChatAlert.Skip) return
 
