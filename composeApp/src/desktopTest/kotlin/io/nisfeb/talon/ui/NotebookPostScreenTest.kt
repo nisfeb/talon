@@ -40,7 +40,7 @@ class NotebookPostScreenTest {
     private val whom = "diary/~bus/blog"
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun post(author: String, commenter: String = "~nec", block: ComposeUiTest.(FakeShip) -> Unit) {
+    private fun post(author: String, commenter: String = "~nec", status: String? = null, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-diary-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -49,7 +49,7 @@ class NotebookPostScreenTest {
         runBlocking {
             db.messages().upsertAll(listOf(
                 MessageEntity(whom, "170141184500100", author, 100, """[{"inline":["Hello ",{"bold":["world"]}]}]""", "/diary",
-                    title = "Spring", image = "https://x.test/cover.png"),
+                    title = "Spring", image = "https://x.test/cover.png", status = status),
                 MessageEntity(whom, "170141184500200", commenter, 200, """[{"inline":["lovely"]}]""", "/diary", parentId = "170141184500100"),
             ))
         }
@@ -134,6 +134,11 @@ class NotebookPostScreenTest {
         showing("Couldn't send")
         val box = onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.EditableText].text
         assertEquals("agreed", box, "the text is back to send again")
+        showing("Not sent")
+    }
+
+    @Test
+    fun `a post the ship refused says so under its byline`() = post("~zod", status = "failed") { _ ->
         showing("Not sent")
     }
 }

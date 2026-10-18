@@ -205,6 +205,9 @@ private fun NotebookCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // A post the ship refused, or one waiting for it, read as
+                // published: say which, as a chat's own post does.
+                SendStateNote(post.status)
                 Spacer(Modifier.height(10.dp))
                 val excerpt = remember(post.id, post.contentJson, post.searchText) {
                     excerptOf(post, limit = 240)

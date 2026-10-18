@@ -251,6 +251,8 @@ fun NotebookPostScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Refused or waiting, not published: as the notebook's card says.
+                    SendStateNote(p.status)
                 }
             }
 
