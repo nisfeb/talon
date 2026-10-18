@@ -893,10 +893,15 @@ fun CalendarScreen(
         var moreOpen by remember(r.id) { mutableStateOf(false) }
         val calName = calendars.firstOrNull { it.id == r.cal }?.let { it.name.ifBlank { it.id } }
         val readOnlyHere = r.cal in readOnly
+        // The dialog is a window of its own, handed the platform's link
+        // handler again: urb:// and talon:// links in the place or the note
+        // went to the system instead of to Talon. The app's goes in with it.
+        val links = androidx.compose.ui.platform.LocalUriHandler.current
         AlertDialog(
             onDismissRequest = { viewing = null },
             title = { Text(r.name.ifBlank { "(untitled)" }) },
             text = {
+              androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val whenText = when {
                         r.isTask -> (r.dueLabel() ?: "No due date") + (if (r.done) " · done" else "") +
@@ -1068,6 +1073,7 @@ fun CalendarScreen(
                         }
                     }
                 }
+              }
             },
             // Filled, like Save in the editor: it is the one thing this
             // window is for, and it read as another of the eight text
