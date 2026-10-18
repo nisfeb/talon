@@ -96,11 +96,12 @@ class OrreryKeysTest {
         holdMint = hold
         val page = CoroutineScope(Job())
         page.launch { repo.enable() }
-        withTimeout(5_000) { while (asked.none { it.startsWith("POST") && "/api/clients" in it }) delay(10) }
+        withTimeout(15_000) { while (asked.none { it.startsWith("POST") && "/api/clients" in it }) delay(10) }
         page.cancel()
         hold.complete(Unit)
-        // The switch goes on just after the row is kept: waited for too.
-        withTimeout(5_000) { while (db.orreryAccounts().get("~zod") == null || !repo.enabled.value) delay(20) }
+        // The switch goes on just after the row is kept: waited for too. The
+        // cap is generous: under the full suite's load this took over 5 s.
+        withTimeout(15_000) { while (db.orreryAccounts().get("~zod") == null || !repo.enabled.value) delay(20) }
         assertEquals("k1.secret", db.orreryAccounts().get("~zod")?.token)
         assertTrue(repo.enabled.value)
     }

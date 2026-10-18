@@ -13,7 +13,8 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
 - Merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
 - Pass 2 started 03:30 EDT: six read-only reviewers (UI polish; voice and the assistant; Android services and lifecycle; desktop and iOS leaves; performance and ship cost; pass 1's own commits), launched while pass 1's full suite runs.
-- Next firing: read pass 1's suite result (fix any failure that is not a known flake), then triage pass 2's reports into fix groups.
+- Pass 1's full suite (03:30): 3816 tests, 1 failure, OrreryKeysTest "turning it on finishes though the page that asked is left". It passes alone (8 of 8); it timed out on a 5 s poll under the suite's load, so the poll cap is now 15 s. All four compiles passed.
+- Next firing: record the remaining pass-2 reports (B2, B3, B5, B6), then triage all of pass 2 into fix groups.
 - Left for pass 2 (found while merging): `dm:` and `invite:` keys in IosNotifier's postsLocally (desktop and iOS DM-request and invite clicks only raise the window); A1-10 (the 5 s and 3 s caps cut a slow PUT off; needs an ack-wait option on UrbitChannel.poke); the other test classes' temp-dir cleanup (contained by build/test-tmp now); AndroidRelaySettings not persisting registeredEndpointFor; ingestPosts never notifying (a worker catch-up notifies nothing); the DmChatScreenTest "emoji alone" flake (ChatRowsSnapshot shared across tests); an AppShellTest hang seen once ("Escape in a chat's composer closes the chat", a Compose deadlock in the test).
 
 ## Pass 1
@@ -178,3 +179,25 @@ Fix groups, one owner per file:
 - B4-16 Low, doc: the iOS crash report is not in Documents as two comments claim (`MainViewController.kt:62-68`, `CallPush.swift:491`). Fix: the comments (Kotlin side), or write to Documents.
 - B4-17 Low, DECISION: Linux puts the pier, models, caches and logs under ~/.config (`AppDirs.kt:167-171`). Moving them is a migration.
 - B4-18 Low, doc: CLAUDE.md says macOS notifications use osascript; SystemNotifier says AWT TrayIcon.
+
+### Area B1, UI polish
+
+- B1-1 High bug: Contacts cannot be opened on Android or iOS. The only way in is the chat list's More menu, which is desktop only (`DmListScreen.kt:899`, `:1001-1006`), and the drawer has no Contacts entry (`SectionsDrawer.kt:59-90`). Fix: a fixed Contacts drawer item beside "Edit menu", wired in both shells, not a RailItem (that is the synced rail-order bucket).
+- B1-2 Med-High bug: a narrow desktop window's menu has no Home and no Orrery. App.kt never passes `onOpenHome` (`App.kt:3433-3530`) and the menu has no `RailItem.Actions` case; hiding Orrery from the sidebar loses it, though SidebarSettingsScreen promises "it stays available in the kebab menu". Fix: pass onOpenHome and add an Orrery item gated on orreryOn.
+- B1-3 Med bug: the sign-in form does not scroll (`LoginScreen.kt:182-216`, same in `LoginQrShareScreen.kt:87-110`), so the keyboard or landscape hides Connect and the error line. Fix: verticalScroll on the form column.
+- B1-4 Med bug: the chat list says "No direct messages yet" when the first load failed (`DmListScreen.kt:1503-1508`; bootstrap reads are runCatching and logged, `TlonChatRepo.kt:760-781, 863`). Fix: bootstrap records a failed read; the list shows "Couldn't load your chats" with Try again.
+- B1-5 Med bug: group activity rows (ask, join, kick, role, invite) show `group/~host/name` and do nothing on tap (`TlonChatRepo.kt:5825`, `ActivityParser.kt:39-47`, `ActivityList.kt:190, 298`); the author may read "someone" (wire unverified); note events read "Note create". Fix: group title, tap to the group, labels.
+- B1-6 Med-Low bug: the profile sheet does not scroll (`ContactProfileSheet.kt:89-100`), so a long bio or landscape hides the actions.
+- B1-7 Med-Low bug: the desktop sidebar does not scroll (`DesktopShell.kt:195-216`); a ~614dp-tall window clips Settings. Its badge dot has no semantics.
+- B1-8 Low polish: Contacts' Remove is fire and forget (`TalonApp.kt:2082-2084`, `App.kt:2684-2686`), no progress, silent failure. New angle on A4-15 and M38.
+- B1-9 Low polish: raw exception text at `UrbLinkHost.kt:121`, `AppsSettingsScreen.kt:146` (LatticeInstall; a 502 reads as a refusal), `App.kt:2389`, `SignVerifyDialog.kt:63`.
+- B1-10 Low polish: the member dialog lists role ids, not titles (`GroupAdminScreen.kt:286`).
+- B1-11 Low polish: an iPad is called "this iPhone" in about ten strings.
+- B1-12 Low polish: a comet's full @p shows where shipHandle belongs (LoginScreen, DmListScreen ship menu, SettingsScreen, GroupAdminScreen, GroupInvitesScreen).
+- B1-13 Low polish: keyboard shortcut labels use enum names (`KeyboardShortcuts.kt:106`); use railLabel.
+- B1-14 Low polish: jargon: "%trunk", "the ship's cordon list", "Save metadata", "kebab menu", "talon:// URI", "Re-register (rotate token)", "Diagnose distributor".
+- B1-15 Low polish: an empty bookmarks folder says "a bookmark below" with nothing below (`BookmarksList.kt:156`).
+- B1-16 Low polish: Invites mixes "Reject" and "decline" (`GroupInvitesScreen.kt:166, 201, 277`).
+- B1-17 Low polish: maxLines with no ellipsis at `ActivityList.kt:254, 313`, `BookmarksScreen.kt:261`, `GroupInvitesScreen.kt:257`.
+- B1-18 Low polish: the drawer marks the open section differently in the two shells (`TalonApp.kt:1752`, `App.kt:3617`); "Always on the sidebar" on phones.
+- False positives (reviewer's): the lightbox Close label, admin and invite spinners, MenuBadgeDot, 32dp IconButtons, icons inside text buttons, the dead gatedOff branch, iPhone landscape sidebar, the admin title.
