@@ -74,6 +74,7 @@ class AssistantActionsToolsTest {
     private class Harness(
         val tools: List<Tool>,
         val pokes: MutableList<JsonObject>,
+        val calendar: CalendarRepo? = null,
     ) {
         fun run(name: String, args: JsonObject): String = runBlocking {
             tools.first { it.spec.name == name }.execute(args)
@@ -172,7 +173,7 @@ class AssistantActionsToolsTest {
                 send = send,
                 locked = locked,
             )
-            block(Harness(actionTools(actions), pokes))
+            block(Harness(actionTools(actions), pokes, calendar))
         } finally {
             scope.cancel()
         }
@@ -391,6 +392,9 @@ class AssistantActionsToolsTest {
             val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (moved)"))
             assertEquals("The calendar refused it: $noOccurrence.", out)
             assertEquals(listOf("edit-at"), h.pokes.map { it["action"]!!.jsonPrimitive.content }, "no fallback to add and skip")
+            // Undone with the refusal: the home page's today showed the
+            // refused name until the reading back gave up.
+            assertEquals(listOf("Standup"), h.calendar!!.rows.value.orEmpty().map { it.name })
             refusing = false
             assertEquals("Updated \"Standup (again)\" for that occurrence.", h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (again)")))
         }
