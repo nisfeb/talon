@@ -180,11 +180,11 @@ object Briefing {
     /** How long the opener waits for the calendar read and the mail listing. */
     const val OPENER_WAIT_MS = 5_000L
 
-    /** The day as $ASSISTANT_NAME opens with it ([day]). */
+    /** The day as Archie opens with it ([day]). */
     class Day(val mail: Int?, val mailLate: Boolean, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
 
     /**
-     * What $ASSISTANT_NAME opens with: the unread mail (null where the inbox
+     * What Archie opens with: the unread mail (null where the inbox
      * could not be listed, never zero from a list not read), the chat
      * list's unread, how many of those wait for the owner ([decider]; null
      * where it did not say), the next event today, and the card, today's

@@ -33,7 +33,7 @@ class PuttingToOwnerTest {
         orreryTools(t).first { it.spec.name == "orrery_instruct" }.execute(buildJsonObject { put("text", "tell them"); put("apply", apply) })
 
     @Test
-    fun `approved, each waiting one is answered and the model reads it`() = runTest {
+    fun `approved each waiting one is answered and the model reads it`() = runTest {
         val said = instruct(tap(true, Instructed(reply = "On it.", actions = listOf(action("a1"), action("a2"), action("t1", "approved")))))
         assertEquals(listOf("On it." to listOf("a1", "a2")), asked, "only what waits, with orrery's reply")
         assertEquals(listOf("a1 true", "a2 true"), answered)
@@ -41,7 +41,7 @@ class PuttingToOwnerTest {
     }
 
     @Test
-    fun `dropped, each is dismissed`() = runTest {
+    fun `dropped each is dismissed`() = runTest {
         val said = instruct(tap(false, Instructed(actions = listOf(action("a1")))))
         assertEquals(listOf("Orrery took it." to listOf("a1")), asked, "a blank reply is said as the voice card says it")
         assertEquals(listOf("a1 false"), answered)
