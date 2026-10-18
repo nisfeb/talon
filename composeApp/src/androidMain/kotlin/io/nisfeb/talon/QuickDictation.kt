@@ -1061,7 +1061,7 @@ private class Voice(ctx: Context) {
         })
     }
 
-    /** Say [text] and return once it is said, stopped, or a minute has gone. */
+    /** Say [text] and return once it is said, stopped, or its time ([DictationSpeech.sayBudgetMs]) has gone, which stops it. */
     suspend fun say(text: String) {
         val ok = kotlinx.coroutines.withTimeoutOrNull(3_000) { ready.await() } == true
         if (!ok) return Log.w("Dictation", "no text to speech engine answered; the card shows it only")
@@ -1070,7 +1070,7 @@ private class Voice(ctx: Context) {
         audio?.requestAudioFocus(focus)
         try {
             tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "dictation-${System.nanoTime()}")
-            kotlinx.coroutines.withTimeoutOrNull(60_000) { done.await() }
+            if (kotlinx.coroutines.withTimeoutOrNull(DictationSpeech.sayBudgetMs(text)) { done.await() } == null) tts.stop()
         } finally {
             audio?.abandonAudioFocusRequest(focus)
         }

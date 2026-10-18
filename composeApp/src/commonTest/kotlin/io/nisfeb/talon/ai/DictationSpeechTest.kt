@@ -43,6 +43,15 @@ class DictationSpeechTest {
         assertEquals("", DictationSpeech.spoken("   "))
     }
 
+    // A flat minute cut a long paragraph off, and the mic opened over it.
+    @Test
+    fun `the time to say something grows with its length`() {
+        assertEquals(10_000L, DictationSpeech.sayBudgetMs(""), "ten seconds for the engine to start")
+        val paragraph = DictationSpeech.sayBudgetMs("a".repeat(900))
+        assertTrue(paragraph in 109_000L..111_000L, "about nine characters a second at Archie's rate: $paragraph")
+        assertTrue(DictationSpeech.sayBudgetMs("a".repeat(901)) > paragraph)
+    }
+
     private fun message(to: String, text: String) = CardProposal("message", "Text $to", to = to, text = text)
 
     // One "send" approves all of them: the second message went unread.

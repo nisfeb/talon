@@ -51,6 +51,14 @@ object DictationSpeech {
         }
     }
 
+    /**
+     * How long saying [text] may take before the voice is stopped: about
+     * nine characters a second at Archie's rate, and ten seconds to start.
+     * A flat minute cut a long paragraph off mid-word, and the next one or
+     * the mic came in over it.
+     */
+    fun sayBudgetMs(text: String): Long = 10_000L + (text.length * 100L / ArchieVoice.RATE).toLong()
+
     /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone, and times said as times. */
     fun plain(md: String): String = times(md)
         .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
