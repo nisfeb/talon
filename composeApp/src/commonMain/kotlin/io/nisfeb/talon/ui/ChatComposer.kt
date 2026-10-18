@@ -180,6 +180,9 @@ class ComposerState(initialDraftText: String) {
 
     var uploading by mutableStateOf(false)
 
+    /** An edit on its way to the ship: the composer holds it, words and all, until the ship answers. */
+    var saving by mutableStateOf(false)
+
     /**
      * The post being edited, if any.
      *
@@ -379,9 +382,10 @@ fun ChatComposer(
      *  keyboard would pop up over the conversation; a thread opened by
      *  Reply turns it on regardless, since typing is why it opened. */
     focusOnOpen: Boolean = !hasSoftKeyboard,
-    /** Commit an in-place edit. Default no-op so surfaces that don't
-     *  support editing need not pass one. */
-    onSaveEdit: (EditTarget, String) -> Unit = { _, _ -> },
+    /** Commit an in-place edit, on the repo's scope; throws when it did
+     *  not land. The composer keeps the edit until this returns. Default
+     *  no-op so surfaces that don't support editing need not pass one. */
+    onSaveEdit: suspend (EditTarget, String) -> Unit = { _, _ -> },
     placeholder: String = "Message",
     locationProvider: LocationProvider? = null,
     voiceComposer: (@Composable (
@@ -811,13 +815,22 @@ fun ChatComposer(
             val edit = state.editing
             if (edit != null) {
                 val text = state.draft.text.trim()
-                if (text.isEmpty() || !canSend) return@doSend false
-                state.editing = null
-                state.draft = TextFieldValue(
-                    edit.priorDraftText,
-                    TextRange(edit.priorDraftText.length),
-                )
-                onSaveEdit(edit, text)
+                if (text.isEmpty() || !canSend || state.saving) return@doSend false
+                // The edit stays in the box until the ship has it: ended at
+                // once, a failed edit threw the changed words away.
+                state.saving = true
+                state.sendError = null
+                scope.launch {
+                    io.nisfeb.talon.util.runSuspendCatching { onSaveEdit(edit, text) }
+                        .onSuccess {
+                            if (state.editing == edit) {
+                                state.editing = null
+                                state.draft = TextFieldValue(edit.priorDraftText, TextRange(edit.priorDraftText.length))
+                            }
+                        }
+                        .onFailure { state.failed("edit", it) }
+                    state.saving = false
+                }
                 return@doSend true
             }
             // A staged attachment goes with whatever is written, as one
@@ -981,7 +994,7 @@ fun ChatComposer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Editing message",
+                    if (state.saving) "Saving…" else "Editing message",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
@@ -1292,7 +1305,7 @@ fun ChatComposer(
             // bare-quote "react" gesture) — the button must agree, or on
             // touch, where hardware Enter doesn't exist, a bare quote is
             // unreachable.
-            val sendable = canSend &&
+            val sendable = canSend && !state.saving &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },

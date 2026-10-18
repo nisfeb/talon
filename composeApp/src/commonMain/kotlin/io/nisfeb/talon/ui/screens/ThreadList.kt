@@ -620,17 +620,26 @@ fun ThreadList(
     }
 
     editing?.let { target ->
+        // Open until the ship has the edit, then closed; a failed one stays
+        // open with its words and says why. Closed at once, a failure threw
+        // the changed words away.
+        var saving by remember(target.id) { mutableStateOf(false) }
+        var failure by remember(target.id) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
         EditThreadMessageDialog(
             // Editable text only — a quoted post's cite (and images /
             // link previews) ride along untouched via originalContentJson.
             initial = io.nisfeb.talon.urbit.editableText(target.contentJson),
+            saving = saving,
+            failure = failure,
             onDismiss = { editing = null },
             onSave = { newText ->
-                editing = null
+                saving = true
+                failure = null
                 scope.launch {
-                    runCatching {
-                        // parentId == null on the thread's parent row;
-                        // non-null on the replies. The repo handles both.
+                    // parentId == null on the thread's parent row;
+                    // non-null on the replies. The repo handles both, on
+                    // its own scope, so leaving the thread keeps the write.
+                    io.nisfeb.talon.util.runSuspendCatching {
                         repo.edit(
                             whom = whom,
                             postId = target.id,
@@ -639,9 +648,9 @@ fun ThreadList(
                             parentId = target.parentId,
                             originalContentJson = target.contentJson,
                         )
-                    }.onFailure {
-                        composerState.failed("edit", it)
-                    }
+                    }.onSuccess { if (editing?.id == target.id) editing = null }
+                        .onFailure { failure = io.nisfeb.talon.util.problemOf("Couldn't save the edit", it) }
+                    saving = false
                 }
             },
         )
@@ -657,6 +666,10 @@ fun ThreadList(
 @Composable
 private fun EditThreadMessageDialog(
     initial: String,
+    /** The edit is on its way: Save waits, and says so. */
+    saving: Boolean,
+    /** Why the last save did not land, shown under the words kept for another try. */
+    failure: io.nisfeb.talon.util.Problem?,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
@@ -671,18 +684,21 @@ private fun EditThreadMessageDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit message") },
         text = {
-            OutlinedTextField(
-                value = value,
-                onValueChange = { value = it },
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                )
+                failure?.let { io.nisfeb.talon.ui.ProblemLine(it) }
+            }
         },
         confirmButton = {
             TextButton(
                 onClick = { onSave(value.text.trim()) },
-                enabled = value.text.isNotBlank(),
+                enabled = value.text.isNotBlank() && !saving,
             ) {
-                Text("Save")
+                Text(if (saving) "Saving…" else "Save")
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

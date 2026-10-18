@@ -260,4 +260,38 @@ class ThreadListTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Reported to the group's admins", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(ship.pokesTo("groups").any { "~bus/crew" in it.json.toString() })
     }
+
+    private fun ComposeUiTest.editReply(to: String) {
+        menuOf("first try")
+        onNodeWithText("Edit").performClick()
+        shows("Edit message")
+        onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.performTextReplacement(to)
+        onNodeWithText("Save").performClick()
+    }
+
+    private val ownReply: suspend AppDatabase.() -> Unit = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~zod", "first try", 2_000, parentId = "170141184506"))
+    }
+
+    // The dialog closed as Save was pressed, and a refused edit lost its words.
+    @Test
+    fun `an edit the ship refuses stays open with its words and says why`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
+        prepare = { refuse = { if (it.app == "channels") "nope" else null } }) { _, _ ->
+        editReply("second try")
+        shows("Couldn't save the edit: the ship refused it (nope).")
+        onNodeWithText("Edit message").assertExists()
+        val box = onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+        assertEquals("second try", box)
+    }
+
+    @Test
+    fun `an edit on its way says saving and closes once the ship has it`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
+        prepare = { holdPoke = 1_500 }) { ship, _ ->
+        editReply("second try")
+        shows("Saving…")
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("Edit message").fetchSemanticsNodes().isEmpty() }
+        assertTrue("second try" in ship.pokesTo("channels").single().json.toString())
+    }
 }

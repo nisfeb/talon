@@ -689,6 +689,47 @@ class DmChatScreenTest {
         )
     }
 
+    // ─── an edit, until the ship has it ────────────────────────────
+
+    private val general = "chat/~bus/general"
+
+    private fun ComposeUiTest.editTo(from: String, to: String) {
+        menuOf(from)
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == from }
+        onNode(hasSetTextAction()).performTextReplacement(to)
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+    }
+
+    @Test
+    fun `an edit the ship refuses keeps the edited words and says so`() = chat(
+        whom = general,
+        seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+        prepare = { refuse = { if (it.app == "channels") "nope" else null } },
+    ) { _, _ ->
+        editTo("first try", "second try")
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("edit failed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("second try", draft(), "the changed words are still there to save again")
+        onNodeWithText("Editing message").assertExists()
+    }
+
+    @Test
+    fun `an edit on its way says saving and keeps its words until the ship has it`() = chat(
+        whom = general,
+        seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+        prepare = { holdPoke = 1_500 },
+    ) { ship, _ ->
+        editTo("first try", "second try")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("second try", draft())
+        // A second Enter while it is on its way does not send it twice.
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Editing message").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Saving…").fetchSemanticsNodes().isEmpty() }
+        assertEquals("", draft(), "the box is back to what it held before the edit")
+        Thread.sleep(300)
+        assertEquals(1, ship.pokesTo("channels").size)
+    }
+
     // ─── words as they were written ────────────────────────────────
 
     @Test

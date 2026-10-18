@@ -1305,20 +1305,16 @@ fun DmChatScreen(
             // (mine, channel chat, top-level) so it can only open
             // an edit the action menu would also allow. Null on
             // non-channel chats — %chat DMs ignore edit pokes.
+            // Waited for by the composer, which keeps the edit until it lands;
+            // the write itself is on the repo's scope.
             onSaveEdit = { target, newText ->
-                scope.launch {
-                    runCatching {
-                        repo.edit(
-                            whom = whom,
-                            postId = target.postId,
-                            text = newText,
-                            originalSentMs = target.originalSentMs,
-                            originalContentJson = target.originalContentJson,
-                        )
-                    }.onFailure {
-                        composerState.failed("edit", it)
-                    }
-                }
+                repo.edit(
+                    whom = whom,
+                    postId = target.postId,
+                    text = newText,
+                    originalSentMs = target.originalSentMs,
+                    originalContentJson = target.originalContentJson,
+                )
             },
             onEditLast = if (whom.startsWith("chat/")) {
                 {
