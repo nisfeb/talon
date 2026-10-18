@@ -230,3 +230,25 @@ Fix groups, one owner per file:
 
 - Hold, read in the code: B1-1 (no Contacts path where isDrawerNavigation, since c5fc4f85 on 2026-09-11), B1-2 (no RailItem.Actions case; App.kt passes no onOpenHome), B1-3, B1-6, B1-7 (no verticalScroll in the four), B1-4, B1-5 (title and tap; the author is unverified), B2-1, B2-3, B2-4, B2-5, B2-7, B2-10, B4-1 (run locally: gdbus prints usage for a bare "-1" and exits 1, and "--" fixes it), B4-2.
 - B2-11 moved to decisions: the 11-minute wait is deliberate.
+
+### Area B3, Android services, permissions and lifecycle
+
+- B3-1 Med-High bug (security): the exported MainActivity places a call for any caller's `call_back` extra and answers a ring for any caller's `answer_from` (`MainActivity.kt:293-315`, used at `TalonApp.kt:582, 310`). Lead: holds; MainActivity is exported as the launcher and has no gate. Fix: notification PendingIntents go to a non-exported activity-alias, and the call extras count only through it. No UX change.
+- B3-2 Med, DECISION (security and product): a forged direct share with any EXTRA_SHORTCUT_ID uploads and posts an image or file to that conversation as the owner (`MainActivity.kt:354-356`, `TalonApp.kt:1190-1196`). Options: every direct share goes to the composer; or accept only ids among the published shortcuts.
+- B3-3 Med bug: without push, a ring is never shown when Talon is only in the background, since `Notifications.showIncomingCall` is called from the push receiver alone and `onShowIncomingCallUi() = Unit`. Lead: holds for that case. Fix: post it from TalonApp's callState effect when Incoming and the activity is not started. After a reboot or a swipe there is no call controller at all: DECISION (an app-level controller, or saying calls ring only while Talon is open).
+- B3-4 Low-Med bug: the old repo's second stop() marks the new repo's stream disconnected after any ship switch (`TlonChatRepo.kt:1037-1043` vs `:566`), so CatchUpWorker retries forever without push. Lead: holds. Fix: only a started repo clears the flag.
+- B3-5 Low-Med bug (multi-ship): a ring for a ship that is not active cannot be answered from its notification; the ring intents carry no ship (`Notifications.kt:328-335`). Fix: EXTRA_FOR_SHIP on Answer and Show, switching first. Decline from the other ship is unconfirmed.
+- B3-6 Low-Med bug: with push and mail, the sync service outlives the swiped activity though mail polling stopped with it (`TalonApp.kt:1236-1244`).
+- B3-7 Low bug (battery): LeaveAlarm's 30-minute poll is never cancelled when Orrery goes off (`LeaveAlarm.kt:58-63`).
+- B3-8 Low bug: BootReceiver has no MY_PACKAGE_REPLACED, so an in-app update leaves a phone without push with no stream until opened.
+- B3-9 Low polish: the retired "calls" and "daily-digest" channels are never deleted (`Notifications.kt:47, 176`).
+- B3-10 Low, DECISION: loops use inexact alarms; USE_EXACT_ALARM is already declared for the leave alarm. Using it for loops is a permission-use choice.
+- B3-11 Low bug (multi-ship): ShipPushes.ensure runs only for the ship active at process start (`TalonApplication.kt:314`).
+- B3-12 Low, DECISION (UX): tapping a missed-call notification's body dials at once. Recommendation: the body opens the DM, Call back stays an action.
+- B3-13 Low bug: TalonApplication's appScope has no exception handler, so one throw kills the app (`TalonApplication.kt:125`).
+- B3-14 Low bug (multi-ship): pinned conversation shortcuts carry no ship (`ShortcutsPublisher.kt:84-89`).
+- B3-15 Low (battery): CatchUpWorker is scheduled every 15 minutes even with push (`TalonApplication.kt:303`).
+- B3-16 Low, DECISION: without push, a lapsed login leaves "Listening for new messages" up with nothing telling the owner. Option: a "Sign in again" notification.
+- B3-17 Low (ship cost), HELD: background repo starts from loops and CatchUpWorker are never stopped. Stopping them is unsafe while the activity may share the repo; needs a design.
+- False positives (reviewer's): PendingIntent request codes, request code 0 sharing, the camera FGS type, the boot start on Android 15, TripService, LocationWatch and HealthWatch, the clock widget, catch-up with no channel, the onScreen check, the sticky restart, DictationService's starts, LoopWorker below 12.
+- Needs a device (reviewer's): the 45 s ring stop under the freezer on 16.1+; background writes in a cached process; the in-app ring tone in the background.
