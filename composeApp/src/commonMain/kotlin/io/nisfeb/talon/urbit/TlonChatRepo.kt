@@ -420,10 +420,17 @@ class TlonChatRepo(
             runSessionLoop(session)
         }
         // Rows stored before searchText existed get it, a batch at a
-        // time; until then search reads their JSON as it used to.
+        // time; until then search reads their JSON as it used to. Once, rows
+        // that may hold a link or a mention have theirs again, with the
+        // addresses and @p it was missing.
         scope.launch {
-            runCatching { while (db.messages().fillSearchText(500) > 0) yield() }
-                .onFailure { Log.w(TAG, "search text fill failed", it) }
+            runCatching {
+                if (db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK) == null) {
+                    db.messages().forgetLinkSearchText()
+                    db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, nowMs()))
+                }
+                while (db.messages().fillSearchText(500) > 0) yield()
+            }.onFailure { Log.w(TAG, "search text fill failed", it) }
         }
     }
 
