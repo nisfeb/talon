@@ -49,7 +49,11 @@ class CatchUpWorker(
         if (app.activeShipFlow.value == null) return Result.success()
         // A process this worker woke has a repo nobody started, and the
         // wait below then never ended: retried every time, it caught up
-        // nothing. Idempotent where the screen or the service started it.
+        // nothing. Started here only where no push reaches the phone,
+        // the backstop this is for: with push, a stream every fifteen
+        // minutes is a channel and a bootstrap for nothing. Idempotent
+        // where the screen or the service started it.
+        if (!app.notificationHealth.sseConnected.value && !TalonSyncService.streamNeeded(app)) return Result.success()
         runCatching { app.repo.start(app.session) }.onFailure { Log.w(TAG, "could not start the stream: ${it.message}") }
 
         // Wait briefly for the channel + sync state to come up

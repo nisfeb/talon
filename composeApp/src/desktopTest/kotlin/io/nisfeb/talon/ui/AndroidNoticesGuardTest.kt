@@ -85,6 +85,7 @@ class AndroidNoticesGuardTest {
     fun `the catch-up worker starts the stream and the last sign-out stops the service`() {
         val worker = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/CatchUpWorker.kt")
         assertTrue("app.repo.start(app.session)" in worker)
+        assertTrue("!TalonSyncService.streamNeeded(app)) return Result.success()" in worker, "with push it starts no stream")
         assertTrue("loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }" in talonApp)
     }
 
