@@ -96,6 +96,11 @@ class Wire12Test {
     fun a_late_nag_is_known_by_its_action_and_as_a_nag() {
         val tag = "orrery-overdue-1791915693-e8f6ea94"
         assertEquals("1791915693-e8f6ea94", io.nisfeb.talon.orrery.actionIdOfTag(tag))
+        // The same nag through the ship's %trunk (its +trunk-notice): the tag whole.
+        assertEquals(
+            ShipPushMessage("Late: Check in for DL 2627", "Due 19:05, 2 h 10 late.", tag),
+            noticeOf(Json.parseToJsonElement("""{"event":"notice","patp":"~zod","tag":"$tag","title":"Late: Check in for DL 2627","body":"Due 19:05, 2 h 10 late.","open":null}""").jsonObject),
+        )
         assertTrue(io.nisfeb.talon.orrery.isOverdueTag(tag))
         listOf("orrery-1791915693-e8f6ea94", "orrery-overdue-", "orrery-late-x", "overdue-x", null).forEach {
             assertFalse(io.nisfeb.talon.orrery.isOverdueTag(it), "$it")
