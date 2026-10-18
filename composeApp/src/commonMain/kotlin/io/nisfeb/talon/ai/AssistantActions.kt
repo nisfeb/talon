@@ -757,7 +757,10 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 ev.name, eventWhenLine(ev.l, ev.r, ev.all, zone), ev.location, ev.note, ev.tags, ev.l, ev.r,
             )
             runCatching { send(whom, card) }.fold(
-                { "Posted the event to ${a.contacts().conversationLabel(whom)} as a card." },
+                {
+                    val label = a.contacts().conversationLabel(whom)
+                    if (a.db.messages().queuedIn(whom) > 0) ToolCatalog.queued("the event for $label") else "Posted the event to $label as a card."
+                },
                 { "Error: the message did not go: ${it.message}" },
             )
         })

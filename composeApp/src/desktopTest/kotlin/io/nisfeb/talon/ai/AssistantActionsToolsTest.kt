@@ -468,6 +468,15 @@ class AssistantActionsToolsTest {
         assertTrue("Dentist" in posted.single().second)
     }
 
+    // A card behind a slow ship waits in the queue: "Posted" was said of it.
+    @Test
+    fun `a card that waits for the ship is said to be queued`() = withHarness(send = { w, _ ->
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity(w, "local_1", "~zod", 1_000, "[]", "/chat", status = "queued"))
+    }) { h ->
+        val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))
+        assertEquals("Queued the event for ~bus: your ship is slow; it goes when it answers.", out)
+    }
+
     @Test
     fun `a card that does not go says so`() = withHarness(send = { _, _ -> error("the ship is away") }) { h ->
         val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))

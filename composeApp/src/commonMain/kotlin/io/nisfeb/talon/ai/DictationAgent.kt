@@ -193,7 +193,8 @@ class DictationAgent(
                 "delete_event" -> result.takeIf { it.startsWith("Deleted \"") }
                 "complete_task" -> result.takeIf { it.startsWith("Done: ") || it.startsWith("Reopened: ") }
                 "send_mail" -> result.takeIf { it.startsWith("Mailed ") }
-                "send_message" -> result.takeIf { it == "Sent." }?.let { "Sent to ${arg("whom") ?: "them"}." }
+                // By the name the chat list gives, or queued for a slow ship.
+                "send_message" -> result.takeIf { it.startsWith("Sent to ") || it.startsWith("Queued for ") }
                 "orrery_file_text" -> result.takeIf { it.startsWith("Handed to orrery to read") }
                     ?.let { "Filed in orrery: " + (arg("title") ?: arg("text")?.take(80) ?: "your note") + "." }
                 else -> null
