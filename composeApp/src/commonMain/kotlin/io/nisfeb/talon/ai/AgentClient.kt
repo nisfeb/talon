@@ -160,7 +160,7 @@ class AgentClient(
         val host = Url(url).host
         if (!resp.status.isSuccess()) {
             Log.w(TAG, "$model: ${resp.status.value} after ${ms}ms, ${payload.length} chars sent")
-            error(extractApiError(host, resp.status.value, body))
+            throw apiFailure(host, resp.status.value, body)
         }
         val obj = runCatching { JSON.parseToJsonElement(body).jsonObject }
             .getOrElse { error("$host bad JSON: ${body.take(300)}") }
@@ -397,6 +397,16 @@ internal fun extractApiError(host: String, code: Int, body: String): String {
         }.trim().ifBlank { null }
     }.getOrNull()
     return "$host $code: ${(parsed ?: body.take(300)).take(600)}"
+}
+
+/**
+ * A refusal as AiClient throws one: its status kept, so Top up and the
+ * calm busy and failing lines reach the assistant, dictation, Archie and
+ * loops; a 402 as the empty balance. A plain error lost the status.
+ */
+internal fun apiFailure(host: String, code: Int, body: String): ModelHttpError {
+    val line = extractApiError(host, code, body)
+    return if (code == 402) ModelHttpError(402, outOfCredit(host, line.removePrefix("$host $code: "))) else ModelHttpError(code, line)
 }
 
 /** `error.metadata.raw` is either the upstream provider's error object, or

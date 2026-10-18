@@ -120,7 +120,7 @@ class DictationAgentTest {
             "Added \"Dentist\" on 2026-10-20 at 09:00 to the Home calendar.\nSent to ~zod.",
             DictationAgent.plainly(listOf(
                 r(call("create_event"), "Added \"Dentist\" on 2026-10-20 at 09:00 to the Home calendar. It is synced there: it goes out on the next sync."),
-                r(call("send_message", "whom" to "~zod"), "Sent."),
+                r(call("send_message", "whom" to "~zod"), "Sent to ~zod."),
             )),
         )
         assertEquals("Done: Staples return.", DictationAgent.plainly(listOf(r(call("complete_task"), "Done: Staples return."))))
@@ -160,7 +160,9 @@ class DictationAgentTest {
         assertEquals("Deleted \"Dentist\".", DictationAgent.plainly(listOf(r("delete_event", "Deleted \"Dentist\"."))))
         assertEquals("Reopened: Staples return.", DictationAgent.plainly(listOf(r("complete_task", "Reopened: Staples return."))))
         assertEquals("Mailed ~zod.", DictationAgent.plainly(listOf(r("send_mail", "Mailed ~zod."))))
-        assertEquals("Sent to them.", DictationAgent.plainly(listOf(r("send_message", "Sent."))))
+        assertEquals("Sent to Andrea.", DictationAgent.plainly(listOf(r("send_message", "Sent to Andrea.", "whom" to "~bus"))), "by name, not the id")
+        val queued = ToolCatalog.queued("for Andrea")
+        assertEquals("Queued for Andrea: your ship is slow; it goes when it answers.", DictationAgent.plainly(listOf(r("send_message", queued))), "queued is not sent")
         // Each refused in its own words: back to the model.
         listOf("create_task", "update_event", "delete_event", "complete_task", "send_mail", "send_message").forEach {
             assertNull(DictationAgent.plainly(listOf(r(it, "The calendar did not take it."))), it)

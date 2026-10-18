@@ -31,15 +31,36 @@ object DictationSpeech {
         return out.toString().ifEmpty { plain.take(MAX_CHARS).substringBeforeLast(' ') + "…" }.take(MAX_CHARS + 40)
     }
 
-    /** What waits, asked aloud, ending in what to say back. */
-    fun prompt(reply: String, sending: Boolean, to: String?, text: String?): String = when {
-        sending && to != null && text != null -> "Send to ${if (to == "You") "you" else to}: ${plain(text).trimEnd('.', '!', '?')}? Say send, or cancel."
-        sending -> "${spoken(reply)} Say send, or cancel."
-        else -> "${spoken(reply)} Say yes, or cancel."
+    /**
+     * What waits, asked aloud, ending in what to say back. One answer
+     * approves all of [waiting], so with more than one each is read out:
+     * only the first message was, and "send" sent the rest unheard.
+     */
+    fun prompt(reply: String, sending: Boolean, waiting: List<CardProposal>): String {
+        val end = if (sending) "Say send, or cancel." else "Say yes, or cancel."
+        fun said(p: CardProposal) = if (p.kind == "message" && p.to != null && p.text != null) {
+            "Send to ${if (p.to == "You") "you" else p.to}: ${plain(p.text).trimEnd('.', '!', '?')}"
+        } else {
+            plain(p.title).trimEnd('.', '!', '?')
+        }
+        val one = waiting.singleOrNull()
+        return when {
+            waiting.size > 1 -> "${waiting.size} things wait. " + waiting.joinToString(" ") { said(it) + "." } + " $end"
+            sending && one?.kind == "message" && one.to != null && one.text != null -> "${said(one)}? $end"
+            else -> "${spoken(reply)} $end"
+        }
     }
 
+    /**
+     * How long saying [text] may take before the voice is stopped: about
+     * nine characters a second at Archie's rate, and ten seconds to start.
+     * A flat minute cut a long paragraph off mid-word, and the next one or
+     * the mic came in over it.
+     */
+    fun sayBudgetMs(text: String): Long = 10_000L + (text.length * 100L / ArchieVoice.RATE).toLong()
+
     /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone, and times said as times. */
-    fun plain(md: String): String = times(md)
+    fun plain(md: String): String = times(dates(md))
         .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
         .replace(Regex("""(?i)\b(?:https?://|urb://|talon://|www\.)\S*[^\s.,;:!?)]"""), "")
         .replace(Regex("""(?m)^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+"""), "")
@@ -48,6 +69,18 @@ object DictationSpeech {
         .replace(Regex("""\s+"""), " ")
         .replace(Regex("""\s+([.,;:!?])"""), "$1")
         .trim()
+
+    private val ISO_DAY = Regex("""\b(\d{4})-(\d{2})-(\d{2})\b""")
+
+    /**
+     * A tool's dates as they are said: "2026-10-20" is "Tuesday, October
+     * 20". The confirmations read them digit by digit. Not a date, left.
+     */
+    fun dates(text: String): String = ISO_DAY.replace(text) { m ->
+        val d = runCatching { kotlinx.datetime.LocalDate.parse(m.value) }.getOrNull() ?: return@replace m.value
+        fun named(e: Enum<*>) = e.name.lowercase().replaceFirstChar { it.uppercase() }
+        "${named(d.dayOfWeek)}, ${named(d.month)} ${d.day}"
+    }
 
     // A twelve-hour time with its AM or PM, or a twenty-four-hour one
     // with two hour digits. A bare "3:16" may be a verse or a score.

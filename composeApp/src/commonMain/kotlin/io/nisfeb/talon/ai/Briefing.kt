@@ -40,14 +40,15 @@ object Briefing {
     /**
      * The numbers, said before any model answers. [mail] null where the
      * inbox could not be listed: never "no new mail" from a list not read.
-     * [questions] null where the decision model did not say.
+     * [questions] null where the decision model did not say. [mailLate]
+     * where there is mail that has not answered yet: said, not left out.
      */
-    fun countsLine(mail: Int?, chats: Int?, questions: Int?): String {
+    fun countsLine(mail: Int?, chats: Int?, questions: Int?, mailLate: Boolean = false): String {
         val m = mail?.takeIf { it > 0 }?.let { if (it == 1) "1 new email" else "$it new emails" }
         val q = questions?.takeIf { it > 0 && chats != null && chats > 0 }?.coerceAtMost(chats ?: 0)
             ?.let { if (it == 1) ", 1 of them a question for you" else ", $it of them questions for you" }.orEmpty()
         val c = chats?.takeIf { it > 0 }?.let { (if (it == 1) "1 chat message" else "$it chat messages") + q }
-        return when {
+        val said = when {
             m != null && c != null -> "You have $m and $c."
             m != null -> "You have $m" + if (chats == 0) ", and no new messages." else "."
             c != null -> "You have $c" + if (mail == 0) ", and no new mail." else "."
@@ -56,7 +57,10 @@ object Briefing {
             mail == 0 -> "No new mail."
             else -> ""
         }
+        return if (mailLate && mail == null) "$said $MAIL_LATE".trim() else said
     }
+
+    const val MAIL_LATE = "Your mail has not answered yet."
 
     /** One unread message for the decision model: who, where, and what they said. */
     data class Said(val from: String, val where: String, val text: String)

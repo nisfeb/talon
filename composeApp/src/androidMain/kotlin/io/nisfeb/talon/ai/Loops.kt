@@ -91,7 +91,7 @@ class Loops(
                     while (!sync.canCoordinate()) kotlinx.coroutines.delay(500)
                 }
             }
-            withTimeoutOrNull(RUN_BUDGET_MS) { withRunner { it.runDue() } }
+            withTimeoutOrNull(FIRE_BUDGET_MS) { withRunner { it.runDue(perLoopMs = RUN_BUDGET_MS) } }
         } finally {
             runCatching { rearm() }
         }
@@ -331,7 +331,7 @@ class Loops(
         }
 
         /** The day as Archie opens with it ([day]). */
-        inner class Day(val mail: Int?, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
+        inner class Day(val mail: Int?, val mailLate: Boolean, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
 
         private fun zone() = io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value)
 
@@ -353,17 +353,20 @@ class Loops(
                 else runCatching { Briefing.questions(decider, owner, Briefing.unreadSaid(db, owner, io.nisfeb.talon.urbit.StoryCache::textFor)) }.getOrNull()
             }
             val chats = runCatching { Briefing.chatUnread(db) }.getOrNull()
-            read.await()
+            // Capped: a slow calendar or mail held the opener, with nothing said.
+            withTimeoutOrNull(OPENER_WAIT_MS) { read.await() }
             val zone = zone()
             val now = System.currentTimeMillis()
             val today = today()
             val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
             val rows = calendar?.rows?.value.orEmpty()
             val next = rows.filter { !it.isTask && !it.all && it.l > now && kotlin.time.Instant.fromEpochMilliseconds(it.l).toLocalDateTime(zone).date == today }.minByOrNull { it.l }
-            val unreadMail = inbox.await()?.threads?.filter { it.unread }
+            val unreadMail = withTimeoutOrNull(OPENER_WAIT_MS) { inbox.await() }?.threads?.filter { it.unread }
+            val mailLate = mail != null && unreadMail == null
             val known = contacts.await()
             Day(
                 mail = unreadMail?.size,
+                mailLate = mailLate,
                 chats = chats,
                 questions = withTimeoutOrNull(Briefing.QUESTIONS_WAIT_MS) { questions.await() },
                 firstEvent = next?.let { "${it.name.ifBlank { "an event" }} at ${DictationCards.clock(it.l, zone, twentyFour)}, ${Briefing.soon(it.l - now)}" },
@@ -588,10 +591,15 @@ class Loops(
         // schedule (LoopRunner stamps lastRunAt up front), so the value is
         // a safety ceiling, not a correctness knob.
         private val RUN_BUDGET_MS = TimeUnit.SECONDS.toMillis(120)
+        // Every loop due in one fire, each with its own budget above, under
+        // WorkManager's ten minutes for a worker, with the connect wait.
+        private val FIRE_BUDGET_MS = TimeUnit.MINUTES.toMillis(8)
         private val WAKE_LOCK_MS = TimeUnit.SECONDS.toMillis(150)
         // Bounded wait for the %settings channel on a cold headless fire
         // with a write loop due — long enough for an SSE connect on mobile
         // data, short enough to leave the run budget intact.
         private val CONNECT_WAIT_MS = TimeUnit.SECONDS.toMillis(15)
+        // How long Archie's opener waits for the calendar read and the mail listing.
+        private const val OPENER_WAIT_MS = 5_000L
     }
 }

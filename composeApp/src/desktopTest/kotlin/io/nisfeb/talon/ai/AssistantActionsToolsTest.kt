@@ -400,6 +400,21 @@ class AssistantActionsToolsTest {
         }
     }
 
+    // The tick was said "Done" when the calendar took it and then refused.
+    @Test
+    fun `a tick the calendar refuses after taking it is said`() {
+        var refusing = true
+        withHarness(
+            events = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"done":false}]""",
+            refuseLater = { b -> "the task is not there".takeIf { refusing && b["id"]?.jsonPrimitive?.content == "t1" } },
+        ) { h ->
+            assertEquals("The calendar refused it: the task is not there.", h.run("complete_task", argsOf("task" to "milk")))
+            assertEquals(listOf("""{"action":"done-event","id":"t1","done":true}"""), h.pokes.map { it.toString() }, "one tick, not retried")
+            refusing = false
+            assertEquals("Done: Buy milk.", h.run("complete_task", argsOf("task" to "t1")))
+        }
+    }
+
     // Taken is not kept: skipping on the add's ack alone lost the
     // occurrence whenever the calendar then refused the add.
     @Test
@@ -466,6 +481,15 @@ class AssistantActionsToolsTest {
     ) { h ->
         assertTrue(h.run("send_event", argsOf("whom" to "~bus", "event" to "e1")).startsWith("Posted"))
         assertTrue("Dentist" in posted.single().second)
+    }
+
+    // A card behind a slow ship waits in the queue: "Posted" was said of it.
+    @Test
+    fun `a card that waits for the ship is said to be queued`() = withHarness(send = { w, _ ->
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity(w, "local_1", "~zod", 1_000, "[]", "/chat", status = "queued"))
+    }) { h ->
+        val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))
+        assertEquals("Queued the event for ~bus: your ship is slow; it goes when it answers.", out)
     }
 
     @Test

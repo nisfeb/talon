@@ -157,7 +157,8 @@ class AssistantScreenTest {
     fun `a model that fails is said so, not answered for`() = assistant {
         status = 503
         ask("anything?")
-        waitUntil(timeoutMillis = 10_000) { shows("down for maintenance") }
+        // A failing provider in calm words (B2-3); its own line is in the details.
+        waitUntil(timeoutMillis = 10_000) { shows("the model's provider is having trouble") }
         assertTrue(!shows("Tuesday, at the library."))
     }
 
@@ -220,6 +221,17 @@ class AssistantScreenTest {
         waitUntil(timeoutMillis = 10_000) { shows("All right, I won't post it.") }
         assertTrue(shows("declined send_event"))
         assertTrue(ship.pokesTo("chat").isEmpty(), "nothing was posted")
+    }
+
+    // The card named the recipient by nickname only.
+    @Test
+    fun `the card names whom it goes to by name and ship`() = assistant { db ->
+        runBlocking { db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null)) }
+        toolCall = postEvent
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        assertTrue(shows("whom: Bus (~bus)"), "name and ship")
+        onNodeWithText("Deny").performClick()
     }
 
     @Test

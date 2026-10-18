@@ -9,6 +9,7 @@ import io.nisfeb.talon.util.formatFullLocal
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.TimeZone
 
 /**
@@ -81,7 +82,7 @@ class LoopRunner(
                 withContext(NonCancellable) { runCatching { record(loop, ts, ok = false, output = CUT_SHORT) } }
                 throw it
             }
-            "Error: ${it.message ?: it::class.simpleName}"
+            modelProblem("Error", it).line
         }
         record(loop, ts, outcome.isSuccess, output)
     }
@@ -94,8 +95,10 @@ class LoopRunner(
 
     /** Run every enabled loop that's due. The alarm fires one shared
      *  wake-up; this batches whatever has come due since. Skips entirely
-     *  with no AI key set, so a keyless device records no error noise. */
-    suspend fun runDue() {
+     *  with no AI key set, so a keyless device records no error noise.
+     *  [perLoopMs] is each loop's own time: one budget for the whole fire
+     *  left the loops after a slow one none, each cut short unrun. */
+    suspend fun runDue(perLoopMs: Long? = null) {
         if (!aiConfig().loopsCanRun()) return
         val t = now()
         val zone = TimeZone.currentSystemDefault()
@@ -125,7 +128,7 @@ class LoopRunner(
                 loops.markRan(loop.id, t)
                 continue
             }
-            runCatching { runLoop(loop) }
+            runCatching { if (perLoopMs == null) runLoop(loop) else withTimeoutOrNull(perLoopMs) { runLoop(loop) } }
                 .onFailure { if (it is CancellationException) throw it }
         }
     }

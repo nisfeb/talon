@@ -442,7 +442,7 @@ class DictationService : Service() {
                     val day = prep.day(io.nisfeb.talon.ai.CalendarQuestion.decider(app.ktorHttp, cfg, Briefing.QUESTIONS_WAIT_MS))
                     Log.i(TAG, "the day in ${System.currentTimeMillis() - t0} ms: mail ${day.mail}, chats ${day.chats}, questions ${day.questions}")
                     val card = day.card.takeUnless { it.isEmpty }
-                    val counts = Briefing.countsLine(day.mail, day.chats, day.questions)
+                    val counts = Briefing.countsLine(day.mail, day.chats, day.questions, day.mailLate)
                     // Written while the counts are said, and said after them:
                     // one voice, so the second would cut the first off.
                     val rest = async { talk.opener(counts, Briefing.openerDigest(prep.now(), day.firstEvent, prep.brief(orrery))) }
@@ -466,14 +466,15 @@ class DictationService : Service() {
                         }
                         missed = 0
                         QuickDictation.show(QuickDictation.Stage.Working("Thinking…"))
+                        // A turn that stops after a write says so, not "say it again" ([VoiceConversation.failed]).
                         val next = try {
                             withTimeoutOrNull(RUN_BUDGET_MS) { talk.next(words) }
-                                ?: io.nisfeb.talon.ai.VoiceConversation.Next.Say("That took too long. Say it again?")
+                                ?: talk.failed(words, "That took too long", "That took too long. Say it again?")
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Throwable) {
                             Log.w(TAG, "a turn failed", e)
-                            io.nisfeb.talon.ai.VoiceConversation.Next.Say("${DictationRun.why(e)}. Say it again, or close me.")
+                            DictationRun.why(e).let { talk.failed(words, it, "$it. Say it again, or close me.") }
                         }
                         // Closed while it thought: kept, and not said to a card that is gone.
                         if (QuickDictation.hangUp) {
@@ -701,8 +702,7 @@ class DictationService : Service() {
             QuickDictation.shown.first { !it }
             askInShade(ask, waiting.map { it.id })
         }
-        val message = ask.proposals.firstOrNull { it.kind == "message" }
-        val asked = DictationSpeech.prompt(reply, ask.sending, message?.to, message?.text)
+        val asked = DictationSpeech.prompt(reply, ask.sending, ask.proposals)
         // Asked aloud first, and only then listened for: not to hear itself.
         val hearing = launch(Dispatchers.IO) {
             say(asked)
@@ -1062,7 +1062,7 @@ private class Voice(ctx: Context) {
         })
     }
 
-    /** Say [text] and return once it is said, stopped, or a minute has gone. */
+    /** Say [text] and return once it is said, stopped, or its time ([DictationSpeech.sayBudgetMs]) has gone, which stops it. */
     suspend fun say(text: String) {
         val ok = kotlinx.coroutines.withTimeoutOrNull(3_000) { ready.await() } == true
         if (!ok) return Log.w("Dictation", "no text to speech engine answered; the card shows it only")
@@ -1071,7 +1071,7 @@ private class Voice(ctx: Context) {
         audio?.requestAudioFocus(focus)
         try {
             tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "dictation-${System.nanoTime()}")
-            kotlinx.coroutines.withTimeoutOrNull(60_000) { done.await() }
+            if (kotlinx.coroutines.withTimeoutOrNull(DictationSpeech.sayBudgetMs(text)) { done.await() } == null) tts.stop()
         } finally {
             audio?.abandonAudioFocusRequest(focus)
         }
