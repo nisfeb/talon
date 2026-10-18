@@ -86,7 +86,7 @@ class AndroidNoticesGuardTest {
         val worker = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/CatchUpWorker.kt")
         assertTrue("app.repo.start(app.session)" in worker)
         assertTrue("!TalonSyncService.streamNeeded(app)) return Result.success()" in worker, "with push it starts no stream")
-        assertTrue("loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }" in talonApp)
+        assertTrue("loggedInShip ?: run {\n            TalonSyncService.stop(context)" in talonApp)
     }
 
     // A3-3: a link or notice opened from a profile or an image landed

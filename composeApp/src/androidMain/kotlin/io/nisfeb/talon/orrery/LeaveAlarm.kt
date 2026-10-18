@@ -62,6 +62,12 @@ object LeaveAlarm {
         )
     }
 
+    /** Orrery off: no poll, and no alarm left to wake the phone. */
+    fun stop(ctx: Context) {
+        WorkManager.getInstance(ctx).cancelUniqueWork(WORK_POLL)
+        clear(ctx)
+    }
+
     /** Read the plan now, after a move: where the owner is changes when to leave. */
     fun refresh(ctx: Context) {
         WorkManager.getInstance(ctx).enqueueUniqueWork(

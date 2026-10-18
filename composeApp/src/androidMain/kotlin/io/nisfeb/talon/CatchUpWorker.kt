@@ -104,6 +104,15 @@ class CatchUpWorker(
             )
         }
 
+        /**
+         * Scheduled only while no push reaches the phone for the active
+         * ship ([TalonSyncService.streamNeeded]). With push, each run woke
+         * the process every fifteen minutes and returned at once.
+         */
+        fun follow(app: TalonApplication) {
+            if (TalonSyncService.streamNeeded(app)) schedule(app) else cancel(app)
+        }
+
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_NAME)
         }

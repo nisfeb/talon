@@ -279,9 +279,24 @@ fun TalonApp(
     // nothing left to say.
     if (callController != null) {
         val callState by callController.state.collectAsState()
+        val ringLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         androidx.compose.runtime.LaunchedEffect(callState) {
-            if (callState !is io.nisfeb.talon.call.CallUiState.Incoming) {
+            val ring = callState as? io.nisfeb.talon.call.CallUiState.Incoming
+            if (ring == null) {
                 io.nisfeb.talon.Notifications.cancelIncomingCall(app)
+                return@LaunchedEffect
+            }
+            // Talon behind with no push: the ring came over the stream, and
+            // only the push posted its notification, so nothing showed it.
+            // Posted once Talon is not in front; a ring the push already
+            // posted is left (one id, one call).
+            ringLifecycle.currentStateFlow.first { !it.isAtLeast(Lifecycle.State.STARTED) }
+            val id = callController.currentCallId ?: return@LaunchedEffect
+            if (io.nisfeb.talon.Notifications.shownCall != id) {
+                io.nisfeb.talon.Notifications.showIncomingCall(
+                    app, ring.peer, id, io.nisfeb.talon.ui.LastContactMap.value.displayName(ring.peer),
+                    forShip = loggedInShip,
+                )
             }
         }
 
@@ -293,7 +308,9 @@ fun TalonApp(
         // arrived over SSE yet, so wait for it rather than firing once
         // and missing.
         if (initialAnswerFrom != null) {
-            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom, initialAnswerCallId) {
+            // Keyed on the controller too: a ring for another ship switches
+            // first (MainActivity), and the wait must be on that ship's.
+            androidx.compose.runtime.LaunchedEffect(callController, initialAnswerFrom, initialAnswerCallId) {
                 // Matched to the ring timeout rather than picked: a
                 // cold start has to open the channel and run its
                 // scries before the ring can land, and giving up
@@ -452,6 +469,12 @@ fun TalonApp(
     LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate == true) {
         if (orreryGate == true && mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
+    }
+    // The leave plan's poll follows the switch: on, it reads; off, it stops
+    // waking the phone, here or from another device.
+    LaunchedEffect(orreryGate == true) {
+        if (orreryGate == true) io.nisfeb.talon.orrery.LeaveAlarm.schedule(app)
+        else io.nisfeb.talon.orrery.LeaveAlarm.stop(app)
     }
     LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
         val url = mailShipUrl ?: return@LaunchedEffect
@@ -1217,7 +1240,11 @@ fun TalonApp(
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         // No ship left signed in: nothing to keep the stream for.
-        val ship = loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }
+        val ship = loggedInShip ?: run {
+            TalonSyncService.stop(context)
+            io.nisfeb.talon.CatchUpWorker.cancel(context)
+            return@LaunchedEffect
+        }
         kotlinx.coroutines.flow.merge(
             kotlinx.coroutines.flow.flowOf(Unit),
             app.relaySettings.changes,
@@ -1247,7 +1274,15 @@ fun TalonApp(
             } else {
                 TalonSyncService.stop(context)
             }
+            // The backstop worker is for the stream alone, not for mail.
+            runCatching { io.nisfeb.talon.CatchUpWorker.follow(app) }
         }
+    }
+    // Mail polls only while this screen lives (mailRepo, on its scope).
+    // Gone, a service kept for mail alone kept the process for nothing:
+    // decided again without mail, only the stream may keep it.
+    DisposableEffect(Unit) {
+        onDispose { if (!TalonSyncService.streamNeeded(app)) TalonSyncService.stop(context) }
     }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {

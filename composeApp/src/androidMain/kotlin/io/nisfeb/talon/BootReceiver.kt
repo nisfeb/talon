@@ -19,9 +19,9 @@ import kotlinx.coroutines.launch
  * freshly-booted process can be reclaimed before the alarm is actually
  * set, defeating the whole point of this receiver.
  *
- * On boot it also starts [TalonSyncService] where no push reaches this
- * phone ([TalonSyncService.startIfNeeded]): until Talon is opened again,
- * nothing else would hear the ship.
+ * On boot, and after an update, it also starts [TalonSyncService]
+ * where no push reaches this phone ([TalonSyncService.startIfNeeded]):
+ * until Talon is opened again, nothing else would hear the ship.
  *
  * See spec §Error handling: "Reboot → BootReceiver re-arms."
  *
@@ -34,10 +34,13 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
+            // An update ends the process as a reboot does: a phone with no
+            // push heard nothing until Talon was opened again.
+            Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
                 val app = context.applicationContext as TalonApplication
-                // A start from boot is one Android allows from the background.
-                if (intent.action == Intent.ACTION_BOOT_COMPLETED) TalonSyncService.startIfNeeded(app)
+                // A start from boot or an update is one Android allows from the background.
+                if (intent.action != Intent.ACTION_TIMEZONE_CHANGED) TalonSyncService.startIfNeeded(app)
                 val pending = goAsync()
                 try {
                     val wakeLock = app.loops.acquireWakeLock("loop-boot-rearm")
