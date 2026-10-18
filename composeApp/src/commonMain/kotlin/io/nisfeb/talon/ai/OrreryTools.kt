@@ -637,9 +637,11 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             .filter { it["attr"].asText() == attr && it["status"].asText() != "retracted" }
         val held = shownOf(body["attrs"] as? JsonObject, attr)
         val list = held is JsonArray
-        // A list's other values are not this change's: adding a person to an
+        // Only what an event carries: the calendar also writes a vanished
+        // event's status and the owner's zone, which are no event's. And a
+        // list's other values are not this change's: adding a person to an
         // event's people is no change to the ones the calendar named.
-        rows.firstOrNull { it.sourceKind() == "calendar" && (!list || it["value"] == given) }?.let { cal ->
+        if (attr in CALENDAR_TIMES || attr in CALENDAR_FIELDS) rows.firstOrNull { it.sourceKind() == "calendar" && (!list || it["value"] == given) }?.let { cal ->
             val event = (cal["source"] as JsonObject)["id"].asText().orEmpty().substringAfter('/')
             if (attr in CALENDAR_TIMES) return@Tool "$subject's $attr is the calendar's, from its event $event. Change the event with update_event (list_events finds it): orrery takes the new time from the calendar itself. Nothing was changed in orrery."
             if (args.str("calendar") != "true") return@Tool "$subject's $attr came from the calendar's event $event. Change the event with update_event first, so the calendar and orrery agree, then call this again with calendar true: orrery does not read a one-off event's new place or people again. Nothing was changed."
@@ -1072,6 +1074,9 @@ internal const val LEAVE_BY_SHIPS = "leave-by is the ship's: it works it out fro
 
 /** The times orrery takes from an event: it reads them again whenever the event's time moves. */
 private val CALENDAR_TIMES = setOf("starts", "ends", "started", "ended", "next", "last")
+
+/** The rest it takes from an event (+plan-events): a series' again as they change, a one-off's once. */
+private val CALENDAR_FIELDS = setOf("location", "participants", "organizer", "cadence", "schedule")
 
 /** The owner's two words on an action here. */
 private val ANSWERS = setOf("approved", "dismissed")
