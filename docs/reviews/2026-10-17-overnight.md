@@ -93,3 +93,16 @@ Calls, sync and the shells were reviewed in depth hours ago; their new code is i
 - A3-3 Low: Android leaves the profile sheet over a link's target (`TalonApp.kt:1450-1466`, closeSections at `:761`). Fix: closeSections clears profileSheetShip and the image viewer, as desktop's leaveAllFor does.
 - A3-4 Low: desktop and iOS draft previews are missing after launch and wrong after a ship switch (`DraftStore.kt:113-128`). Fix: fill backing from the active ship at construction and on ship change.
 - A3-5 Low: picking another ship from the Android drawer drops unsaved profile edits with no prompt (`TalonApp.kt` ~1892, ~3128). Fix: sections.leave around both.
+
+### Area 1, sync and calls half of #42
+
+- A1-1 Med-High: a new settings write is delivered ahead of older kept rows, so a kept del-bucket can later delete what landed after it (e.g. Clear all on the assistant, then a new question) (`SettingsSyncImpl.kt:1769-1776` send, `:1011-1013`, `:1703-1716`). Fix: in send(), flush older rows first under the lock; if one is still unanswered, keep this write too.
+- A1-2 Med: a write that landed but was acked late is re-sent and re-applied later, undoing a newer change from another device (`SettingsSyncImpl.kt:1782-1788` deliver, `:1795-1811` flushPending, `:1818-1823` reapplyPending). Breaks testing standard 3. Fix: before re-sending or re-applying a kept entry write, compare with the desk the bootstrap read (or scry the entry), and drop the row if the ship holds that value.
+- A1-3 Med-Low: every ring ending in None is filed as answered elsewhere, including a Decline from this phone's notification (`NativeCalls.kt:54`, `CallActionReceiver.kt:47`, `CallController.kt:513-520`, `TelecomCalls.kt:139-147`). Fix: the receiver calls the live controller's reject() when it rings for that callId; otherwise None maps to Rejected until the wire says which.
+- A1-4 Low-Med: a channel reply whose echo was lost stays as a grey duplicate until the next launch (`MessageDao.kt:224, 320`, `TlonChatRepo.kt:2766-2770, 2889, 3764`). Fix: drop parentId == null from the scry-reap filters; reap exact twins in fetchThread.
+- A1-5 Low: the ch.gone early return gives a channel up without deleting it, now reachable with the early stream (`TlonChatRepo.kt:882-889`). Fix: deleteSoon there, or skip stream() when subscribeAll failed.
+- A1-6 Low-Med: DMs and club messages in flight at a kill are never requeued (inserted with status null) (`TlonChatRepo.kt:1195`, `MessageDao.kt:232`). Fix: insert as pending, clear on the ack.
+- A1-7 Low: a stale kept status-seen write lowers the ship's high-water mark (`SettingsSyncImpl.kt:221-232`). Fix: drop it when the desk is already at or above it.
+- A1-8 Low: after joinGranted switches lines, the old line's host keeps showing us recording until the result dialog closes (`CallController.kt:1090-1102, 1184-1196`, `PartyRecording.kt:185-190`). Fix: endRecordingAnnounce before line.leave().
+- A1-9 Low: requeued rows show "N queued" from launch until the first drain (`TlonChatRepo.kt:416, 1386, 830`). Fix: leave unchecked requeued rows out of shipSlow until the drain asks.
+- A1-10 Low, low confidence: the 5 s and 3 s caps on decline and stop also cover the PUT itself.
