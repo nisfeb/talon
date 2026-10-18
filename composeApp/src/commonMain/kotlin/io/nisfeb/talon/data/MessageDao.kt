@@ -497,6 +497,9 @@ internal fun MessageEntity.searchable(): MessageEntity = copy(searchText = searc
  */
 internal const val SEARCH_TEXT_EXTRAS_MARK = "search-text-extras"
 
+/** Set once every row has its search text: writes fill their own from then on. */
+internal const val SEARCH_TEXT_FILLED_MARK = "search-text-filled"
+
 /** Starts the line of what search finds beside the words shown: see [shownWordsOf]. */
 private const val SEARCH_EXTRAS = "\n\u001F"
 

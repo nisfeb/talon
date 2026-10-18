@@ -429,7 +429,12 @@ class TlonChatRepo(
                     db.messages().forgetLinkSearchText()
                     db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, nowMs()))
                 }
-                while (db.messages().fillSearchText(500) > 0) yield()
+                // Once filled, every write fills its own: no launch after
+                // scans the whole table again for one (no index to use).
+                if (db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) == null) {
+                    while (db.messages().fillSearchText(500) > 0) yield()
+                    db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK, nowMs()))
+                }
             }.onFailure { Log.w(TAG, "search text fill failed", it) }
         }
     }

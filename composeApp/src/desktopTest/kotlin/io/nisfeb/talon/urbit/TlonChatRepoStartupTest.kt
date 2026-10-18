@@ -646,6 +646,30 @@ class TlonChatRepoStartupTest {
         assertTrue(!health.sseConnected.value, "a started repo stopped marks it down")
     }
 
+    // B5-5: every launch scanned the whole messages table for rows with
+    // no search text, though writes fill their own. Once filled, it is
+    // marked and not looked for again.
+    @Test
+    fun `rows with no search text are filled once and later launches do not look`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170141184501", "~bus", 1, """[{"inline":["hi ~zod"]}]""", "/chat"))
+        db.marks().put(io.nisfeb.talon.data.MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, 1))
+        db.messages().forgetLinkSearchText()
+        suspend fun text() = db.messages().getOne("~bus", "~bus/170141184501")!!.searchText
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val first = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
+        } finally { first.stop() }
+        db.messages().forgetLinkSearchText()
+        val next = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("the second stream") { streams() >= 2 }
+            delay(500)
+            assertNull(text(), "a later launch scanned for rows to fill")
+        } finally { next.stop() }
+    }
+
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
         """"$f":{"invites":[{"flag":"$f","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],"lookup":null,""" +
             """"preview":{"meta":{"title":"$f","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},"progress":null,"token":null}"""
