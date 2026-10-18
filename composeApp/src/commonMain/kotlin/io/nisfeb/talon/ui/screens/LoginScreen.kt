@@ -108,6 +108,10 @@ object LoginLapses {
     }
 }
 
+/** What the login form says when a ship run here booted but did not sign
+ *  in: the sign-in's own plain words, not the exception's text. */
+fun bootedLoginNotice(err: Throwable): String = "The ship booted. " + friendlyError(err)
+
 /** What the login form says to a ship whose sign-in lapsed. */
 fun lapsedLoginNotice(ship: String): String =
     "You were signed out of ${io.nisfeb.talon.ui.shipHandle(ship)}. Sign in again to keep getting its messages."

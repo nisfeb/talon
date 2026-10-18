@@ -2394,7 +2394,7 @@ fun App(
                                         loggedInShip = who
                                     }
                                     .onFailure {
-                                        loginNotice = "The ship booted but signing in failed: ${it.message}"
+                                        loginNotice = io.nisfeb.talon.ui.screens.bootedLoginNotice(it)
                                         localShipSetupOpen = false
                                     }
                             }
