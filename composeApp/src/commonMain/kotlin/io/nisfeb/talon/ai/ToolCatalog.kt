@@ -321,7 +321,7 @@ object ToolCatalog {
     private fun format(messages: List<MessageEntity>, displayName: (String) -> String): String {
         if (messages.isEmpty()) return "No messages found."
         return messages.joinToString("\n") { m ->
-            val text = StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ').take(300)
+            val text = StoryCache.copyTextFor(m.id, m.contentJson).replace('\n', ' ').take(300)
             "whom=${m.whom} post=${m.id} link=${io.nisfeb.talon.urbit.TalonLink.forMessage(m.whom, m.id, m.parentId)} from=${displayName(m.author)}: $text"
         }
     }

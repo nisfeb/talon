@@ -109,6 +109,17 @@ class ToolCatalogTest {
     }
 
     @Test
+    fun `read_conversation gives the model a link's whole address`() {
+        // B6-6: the model reads links whole, not as the cut preview.
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        runBlocking {
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat"))
+        }
+        val read = run("read_conversation", argsOf("whom" to "~bus"))
+        assertTrue("see $url" in read, read)
+    }
+
+    @Test
     fun `read_conversation with an empty db reports no messages`() {
         assertEquals("No messages found.", run("read_conversation", argsOf("whom" to "~bus")))
     }
