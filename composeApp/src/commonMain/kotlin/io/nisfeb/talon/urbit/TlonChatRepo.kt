@@ -816,10 +816,12 @@ class TlonChatRepo(
                     // Group invites had no bootstrap at all — refreshInvites ran
                     // only when the Invites screen was opened, so an invite that
                     // arrived while you weren't looking never lit the badge.
-                    // notify=false: populate the badge, don't fire a toast for
-                    // invites that were already pending before this launch.
+                    // As with DM requests, one that came while the stream was
+                    // down is news on a reconnect; the first pass, or one with
+                    // no list read before to tell new from old, stays quiet.
+                    // Quiet every time, an invite sent meanwhile went unsaid.
                     val groupInvitesJob = async {
-                        runCatching { refreshInvites(notify = false) }
+                        runCatching { refreshInvites(notify = !firstRun && _invites.value != null) }
                             .onFailure { Log.e(TAG, "group-invites scry failed", it) }
                     }
                     val firstRunJobs = if (firstRun) {
@@ -3778,10 +3780,11 @@ class TlonChatRepo(
                 bootstrapFollowedThreads(ch)
             }
             app == "contacts" -> bootstrapContacts(ch)
-            app == "groups" -> {
-                bootstrapGroups(ch)
-                refreshInvites(notify = false)
-            }
+            // Invites are read on their own: behind the groups' read, one
+            // that failed left them unread, and what came unannounced.
+            app == "groups" && (path == "/v1/foreigns" || path == "/gangs/updates") ->
+                refreshInvites(notify = _invites.value != null)
+            app == "groups" -> bootstrapGroups(ch)
         }
     }
 

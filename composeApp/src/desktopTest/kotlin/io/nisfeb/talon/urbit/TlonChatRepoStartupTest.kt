@@ -624,6 +624,36 @@ class TlonChatRepoStartupTest {
         until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
     }
 
+    private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
+        """"$f":{"invites":[{"flag":"$f","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],"lookup":null,""" +
+            """"preview":{"meta":{"title":"$f","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},"progress":null,"token":null}"""
+    }
+
+    // An invite that came while the stream was down was listed and never
+    // announced: every read of invites but a live fact was quiet (review
+    // A5-9). The first read of a session stays quiet, as DM requests do.
+    @Test
+    fun `an invite that came while the stream was down is announced when it is back`() = started(prepare = {
+        scries[init] = initPosts
+        scries["groups/v1/foreigns"] = foreigns("~bus/garden")
+    }) { repo ->
+        val announced = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.groupInviteListener = { announced += it.flag }
+        connected(repo)
+        until("the first read of invites") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" } == true }
+        // While away, a long outage: a new channel and the whole pass.
+        ship.scries["groups/v1/foreigns"] = foreigns("~bus/garden", "~nec/club")
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("announced") { "~nec/club" in announced }
+        until("watched again") { ship.subscribed.count { it == "groups/v1/foreigns" } == 2 }
+        // The ship drops the invites watch: what came meanwhile is read.
+        ship.scries["groups/v1/foreigns"] = foreigns("~bus/garden", "~nec/club", "~wex/den")
+        ship.quit("groups/v1/foreigns")
+        until("announced too") { "~wex/den" in announced }
+        assertEquals(listOf("~nec/club", "~wex/den"), announced.toList(), "the one pending at launch stays quiet")
+    }
+
     // Each invite heard read the whole foreigns list again. The fact is
     // the one group that moved, in the shape the scry gives.
     @Test
