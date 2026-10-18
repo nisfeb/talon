@@ -616,7 +616,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             write = false,
         ) { args ->
             val withDone = args.text("include_done") == "true"
-            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": ${it.trimEnd('.')}" } ?: ""}."
             val all = taskOrder(tasks.filter { withDone || !it.done })
             a.onTasks(all)
             // Calendar by NAME, the way list_events shows it — the raw id
@@ -639,7 +639,7 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
         ) { args ->
             val q = args.text("task")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: task is required."
             val reopen = args.text("reopen") == "true"
-            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": $it" } ?: ""}."
+            val tasks = cal.tasksOrAsk() ?: return@Tool "The calendar did not answer${cal.error.value?.let { ": ${it.trimEnd('.')}" } ?: ""}."
             val pool = tasks.filter { it.done == reopen }
             val hits = pool.filter { it.id == q }.ifEmpty { pool.filter { it.name.contains(q, ignoreCase = true) } }
             when {

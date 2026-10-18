@@ -481,8 +481,10 @@ class AssistantActionsToolsTest {
     // own took for the truth.
     @Test
     fun `a calendar that has not sent its tasks is said to be silent, not empty`() = withHarness(events = "not the list") { h ->
-        assertTrue(h.run("list_tasks", argsOf()).startsWith("The calendar did not answer"))
-        assertTrue(h.run("complete_task", argsOf("task" to "milk")).startsWith("The calendar did not answer"))
+        val listed = h.run("list_tasks", argsOf())
+        assertTrue(listed.startsWith("The calendar did not answer") && ".." !in listed, listed)
+        val ticked = h.run("complete_task", argsOf("task" to "milk"))
+        assertTrue(ticked.startsWith("The calendar did not answer") && ".." !in ticked, ticked)
     }
 
     // ─── mail the ship answers ─────────────────────────────────────
