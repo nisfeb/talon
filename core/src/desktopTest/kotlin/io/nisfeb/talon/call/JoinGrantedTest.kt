@@ -77,4 +77,31 @@ class JoinGrantedTest {
             c.stop()
         }
     }
+
+    // The line left kept a recording's badge: its announce ran on until
+    // the result dialog closed (review A1-8, 2026-10-17).
+    @Test
+    fun `a grant for another line ends the recording badge of the line left`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { HangingCallEngine() })
+        val line = PartyLine(
+            HttpClient(MockEngine { awaitCancellation() }),
+            links = { _, _ -> Link() },
+        )
+        try {
+            c.start()
+            h.awaitConnected()
+            c.joinGranted(line, "~zod", TrunkTicket("lounge", "http://sfu.test/a/", "tok"), "~nec")
+            h.await { presence(h, "enter-room", "~zod", "lounge") > 0 }
+            line.startRecording("~nec")
+            c.beginRecordingAnnounce("~zod", "lounge", line.recording)
+            h.await { presence(h, "start-recording", "~zod", "lounge") > 0 }
+            c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
+            h.await { presence(h, "stop-recording", "~zod", "lounge") > 0 }
+            assertTrue(!line.recording.value)
+        } finally {
+            line.leave()
+            c.stop()
+        }
+    }
 }

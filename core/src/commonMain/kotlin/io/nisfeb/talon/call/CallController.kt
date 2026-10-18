@@ -1081,7 +1081,7 @@ class CallController(
 
     /**
      * Announce that we are recording (host, name) and keep saying so
-     * until [endRecordingAnnounce].
+     * until [recording] ends, or [endRecordingAnnounce].
      *
      * The heartbeat lives here, on the controller's own scope, rather
      * than in the screen that started it. Two bugs came from having it
@@ -1090,15 +1090,24 @@ class CallController(
      * and the room it announced to was whichever chat happened to be
      * open rather than the line being recorded. Both are captured here
      * once, at the moment recording starts.
+     *
+     * Ended with the recording, however that ends: stopped, the line
+     * left or traded for another ([joinGranted]), admin rights lost. It
+     * ran on until the result dialog closed, so the host showed us
+     * recording a line we had left; with that chat off screen, for good.
      */
-    fun beginRecordingAnnounce(host: String, name: String) {
+    fun beginRecordingAnnounce(host: String, name: String, recording: StateFlow<Boolean>) {
         recAnnounce?.cancel()
         recAnnounce = scope.launch {
             try {
-                while (true) {
-                    startRecording(host, name)
-                    delay(RECORD_HEARTBEAT_MS)
+                val beat = launch {
+                    while (true) {
+                        startRecording(host, name)
+                        delay(RECORD_HEARTBEAT_MS)
+                    }
                 }
+                recording.first { !it }
+                beat.cancel()
             } finally {
                 withContext(NonCancellable) { stopRecording(host, name) }
             }

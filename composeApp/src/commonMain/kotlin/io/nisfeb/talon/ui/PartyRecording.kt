@@ -115,10 +115,10 @@ fun rememberPartyRecording(
     fun beginRecording() {
         val line = partyLine ?: return
         line.startRecording(ourShip)
-        // Announce to the line we are actually on, captured now. The
-        // heartbeat runs on the controller's scope so navigating away
-        // no longer retracts it.
-        partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n) }
+        // Announce to the line we are actually on, captured now, for as
+        // long as it records. The heartbeat runs on the controller's
+        // scope so navigating away no longer retracts it.
+        partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n, line.recording) }
     }
 
     // Only admins record: the SFU grants operator rights to the host
@@ -182,12 +182,9 @@ fun rememberPartyRecording(
             ourShip = ourShip,
             title = conversationTitle,
             nameFor = nameFor,
-            onClose = {
-                partyLine?.clearLastRecording()
-                // A recording finalized by teardown (leaving the line)
-                // never went through the toggle, so retract the badge here.
-                callController?.endRecordingAnnounce()
-            },
+            // The badge went with the recording ([CallController.beginRecordingAnnounce]):
+            // retracted here too, it ended a newer recording's on another line.
+            onClose = { partyLine?.clearLastRecording() },
         )
     }
 
