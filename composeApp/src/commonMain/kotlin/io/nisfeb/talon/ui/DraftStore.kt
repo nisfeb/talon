@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +39,12 @@ abstract class DraftStore {
      * drafts mixed, so there is no ship to pin to.
      */
     open fun bound(): DraftStore = this
+
+    /** [state] for the ship active now: called when that changes. */
+    open fun showActiveShip() {}
+
+    /** Drop what is held for [ship], once its files are erased. */
+    open fun forget(ship: String) {}
 }
 
 /** In-memory DraftStore, for tests and previews. Loses drafts on relaunch. */
@@ -81,15 +88,31 @@ open class FileDraftStore(
 ) : DraftStore() {
 
     /** Every loaded ship's drafts, keyed so a save can only ever land
-     *  in the file the draft was composed under. */
-    private val byShip = mutableMapOf<String, MutableMap<String, String>>()
+     *  in the file the draft was composed under. Replaced whole, never
+     *  changed in place: [forget] comes from the thread that erased. */
+    @Volatile
+    private var byShip: Map<String, Map<String, String>> = emptyMap()
 
-    private fun draftsFor(ship: String): MutableMap<String, String> =
-        byShip.getOrPut(ship) {
-            runCatching {
-                read(draftsFileName(ship))?.let { Json.decodeFromString<Map<String, String>>(it) }
-            }.getOrNull().orEmpty().toMutableMap()
-        }
+    private fun draftsFor(ship: String): Map<String, String> =
+        byShip[ship] ?: runCatching {
+            read(draftsFileName(ship))?.let { Json.decodeFromString<Map<String, String>>(it) }
+        }.getOrNull().orEmpty().also { byShip = byShip + (ship to it) }
+
+    private fun change(ship: String, edit: (Map<String, String>) -> Map<String, String>) {
+        byShip = byShip + (ship to edit(draftsFor(ship)))
+    }
+
+    // The list's "Draft:" previews were empty after a launch and the last
+    // ship's after a switch, until a composer happened to load one.
+    override fun showActiveShip() {
+        backing.value = activeShip()?.let { draftsFor(it) }.orEmpty()
+    }
+
+    // Erased, a ship's drafts came back from here when it was added again.
+    override fun forget(ship: String) {
+        byShip = byShip - ship
+        if (ship == activeShip()) backing.value = emptyMap()
+    }
 
     override fun load(whom: String): String = activeShip()?.let { loadFor(it, whom) } ?: ""
 
@@ -111,25 +134,25 @@ open class FileDraftStore(
     }
 
     private fun loadFor(ship: String, whom: String): String {
-        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
+        if (ship == activeShip()) backing.value = draftsFor(ship)
         return draftsFor(ship)[whom] ?: ""
     }
 
     private fun saveFor(ship: String, whom: String, draft: String) {
-        if (draft.isBlank()) draftsFor(ship).remove(whom) else draftsFor(ship)[whom] = draft
+        change(ship) { if (draft.isBlank()) it - whom else it + (whom to draft) }
         persist(ship)
         // The list's "Draft:" previews follow the active ship only.
-        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
+        if (ship == activeShip()) backing.value = draftsFor(ship)
     }
 
     private fun clearFor(ship: String, whom: String) {
-        draftsFor(ship).remove(whom)
+        change(ship) { it - whom }
         persist(ship)
-        if (ship == activeShip()) backing.value = draftsFor(ship).toMap()
+        if (ship == activeShip()) backing.value = draftsFor(ship)
     }
 
     private fun persist(ship: String) {
-        runCatching { write(draftsFileName(ship), Json.encodeToString(draftsFor(ship).toMap())) }
+        runCatching { write(draftsFileName(ship), Json.encodeToString(draftsFor(ship))) }
     }
 }
 

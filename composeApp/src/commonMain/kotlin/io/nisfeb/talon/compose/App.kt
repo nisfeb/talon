@@ -479,6 +479,8 @@ fun App(
         // and would otherwise open showing the last ship's nicknames.
         io.nisfeb.talon.ui.LastContactMap.forget()
         io.nisfeb.talon.ui.AzimuthNames.reset()
+        // The list's draft previews are the ship's own, from the start.
+        drafts.showActiveShip()
     }
     // A "forget + erase" of the active ship waits on the database
     // re-key before it can delete files; if the process died in that
@@ -2192,12 +2194,14 @@ fun App(
                             afterShipClose.update { waiting ->
                                 waiting + (gone to {
                                     shipDataEraser.erase(gone)
+                                        .onSuccess { drafts.forget(gone) }
                                         .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
                                     Unit
                                 })
                             }
                         } else {
                             shipDataEraser.erase(gone)
+                                .onSuccess { drafts.forget(gone) }
                                 .onFailure { io.nisfeb.talon.util.Log.w("App", "forgetShip: erase failed for $gone", it) }
                         }
                     }
