@@ -689,6 +689,28 @@ class DmChatScreenTest {
         )
     }
 
+    // ─── a post the ship has not taken yet ─────────────────────────
+
+    // Its id is only ours ("local_..."): a reaction, reply, edit, pin,
+    // link, quote or follow sent with it named a post the ship never had.
+    @Test
+    fun `a post the ship has not taken offers only what can be done here`() = chat(whom = ours, seed = ourChannel(
+        post("170141184506", "~zod", "landed earlier", 1_000),
+        MessageEntity(ours, "local_170141184599", "~zod", 2_000, """[{"inline":["never landed"]}]""", "/chat", status = "failed"),
+    )) { _, _ ->
+        menuOf("never landed")
+        for (gone in listOf("React", "Reply in thread", "Edit", "Pin", "Copy link", "Quote", "Follow thread", "Unfollow thread")) {
+            assertTrue(onAllNodesWithText(gone).fetchSemanticsNodes().isEmpty(), "offered $gone")
+        }
+        onNodeWithText("Delete").assertExists()
+        onNodeWithText("Copy text").performClick()
+        // Up edits the last post the ship has, not the one it does not.
+        // The box first takes the focus the menu had.
+        onNode(hasSetTextAction()).performClick()
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionUp) }
+        waitUntil(timeoutMillis = 20_000) { draft() == "landed earlier" }
+    }
+
     // ─── an edit, until the ship has it ────────────────────────────
 
     private val general = "chat/~bus/general"

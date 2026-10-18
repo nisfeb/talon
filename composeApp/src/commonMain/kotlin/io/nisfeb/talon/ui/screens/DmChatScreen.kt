@@ -802,7 +802,9 @@ fun DmChatScreen(
     }
     val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
         { m ->
-            if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
+            // Not yet on the ship: no post there to quote or answer.
+            if (isLocalOnly(m.id)) Unit
+            else if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
                 composerState.pendingQuote = m
             } else {
                 io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(m.id)
@@ -1336,7 +1338,8 @@ fun DmChatScreen(
                     rows.asSequence()
                         .filterIsInstance<ChatListItem.Message>()
                         .map { it.row.m }
-                        .filter { it.author == ourPatp && it.parentId == null }
+                        // Not one the ship has yet: there is no post of that id to edit.
+                        .filter { it.author == ourPatp && it.parentId == null && !isLocalOnly(it.id) }
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
                             val prior = composerState.draft.text
@@ -1711,7 +1714,7 @@ private fun MessageRow(
     }
 
     val offsetX = remember { androidx.compose.runtime.mutableStateOf(0f) }
-    val isPending = remember(m.id) { m.id.startsWith("local_") }
+    val isPending = remember(m.id) { isLocalOnly(m.id) }
 
     val flashAlpha = remember(m.id) { Animatable(0f) }
     LaunchedEffect(flashAmber) {
@@ -1834,7 +1837,8 @@ private fun MessageRow(
                 onImageTap = onImageTap,
                 reactions = row.reactions,
                 ourPatp = ourPatp,
-                onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
+                // A poll the ship has not taken yet has no post to vote on.
+                onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
                 // Touch only: tapping the message text (off any link) opens
                 // the action menu — same as tapping the row background. Null
                 // on desktop so a left-press-drag in text selects rather than
@@ -2423,7 +2427,12 @@ private fun MessageActionMenu(
     onMakeTask: (() -> Unit)? = null,
 ) {
     val isMine = message.author == ourPatp
-    val canReply = message.parentId == null
+    // Ours, not yet taken by the ship: its id is only ours, so anything
+    // sent with it (a reaction, a reply, an edit, a pin, a link, a quote,
+    // a bookmark, a follow) names a post the ship has never seen. Delete
+    // stays, and takes it off this device.
+    val onShip = !isLocalOnly(message.id)
+    val canReply = message.parentId == null && onShip
     // Compact density tokens. The previous menu used Material's
     // default 8.dp spacedBy + full TextButton heights (~48.dp each)
     // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
@@ -2435,62 +2444,64 @@ private fun MessageActionMenu(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-            val topUsage by remember {
-                db.reactionUsage().streamTop(8)
-            }.collectAsState(initial = emptyList())
+            if (onShip) {
+                val topUsage by remember {
+                    db.reactionUsage().streamTop(8)
+                }.collectAsState(initial = emptyList())
 
-            // Merge usage-ranked reactions with the default palette so
-            // the row is always 8 wide even before the user has reacted
-            // much. De-dupe by canonical reaction (normalize) so a glyph
-            // already in history (❤️) and its palette code (:heart:) don't
-            // both show as separate-looking options. Usage rows rank
-            // first, then the palette fills the rest.
-            val suggested = remember(topUsage) {
-                val seen = mutableSetOf<String>()
-                val out = mutableListOf<String>()
-                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                    .forEach { item ->
-                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                    }
-                out.take(8)
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "React",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 4.dp),
-                )
-                io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = "Browse emojis",
-                        modifier = Modifier.size(18.dp),
-                    )
+                // Merge usage-ranked reactions with the default palette so
+                // the row is always 8 wide even before the user has reacted
+                // much. De-dupe by canonical reaction (normalize) so a glyph
+                // already in history (❤️) and its palette code (:heart:) don't
+                // both show as separate-looking options. Usage rows rank
+                // first, then the palette fills the rest.
+                val suggested = remember(topUsage) {
+                    val seen = mutableSetOf<String>()
+                    val out = mutableListOf<String>()
+                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                        .forEach { item ->
+                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                        }
+                    out.take(8)
                 }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(horizontal = 4.dp),
-            ) {
-                suggested.forEach { code ->
-                    val glyph = ReactionPalette.display(code)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        glyph,
-                        fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                        style = MaterialTheme.typography.titleLarge,
+                        "React",
+                        style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPickReaction(code) }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .weight(1f)
+                            .padding(start = 4.dp),
                     )
+                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Browse emojis",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) {
+                    suggested.forEach { code ->
+                        val glyph = ReactionPalette.display(code)
+                        Text(
+                            glyph,
+                            fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onPickReaction(code) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             // Action rows — short, left-aligned, full-width so the
             // tap target spans the popover and reads like a menu
             // item instead of a centered button. minHeight 36 (vs
@@ -2520,8 +2531,8 @@ private fun MessageActionMenu(
             }
             ActionRow(onClick = onCopy, label = "Copy text")
             ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            ActionRow(onClick = onCopyLink, label = "Copy link")
-            if (canBookmark) {
+            if (onShip) ActionRow(onClick = onCopyLink, label = "Copy link")
+            if (canBookmark && onShip) {
                 ActionRow(
                     onClick = onToggleBookmark,
                     label = if (isBookmarked) "Remove bookmark" else "Bookmark",
@@ -2532,18 +2543,18 @@ private fun MessageActionMenu(
             }
             onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
             onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
-            if (canQuote) {
+            if (canQuote && onShip) {
                 ActionRow(onClick = onQuote, label = "Quote")
             }
             // Edit on channel chats only — %chat (DMs + clubs) silently
             // ignores edit pokes. Thread replies have their own Edit
             // affordance in ThreadActionSheet; top-level posts get it here.
-            if (isMine && isChannel && message.parentId == null) {
+            if (isMine && isChannel && message.parentId == null && onShip) {
                 ActionRow(onClick = onEdit, label = "Edit")
             }
-            followLabel?.let { ActionRow(onClick = onToggleFollow, label = it) }
+            followLabel?.takeIf { onShip }?.let { ActionRow(onClick = onToggleFollow, label = it) }
             // Pin / Unpin — chat channels only, top-level posts only.
-            if (canPin) {
+            if (canPin && onShip) {
                 ActionRow(
                     onClick = onTogglePin,
                     label = if (isPinned) "Unpin" else "Pin",
@@ -2898,6 +2909,13 @@ private fun TypingIndicator(
  */
 internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
     setting && whom.startsWith("chat/") && parentId == null
+
+/**
+ * Our own post or reply, made here and not yet taken by the ship: its id
+ * is the stand-in [TlonChatRepo] gave it ("local_..."), which the ship
+ * has never seen, so nothing can be asked of the ship about it.
+ */
+internal fun isLocalOnly(id: String): Boolean = id.startsWith("local_")
 
 /** Our own message on its way: the ship has not taken it yet. */
 @Composable
