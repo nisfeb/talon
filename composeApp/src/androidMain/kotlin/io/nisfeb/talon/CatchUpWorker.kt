@@ -28,7 +28,9 @@ import java.util.concurrent.TimeUnit
  *     re-runs us.
  *
  * The work is cheap: scry %activity, diff against local, post any
- * notifications the SSE / push relay missed. ConnectionPool worth
+ * notifications the SSE / push relay missed. Those are the repo's: what
+ * the read since the last one brings, new here and unread, one a chat
+ * (TlonChatRepo.announceCaughtUp). ConnectionPool worth
  * of work, but bounded — we delay() up to 8 seconds for an open
  * channel before giving up, so even a wedged ship doesn't burn
  * the worker's runtime budget.

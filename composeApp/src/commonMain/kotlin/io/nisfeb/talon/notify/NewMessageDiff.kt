@@ -218,6 +218,19 @@ suspend fun AppDatabase.messageAlerts(m: MessageEntity, replyToUs: Boolean, hear
     return liveMessageAlerts(m.whom, notifyLevelOf(m.whom), isMentioned(m.contentJson, ourShip), replyToUs, heard, read, onScreen)
 }
 
+/**
+ * What a catch-up alerts for, of the messages it brought that are new
+ * here, each with whether it is a reply that counts: one a chat, so many
+ * go up as that chat's one notification. The newest that names us or is
+ * such a reply, else the newest: in a chat at "mentions only", the newest
+ * plain message would hide the mention before it.
+ */
+fun catchUpAlerts(fresh: List<Pair<MessageEntity, Boolean>>, ourPatp: String?): List<Pair<MessageEntity, Boolean>> =
+    fresh.groupBy { it.first.whom }.values.map { msgs ->
+        msgs.filter { (m, toUs) -> toUs || isMentioned(m.contentJson, ourPatp) }.maxByOrNull { it.first.sentMs }
+            ?: msgs.maxBy { it.first.sentMs }
+    }
+
 /** How a chat notification goes up over the one showing under its tag. */
 enum class ChatAlert { Post, Quiet, Skip }
 

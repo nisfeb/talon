@@ -78,6 +78,29 @@ class LiveMessageAlertTest {
         assertTrue(alerts(read = readPast(count = 0, recencyMs = 1_000, sentMs = 5_000)), "an hour old or a second")
     }
 
+    // What a catch-up brought after an outage: one alert a chat, not one
+    // a message, and a mention is not hidden behind the chat after it.
+    @Test
+    fun `a catch-up alerts once a chat and a mention or a reply to us wins`() {
+        fun msg(whom: String, id: String, sent: Long, text: String = "hi") =
+            io.nisfeb.talon.data.MessageEntity(whom, id, "~bus", sent, text, "/chat")
+        val nest = "chat/~bus/general"
+        val mention = """[{"inline":[{"ship":"~zod"}]}]"""
+        val picked = catchUpAlerts(
+            listOf(
+                msg("~bus", "1", 1_000) to false, msg("~bus", "3", 3_000) to false, msg("~bus", "2", 2_000) to false,
+                msg(nest, "4", 4_000, mention) to false, msg(nest, "5", 5_000) to false,
+                msg("~nec", "6", 6_000) to false, msg("~nec", "7", 7_000) to true, msg("~nec", "8", 8_000) to false,
+            ),
+            ourPatp = "~zod",
+        ).map { it.first.id to it.second }.toSet()
+        assertEquals(setOf("3" to false, "4" to false, "7" to true), picked)
+        val two = catchUpAlerts(listOf(msg(nest, "4", 4_000, mention) to false, msg(nest, "9", 9_000, mention) to false), "~zod")
+        assertEquals(listOf("9"), two.map { it.first.id }, "the newest of the mentions")
+        assertEquals(listOf("5"), catchUpAlerts(listOf(msg(nest, "4", 4_000, mention) to false, msg(nest, "5", 5_000) to false), "~nec").map { it.first.id })
+        assertTrue(catchUpAlerts(emptyList(), "~zod").isEmpty())
+    }
+
     @Test
     fun `a hint over a fresh notification is dropped and the message over a fresh hint is quiet`() {
         assertEquals(ChatAlert.Post, chatAlert(hint = true, shownAgoMs = null, shownIsHint = false))

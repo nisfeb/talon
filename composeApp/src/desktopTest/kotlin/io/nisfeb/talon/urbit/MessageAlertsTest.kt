@@ -102,6 +102,88 @@ class MessageAlertsTest {
         assertEquals(listOf("~bus/170141184508", "~bus/170141184509"), alerted)
     }
 
+    // ─── a catch-up's read ─────────────────────────────────────────
+
+    private val now = System.currentTimeMillis()
+    private val nest = "chat/~bus/general"
+    private val mention = """{"content":[{"inline":[{"ship":"~zod"}," look"]}],"author":"~nec","sent":${now - 170_000},"kind":"/chat","blob":null,"meta":null}"""
+
+    /**
+     * What the ship says changed: posts from three DMs and a channel, in
+     * the last few minutes but for one an hour old. Old enough by the
+     * clock that the age rule silenced them all.
+     */
+    private val changes = """{"activity":{},"groups":{},"contacts":{},
+        "chat":{
+          "~bus":{${post("~bus/170141184601", "~bus", "first", now - 180_000)},${post("~bus/170141184602", "~bus", "second", now - 120_000)}},
+          "~nec":{${post("~nec/170141184603", "~nec", "before the last read", now - 60 * 60_000)}},
+          "~wex":{${post("~wex/170141184604", "~wex", "read on the laptop", now - 150_000)}}},
+        "channels":{"$nest":{
+          "170141184605":{"seal":{"id":"170141184605","reacts":{},"replies":{},"meta":{"replyCount":0,"lastReply":null,"lastRepliers":[]}},"essay":$mention},
+          ${post("170141184606", "~bus", "chatter after it", now - 60_000)}}}}"""
+
+    /** ~bus and the channel unread; ~wex read on another client since its message. */
+    private val activity = """{
+        "ship/~bus":{"count":2,"notify-count":2,"recency":${now - 120_000},"notify":true,"unread":{"id":"~bus/170.141.184.601","time":"170.141.184.601","count":2,"notify":true}},
+        "ship/~wex":{"count":0,"notify-count":0,"recency":$now,"notify":false,"unread":null},
+        "channel/$nest":{"count":2,"notify-count":1,"recency":${now - 60_000},"notify":true,"unread":{"id":"~nec/170.141.184.605","time":"170.141.184.605","count":2,"notify":true}}}"""
+
+    // A phone with no push whose process was gone: the catch-up worker
+    // starts it, and the first read is everything since the last one. The
+    // alerts wait for what is read, then go up one a chat.
+    @Test
+    fun `a catch-up alerts once a chat for what came since the last read and after the read state`() = runBlocking<Unit> {
+        db.marks().put(io.nisfeb.talon.data.MarkEntity(io.nisfeb.talon.data.MarkDao.POSTS_READ, now - 30 * 60_000))
+        started(prepare = {
+            answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null }
+            scries["activity/v4/activity/full"] = activity
+            holdScry = { p -> if (p.startsWith("activity/")) 2_000 else 0 }
+        }) { _ ->
+            until("the posts") { db.messages().getOne(nest, "170141184606") != null }
+            delay(500)
+            assertEquals(emptyList(), decided.toList(), "nothing before what is read is known")
+            until("the alerts") { decided.size >= 3 }
+            delay(500)
+            assertEquals(setOf("~bus/170141184602", "170141184605", "~wex/170141184604"), decided.toSet(), "one a chat, none from before the last read")
+            assertEquals(3, decided.size)
+            assertEquals(setOf("~bus/170141184602", "170141184605"), alerted.toSet(), "not the one read on the laptop")
+        }
+    }
+
+    // A new install, or a database wiped: nothing it reads is news.
+    @Test
+    fun `a first sign-in alerts nothing it reads`() = started(prepare = {
+        scries["groups-ui/v6/init-posts/10/10"] = changes
+        scries["activity/v4/activity/full"] = activity
+    }) { repo ->
+        until("the first read") { db.messages().getOne(nest, "170141184606") != null && !repo.bootstrapping.value }
+        until("the unreads") { db.unreads().getOne("~bus") != null }
+        until("the stream") { streams >= 1 }
+        ship.emit(dmFact("~bus/170141184607", "live", now))
+        until("the live one") { "~bus/170141184607" in decided }
+        delay(500)
+        assertEquals(listOf("~bus/170141184607"), decided.toList())
+        assertEquals(listOf("~bus/170141184607"), alerted.toList())
+    }
+
+    // The stream dropped and the channel went with it (eyre reaped it): a
+    // new channel reads what changed since the last read, and that alerts.
+    @Test
+    fun `a new channel after an outage alerts what its read brought`() = started(prepare = {
+        scries["groups-ui/v6/init-posts/10/10"] = """{"chat":{},"channels":{}}"""
+        scries["activity/v4/activity/full"] = activity
+    }) { repo ->
+        until("the first read") { !repo.bootstrapping.value && db.unreads().getOne("~bus") != null }
+        until("the stream") { streams >= 1 }
+        ship.answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null }
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("the alerts") { decided.size >= 3 }
+        delay(500)
+        assertEquals(setOf("~bus/170141184602", "170141184605"), alerted.toSet(), "decided: $decided")
+        assertEquals(3, decided.size)
+    }
+
     @Test
     fun `a message read already does not alert`() = started(prepare = {
         scries["groups-ui/v6/init-posts/10/10"] = """{"chat":{},"channels":{}}"""
