@@ -148,9 +148,9 @@ fun TalonApp(
     /** A tapped calendar reminder: open the Calendar on its occurrence (the push's tag). */
     initialOpenCalendarTag: String? = null,
     pendingShare: ShareIntent? = null,
-    /** When non-null, the user already picked the share target in
-     *  the system share sheet (Sharing Shortcut). Skip the in-app
-     *  picker and dispatch [pendingShare] straight to this whom. */
+    /** When non-null, the system share sheet named the share target
+     *  (Sharing Shortcut). Skip the in-app picker and open this whom
+     *  with [pendingShare] waiting in its composer (shareStep). */
     pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
     /** Called once TalonApp has consumed an `initialOpen*` /
@@ -589,7 +589,7 @@ fun TalonApp(
                     val who = ringingFrom
                     ringingFrom = null
                     if (who != null && s.reason != "declined") {
-                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who))
+                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who), forShip = loggedInShip)
                     }
                     stopShowingOverLockScreen(context)
                 }
@@ -601,7 +601,11 @@ fun TalonApp(
             }
         }
         if (initialCallBack != null) {
-            androidx.compose.runtime.LaunchedEffect(initialCallBack) {
+            // Keyed on the controller: a call back for another ship switches
+            // first (MainActivity), and the call goes from that ship's
+            // controller once this screen has caught up with the switch.
+            androidx.compose.runtime.LaunchedEffect(callController, initialCallBack) {
+                if (loggedInShip != app.activeShipFlow.value) return@LaunchedEffect
                 callController.placeCall(initialCallBack)
                 onCallBackConsumed()
             }
@@ -1113,7 +1117,34 @@ fun TalonApp(
             ).show()
         }
     }
-    val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
+    // A direct share's file waits in the chat's composer for Send. Its bytes
+    // are read now: the grant to read them came with the share.
+    val stageShare: (ShareIntent, String) -> Unit = { share, whom ->
+        appScope.launch {
+            runCatching {
+                val (uri, mime) = when (share) {
+                    is ShareIntent.Image -> share.uri to share.mimeType
+                    is ShareIntent.File -> share.uri to share.mimeType
+                    is ShareIntent.Text -> return@launch
+                }
+                val isImage = share is ShareIntent.Image
+                val resolver = context.contentResolver
+                val (name, bytes) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolveFileName(resolver, uri, default = if (isImage) "image" else "file") to
+                        (resolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot read shared bytes"))
+                }
+                io.nisfeb.talon.ui.SharedAttachments.put(whom, io.nisfeb.talon.ui.PendingAttachment(bytes, mime, name, isImage))
+            }.onFailure { shareFailedToast(it) }
+        }
+    }
+    // [direct]: the share sheet named the chat, and any app can do that,
+    // so nothing is posted until the owner sends it (shareStep).
+    val dispatchShare: (ShareIntent, String, Boolean) -> Unit = dispatch@{ share, whom, direct ->
+        when (io.nisfeb.talon.ui.shareStep(whom, share is ShareIntent.Text, direct)) {
+            io.nisfeb.talon.ui.ShareStep.Pick -> return@dispatch
+            io.nisfeb.talon.ui.ShareStep.Stage -> return@dispatch stageShare(share, whom)
+            else -> {}
+        }
         // A gallery is not a chat: its posts are gallery essays, and
         // there is no draft box to drop text into. Post directly.
         if (whom.startsWith("heap/")) {
@@ -1211,14 +1242,16 @@ fun TalonApp(
     // A share arriving puts the sections down: the picker is drawn
     // beneath them, so with one open it was hidden, and Back threw the
     // share away. A chat stays; the picker is drawn over it and its Back
-    // comes back to it. On the Sharing Shortcut path the user already
-    // chose the channel in the system share sheet, so the share goes at
-    // once and that conversation opens without the in-app picker.
+    // comes back to it. On the Sharing Shortcut path the share sheet named
+    // the channel, so that conversation opens without the in-app picker,
+    // the share waiting in its composer. A gallery has none: the picker.
     LaunchedEffect(pendingShare, pendingShareTarget) {
         val share = pendingShare ?: return@LaunchedEffect
         val target = pendingShareTarget
-        if (!target.isNullOrBlank()) {
-            dispatchShare(share, target)
+        if (!target.isNullOrBlank() &&
+            io.nisfeb.talon.ui.shareStep(target, share is ShareIntent.Text, direct = true) != io.nisfeb.talon.ui.ShareStep.Pick
+        ) {
+            dispatchShare(share, target, true)
             sections.leave { closeSections(); openWhom = target }
             onShareConsumed()
         } else {
@@ -1237,6 +1270,9 @@ fun TalonApp(
     // the ship finishing turns it off, "Use the relay" before registering
     // turns it back on.
     var keepAlive by remember { mutableStateOf(true) }
+    // No push reaches this phone for the ship, mail aside: calls ring only
+    // while Talon is open, and Settings says so.
+    var noPush by remember { mutableStateOf(false) }
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         // No ship left signed in: nothing to keep the stream for.
@@ -1264,11 +1300,11 @@ fun TalonApp(
             val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)?.takeIf {
                 runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(context).isNotEmpty() }.getOrDefault(true)
             }
-            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(
+            noPush = io.nisfeb.talon.notify.keepAliveNeeded(
                 app.relaySettings, ship, endpoint,
-                mailNeedsProcess = mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT,
                 shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
             )
+            keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT
             if (keepAlive) {
                 runCatching { TalonSyncService.start(context) }
             } else {
@@ -2402,6 +2438,7 @@ fun TalonApp(
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,
                     systemNotificationProbe = systemProbe,
+                    noPush = noPush,
                     relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                         client = relayClient,
                         settings = app.relaySettings,
@@ -2448,7 +2485,7 @@ fun TalonApp(
                 db = app.db,
                 share = pendingShare,
                 onPick = { whom ->
-                    dispatchShare(pendingShare, whom)
+                    dispatchShare(pendingShare, whom, false)
                     openWhom = whom
                     onShareConsumed()
                 },

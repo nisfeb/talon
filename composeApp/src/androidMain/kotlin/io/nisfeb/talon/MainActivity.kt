@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
      *  emits), Android adds [Intent.EXTRA_SHORTCUT_ID] alongside
      *  ACTION_SEND. The id is the channel's `whom`, so we use it to
-     *  bypass the picker and deliver the share directly. */
+     *  bypass the picker and open that chat with the share waiting in
+     *  its composer. Any app can send one, so nothing posts by itself. */
     private val pendingShareTarget = mutableStateOf<String?>(null)
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -262,15 +263,19 @@ class MainActivity : ComponentActivity() {
         var consumedDeepLink = false
         val trusted = callsTrusted(intent)
         val ring = trusted && io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)
+        // A call back or a sign-in acts on its ship, as a ring does.
+        val actsOnShip = ring || trusted &&
+            (intent.hasExtra(Notifications.EXTRA_CALL_BACK) || intent.hasExtra(Notifications.EXTRA_SIGN_IN))
         // Read before the target, though order does not matter here:
         // what matters is that TalonApp switches ships before it acts
         // on any of the rest.
         intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
-            if (ring) {
-                // A ring for another of the owner's ships: only that ship's
-                // controller hears it, so go there now. Not as a deep link,
-                // which with nothing else in it TalonApp never consumes: the
-                // next switch away would have come straight back.
+            if (actsOnShip) {
+                // A ring, call back or sign-in for another of the owner's
+                // ships: only that ship's controller or login acts on it, so
+                // go there now. Not as a deep link, which with nothing else
+                // in it TalonApp never consumes: the next switch away would
+                // have come straight back.
                 val app = applicationContext as TalonApplication
                 io.nisfeb.talon.call.RingIntents.shipToSwitch(it, app.activeShipFlow.value, app.allShipsFlow.value)
                     ?.let(app::switchShip)
@@ -336,6 +341,14 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_CALL_BACK)
             consumedDeepLink = true
         }
+        // The signed-out notice: the login form for its ship, held again
+        // (LoginLapses) in case it was shown and put away.
+        intent.getStringExtra(Notifications.EXTRA_SIGN_IN)?.let {
+            val app = applicationContext as TalonApplication
+            if (trusted && it in app.allShipsFlow.value) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(it)
+            intent.removeExtra(Notifications.EXTRA_SIGN_IN)
+            consumedDeepLink = true
+        }
         // The Phone app's integrated call log (16.1+) calling one of our
         // calls back: a UUID we mapped to a ship when the call was added.
         if (intent.action == android.telecom.TelecomManager.ACTION_CALL_BACK) {
@@ -372,8 +385,8 @@ class MainActivity : ComponentActivity() {
             // Sharing Shortcut routing: Android attaches the picked
             // shortcut id to the ACTION_SEND intent. We publish one
             // per channel keyed on `whom`, so this is the conversation
-            // the user already chose in the system share sheet — skip
-            // the in-app picker and deliver straight there.
+            // the share sheet named. The in-app picker is skipped and the
+            // share waits in that chat's composer for Send.
             intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.let { id ->
                 pendingShareTarget.value = id
             }

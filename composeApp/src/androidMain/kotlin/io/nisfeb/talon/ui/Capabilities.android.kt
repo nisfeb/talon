@@ -29,6 +29,8 @@ actual val isWindowFullScreenSupported: Boolean = false
 
 // UnifiedPush wakes the process, so a ring lands with the app closed.
 actual val isBackgroundCallRingSupported: Boolean = true
+// Only with push: without it the activity's controller is the only ear.
+actual val needsPushForBackgroundRing: Boolean = true
 
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true

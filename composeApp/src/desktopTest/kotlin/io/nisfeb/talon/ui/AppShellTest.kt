@@ -1367,4 +1367,71 @@ class AppShellTest {
         waitForIdle()
         assertTrue(!present("Attach file") && !present("Attach image"), "no composer shows them")
     }
+
+    // ---- A share from another app (B3-2) ----
+
+    /** Uploads land, as AttachmentWithTextTest's ship has them. */
+    private val hostsUploads: FakeShip.() -> Unit = {
+        scries["genuine/secret"] = "\"tok-1\""
+        answerApi = { method, path, _ ->
+            when {
+                method == "PUT" && path == "/v1/zod/upload" ->
+                    """{"uploadUrl":"https://bucket.test/put-here?sig=1","hostedUrl":"https://cdn.test/zod/cat.png"}"""
+                method == "PUT" && path == "/put-here" -> ""
+                else -> null
+            }
+        }
+    }
+
+    private fun ComposeUiTest.openBusChat() {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { busChatShown() }
+    }
+
+    /** Nothing of [ship]'s says the file was uploaded or posted. */
+    private fun nothingSent(ship: FakeShip) =
+        ship.api.none { "/upload" in it || "/put-here" in it } && ship.pokesTo("chat").isEmpty()
+
+    // A forged direct share uploaded and posted as the owner. It waits in
+    // the chat's composer now, and goes on the owner's Send alone.
+    @Test
+    fun `a file shared into a chat waits in its composer and goes only on Send`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        // Shared before the chat opens, as the share sheet's shortcut does.
+        SharedAttachments.put("~bus", PendingAttachment(byteArrayOf(1, 2, 3, 4), "image/png", "cat.png", isImage = true))
+        openBusChat()
+        waitUntil(timeoutMillis = 5_000) { showing("Image, sent with your message") }
+        // Real time: an upload or a post would have gone by now.
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(nothingSent(ship), "sent before Send: ${ship.api} ${ship.pokesTo("chat")}")
+        onNodeWithContentDescription("Send").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("chat").any { "cdn.test/zod/cat.png" in it.json.toString() } }
+        assertTrue(ship.api.any { it.startsWith("PUT /v1/zod/upload") }, "uploaded on Send")
+        waitUntil(timeoutMillis = 5_000) { !showing("Image, sent with your message") }
+    }
+
+    @Test
+    fun `a file shared into the chat on screen is staged there too`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        openBusChat()
+        runOnIdle { SharedAttachments.put("~bus", PendingAttachment("x".encodeToByteArray(), "text/plain", "notes.txt", isImage = false)) }
+        waitUntil(timeoutMillis = 5_000) { showing("File, sent with your message") }
+        assertTrue(showing("notes.txt"))
+        Thread.sleep(1_000)
+        waitForIdle()
+        assertTrue(nothingSent(ship))
+        assertEquals(null, SharedAttachments.peek("~bus"), "taken once, by the composer")
+    }
+
+    // A cloud photo that never downloaded reads as no bytes: the composer
+    // says why, as it does for a pick, and nothing goes.
+    @Test
+    fun `an empty shared file says why and sends nothing`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        SharedAttachments.put("~bus", PendingAttachment(ByteArray(0), "image/png", "cloud.png", isImage = true))
+        openBusChat()
+        waitUntil(timeoutMillis = 5_000) { showing("came back empty") }
+        assertTrue(!showing("Image, sent with your message"), "staged with nothing in it")
+        assertTrue(nothingSent(ship))
+    }
 }

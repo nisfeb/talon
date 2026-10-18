@@ -48,6 +48,8 @@ actual val isWindowFullScreenSupported: Boolean = false
 // so a backgrounded phone hears a ring. UIBackgroundModes audio sustains
 // a call already in progress.
 actual val isBackgroundCallRingSupported: Boolean = true
+// The relay's PushKit leg is offered at sign-in (isRelayNotificationSetupNeeded).
+actual val needsPushForBackgroundRing: Boolean = false
 
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
