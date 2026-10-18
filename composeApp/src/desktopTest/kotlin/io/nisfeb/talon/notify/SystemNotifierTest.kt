@@ -86,4 +86,14 @@ class SystemNotifierTest {
         assertEquals(java.io.File(io.nisfeb.talon.util.cacheDirPath).canonicalFile, icon.parentFile.canonicalFile)
         assertTrue(icon.length() > 0)
     }
+
+    @Test fun `a click on a notify-send toast brings talon up and a close does not`() {
+        var raised = 0
+        fun n(out: String) = SystemNotifier(trayFallback = { _, _ -> }, onActivate = { raised++ }, linux = true, start = { Ran(out, 0) })
+        n("9\ndefault\n").deliver("a", "b", null)
+        assertEquals(1, raised)
+        n("9\n").deliver("a", "b", null)
+        n("9\nother\n").deliver("a", "b", null)
+        assertEquals(1, raised)
+    }
 }

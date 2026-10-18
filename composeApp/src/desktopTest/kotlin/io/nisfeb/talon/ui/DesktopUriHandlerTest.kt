@@ -39,4 +39,13 @@ class DesktopUriHandlerTest {
         assertNull(openTarget("file://${opened.path}/../x.ics", opened))
         assertNull(openTarget("file://${opened.path}/sub/x.ics", opened))
     }
+
+    // They piled up in the shared temp directory, readable by anyone.
+    @Test fun `event files older than a day are dropped on the next and newer ones stay`() {
+        opened.mkdirs()
+        val old = File(opened, "talon-event-old.ics").apply { writeText("old"); setLastModified(System.currentTimeMillis() - 2 * 86_400_000L) }
+        val recent = File(opened, "talon-event-recent.ics").apply { writeText("recent"); setLastModified(System.currentTimeMillis() - 60_000L) }
+        val made = openTarget(createTempFileUri("talon-event-", ".ics", "new"), opened) as File
+        assertTrue(!old.exists() && recent.isFile && made.isFile)
+    }
 }
