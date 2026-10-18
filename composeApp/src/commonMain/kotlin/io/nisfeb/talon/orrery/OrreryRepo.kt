@@ -620,8 +620,17 @@ class OrreryRepo(
     /** One body as the ship shows it, current values and all. */
     suspend fun bodyView(id: String): Result<JsonObject> = runCatching { attached().bodyView(id, key()) }
 
-    /** One observe batch under this install's key. */
-    suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching { attached().observe(batch, key()) }
+    /** One observe batch under this install's key, or [asOwner] under the owner's login, on this repo's scope. */
+    suspend fun observeNow(batch: JsonObject, asOwner: Boolean = false): Result<ObserveAnswer> =
+        scope.async { runCatching { attached().observe(batch, if (asOwner) null else key()) } }.await()
+
+    /** One observation taken back ([OrreryApi.retract]), on this repo's scope. */
+    suspend fun retract(id: String, note: String): Result<Unit> =
+        scope.async { runCatching { attached().retract(id, note) } }.await()
+
+    /** What waits for the owner, read from the ship now; the Actions page shows the same list. */
+    suspend fun readActions(): Result<List<OrreryAction>> =
+        runCatching { attached().actions(keyToken()) }.onSuccess { published(it) }
 
     private fun attached(): OrreryApi = api ?: error("Not attached to a ship.")
 

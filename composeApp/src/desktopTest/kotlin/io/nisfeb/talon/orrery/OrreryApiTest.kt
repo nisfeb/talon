@@ -135,6 +135,28 @@ class OrreryApiTest {
         assertEquals(true, answer.observations[0].existing)
     }
 
+    // orrery's serve-observe: on the owner's login a row keeps the by it
+    // names, and one with no at is dated by the ship (+fill-obs).
+    @Test
+    fun `observing as the owner carries no key and sends the rows as given`() = runTest {
+        val row = buildJsonObject { put("subject", "situation/jax"); put("attr", "needs"); put("value", "drop-off"); put("by", "owner") }
+        api(body = """{"bodies":[],"observations":[{"id":"1-a","ok":true,"existing":false}]}""")
+            .observe(buildJsonObject { put("observations", kotlinx.serialization.json.JsonArray(listOf(row))) }, token = null)
+        assertNull(seen!!.headers[HttpHeaders.Authorization], "the owner's, not the key's")
+        assertEquals("https://ship/apps/orrery/api/observe", seen!!.url.toString())
+        assertEquals("""{"observations":[{"subject":"situation/jax","attr":"needs","value":"drop-off","by":"owner"}]}""", (seen!!.body as TextContent).text)
+    }
+
+    // orrery's serve-retract: {"id", "note"}, the note at most 500 bytes.
+    @Test
+    fun `a retraction is the owner's and names the row and why`() = runTest {
+        api(body = """{"id":"1-a","ok":true}""").retract("1-a", "x".repeat(600))
+        assertEquals("https://ship/apps/orrery/api/retract", seen!!.url.toString())
+        assertNull(seen!!.headers[HttpHeaders.Authorization])
+        assertEquals("""{"id":"1-a","note":"${"x".repeat(500)}"}""", (seen!!.body as TextContent).text)
+        assertFailsWith<OrreryError.Refused> { api(HttpStatusCode.NotFound, """{"error":"no such observation"}""").retract("9-z", "") }
+    }
+
     @Test
     fun `the brief view is asked for with brief=1, the whole one without`() = runTest {
         val api = api(body = """{"bodies":[]}""")
