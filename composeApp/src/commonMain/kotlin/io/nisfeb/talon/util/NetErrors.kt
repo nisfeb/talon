@@ -35,7 +35,8 @@ fun isTransientNetworkError(t: Throwable?): Boolean {
 
 /**
  * Whether [t] says the ship was slow or out of reach, rather than that it
- * refused: timed out, lost the connection, answered with a 5xx, or was not
+ * refused: timed out, lost the connection, answered a channel PUT with a
+ * 5xx or anything with a proxy's 502 to 504 ([SHIP_DOWN]), or was not
  * connected at all. A write that failed so is not the ship saying no; it
  * can go again when the ship is back, and is said calmly.
  */
@@ -43,8 +44,19 @@ fun isShipSlow(t: Throwable): Boolean =
     t !is io.nisfeb.talon.urbit.PokeNacked && (
         isTransientNetworkError(t) ||
             t is io.nisfeb.talon.urbit.PokeUnacked ||
-            t.message.orEmpty().let { it.startsWith("channel PUT: HTTP 5") || it.startsWith("not connected") }
+            t.message.orEmpty().let { it.startsWith("channel PUT: HTTP 5") || it.startsWith("not connected") || SHIP_DOWN.matches(it) }
         )
+
+/**
+ * A 502, 503 or 504 in the words UrbitChannel and UrbitSession give it:
+ * "scry <app><path>: HTTP 502", "PUT <path>: HTTP 502", "thread <name>:
+ * HTTP 504", "channel SSE: HTTP 503", "login HTTP 502". The web server in
+ * front of the ship answering for a ship that is down, or too slow. Not
+ * every 5xx: a scry's 500 is a path its agent does not serve, which a read
+ * falls back from ([io.nisfeb.talon.urbit.notServed]). Nor another
+ * service's 502 (S3, memex, a model), which says nothing of the ship.
+ */
+private val SHIP_DOWN = Regex("""^(?:(?:channel (?:PUT|SSE)|scry \S+|thread \S+|[A-Z]+ /\S*): |login )HTTP 50[234]$""")
 
 /**
  * A failure as the person is told it: [line] in words, the error whole in
@@ -89,6 +101,8 @@ fun shipSlowLine(queued: Int, health: io.nisfeb.talon.urbit.ShipHealth?): String
 /** [message]'s first line when it reads as words, else null. */
 internal fun readableReason(message: String?): String? {
     val first = message?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+    // The internal path never reaches the line: said as what it means.
+    if (SHIP_DOWN.matches(first)) return "your ship is down or out of reach"
     val technical = first.isEmpty() || first.length > 160 ||
         listOf("://", "Exception", "{", "<", "[url=").any { it in first }
     return first.takeUnless { technical }

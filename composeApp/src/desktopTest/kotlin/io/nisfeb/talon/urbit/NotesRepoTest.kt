@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
+import io.ktor.client.engine.mock.respond
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -258,6 +259,22 @@ class NotesRepoTest {
         val row = db.notes().note(book.flagString, 11)
         assertEquals("Simmer **long**.", row?.bodyMd, "the host's copy, not the edit")
         assertEquals(false, row?.pending)
+    }
+
+    // A proxy's 502 for a ship that is down read "Your ship couldn't take
+    // it (PUT /notes/~/v1/...: HTTP 502)": the internal path, and a refusal.
+    @Test
+    fun `a save or a new note behind a proxy's 502 says the ship is slow and not the path`() = live {
+        notes.bootstrap()
+        val proxy = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+            respond("<html><body>502 Bad Gateway</body></html>", io.ktor.http.HttpStatusCode.BadGateway)
+        })
+        val down = NotesRepo(db, CoroutineScope(SupervisorJob()))
+            .apply { attach(UrbitSession(proxy, ship.session).apply { tryRestore("~zod") }.openChannel()) }
+        val slow = "Your ship is slow, so it didn't go through. Try again when it's back."
+        assertEquals(slow, down.updateNote(book, 11, "not saved", expectedRevision = 3))
+        assertEquals(slow, down.createNote(book, 9, "Laksa", ""))
+        assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the host's copy, not the edit")
     }
 
     @Test

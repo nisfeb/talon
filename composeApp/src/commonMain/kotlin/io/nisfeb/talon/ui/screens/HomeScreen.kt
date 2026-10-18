@@ -1496,7 +1496,8 @@ private fun EventRow(
  * trace), which reached the home page and the mail list as it came.
  */
 internal fun installFailedLine(e: Throwable, what: String = "The calendar"): String = when {
-    io.nisfeb.talon.util.isTransientNetworkError(e) -> "Your ship did not answer. Try again when it's back."
+    // A proxy's 502 too: said as a phrase in a sentence, it began in lower case.
+    io.nisfeb.talon.util.isShipSlow(e) -> "Your ship did not answer. Try again when it's back."
     else -> io.nisfeb.talon.util.readableReason(e.message) ?: "$what did not install. Try again shortly."
 }
 
