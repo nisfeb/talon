@@ -392,6 +392,39 @@ class SettingsSyncOutboxTest {
         assertEquals(emptyList(), db.settingsOutbox().all())
     }
 
+    // Of a peer's whole bucket: a waiting change it has is dropped; one it
+    // has another value for stands over it.
+    @Test
+    fun `a peer's whole bucket drops only the waiting changes it holds`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        val a = sync.createFolder("A", 0)
+        val b = sync.createFolder("B", 1)
+        sync.applySettingsEvent(
+            fact("put-bucket", "folders", """"bucket":{"$a":"{\"name\":\"Theirs\",\"sortOrder\":0}","$b":"{\"name\":\"B\",\"sortOrder\":1}"}"""),
+        )
+        assertEquals(listOf("folders/$a"), db.settingsOutbox().all().map { it.slot })
+        assertEquals(setOf("A", "B"), folders().toSet())
+    }
+
+    // As at a bootstrap: a kept clear still goes, so an entry kept behind
+    // it is applied again and kept, though the peer's bucket has it.
+    @Test
+    fun `a peer's whole bucket holds nothing kept behind a kept clear`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.clearAssistantHistoryOnShip()
+        sync.pushAssistantTurn(conv, turn)
+        sync.applySettingsEvent(
+            fact(
+                "put-bucket", "assistant-conversations",
+                """"bucket":{"c1":"{\"title\":\"Tides\",\"createdAt\":10,\"updatedAt\":10,\"turnCount\":1}"}""",
+            ),
+        )
+        assertEquals(4, db.settingsOutbox().all().size, "the clear goes, and what it clears goes after it")
+        assertEquals(listOf("c1"), db.assistantConversations().recent(10).first().map { it.gid })
+    }
+
     // A fact for the entry: the same value is ours landing, and drops it;
     // another value is the ship's word, which a change waiting stands over.
     @Test
