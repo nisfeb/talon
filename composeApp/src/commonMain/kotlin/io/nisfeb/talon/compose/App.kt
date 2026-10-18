@@ -2622,12 +2622,17 @@ fun App(
                         uiSettings = uiSettings,
                         embedder = searchEmbedderClient,
                         onBack = { showSearch = false },
+                        // Search closes here when a result opens, so the
+                        // query kept for Android's Back must not prefill
+                        // the next search.
                         onOpenConversation = { other ->
                             showSearch = false
+                            io.nisfeb.talon.ui.screens.SearchDraft.query = ""
                             openChat = other
                         },
                         onOpenMessage = { whomTarget, postId, parentId ->
                             showSearch = false
+                            io.nisfeb.talon.ui.screens.SearchDraft.query = ""
                             openChat = whomTarget
                             // Land on the tapped hit, not the bottom of the
                             // chat — same anchors Bookmarks/Activity use.
