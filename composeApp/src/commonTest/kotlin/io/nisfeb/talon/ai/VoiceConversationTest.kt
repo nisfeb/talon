@@ -81,10 +81,12 @@ class VoiceConversationTest {
         // The next turn knows what was read and what was said.
         assertEquals(VoiceConversation.Next.Say("A1 is the wifi."), t.next("What's A1 again?"))
         val (system, messages, _) = model.calls.last()
-        assertTrue("What you read out to the owner earlier" in system && "Load the BT26 wifi" in system, system)
+        // In mind as the reading turn's reply, marked as others' words; not
+        // in the system prompt, which went again with every later turn.
+        assertEquals(VoiceConversation.prompt, system, "Archie's own prompt, and nothing read out")
         assertTrue(system.startsWith(DATA_NOT_INSTRUCTIONS) && "orrery_instruct" in system && "read_brief with aloud" in system, "Archie's own prompt")
         assertEquals(AgentMessage.User("Yes, read me the brief"), messages[0])
-        assertEquals(AgentMessage.Assistant(VoiceConversation.READING, emptyList()), messages[1])
+        assertEquals(AgentMessage.Assistant(VoiceConversation.READING + "\n\n" + VoiceConversation.READ_OUT + brief.text, emptyList()), messages[1])
         assertEquals(AgentMessage.User("What's A1 again?"), messages.last())
     }
 
@@ -126,8 +128,22 @@ class VoiceConversationTest {
         assertTrue("Nec: lunch anyone?" in read.shown && Briefing.UNREAD_IDS !in read.shown && read.inFull.none { Briefing.UNREAD_IDS in it }, "the ids are the model's, neither said nor shown")
         assertEquals(1, model.calls.size, "said by the tool's result, not a second call")
         t.next("What did Andrea want?")
-        assertTrue("can you grab milk?" in model.calls.last().first, "the next turn knows what was read")
+        val reply = (model.calls.last().second[1] as AgentMessage.Assistant).text.orEmpty()
+        assertTrue(VoiceConversation.READ_OUT in reply && "can you grab milk?" in reply, "the next turn knows what was read, as others' words: $reply")
+        assertTrue("can you grab milk?" !in model.calls.last().first, "and not in the system prompt")
         assertTrue("list_unread's, read to them the same way with aloud true" in model.calls.first().first, "Archie is told how")
+    }
+
+    // A long read-out went whole with every later turn.
+    @Test
+    fun `a long read-out is kept in part`() = runBlocking {
+        val long = "Saturday\n\n" + "x".repeat(VoiceConversation.READ_KEPT * 2)
+        val model = Model(AgentTurn.Calls(null, listOf(call("read_brief", "aloud" to true))), AgentTurn.Final("ok"))
+        val t = talk(model, brief = brief.copy(text = long))
+        t.next("Read me the brief")
+        t.next("And then?")
+        val reply = (model.calls.last().second[1] as AgentMessage.Assistant).text.orEmpty()
+        assertEquals(VoiceConversation.READING + "\n\n" + VoiceConversation.READ_OUT + long.take(VoiceConversation.READ_KEPT), reply)
     }
 
     @Test
