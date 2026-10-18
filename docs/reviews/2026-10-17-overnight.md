@@ -11,6 +11,7 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Step: fix. Pass 2's triage done 03:50 EDT (see "Pass 2 triage"); six fixers launched in the worktrees below, asked to report by 05:30.
 - Pass 1: 00:10 to 03:30 EDT. Pass 2 started 03:30 EDT. Pass 3 will not start: a pass takes two hours or more, and the cutoff is 04:30.
 - Fixer branches in flight: `polish/ov-2026-10-17-p2-<group>` for shells, android, voice, desktop-ios, chat, screens, in `~/software/personal/talon-ov-2026-10-17-p2-<group>`.
+- Stalled 04:00 to 06:32 EDT: the session limit stopped all six fixers and the loop itself (it reset at 04:40, but the loop's wakeups had hit the same limit). Resumed at 06:32 with each fixer's work kept and a new report-by time of 07:30.
 - Pass 1's lattice entry saved at 03:48 (`/project/talon/overnight-2026-10-17`).
 - Next firing: merge each pass-2 fixer as it reports (check the branch, merge --no-ff, apply asked-for changes elsewhere), then the full suite and four compiles, then the morning report.
 - Pass 1 merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
