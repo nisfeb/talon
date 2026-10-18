@@ -111,6 +111,16 @@ class Loops(
         }
     }
 
+    /** Allow, from the Loops screen: the held call, done as the loop's tool would ([LoopRunner.allow]). */
+    fun allowHeld(holdId: Long) {
+        scope.launch {
+            runCatching {
+                if (sessionStore.activeShip() == null) return@launch
+                withRunner { it.allow(holdId) }
+            }.onFailure { if (it is CancellationException) throw it }
+        }
+    }
+
     private suspend fun rearm() {
         val pi = buildPendingIntent()
         // Disarm when there's nothing to run: no ship, no AI key (loops
@@ -581,6 +591,7 @@ class Loops(
         return LoopRunner(
             loops = db.loops(),
             runs = db.loopRuns(),
+            holds = db.loopHolds(),
             tools = tools + actionTools(actions),
             completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
             aiConfig = { aiSettings.state.value },

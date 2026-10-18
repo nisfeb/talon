@@ -52,6 +52,7 @@ import androidx.sqlite.execSQL
         AssistantConversationEntity::class,
         LoopEntity::class,
         LoopRunEntity::class,
+        LoopHoldEntity::class,
         NotesNotebookEntity::class,
         NotesFolderEntity::class,
         NotesNoteEntity::class,
@@ -68,7 +69,7 @@ import androidx.sqlite.execSQL
         SettingsOutboxEntity::class,
         MarkEntity::class,
     ],
-    version = 57,
+    version = 58,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -94,6 +95,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun assistantConversations(): AssistantConversationDao
     abstract fun loops(): LoopDao
     abstract fun loopRuns(): LoopRunDao
+    abstract fun loopHolds(): LoopHoldDao
     abstract fun notes(): NotesDao
     abstract fun mailRows(): MailRowDao
     abstract fun calendarCache(): CalendarCacheDao
@@ -163,4 +165,5 @@ val SHARED_MIGRATIONS = arrayOf(
     COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION,
     URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION,
     FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION, NOTICE_MIGRATION, SYNC_STATE_MIGRATION,
+    LOOP_HOLD_MIGRATION,
 )

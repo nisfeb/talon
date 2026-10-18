@@ -63,6 +63,7 @@ import io.nisfeb.talon.ai.LoopSchedule
 import io.nisfeb.talon.ai.LoopScheduler
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.LoopEntity
+import io.nisfeb.talon.data.LoopHoldEntity
 import io.nisfeb.talon.data.newGid
 import io.nisfeb.talon.ui.MarkdownText
 import io.nisfeb.talon.ui.isBackgroundSchedulingSupported
@@ -82,6 +83,9 @@ import kotlinx.coroutines.launch
  * @param onRunNow fire a one-off run of a loop now (result lands in its
  *   history + a notification); no-op where loops can't run headless.
  * @param scheduler re-armed after every add/edit/enable/delete.
+ * @param onAllowHeld do a call a loop held for the owner
+ *   ([LoopEntity.askBeforeSharing]); the host runs it on a scope that
+ *   outlives this screen. Null where nothing can run it.
  * @param settingsSync pushes loop *definitions* to %settings so they
  *   follow the ship across devices; lastRunAt + run history stay local.
  *   The DAO has no change hook, so the screen pushes directly. Null (and
@@ -94,6 +98,7 @@ fun LoopsScreen(
     scheduler: LoopScheduler,
     onRunNow: (Long) -> Unit,
     onBack: () -> Unit,
+    onAllowHeld: ((Long) -> Unit)? = null,
     settingsSync: SettingsSync? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -138,6 +143,7 @@ fun LoopsScreen(
                     selectedId = null,
                     onSelect = { openJob = it },
                     onNew = { openJob = blankLoop() },
+                    onAllowHeld = onAllowHeld,
                 )
             }
         }
@@ -158,10 +164,16 @@ fun LoopsList(
     selectedId: Long? = null,
     onSelect: (LoopEntity) -> Unit,
     onNew: () -> Unit,
+    /** Shows the calls loops hold for the owner, with Allow and Don't; null shows none. */
+    onAllowHeld: ((Long) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val loopDao = remember(db) { db.loops() }
+    val holdDao = remember(db) { db.loopHolds() }
+    // Those not yet expired: one past its day does nothing, so it is not offered.
+    val held by remember(holdDao) { holdDao.stream(nowMs() - io.nisfeb.talon.ai.LoopRunner.HOLD_MS) }
+        .collectAsState(initial = emptyList())
     // null = the first DB emission is still in flight. Rendering the empty
     // state during that frame flashes "no loops / add a loop" when switching
     // to the Jobs tab before the list loads — so wait for the real value.
@@ -197,6 +209,16 @@ fun LoopsList(
                 TextButton(onClick = onNew) { Text("New") }
             }
         }
+        if (onAllowHeld != null) {
+            val ids = list.map { it.id }.toSet()
+            items(held.filter { it.loopId in ids }, key = { "hold-${it.id}" }) { hold ->
+                HeldCall(
+                    hold = hold,
+                    onAllow = { onAllowHeld(hold.id) },
+                    onDont = { scope.launch { holdDao.delete(hold.id) } },
+                )
+            }
+        }
         items(list, key = { it.id }) { loop ->
             LoopListRow(
                 db = db,
@@ -213,6 +235,23 @@ fun LoopsList(
                     }
                 },
             )
+        }
+    }
+}
+
+/** A call a loop held for the owner: what it wanted, with Allow and Don't. */
+@Composable
+private fun HeldCall(hold: LoopHoldEntity, onAllow: () -> Unit, onDont: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(hold.what, style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onAllow) { Text("Allow") }
+                OutlinedButton(onClick = onDont) { Text("Don't") }
+            }
         }
     }
 }
@@ -335,6 +374,7 @@ fun LoopDetail(
                                 atMinuteOfDay = r.atMinuteOfDay,
                                 daysMask = r.daysMask,
                                 writesAuthorized = r.writesAuthorized,
+                                askBeforeSharing = r.askBeforeSharing,
                                 createdAt = now, updatedAt = now, lastRunAt = now,
                             )
                         } else {
@@ -355,6 +395,7 @@ fun LoopDetail(
                                 atMinuteOfDay = r.atMinuteOfDay,
                                 daysMask = r.daysMask,
                                 writesAuthorized = r.writesAuthorized,
+                                askBeforeSharing = r.askBeforeSharing,
                                 updatedAt = now,
                             )
                         }
@@ -401,7 +442,8 @@ fun LoopDetail(
             // and silently can't post. Surface that, with a one-tap grant.
             if (loop.writesAuthorized) {
                 Text(
-                    "Authorized to act on your ship (send messages, poke agents).",
+                    "Authorized to act on your ship (send messages, poke agents)." +
+                        if (loop.askBeforeSharing) " Asks before sharing calendars." else "",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -541,6 +583,7 @@ private fun LoopForm(
     var prompt by remember { mutableStateOf(initial.prompt) }
     var interval by remember { mutableStateOf(initial.intervalMinutes.takeIf { it > 0 } ?: 60) }
     var writesAuthorized by remember { mutableStateOf(initial.writesAuthorized) }
+    var askBeforeSharing by remember { mutableStateOf(initial.askBeforeSharing) }
     var scheduleKind by remember {
         mutableStateOf(initial.scheduleKind.ifBlank { LoopSchedule.KIND_INTERVAL })
     }
@@ -638,6 +681,25 @@ private fun LoopForm(
             }
             Switch(checked = writesAuthorized, onCheckedChange = { writesAuthorized = it })
         }
+        // Only a loop that may write can share; a read-only one has nothing to ask.
+        if (writesAuthorized) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Ask before sharing calendars", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (askBeforeSharing) {
+                            "On: a calendar share or an answer to a calendar offer waits for " +
+                                "you to allow it in Loops."
+                        } else {
+                            "Off: it shares calendars and answers offers unattended."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = askBeforeSharing, onCheckedChange = { askBeforeSharing = it })
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
@@ -646,6 +708,7 @@ private fun LoopForm(
                             name = name.trim(),
                             prompt = prompt.trim(),
                             writesAuthorized = writesAuthorized,
+                            askBeforeSharing = askBeforeSharing,
                             scheduleKind = scheduleKind,
                             intervalMinutes = interval,
                             atMinuteOfDay = timeState.hour * 60 + timeState.minute,
@@ -687,6 +750,7 @@ private data class LoopFormResult(
     val name: String,
     val prompt: String,
     val writesAuthorized: Boolean,
+    val askBeforeSharing: Boolean,
     val scheduleKind: String,
     val intervalMinutes: Int,
     val atMinuteOfDay: Int,

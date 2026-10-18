@@ -47,6 +47,11 @@ class AssistantScreenTest {
     @Volatile private var answer = "Tuesday, at the library."
 
     @Volatile private var status = 200
+    /** From this request on, the model holds its answer until [stall] is let go: a stalled call. */
+    @Volatile private var stallFrom = Int.MAX_VALUE
+    private val stall = java.util.concurrent.CountDownLatch(1)
+    /** The screen is shown; off, it is left, and its run goes on in the session. */
+    private val showing = androidx.compose.runtime.mutableStateOf(true)
     /** A tool call the model makes before it answers, in the OpenAI wire shape. */
     @Volatile private var toolCall: String? = null
 
@@ -84,6 +89,7 @@ class AssistantScreenTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
+            if (asked.size >= stallFrom) stall.await(30, java.util.concurrent.TimeUnit.SECONDS)
             // A tool call waiting to be made goes first, once; then the answer.
             val call = toolCall
             toolCall = null
@@ -113,13 +119,15 @@ class AssistantScreenTest {
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
         ship.channel.events().launchIn(sessionScope)
         val calendar = if (withCalendar) calendarOn(sessionScope) else null
+        // The host's, as the shells keep it: it outlives the screen.
+        val session = AssistantSession(sessionScope)
         try {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        AssistantScreen(
+                        if (showing.value) AssistantScreen(
                             db = db, aiSettings = ai, embedder = null, onOpenMessage = { _, _, _ -> }, repo = repo,
-                            session = AssistantSession(sessionScope), forceExpanded = true, calendar = calendar,
+                            session = session, forceExpanded = true, calendar = calendar,
                         )
                     }
                 }
@@ -127,6 +135,7 @@ class AssistantScreenTest {
                 block(db)
             }
         } finally {
+            stall.countDown()
             runBlocking { sessionScope.coroutineContext.job.cancelAndJoin() }
             server.stop(0)
             db.close()
@@ -288,6 +297,68 @@ class AssistantScreenTest {
         assertTrue(calPokes.none { "Picnic" in it })
         onNodeWithText("Allow").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("Added the picnic.") }
+    }
+
+    // ─── Stop ──────────────────────────────────────────────────────
+
+    // A stalled model call held a run for up to 11 minutes a step, and
+    // nothing ended it. On real time: the session runs on Dispatchers.Default.
+    @Test
+    fun `Stop ends a stalled run at once and gives the question back`() = assistant { db ->
+        stallFrom = 1
+        ask("when is the book club?")
+        waitUntil(timeoutMillis = 5_000) { asked.size == 1 && shows("Stop") }
+        onNodeWithText("Stop").performClick()
+        // The model has still not answered: the run ended without it.
+        waitUntil(timeoutMillis = 2_000) { shows("Stopped.") }
+        assertEquals(1L, stall.count, "the model call is still held")
+        onNode(hasSetTextAction()).assertTextContains("when is the book club?")
+        assertTrue(!shows("It may have done part of it"))
+        assertTrue(runBlocking { db.assistantConversations().mostRecent() } == null, "nothing is kept")
+        // The box is usable: the same question goes again and is answered.
+        stall.countDown()
+        onNodeWithText("Send").performClick()
+        waitUntil(timeoutMillis = 10_000) { shows("Tuesday, at the library.") }
+    }
+
+    @Test
+    fun `Stop after a write says it may have done part of it and keeps the turn`() = assistant { db ->
+        toolCall = postEvent
+        stallFrom = 2
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("chat").isNotEmpty() && asked.size == 2 }
+        onNodeWithText("Stop").performClick()
+        waitUntil(timeoutMillis = 2_000) { shows("It may have done part of it") }
+        // Not put back: sent again, it would post twice.
+        assertEquals("", onNode(hasSetTextAction()).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+        val conv = runBlocking { db.assistantConversations().mostRecent() }!!
+        val turn = runBlocking { db.assistantHistory().forConversation(conv.id) }.single()
+        assertEquals("tell bus about the seed swap", turn.question)
+        assertEquals(io.nisfeb.talon.ui.screens.STOPPED_AFTER_WRITE, turn.answer)
+        assertTrue(turn.log.lines().any { it.startsWith("→ send_event (write) args ") }, turn.log)
+        assertTrue(turn.log.lines().contains("stopped by the owner"), turn.log)
+    }
+
+    // The run lives on the host's scope, so leaving did not end it; the
+    // Stop has to reach it from the screen opened again.
+    @Test
+    fun `Stop reaches a run after the screen is left and opened again`() = assistant { db ->
+        stallFrom = 1
+        ask("when is the book club?")
+        waitUntil(timeoutMillis = 5_000) { asked.size == 1 }
+        showing.value = false
+        waitUntil(timeoutMillis = 5_000) { !shows("Stop") }
+        showing.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("Stop") }
+        onNodeWithText("Stop").performClick()
+        waitUntil(timeoutMillis = 2_000) { shows("Stopped.") }
+        assertEquals(1L, stall.count, "the model call is still held")
+        onNode(hasSetTextAction()).assertTextContains("when is the book club?")
+        assertTrue(!shows("Working…"), "the box is free")
+        assertTrue(runBlocking { db.assistantConversations().mostRecent() } == null)
     }
 }
 

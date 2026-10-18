@@ -115,6 +115,7 @@ class MessageSearchTextTest {
         BundledSQLiteDriver().open(path).also { c ->
             c.execSQL("ALTER TABLE messages DROP COLUMN searchText")
             c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+            c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
             c.execSQL("PRAGMA user_version = 48")
             c.close()
         }

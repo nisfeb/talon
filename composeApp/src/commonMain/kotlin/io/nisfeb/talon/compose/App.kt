@@ -1288,6 +1288,7 @@ fun App(
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),
+                holds = db.loopHolds(),
                 tools = io.nisfeb.talon.ai.ToolCatalog.default(
                     repo, db, searchEmbedderClient,
                     braveSearch = if (loopBraveOn) {
@@ -1321,13 +1322,10 @@ fun App(
                 // (SettingsSyncImpl implements LoopWriteCoordinator). Noop when
                 // there's no sync channel (a write loop needs the ship anyway).
                 coordinator = settingsSync ?: io.nisfeb.talon.ai.LoopWriteCoordinator.Noop,
-                // loopId is dropped: the desktop Notifier (tray balloon /
-                // notify-send) has no per-notification tag, so loops can't
-                // group/replace like Android's id-tagged notifications. A
-                // tag param on Notifier.notify is the upgrade path if it
-                // matters; for now each loop run is a standalone toast.
+                // Keyed on the loop, so a click opens Loops
+                // (openNotificationKey), where a held call waits.
                 notify = { loopId, title, body ->
-                    notifier.notify(title, body)
+                    notifier.notify(title, body, "loop:$loopId")
                     noticeRepo.record(
                         "loop:$loopId", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
                         "loop-result", title, body, "loop:$loopId",
@@ -1406,6 +1404,8 @@ fun App(
         val runLoopNow: (Long) -> Unit = { loopId ->
             loopScope.launch { db.loops().get(loopId)?.let { loopRunner.runLoop(it) } }
         }
+        // Allow on a held call; on the loops' scope, so leaving Loops does not stop it.
+        val allowHeld: (Long) -> Unit = { holdId -> loopScope.launch { loopRunner.allow(holdId) } }
 
         // Kick off the embedder index as soon as ANY feature that
         // depends on it is enabled — smart search, topic clusters, or
@@ -2500,6 +2500,7 @@ fun App(
                         db = db,
                         scheduler = io.nisfeb.talon.ai.LoopScheduler.Noop,
                         onRunNow = runLoopNow,
+                        onAllowHeld = allowHeld,
                         onBack = { showLoops = false },
                         settingsSync = settingsSync,
                     )

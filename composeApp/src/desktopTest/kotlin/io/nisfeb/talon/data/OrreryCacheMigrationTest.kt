@@ -33,6 +33,7 @@ class OrreryCacheMigrationTest {
             // As 1.8.1-rc35 left it: version 54, no table.
             BundledSQLiteDriver().open(path).apply {
                 execSQL("DROP TABLE orrery_cache")
+                execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 execSQL("PRAGMA user_version = 54")
                 close()
             }

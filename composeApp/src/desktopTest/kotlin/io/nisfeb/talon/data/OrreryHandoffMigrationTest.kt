@@ -43,6 +43,7 @@ class OrreryHandoffMigrationTest {
                     c.execSQL("INSERT INTO orrery_sent VALUES ('~zod', '$it', 'v', 1)")
                 }
                 c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+                c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 c.execSQL("PRAGMA user_version = 46")
                 c.close()
             }

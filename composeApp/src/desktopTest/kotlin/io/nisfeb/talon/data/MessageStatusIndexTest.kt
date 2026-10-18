@@ -32,6 +32,7 @@ class MessageStatusIndexTest {
             BundledSQLiteDriver().open(path).also { c ->
                 c.execSQL("DROP INDEX index_messages_status")
                 c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+                c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 c.execSQL("PRAGMA user_version = 50")
                 c.close()
             }
