@@ -11,7 +11,7 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Step: fix. Triage done 01:25 EDT; six fixers launched in the worktrees below.
 - Pass 1 started: 00:10 EDT.
 - Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
-- Merged so far: shells (15 commits, 02:45), chatui (21 commits, 03:00), search-groups (5 commits, 03:10; plus a lead commit clearing SearchDraft in App.kt, untested in the shell). The DmChatScreenTest "an emoji alone draws large" flake may come from ChatRowsSnapshot being process-global across tests (pass 2).
+- Merged so far: shells (15 commits, 02:45), chatui (21 commits, 03:00), search-groups (5 commits, 03:10; plus a lead commit clearing SearchDraft in App.kt, untested in the shell), apps (16 commits, 03:20). Lead integration commits: orrery setForeground in both shells, the event card using addSharedWhyNot, and test temp dirs under build/test-tmp (verified: a leaking test wrote 16 dirs there and none to /tmp). The DmChatScreenTest "an emoji alone draws large" flake may come from ChatRowsSnapshot being process-global across tests (pass 2).
 - Next firing: merge each fixer's branch as it reports (step 4), then the full suite and compiles. Integration notes for after the merges: bridge chatrepo's signed-out flow into `LoginLapses` in both shells (A5-18); add `dm:` and `invite:` keys to IosNotifier's postsLocally so desktop and iOS DM-request and invite clicks open them.
 
 ## Pass 1
