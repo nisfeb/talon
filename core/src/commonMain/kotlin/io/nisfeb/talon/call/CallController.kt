@@ -107,6 +107,8 @@ class CallController(
     private val defaults: CallDefaults = CallDefaults.None,
     /** How long a lost path may take to come back. A knob for tests. */
     private val restartGiveUpMs: Long = RESTART_GIVE_UP_MS,
+    /** How often a recording is announced again. A knob for tests. */
+    private val recordHeartbeatMs: Long = RECORD_HEARTBEAT_MS,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -1103,7 +1105,7 @@ class CallController(
                 val beat = launch {
                     while (true) {
                         startRecording(host, name)
-                        delay(RECORD_HEARTBEAT_MS)
+                        delay(recordHeartbeatMs)
                     }
                 }
                 recording.first { !it }
