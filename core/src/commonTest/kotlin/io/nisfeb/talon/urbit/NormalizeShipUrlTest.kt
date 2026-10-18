@@ -42,6 +42,17 @@ class NormalizeShipUrlTest {
         assertEquals("https://ship.example.com", normalizeShipUrl("ship.example.com/"))
     }
 
+    // A page of the ship pasted from a browser kept its path, and every
+    // request went under it (review Low, UrbitSession.kt:26-34).
+    @Test
+    fun aPastedPageKeepsOnlyTheShip() {
+        assertEquals("https://ship.example.com", normalizeShipUrl("https://ship.example.com/apps/groups/"))
+        assertEquals("https://ship.example.com", normalizeShipUrl("ship.example.com/apps/landscape?tab=1#top"))
+        assertEquals("http://localhost:8080", normalizeShipUrl("http://localhost:8080/~/login"))
+        assertEquals("https://ship.example.com", normalizeShipUrl("https://ship.example.com?x=1"))
+        assertEquals("HTTP://localhost:8080", normalizeShipUrl("HTTP://localhost:8080/apps/"))
+    }
+
     @Test
     fun whitespaceIsStripped() {
         assertEquals("https://ship.example.com", normalizeShipUrl("  ship.example.com  "))
