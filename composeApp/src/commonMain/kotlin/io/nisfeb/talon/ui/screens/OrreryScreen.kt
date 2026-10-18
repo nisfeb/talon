@@ -95,7 +95,7 @@ fun OrreryRepoScreen(
         openItem = openItem,
         onOpenedItem = onOpenedItem,
         turnOn = if (on) null else orreryRepo::ensureEnabled,
-        setUpAgain = orreryRepo::enable,
+        setUpAgain = orreryRepo::setUpAgain,
     ) {
         OrreryActionsScreen(
             actions = actions,

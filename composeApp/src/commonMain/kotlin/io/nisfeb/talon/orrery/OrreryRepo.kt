@@ -1212,9 +1212,7 @@ class OrreryRepo(
             // read-only key, neither of which is the key gone; and for a
             // key it has minted and not stored yet, which is a key not
             // there yet, and was turning the pipe off as it was turned on.
-            val fresh = token?.let { t -> db.orreryAccounts().get(s)?.takeIf { it.token == t } }
-                ?.let { r -> db.orrerySent().get(s, "minted:${r.clientId}")?.atMs }
-                ?.let { now() - it < KEY_GRACE_MS } == true
+            val fresh = token?.let { keyFresh(s, it) } == true
             if (e.status == 403 && e.reason == "forbidden" && !fresh) {
                 // Deleted before anything is cancelled: turning off cancels
                 // the loop this pass may run in, and a delete after that
@@ -1257,6 +1255,28 @@ class OrreryRepo(
     private data class Heard(val address: String, val lines: List<Spoken>, val from: Int = 0)
 
     /** When a key was minted, for the grace it gets while the ship stores it. */
+    /**
+     * Whether [token] is this ship's key here, made within [KEY_GRACE_MS]:
+     * one the ship may not have stored yet, whose 403 is not the key gone.
+     */
+    private suspend fun keyFresh(s: String, token: String): Boolean =
+        db.orreryAccounts().get(s)?.takeIf { it.token == token }
+            ?.let { r -> db.orrerySent().get(s, "minted:${r.clientId}")?.atMs }
+            ?.let { now() - it < KEY_GRACE_MS } == true
+
+    /**
+     * "Set up this device again", where the ship refused this device's key:
+     * a new one, unless the key here was made within [KEY_GRACE_MS], which
+     * the ship refuses until it has stored it. Minted again then, it made a
+     * key more for each tap while the first was still landing.
+     */
+    suspend fun setUpAgain(): Result<Unit> {
+        val s = ship
+        val row = s?.let { db.orreryAccounts().get(it) }
+        if (s != null && row != null && keyFresh(s, row.token)) return Result.success(Unit)
+        return enable()
+    }
+
     private suspend fun minted(s: String, clientId: String) =
         db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(s, "minted:$clientId", "", now()))
 

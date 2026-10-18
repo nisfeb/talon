@@ -104,6 +104,19 @@ class OrreryKeysTest {
         assertTrue(repo.enabled.value)
     }
 
+    // The ship refuses a key it has minted and not stored yet. "Set up this
+    // device again" minted another on each tap while the first was landing.
+    @Test
+    fun `set up again leaves a key made moments ago to land and replaces an older one`() = keys { repo, db ->
+        assertTrue(repo.enable().isSuccess)
+        assertTrue(repo.setUpAgain().isSuccess)
+        assertEquals(1, asked.count { it.startsWith("POST") && "/api/clients" in it }, "no second key while the first lands")
+        // Made long enough ago that the ship has had it: refused now, it is gone.
+        db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity("~zod", "minted:c1", "", 0L))
+        assertTrue(repo.setUpAgain().isSuccess)
+        assertEquals(2, asked.count { it.startsWith("POST") && "/api/clients" in it }, "a new key for a refused old one")
+    }
+
     @Test
     fun `a schema the ship will not give falls back to the built-in lists`() = keys { repo, _ ->
         schemaAnswers = false
