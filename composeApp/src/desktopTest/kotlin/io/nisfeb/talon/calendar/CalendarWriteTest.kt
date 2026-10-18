@@ -554,6 +554,24 @@ class CalendarWriteTest {
         }
     }
 
+    // The chat card compared unheard before and after its add to find its
+    // own refusal: another write's, waiting there, read as this one's.
+    @Test
+    fun `an add from a chat card answers its own refusal and not another write's`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(
+            setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },
+            window = { ship -> """{"rows":[${if (ship.pokes.any { "Tea" in it }) event("e9", "Tea", soon) else ""}]}""" },
+        ) { repo, ship ->
+            assertEquals("\"Picnic\" was not added: no such calendar", repo.addSharedWhyNot("default", "Picnic", soon, soon + 3_600_000))
+            assertEquals(null, repo.addSharedWhyNot("default", "Tea", soon, soon + 3_600_000), "added, though Picnic's still waits in unheard")
+            assertEquals("\"Picnic\" was not added: no such calendar", repo.unheard.value)
+            ship.down = true
+            val down = repo.addSharedWhyNot("default", "Tea", soon, soon + 3_600_000)
+            assertTrue(down != null && "isn't answering" in down, "$down")
+        }
+    }
+
     @Test
     fun `an event written behind a chat says why it did not land`() = calendar(
         setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },

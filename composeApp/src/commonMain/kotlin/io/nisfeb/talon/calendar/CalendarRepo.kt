@@ -479,24 +479,33 @@ class CalendarRepo(
 
     /**
      * An event someone shared, as moments, onto [calId] (else the calendar
-     * new events go to). False when refused, the calendar's own refusal
-     * after its ack included, whose why is kept in [unheard]: "Added" was
-     * said of an event the calendar had then refused.
+     * new events go to). Null once added; else this add's own line: not
+     * taken, or the calendar's own refusal after its ack, early or late,
+     * which is kept in [unheard] as well. "Added" was said of an event the
+     * calendar had then refused, and a chat card showing another write's
+     * refusal compared [unheard] before and after.
      */
-    suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean = carry {
+    suspend fun addSharedWhyNot(calId: String?, title: String, startMs: Long, endMs: Long): String? = carry {
         val zoneId = _zone.value ?: TimeZone.currentSystemDefault().id
         val zone = runSuspendCatching { TimeZone.of(zoneId) }.getOrElse { TimeZone.currentSystemDefault() }
         val since = nowMs()
-        val w = writeEvent(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
-        if (!w.ok) return@carry false
+        val body = eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId))
+        val w = writeEvent(body)
+        if (!w.ok) return@carry failedLine("The calendar did not take \"$title\".")
         // Before the reading back, which a refused add waits out in full.
-        if (refusalOfSave("", since, "add-event") { "\"$title\" was not added: $it" } != null) {
+        val said = { why: String -> notLanded(body, why) }
+        refusalOfSave("", since, "add-event", line = said)?.let { why ->
             w.undo()
-            return@carry false
+            return@carry said(why)
         }
         // A busy ship's refusal after that look, found behind the reading.
-        w.shown.await() == null
+        w.shown.await()?.let(said)
     }
+
+    /** [addSharedWhyNot] as yes or no. */
+    // ponytail: kept for StoryRenderer's card until it takes the line; then it goes
+    suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean =
+        addSharedWhyNot(calId, title, startMs, endMs) == null
 
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
     suspend fun importIcs(calId: String?, ics: String): Boolean = carry {
