@@ -118,10 +118,28 @@ object StoryCache {
             val cached = previews[id]
             if (cached != null && cached.first == hash) return cached.second
         }
-        val partsForId = partsFor(id, contentJson)
-        val text = partsForId.joinToString("\n") { part ->
+        val text = flatten(partsFor(id, contentJson)) { it.text }
+        synchronized(lock) {
+            previews[id] = hash to text
+        }
+        return text
+    }
+
+    /**
+     * [textFor] with each link cut short on screen given its whole address:
+     * for Copy text, a new event's notes and the assistant's reads. Previews
+     * (the chat list, quotes, cites, notifications) keep the cut form.
+     */
+    fun copyTextFor(id: String, contentJson: String): String =
+        flatten(partsFor(id, contentJson), ::withAddresses)
+
+    private fun flatten(
+        parts: List<StoryPart>,
+        words: (androidx.compose.ui.text.AnnotatedString) -> String,
+    ): String =
+        parts.joinToString("\n") { part ->
             when (part) {
-                is StoryPart.Text -> withAddresses(part.text)
+                is StoryPart.Text -> words(part.text)
                 is StoryPart.Image -> part.alt?.takeIf { it.isNotBlank() } ?: "[image]"
                 is StoryPart.Code -> "```\n${part.code}\n```"
                 is StoryPart.Table -> (listOf(part.header) + part.rows)
@@ -134,11 +152,6 @@ object StoryCache {
                 is StoryPart.LocWidget -> "📍 ${part.lat}, ${part.lng}"
             }
         }.trim()
-        synchronized(lock) {
-            previews[id] = hash to text
-        }
-        return text
-    }
 }
 
 /**

@@ -710,7 +710,7 @@ fun DmChatScreen(
             MessageToCalendarDialog(
                 kind = kind,
                 initialTitle = titleFromMessage(StoryCache.textFor(target.id, target.contentJson)),
-                initialNote = StoryCache.textFor(target.id, target.contentJson).let { said ->
+                initialNote = StoryCache.copyTextFor(target.id, target.contentJson).let { said ->
                     descriptionFromMessage(said, titleFromMessage(said))
                 },
                 zone = runCatching { kotlinx.datetime.TimeZone.of(zoneId ?: "") }
@@ -1119,7 +1119,7 @@ fun DmChatScreen(
                 },
                 onCopy = {
                     actionTarget = null
-                    val text = StoryCache.textFor(target.id, target.contentJson)
+                    val text = StoryCache.copyTextFor(target.id, target.contentJson)
                     clipboardManager.setText(AnnotatedString(text))
                 },
                 onCopyMarkdown = {
