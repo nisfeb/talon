@@ -3646,6 +3646,10 @@ fun App(
                                         onRailItemClicked(io.nisfeb.talon.ui.RailItem.Settings)
                                         showSidebarSettings = true
                                     },
+                                    onContacts = {
+                                        closeDrawer()
+                                        leaveAllFor { showContacts = true }
+                                    },
                                 )
                             },
                         ) {

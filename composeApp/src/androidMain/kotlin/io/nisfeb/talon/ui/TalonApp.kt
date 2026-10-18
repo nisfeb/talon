@@ -1799,6 +1799,13 @@ fun TalonApp(
                             sidebarSettingsOpen = true
                         }
                     },
+                    onContacts = {
+                        close()
+                        sections.leave {
+                            closeSections()
+                            contactsOpen = true
+                        }
+                    },
                 )
             },
         ) {
