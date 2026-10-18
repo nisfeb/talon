@@ -38,6 +38,16 @@ object DesktopUriHandler : UriHandler {
      * have one either.
      */
     fun tryOpenUri(uri: String): Boolean {
+        when (val target = openTarget(uri, java.io.File(io.nisfeb.talon.util.openedFilesDir()))) {
+            null -> {
+                // A message's link reaches here as the sender wrote it, and
+                // the system opener runs anything it has a handler for: a
+                // file, a .desktop launcher, an smb share, a custom scheme.
+                Log.w(TAG, "not opening a link of this kind: ${uri.substringBefore(':').take(20)}")
+                return false
+            }
+            is java.io.File -> return openFile(target)
+        }
         val cmd = when {
             "linux" in osName -> arrayOf("xdg-open", uri)
             "mac" in osName || "darwin" in osName -> arrayOf("open", uri)
@@ -91,7 +101,7 @@ object DesktopUriHandler : UriHandler {
             "linux" in osName -> arrayOf("xdg-open", path)
             "mac" in osName || "darwin" in osName -> arrayOf("open", path)
             "windows" in osName -> arrayOf("rundll32", "url.dll,FileProtocolHandler", path)
-            else -> return tryOpenUri(file.toURI().toString())
+            else -> return runCatching { java.awt.Desktop.getDesktop().open(file); true }.getOrDefault(false)
         }
         return runCatching {
             val p = ProcessBuilder(*cmd)
@@ -109,4 +119,19 @@ object DesktopUriHandler : UriHandler {
             false
         }
     }
+}
+
+/** The link kinds the system opener is given. Talon's own (talon:, urb:) are routed before this. */
+private val OPENABLE_SCHEMES = setOf("http", "https", "mailto")
+
+/**
+ * What [uri] may be opened as: itself (a web or mail link), a file Talon
+ * made in [opened] (an event's .ics), or null for anything else.
+ */
+internal fun openTarget(uri: String, opened: java.io.File): Any? {
+    val scheme = uri.substringBefore(':', "").lowercase()
+    if (scheme in OPENABLE_SCHEMES) return uri
+    if (scheme != "file") return null
+    val file = runCatching { java.io.File(java.net.URI(uri)).canonicalFile }.getOrNull() ?: return null
+    return file.takeIf { it.parentFile == opened.canonicalFile }
 }

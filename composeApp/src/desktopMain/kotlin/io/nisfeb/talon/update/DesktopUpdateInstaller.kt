@@ -178,7 +178,7 @@ class DesktopUpdateInstaller(
             // downloaded installer isn't a dead end the user can't find.
             if (!DesktopUriHandler.openFile(file)) {
                 Log.w(TAG, "no opener took ${file.name}; revealing its folder")
-                DesktopUriHandler.openUri(file.parentFile.toURI().toString())
+                DesktopUriHandler.openFile(file.parentFile)
             }
         }
     }
@@ -205,7 +205,7 @@ class DesktopUpdateInstaller(
         }.onFailure { Log.w(TAG, "could not start the MSI update waiter: ${it.message}") }.isSuccess
         if (ok) quit()
         else if (!DesktopUriHandler.openFile(msi)) {
-            DesktopUriHandler.openUri(msi.parentFile.toURI().toString())
+            DesktopUriHandler.openFile(msi.parentFile)
         }
     }
 
@@ -226,7 +226,7 @@ class DesktopUpdateInstaller(
             Files.move(fresh.toPath(), current.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
             spawnRestartAfterExit(current)
         }.onFailure { Log.w(TAG, "could not replace ${current.path}: ${it.message}") }.isSuccess
-        if (ok) quit() else DesktopUriHandler.openUri(fresh.parentFile.toURI().toString())
+        if (ok) quit() else DesktopUriHandler.openFile(fresh.parentFile)
     }
 
     /**

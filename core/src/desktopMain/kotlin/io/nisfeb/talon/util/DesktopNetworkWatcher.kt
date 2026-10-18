@@ -30,7 +30,18 @@ object DesktopNetworkWatcher {
     }
 
     private fun snapshot(): Set<String> = NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback }
-        .flatMap { i -> i.inetAddresses.toList().map { it.hostAddress ?: "" } }
+        .filter { it.isUp && !it.isLoopback && !it.isVirtual && carriesCalls(it.name) }
+        .flatMap { i -> i.inetAddresses.toList().filterNot { it.isLinkLocalAddress }.map { it.hostAddress ?: "" } }
         .toSet()
+
+    /**
+     * Whether an interface can carry a call's path. A container or VM
+     * bridge coming and going (docker starting one per container) is not
+     * a network change, nor a link-local address, and each one dropped
+     * the party line. A VPN (tun, wg) moving is a real change.
+     */
+    internal fun carriesCalls(name: String): Boolean =
+        VIRTUAL_PREFIXES.none { name.startsWith(it) }
+
+    private val VIRTUAL_PREFIXES = listOf("docker", "veth", "br-", "virbr", "vboxnet", "vmnet", "lxcbr", "lxdbr", "podman", "cni", "flannel")
 }

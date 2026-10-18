@@ -41,6 +41,9 @@ private object IosDictation {
     private var task: SFSpeechRecognitionTask? = null
     private var request: SFSpeechAudioBufferRecognitionRequest? = null
     private var quiet: NSTimer? = null
+    // Which listen is current. Starting again cancels the old task, whose
+    // callback then finished the old listen by stopping the new one.
+    private var generation = 0
 
     /** Whether a listen can come to anything; not yet asked counts as yes, the asking is [start]'s. */
     fun canListen(): Boolean {
@@ -74,6 +77,7 @@ private object IosDictation {
 
     private fun listen(onResult: (String) -> Unit) {
         stop()
+        val mine = ++generation
         val recognizer = SFSpeechRecognizer() ?: return
         // Info.plist promises the transcription happens on this device;
         // a recognizer that can't do that has no business streaming the
@@ -105,7 +109,7 @@ private object IosDictation {
         var heard = ""
         var delivered = false
         fun finish() {
-            if (delivered) return
+            if (delivered || mine != generation) return
             delivered = true
             stop()
             if (heard.isNotBlank()) onResult(heard)
@@ -121,6 +125,8 @@ private object IosDictation {
             // which has no run loop — an NSTimer armed here never fires
             // and silence detection dies with it. Do the work on main.
             dispatch_async(dispatch_get_main_queue()) {
+                // A superseded listen's last words must not re-arm the new one's timer.
+                if (mine != generation) return@dispatch_async
                 if (result != null) {
                     heard = result.bestTranscription.formattedString
                     if (result.isFinal()) finish() else armQuiet()

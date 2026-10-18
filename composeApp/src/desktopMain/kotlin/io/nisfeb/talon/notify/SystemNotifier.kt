@@ -1,5 +1,6 @@
 package io.nisfeb.talon.notify
 
+import io.nisfeb.talon.util.cacheDirPath
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -43,12 +44,17 @@ class SystemNotifier(
     // routine). Other backends have no click signal to hook. The
     // notification's key then opens its place (openNotificationKey).
     private val onActivate: () -> Unit = {},
+    linux: Boolean = "linux" in System.getProperty("os.name").lowercase(),
+    // Starts a backend's process; a test hands in a fake one.
+    private val start: (List<String>) -> Process = {
+        ProcessBuilder(it).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+    },
 ) : Notifier {
 
     private enum class Backend { LINUX_NOTIFY_SEND, LINUX_GDBUS, FALLBACK }
 
     @Volatile
-    private var backend: Backend = pickInitialBackend()
+    private var backend: Backend = pickInitialBackend(linux)
 
     private val iconFile = AtomicReference<File?>(null)
 
@@ -89,19 +95,22 @@ class SystemNotifier(
     }
 
     override fun notify(title: String, body: String, key: String?) {
-        Thread {
-            // Try up to one demotion (notify-send → gdbus on Linux)
-            // before serving via the tray fallback. The retry is what
-            // keeps the *first* notification on a notify-send-less host
-            // from being an ugly Swing balloon.
-            repeat(2) {
-                if (tryEmit(title, body, key)) return@Thread
-            }
-            runCatching { trayFallback(title, body) }
-        }.apply {
+        Thread { deliver(title, body, key) }.apply {
             isDaemon = true
             name = "Talon-notify"
         }.start()
+    }
+
+    /** Shows one notification, on the calling thread. */
+    internal fun deliver(title: String, body: String, key: String?) {
+        // Try up to one demotion (notify-send → gdbus on Linux)
+        // before serving via the tray fallback. The retry is what
+        // keeps the *first* notification on a notify-send-less host
+        // from being an ugly Swing balloon.
+        repeat(2) {
+            if (tryEmit(title, body, key)) return
+        }
+        runCatching { trayFallback(title, body) }
     }
 
     private fun tryEmit(title: String, body: String, key: String?): Boolean {
@@ -122,10 +131,9 @@ class SystemNotifier(
         }
     }
 
-    private fun pickInitialBackend(): Backend {
-        val osName = System.getProperty("os.name").lowercase()
+    private fun pickInitialBackend(linux: Boolean): Backend {
         return when {
-            "linux" in osName -> Backend.LINUX_NOTIFY_SEND
+            linux -> Backend.LINUX_NOTIFY_SEND
             // macOS and Windows go straight to trayFallback. The AWT
             // TrayIcon route on macOS attributes notifications to
             // Talon.app (icon + name correct); Windows TrayIcon maps
@@ -143,32 +151,7 @@ class SystemNotifier(
     }
 
     private fun notifyNotifySend(title: String, body: String, key: String?) {
-        val args = mutableListOf("notify-send", "-a", "Talon")
-        ensureIconFile()?.let {
-            args += "-i"
-            args += it.absolutePath
-        }
-        // The "default" action fires when the user clicks the
-        // notification body itself. With -A, notify-send stays alive
-        // until the toast closes and prints the activated action's
-        // name on stdout — we're already on the per-notification
-        // daemon thread, so blocking on that here is free.
-        // -p prints the id first, before the wait, so the toast can be closed later.
-        args += "-p"
-        args += "-A"
-        args += "default=Open"
-        // -A implies --wait, and the wait is only bounded when an
-        // expire-time is set: GNOME parks non-transient toasts in the
-        // tray without ever closing them, and each unbounded wait is a
-        // parked thread plus a live notify-send. Ten seconds trades
-        // clicks on tray-archived toasts for a bounded process count.
-        args += "-t"
-        args += "10000"
-        args += title
-        args += body
-        val process = ProcessBuilder(args)
-            .redirectError(ProcessBuilder.Redirect.DISCARD)
-            .start()
+        val process = start(notifySendArgs(ensureIconFile()?.absolutePath, title, body))
         val action = process.inputStream.bufferedReader().use { out ->
             record(key, out.readLine()?.trim()?.toLongOrNull())
             out.readLine()
@@ -186,37 +169,18 @@ class SystemNotifier(
     }
 
     private fun notifyGdbus(title: String, body: String, key: String?) {
-        // Direct call to org.freedesktop.Notifications.Notify. Args:
-        //   app_name, replaces_id, app_icon, summary, body,
-        //   actions[], hints{}, expire_timeout_ms
-        val iconPath = ensureIconFile()?.absolutePath ?: ""
         // The answer is "(uint32 <id>,)": kept so the toast can be closed later.
-        val process = ProcessBuilder(
-            listOf(
-                "gdbus", "call", "--session",
-                "--dest", "org.freedesktop.Notifications",
-                "--object-path", "/org/freedesktop/Notifications",
-                "--method", "org.freedesktop.Notifications.Notify",
-                "Talon",
-                "0",
-                iconPath,
-                title,
-                body,
-                "[]",
-                "{}",
-                "-1",
-            )
-        ).redirectErrorStream(true).start()
+        val process = start(gdbusNotifyArgs(ensureIconFile()?.absolutePath ?: "", title, body))
         val out = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor()
+        // A refused call (a bad argument, no notification daemon) used
+        // to count as shown, and every later toast went nowhere. The
+        // IOException demotes to the tray, as for notify-send.
+        if (process.waitFor() != 0) throw IOException("gdbus exited ${process.exitValue()}")
         record(key, gdbusId(out))
     }
 
     private fun spawn(args: List<String>) {
-        ProcessBuilder(args)
-            .redirectErrorStream(true)
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .start()
+        start(args).inputStream.close()
     }
 
     private fun ensureIconFile(): File? {
@@ -224,21 +188,58 @@ class SystemNotifier(
         val bytes = ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
             ?: return null
         return runCatching {
-            // Per-PID temp file so concurrent Talon instances don't
-            // race on the same path.
-            val tmp = File(
-                System.getProperty("java.io.tmpdir"),
-                "talon-notify-${ProcessHandle.current().pid()}.png",
-            )
-            if (!tmp.exists()) {
-                Files.write(tmp.toPath(), bytes)
-                tmp.deleteOnExit()
+            // Under Talon's own cache, not the shared temp directory,
+            // where a predictable name could be someone else's symlink.
+            val icon = File(cacheDirPath, "notify-icon.png")
+            if (icon.length() != bytes.size.toLong()) {
+                icon.parentFile.mkdirs()
+                Files.write(icon.toPath(), bytes)
             }
-            iconFile.compareAndSet(null, tmp)
+            iconFile.compareAndSet(null, icon)
             iconFile.get()
         }.getOrNull()
     }
 }
+
+/**
+ * notify-send's arguments. The "default" action fires when the user
+ * clicks the notification body itself. With -A, notify-send stays alive
+ * until the toast closes and prints the activated action's name on
+ * stdout; the caller is already on the per-notification daemon thread,
+ * so blocking on that is free. -p prints the id first, before the wait,
+ * so the toast can be closed later.
+ *
+ * -A implies --wait, and the wait is only bounded when an expire-time is
+ * set: GNOME parks non-transient toasts in the tray without ever closing
+ * them, and each unbounded wait is a parked thread plus a live
+ * notify-send. Ten seconds trades clicks on tray-archived toasts for a
+ * bounded process count.
+ *
+ * "--" ends the options, so a title or body that starts with "-" is
+ * shown, not read as an option.
+ */
+internal fun notifySendArgs(iconPath: String?, title: String, body: String): List<String> = buildList {
+    add("notify-send"); add("-a"); add("Talon")
+    iconPath?.let { add("-i"); add(it) }
+    add("-p"); add("-A"); add("default=Open")
+    add("-t"); add("10000")
+    add("--"); add(title); add(body)
+}
+
+/**
+ * gdbus's arguments for org.freedesktop.Notifications.Notify: app_name,
+ * replaces_id, app_icon, summary, body, actions[], hints{},
+ * expire_timeout_ms. Without "--" gdbus reads the -1 timeout (or a body
+ * starting with "-") as an option, prints its usage and exits 1.
+ */
+internal fun gdbusNotifyArgs(iconPath: String, title: String, body: String): List<String> = listOf(
+    "gdbus", "call", "--session",
+    "--dest", "org.freedesktop.Notifications",
+    "--object-path", "/org/freedesktop/Notifications",
+    "--method", "org.freedesktop.Notifications.Notify",
+    "--",
+    "Talon", "0", iconPath, title, body, "[]", "{}", "-1",
+)
 
 /** The id in gdbus's answer to Notify, "(uint32 42,)", or null. */
 internal fun gdbusId(out: String): Long? = Regex("""uint32 (\d+)""").find(out)?.groupValues?.get(1)?.toLongOrNull()

@@ -80,3 +80,15 @@ kotlin {
         }
     }
 }
+
+// The app keeps its data and its log under ~/.config/talon (AppDirs). A
+// test run must not write the developer's real copy, as composeApp's
+// tests already do not; temp dirs go under the build too.
+tasks.withType<Test>().configureEach {
+    val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
+    systemProperty("user.home", home)
+    environment("XDG_CONFIG_HOME", "$home/.config")
+    val tmp = layout.buildDirectory.dir("test-tmp").get().asFile
+    systemProperty("java.io.tmpdir", tmp.absolutePath)
+    doFirst { tmp.deleteRecursively(); tmp.mkdirs() }
+}

@@ -59,8 +59,10 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
     // Kotlin/Native terminates on any exception that escapes to a foreign
     // (GCD) frame — Apple review hit that as an undiagnosable SIGABRT
     // crash-loop, and the .ips logs carry no Kotlin frames. Write the
-    // real stack to Documents/last-crash.txt (retrievable via the Files
-    // app; UIFileSharingEnabled) before the runtime aborts.
+    // real stack to last-crash.txt before the runtime aborts. IosFiles
+    // keeps it in Application Support, not Documents, so it is not in the
+    // Files app: read it from the app container (Xcode's Devices window).
+    // A crash while the device is locked writes nothing.
     @OptIn(kotlin.experimental.ExperimentalNativeApi::class)
     setUnhandledExceptionHook { t ->
         val report = "Talon ${TalonBuild.versionName} uncaught: $t\n${t.stackTraceToString()}"

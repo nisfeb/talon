@@ -107,4 +107,32 @@ class FileDraftStoreTest {
         s.forget("~zod")
         assertEquals(emptyMap(), s.state.value, "the active ship forgotten shows none")
     }
+
+    // iOS keeps the file locked while the device is. Built then (a call's
+    // push), the store read nothing and kept it as no drafts; the next save
+    // wrote that over every other chat's draft.
+    @Test
+    fun `a drafts file that cannot be read yet is not written over and is read once it can be`() {
+        files["drafts-zod.json"] = """{"~bus":"kept"}"""
+        var locked = true
+        val s = FileDraftStore({ active }, read = { if (locked) null else files[it] }, write = { name, text -> files[name] = text }, exists = { it in files })
+        s.showActiveShip()
+        assertEquals("", s.load("~bus"))
+        s.save("~nec", "typed while locked")
+        s.clear("~bus")
+        assertEquals("""{"~bus":"kept"}""", files["drafts-zod.json"])
+        locked = false
+        assertEquals("kept", s.load("~bus"))
+        s.save("~nec", "after")
+        assertEquals(mapOf("~bus" to "kept", "~nec" to "after"), s.state.value)
+        assertEquals("after", store().load("~nec"))
+        assertEquals("kept", store().load("~bus"))
+    }
+
+    @Test
+    fun `an absent drafts file is a fresh start and is written`() {
+        val s = FileDraftStore({ active }, read = { null }, write = { name, text -> files[name] = text }, exists = { false })
+        s.save("~bus", "first")
+        assertEquals("first", store().load("~bus"))
+    }
 }
