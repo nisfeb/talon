@@ -1740,12 +1740,15 @@ class TlonChatRepo(
     suspend fun removeContact(ship: String) {
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "removeContact: $ship isn't a patp" }
+        // Confirmed, as an add is: the screen says they were removed, and
+        // a ship that never answered was taken for one that had.
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
             payload = buildJsonObject {
                 put("wipe", buildJsonArray { add(JsonPrimitive(ship)) })
             },
+            confirm = true,
         )
         _bookContacts.value = _bookContacts.value - ship
     }
