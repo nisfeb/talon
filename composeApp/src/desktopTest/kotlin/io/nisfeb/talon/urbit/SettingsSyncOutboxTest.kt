@@ -276,6 +276,26 @@ class SettingsSyncOutboxTest {
         assertEquals(setOf("c1"), Json.parseToJsonElement(ship.settingsDesk(before)).jsonObject["desk"]!!.jsonObject["assistant-conversations"]?.jsonObject?.keys)
     }
 
+    // A kept clear still goes, so what it clears goes too: an entry kept
+    // behind it is sent again even where the desk has it already.
+    @Test
+    fun `an entry kept behind a kept clear is not dropped though the desk has it`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.clearAssistantHistoryOnShip()
+        sync.pushAssistantTurn(conv, turn)
+        ship.lose = { null }
+        val has = """{"desk":{"assistant-conversations":{"c0":"{}","c1":"{\"title\":\"Tides\",\"createdAt\":10,\"updatedAt\":10,\"turnCount\":1}"},""" +
+            """"assistant-turns":{"t1":"{\"convGid\":\"c1\",\"question\":\"When is high tide?\",\"answer\":\"At six.\",\"createdAt\":10}"}}}"""
+        ship.answerSettingsDesk(has)
+        sync.bootstrap()
+        assertEquals(listOf("c1"), db.assistantConversations().recent(10).first().map { it.gid })
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        val desk = Json.parseToJsonElement(ship.settingsDesk(has)).jsonObject["desk"]!!.jsonObject
+        assertEquals(setOf("c1"), desk["assistant-conversations"]?.jsonObject?.keys)
+        assertEquals(setOf("t1"), desk["assistant-turns"]?.jsonObject?.keys)
+    }
+
     // Acked late is not unanswered: eyre took the PUT, and %settings is on
     // our own ship, so it had the write. Kept, it was sent and applied
     // again at the next connect, over what another device wrote since.

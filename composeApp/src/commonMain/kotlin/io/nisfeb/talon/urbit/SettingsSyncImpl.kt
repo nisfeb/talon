@@ -1902,13 +1902,17 @@ class SettingsSyncImpl(
      * as the fact its poke will bring back, so it lands the same way.
      */
     private suspend fun reapplyPending(desk: JsonObject) {
+        // Buckets a kept whole-bucket write still goes to: it will undo
+        // what the ship holds of them, so nothing after it there is held.
+        val reshaped = mutableSetOf<String>()
         for (row in db.settingsOutbox().all()) {
             val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull() ?: continue
-            val (bucket, _) = payload.target() ?: continue
-            if (holds(desk[bucket] as? JsonObject, payload)) {
+            val (bucket, entry) = payload.target() ?: continue
+            if (bucket !in reshaped && holds(desk[bucket] as? JsonObject, payload)) {
                 db.settingsOutbox().done(row.id)
                 continue
             }
+            if (entry == null) reshaped += bucket
             runSuspendCatching { applyFact(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
         }
     }
@@ -1930,6 +1934,8 @@ class SettingsSyncImpl(
             fact["del-entry"] != null -> JsonObject(emptyMap())
             else -> (fact["put-bucket"] as? JsonObject)?.get("bucket") as? JsonObject
         }
+        // As in [reapplyPending]: after a kept whole-bucket write, nothing is held.
+        var reshaped = false
         for (row in rows) {
             val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull() ?: continue
             val (rowBucket, rowEntry) = payload.target() ?: continue
@@ -1937,8 +1943,12 @@ class SettingsSyncImpl(
             if (entry != null && rowEntry != null && rowEntry != entry) continue
             // A whole bucket kept here, after a fact for one of its entries,
             // is applied again: it is what the ship will hold once it goes.
-            if ((entry == null || rowEntry == entry) && holds(known, payload)) db.settingsOutbox().done(row.id)
-            else runSuspendCatching { applyFact(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
+            if (!reshaped && (entry == null || rowEntry == entry) && holds(known, payload)) {
+                db.settingsOutbox().done(row.id)
+                continue
+            }
+            if (rowEntry == null) reshaped = true
+            runSuspendCatching { applyFact(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
         }
     }
 
