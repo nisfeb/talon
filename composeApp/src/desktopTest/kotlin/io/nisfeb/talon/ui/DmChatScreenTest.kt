@@ -737,6 +737,17 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { draft() == "landed earlier" }
     }
 
+    // B6-4: a post on its way, its poke on the wire, offers no Delete:
+    // the ship takes it anyway, and its echo brought it back.
+    @Test
+    fun `a post still sending offers no delete`() = chat(whom = ours, seed = ourChannel(
+        MessageEntity(ours, "local_170141184599", "~zod", 2_000, """[{"inline":["on its way"]}]""", "/chat", status = "pending"),
+    )) { _, _ ->
+        menuOf("on its way")
+        onNodeWithText("Copy text").assertExists()
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty(), "offered Delete")
+    }
+
     // ─── an edit, until the ship has it ────────────────────────────
 
     private val general = "chat/~bus/general"

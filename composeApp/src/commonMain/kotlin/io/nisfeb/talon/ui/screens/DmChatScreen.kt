@@ -2444,8 +2444,10 @@ private fun MessageActionMenu(
     // Ours, not yet taken by the ship: its id is only ours, so anything
     // sent with it (a reaction, a reply, an edit, a pin, a link, a quote,
     // a bookmark, a follow) names a post the ship has never seen. Delete
-    // stays, and takes it off this device.
+    // stays, and takes it off this device, unless its poke is on the wire:
+    // then the ship takes it anyway and its echo brings it back.
     val onShip = !isLocalOnly(message.id)
+    val sending = !onShip && message.status == "pending"
     val canReply = message.parentId == null && onShip
     // Compact density tokens. The previous menu used Material's
     // default 8.dp spacedBy + full TextButton heights (~48.dp each)
@@ -2594,7 +2596,7 @@ private fun MessageActionMenu(
             if (isChannel) {
                 ActionRow(onClick = onPublish, label = "Publish to Lattice")
             }
-            if (isMine || (isChannel && canModerate)) {
+            if ((isMine || (isChannel && canModerate)) && !sending) {
                 ActionRow(
                     onClick = onDelete,
                     label = if (isMine) "Delete" else "Delete (admin)",
