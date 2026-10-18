@@ -66,12 +66,19 @@ class ThreadListTest {
         try {
             runComposeUiTest {
                 setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalClipboardManager provides object : androidx.compose.ui.platform.ClipboardManager {
+                            override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+                            override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
+                        },
+                    ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
                             db = db, repo = repo, http = createAppHttpClient(), drafts = InMemoryDraftStore(),
                             ourPatp = "~zod", whom = whom, parentId = parentId, initialScrollReplyId = null,
                             onOpenConversation = {}, onOpenImage = {},
                         )
+                    }
                     }
                 }
                 waitForIdle()
@@ -83,6 +90,8 @@ class ThreadListTest {
             tmp.deleteRecursively()
         }
     }
+
+    private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun msg(id: String, author: String, text: String, sent: Long, parentId: String? = null, status: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", parentId = parentId, status = status)
@@ -168,6 +177,20 @@ class ThreadListTest {
     }
 
     // ─── a reply's menu ────────────────────────────────────────────
+
+    // B6-6's other half: a reply's Copy text gives a link its whole
+    // address, as the chat's does; the row still shows it cut short.
+    @Test
+    fun `copy text on a reply gives a link its whole address`() = thread(seed = {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(MessageEntity("~bus", "~bus/170141184507", "~bus", 2_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat", parentId = parent))
+    }) { _, _ ->
+        menuOf("see example.com/articles…")
+        onNodeWithText("Copy text").performClick()
+        waitForIdle()
+        assertEquals(listOf("see https://example.com/articles/2026/10/a-very-long-slug"), copied.toList())
+    }
 
     /** Opens [text]'s menu by the Message actions button beside it, clicking again if a cold first click is lost. */
     private fun ComposeUiTest.menuOf(text: String) {

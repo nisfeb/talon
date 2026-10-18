@@ -51,7 +51,7 @@ class AskUrbit(
             )
         }
         val excerpts = numberedContext(
-            hits.map { displayName(it.author) to StoryCache.textFor(it.id, it.contentJson) },
+            hits.map { displayName(it.author) to StoryCache.copyTextFor(it.id, it.contentJson) },
         )
         val text = client.complete(
             AskUrbitPrompt.system,

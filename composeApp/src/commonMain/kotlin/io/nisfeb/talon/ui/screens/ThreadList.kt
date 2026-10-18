@@ -389,7 +389,7 @@ fun ThreadList(
             },
             onCopy = {
                 actionTarget = null
-                val text = StoryCache.textFor(target.id, target.contentJson)
+                val text = StoryCache.copyTextFor(target.id, target.contentJson)
                 clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(text))
             },
             onCopyMarkdown = {

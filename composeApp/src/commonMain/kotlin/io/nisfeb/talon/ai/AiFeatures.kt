@@ -23,7 +23,7 @@ class AiFeatures(
         if (messages.isEmpty()) return "No new messages."
         val lines = messages.joinToString("\n") { m ->
             val who = displayName(m.author)
-            val text = StoryCache.textFor(m.id, m.contentJson)
+            val text = StoryCache.copyTextFor(m.id, m.contentJson)
                 .replace('\n', ' ')
                 .take(400)
             "$who: $text"
