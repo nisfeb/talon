@@ -667,6 +667,10 @@ fun TalonApp(
     // the back handlers below, which let the chat's back come first.
     val searchSection = remember { sections.flag() }
     var searchOpen by searchSection
+    // The query a result was opened from is for Search's next draw. Search
+    // stays open under that result; closed any other way (back, the
+    // drawer), the query must not fill a later, unrelated search.
+    LaunchedEffect(searchOpen) { if (!searchOpen) io.nisfeb.talon.ui.screens.SearchDraft.query = "" }
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
     val newDmSection = remember { sections.flag() }
     var newDmOpen by newDmSection
