@@ -456,10 +456,13 @@ class SettingsSyncImpl(
             return
         }
         // While the desk is read and applied, a write made here is kept,
-        // not sent: one the ship took after the read but before the apply
-        // was applied away, and no longer kept to apply again. The lock
-        // first waits out a write already on the wire.
-        sending.withLock { holdingWrites = true }
+        // not sent, and one the ship answers meanwhile stays kept ([taken]):
+        // taken after the read but before the apply, it was applied away,
+        // and no longer kept to apply again. Kept, it is applied again over
+        // the desk and sent after, or dropped where the desk has it. A write
+        // already on the wire is not waited out: to a silent ship, it held
+        // every connect for its whole ack wait.
+        holdingWrites = true
         val read = try { readDesk(ch) } finally { holdingWrites = false }
         if (!read) return
         // Subscribe for live updates from other devices.
@@ -1784,7 +1787,8 @@ class SettingsSyncImpl(
      * Sends one at a time, the kept writes first, oldest first: a kept
      * write sent after a newer one undid it (Clear all kept, then a new
      * question; the clear went last and took the question with it).
-     * Writes queue behind a slow poke, as they did behind the ship.
+     * Writes queue behind a slow poke, as they did behind the ship; a
+     * bootstrap and a flush do not ([bootstrap], [flushPending]).
      */
     private val sending = Mutex()
 
@@ -1799,20 +1803,28 @@ class SettingsSyncImpl(
      * it (seeds, orphan cleanup), and leases; sent days later, a seed
      * would overwrite what other devices wrote since.
      */
-    private suspend fun send(slot: String, payload: JsonObject, keep: Boolean) = sending.withLock {
-        val id = if (keep) db.settingsOutbox().keep(SettingsOutboxEntity(slot = slot, payload = payload.toString())) else null
-        val ch = channel ?: return@withLock
-        if (holdingWrites) {
-            // A bootstrap is reading the desk: a kept write goes with its
-            // last step; a seed or a cleanup, decided from that read, now.
-            if (!keep) deliver(ch, slot, payload)
-            return@withLock
+    private suspend fun send(slot: String, payload: JsonObject, keep: Boolean) {
+        sending.withLock {
+            val id = if (keep) db.settingsOutbox().keep(SettingsOutboxEntity(slot = slot, payload = payload.toString())) else null
+            val ch = channel ?: return@withLock
+            if (holdingWrites) {
+                // A bootstrap is reading the desk: a kept write goes with its
+                // last step; a seed or a cleanup, decided from that read, now.
+                if (!keep) deliver(ch, slot, payload)
+                return@withLock
+            }
+            // The kept writes before this one go first. One the ship still
+            // does not answer keeps this one waiting behind it; a write not
+            // kept then goes nowhere, as it would have failed the same way.
+            if (!sendKept(ch, before = id)) return@withLock
+            if (deliver(ch, slot, payload)) id?.let { taken(it) }
         }
-        // The kept writes before this one go first. One the ship still
-        // does not answer keeps this one waiting behind it; a write not
-        // kept then goes nowhere, as it would have failed the same way.
-        if (!sendKept(ch, before = id)) return@withLock
-        if (deliver(ch, slot, payload)) id?.let { db.settingsOutbox().done(it) }
+        handOff()
+    }
+
+    /** Answered: no longer kept, unless a bootstrap began reading the desk since ([bootstrap]). */
+    private suspend fun taken(id: Long) {
+        if (!holdingWrites) db.settingsOutbox().done(id)
     }
 
     /**
@@ -1846,7 +1858,7 @@ class SettingsSyncImpl(
             if (!db.settingsOutbox().has(row.id)) continue
             val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull()
             if (payload != null && !deliver(ch, row.slot, payload)) return false
-            db.settingsOutbox().done(row.id)
+            taken(row.id)
         }
         return true
     }
@@ -1855,10 +1867,32 @@ class SettingsSyncImpl(
      * Send what was kept, oldest first. Stops at the first the ship does
      * not answer: the rest go at the next connect, with the next write,
      * or with the next drain of the chat queue (TlonChatRepo.drainQueue).
+     * Never waits on a write already on the wire: its sender sends these
+     * once it is done ([handOff]). A bootstrap runs this, and on a resumed
+     * channel that write's ack comes down a stream opened only after it,
+     * so the wait was always the write's whole 15 s.
      */
     override suspend fun flushPending() {
         val ch = channel ?: return
-        sending.withLock { sendKept(ch) }
+        // Asked for before trying, so a sender letting go just after the
+        // try still sees it.
+        flushAsked = true
+        if (!sending.tryLock()) return
+        try {
+            flushAsked = false
+            sendKept(ch)
+        } finally {
+            sending.unlock()
+        }
+        handOff()
+    }
+
+    /** A flush found a write on the wire ([flushPending]). */
+    @Volatile private var flushAsked = false
+
+    /** After letting [sending] go: the flush asked for meanwhile. */
+    private suspend fun handOff() {
+        if (flushAsked && !holdingWrites) flushPending()
     }
 
     /**

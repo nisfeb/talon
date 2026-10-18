@@ -383,6 +383,53 @@ class SettingsSyncOutboxTest {
         assertEquals(listOf("~nec"), sent().map { Regex("\"entry-key\":\"([^\"]+)\"").find(it)!!.groupValues[1] })
     }
 
+    // ─── a write on the wire as a bootstrap starts (2026-10-17 follow-up) ──
+
+    /** A desk that leaves the bootstrap nothing to seed, so it sends nothing of its own. */
+    private val settled = """{"desk":{"notify-prefs":{"~nec":"{\"level\":\"all\"}"},""" +
+        """"ui-prefs":{"always-patp":"{\"enabled\":false}"},"ai-settings":{"config":"{\"schemaVersion\":3}"}}}"""
+
+    // The bootstrap waited on the write's lock, and on a resumed channel
+    // that write's ack comes down a stream opened only after the
+    // bootstrap: it waited out the whole ack. Now it goes on, and the
+    // write, cut off on the wire, sends what is kept once it lets go.
+    // Real time: the ship holds the PUT.
+    @Test
+    fun `a write on the wire does not hold up a bootstrap and goes after it`() = live {
+        sync.attach(ship.channel)
+        ship.scries["settings/desk/talon"] = settled
+        val first = java.util.concurrent.atomic.AtomicBoolean(true)
+        ship.lose = { if ("~bus" in it.json.toString() && first.getAndSet(false)) lost else null }
+        ship.holdPoke = 1_500
+        val write = launch { sync.setNotifyLevel("~bus", NotifyLevel.NONE) }
+        delay(200)
+        val tookMs = kotlin.system.measureTimeMillis { sync.bootstrap() }
+        assertTrue(tookMs < 1_000, "the bootstrap waited ${tookMs}ms on the write")
+        assertEquals(NotifyLevel.NONE, db.notifyPrefs().levelFor("~bus"), "kept over the desk")
+        assertTrue(ship.subscribed.contains("settings/desk/talon"), ship.subscribed.toString())
+        ship.holdPoke = 0
+        write.join()
+        kotlinx.coroutines.withTimeout(5_000) { while (db.settingsOutbox().all().isNotEmpty()) delay(50) }
+        assertEquals(1, ship.pokesTo("settings").count { "~bus" in it.json.toString() })
+    }
+
+    // The 2026-10-17 fix, kept without the lock: a write the ship takes
+    // after a bootstrap read the desk but before it applied it is not
+    // applied away. The desk is read when asked and answered later.
+    @Test
+    fun `a write answered while a bootstrap reads the desk is kept over it`() = live {
+        sync.attach(ship.channel)
+        ship.answerScry = { p -> if (p == "settings/desk/talon") ship.settingsDesk(settled).also { Thread.sleep(1_500) } else null }
+        ship.holdPoke = 600
+        val write = launch { sync.setNotifyLevel("~bus", NotifyLevel.NONE) }
+        delay(100)
+        sync.bootstrap()
+        write.join()
+        assertEquals(NotifyLevel.NONE, db.notifyPrefs().levelFor("~bus"), "taken after the read: not applied away")
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        assertTrue(ship.pokesTo("settings").any { "~bus" in it.json.toString() })
+    }
+
     // ─── folder keys (H7) ─────────────────────────────────────────
 
     // A folder's id was each device's own autoincrement, and its key on the
