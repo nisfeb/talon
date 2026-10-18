@@ -34,6 +34,21 @@ class SearchTextOfTest {
     @Test
     fun `a message with no links or mentions is its words alone`() {
         assertEquals("Plans\nhello", searchTextOf(inline("\"hello\""), title = "Plans"))
+        assertEquals("hello", searchTextOf(inline("\"hello\""), title = "  "), "a blank title is none")
         assertEquals("hello", shownWordsOf("hello"))
+    }
+
+    @Test
+    fun `a link in a table cell is kept behind the words too`() {
+        val table = "| Name | Where |\\n| --- | --- |\\n| Plan | [the plan](https://x.test/plan) |"
+        val text = searchTextOf(inline("\"$table\""), title = null)
+        assertTrue("the plan" in shownWordsOf(text), text)
+        assertTrue(text.endsWith("\u001Fhttps://x.test/plan"), text)
+    }
+
+    @Test
+    fun `a link preview is found by its title and address`() {
+        val text = searchTextOf("""[{"block":{"link":{"url":"https://p.test/a","meta":{"title":"A page"}}}}]""", title = null)
+        assertEquals("A page https://p.test/a", text)
     }
 }
