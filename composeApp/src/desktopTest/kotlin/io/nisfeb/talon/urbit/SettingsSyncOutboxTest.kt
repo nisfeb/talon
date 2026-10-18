@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -189,6 +190,197 @@ class SettingsSyncOutboxTest {
         val bus = ship.pokesTo("settings").map { it.json.toString() }.filter { "~bus" in it }
         assertEquals(1, bus.size, bus.toString())
         assertTrue("all" in bus.single())
+    }
+
+    // ─── order and staleness (review A1-1, A1-2, A1-7) ─────────────
+
+    private val conv = io.nisfeb.talon.data.AssistantConversationEntity(
+        gid = "c1", title = "Tides", createdAt = 10, updatedAt = 10, centroid = ByteArray(0), dim = 0, turnCount = 1,
+    )
+    private val turn = io.nisfeb.talon.data.AssistantHistoryEntity(
+        gid = "t1", mode = "Assistant", question = "When is high tide?", answer = "At six.", createdAt = 10, convGid = "c1",
+    )
+    private val clearConversations = """{"del-bucket":{"desk":"talon","bucket-key":"assistant-conversations"}}"""
+    private val clearTurns = """{"del-bucket":{"desk":"talon","bucket-key":"assistant-turns"}}"""
+
+    /** A poke as its shape and bucket, as "put-entry notify-prefs". */
+    private fun shapeOf(poke: String): String = Json.parseToJsonElement(poke).jsonObject.entries.single().let { (shape, e) ->
+        "$shape ${e.jsonObject["bucket-key"]!!.jsonPrimitive.content}"
+    }
+    private fun deskBucket(name: String) =
+        Json.parseToJsonElement(ship.settingsDesk()).jsonObject["desk"]!!.jsonObject[name]?.jsonObject
+    private fun fact(shape: String, bucket: String, body: String) = Json.parseToJsonElement(
+        """{"$shape":{"desk":"talon","bucket-key":"$bucket",$body}}""",
+    ).jsonObject
+
+    // A kept write sent after a newer one undid it: Clear all on the
+    // assistant while the ship was out of reach, then a new question. The
+    // question went at once and the clear at the next connect, and the
+    // clear took the question with it.
+    @Test
+    fun `a kept clear goes before a newer question and leaves it on the ship`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.clearAssistantHistoryOnShip()
+        ship.lose = { null }
+        sync.pushAssistantTurn(conv, turn)
+        // Wire: the clears go as they were made, byte for byte, then the question.
+        assertEquals(listOf(clearConversations, clearTurns), sent().take(2))
+        assertEquals(listOf("put-entry assistant-conversations", "put-entry assistant-turns"), sent().drop(2).map(::shapeOf))
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        assertEquals(setOf("c1"), deskBucket("assistant-conversations")?.keys)
+        assertEquals(setOf("t1"), deskBucket("assistant-turns")?.keys)
+    }
+
+    // A slot written again is kept anew, after what was kept since: the
+    // newest write to it goes last.
+    @Test
+    fun `a newer write waits behind a kept one the ship does not take`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.setNotifyLevel("~bus", NotifyLevel.NONE)
+        sync.addBookmark("chat/~bus/general", "170.1", 5)
+        sync.setNotifyLevel("~bus", NotifyLevel.ALL)
+        ship.lose = { if ("bookmarks" in it.json.toString()) lost else null }
+        sync.addBookmark("chat/~bus/general", "170.2", 6)
+        assertTrue(sent().isEmpty(), "behind the bookmark the ship does not take: ${sent()}")
+        assertEquals(
+            listOf("bookmarks/chat/~bus/general|170.1", "notify-prefs/~bus", "bookmarks/chat/~bus/general|170.2"),
+            db.settingsOutbox().all().map { it.slot },
+        )
+        ship.lose = { null }
+        sync.flushPending()
+        val order = sent().map { Regex("\"entry-key\":\"([^\"]+)\"").find(it)!!.groupValues[1] }
+        assertEquals(listOf("chat/~bus/general|170.1", "~bus", "chat/~bus/general|170.2"), order)
+        assertTrue("all" in sent()[1], sent()[1])
+        assertEquals(emptyList(), db.settingsOutbox().all())
+    }
+
+    // The same, through a bootstrap: both kept, the desk holding a
+    // conversation from before the clear.
+    @Test
+    fun `a kept clear and a newer question kept behind it go in order at the next connect`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.clearAssistantHistoryOnShip()
+        sync.pushAssistantTurn(conv, turn)
+        assertEquals(4, db.settingsOutbox().all().size)
+        ship.lose = { null }
+        val before = """{"desk":{"assistant-conversations":{"c0":"{\"title\":\"Old\",\"createdAt\":1,\"updatedAt\":1}"},""" +
+            """"assistant-turns":{"t0":"{\"convGid\":\"c0\",\"question\":\"Old?\",\"answer\":\"Yes.\",\"createdAt\":1}"}}}"""
+        ship.answerSettingsDesk(before)
+        sync.bootstrap()
+        assertEquals(listOf("c1"), db.assistantConversations().recent(10).first().map { it.gid }, "cleared, then asked")
+        assertEquals(listOf(clearConversations, clearTurns), sent().filter { "\"bucket-key\":\"assistant-" in it }.take(2))
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        assertEquals(setOf("c1"), Json.parseToJsonElement(ship.settingsDesk(before)).jsonObject["desk"]!!.jsonObject["assistant-conversations"]?.jsonObject?.keys)
+    }
+
+    // Acked late is not unanswered: eyre took the PUT, and %settings is on
+    // our own ship, so it had the write. Kept, it was sent and applied
+    // again at the next connect, over what another device wrote since.
+    // Real time: the wait is the channel's own 15 s for an ack.
+    @Test
+    fun `a write acked late is not sent or applied again over a newer value`() = live {
+        sync.attach(ship.channel)
+        ship.silent = { it.app == "settings" }
+        sync.setNotifyLevel("~bus", NotifyLevel.NONE)
+        assertEquals(emptyList(), db.settingsOutbox().all(), "taken, though not acked")
+        ship.silent = { false }
+        ship.scries["settings/desk/talon"] = """{"desk":{"notify-prefs":{"~bus":"{\"level\":\"all\"}"}}}"""
+        sync.bootstrap()
+        assertEquals(NotifyLevel.ALL, db.notifyPrefs().levelFor("~bus"), "another device's newer value stands")
+        assertEquals(1, sent().count { "~bus" in it }, sent().toString())
+    }
+
+    @Test
+    fun `a kept write the ship already has is dropped and not sent again`() = live {
+        sync.attach(ship.channel)
+        ship.landThenFail = { if (it.app == "settings") lost else null }
+        sync.setNotifyLevel("~bus", NotifyLevel.NONE)
+        assertEquals(1, db.settingsOutbox().all().size, "the PUT failed: it may not have landed")
+        ship.landThenFail = { null }
+        ship.answerSettingsDesk()
+        sync.bootstrap()
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        assertEquals(1, sent().count { "~bus" in it }, sent().toString())
+        assertEquals(NotifyLevel.NONE, db.notifyPrefs().levelFor("~bus"))
+    }
+
+    // A seen mark only rises. Kept while the ship was out of reach, then
+    // passed on another device, it was sent at the next connect and
+    // lowered the ship's mark for every device.
+    @Test
+    fun `a kept seen mark the ship has passed is dropped at a bootstrap`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.pushStatusesSeen(100)
+        ship.lose = { null }
+        ship.scries["settings/desk/talon"] = """{"desk":{"status-seen":{"me":"{\"ms\":200}"}}}"""
+        sync.bootstrap()
+        assertEquals(200L, sync.statusesSeenMs.value)
+        assertTrue(sent().none { "status-seen" in it }, sent().toString())
+        assertEquals(emptyList(), db.settingsOutbox().all())
+    }
+
+    @Test
+    fun `a kept seen mark above the ship's still goes`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.pushStatusesSeen(300)
+        ship.lose = { null }
+        ship.scries["settings/desk/talon"] = """{"desk":{"status-seen":{"me":"{\"ms\":200}"}}}"""
+        sync.bootstrap()
+        assertEquals(300L, sync.statusesSeenMs.value)
+        assertTrue(sent().single { "status-seen" in it }.contains("""{\"ms\":300}"""), sent().toString())
+        assertEquals(emptyList(), db.settingsOutbox().all())
+    }
+
+    @Test
+    fun `a kept seen mark the ship passes live is dropped`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.pushStatusesSeen(100)
+        sync.applySettingsEvent(fact("put-entry", "status-seen", """"entry-key":"me","value":"{\"ms\":200}""""))
+        assertEquals(emptyList(), db.settingsOutbox().all())
+        assertEquals(200L, sync.statusesSeenMs.value)
+        ship.lose = { null }
+        sync.flushPending()
+        assertTrue(sent().isEmpty(), sent().toString())
+    }
+
+    // A peer's whole bucket arriving while a change waited here took the
+    // change off this device until the flush landed (follow-up of the
+    // 2026-10-17 review).
+    @Test
+    fun `a peer's whole bucket does not take a waiting change off this device`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        val id = sync.createFolder("Mine", 0)
+        sync.applySettingsEvent(fact("put-bucket", "folders", """"bucket":{"5":"{\"name\":\"Theirs\",\"sortOrder\":1}"}"""))
+        assertEquals(setOf("Theirs", "Mine"), folders().toSet())
+        assertEquals(1, db.settingsOutbox().all().size)
+        ship.lose = { null }
+        sync.flushPending()
+        assertTrue(sent().any { "\"entry-key\":\"$id\"" in it && "Mine" in it }, sent().toString())
+        assertEquals(emptyList(), db.settingsOutbox().all())
+    }
+
+    // A fact for the entry: the same value is ours landing, and drops it;
+    // another value is the ship's word, which a change waiting stands over.
+    @Test
+    fun `a live fact for a waiting change drops it only when it shows it landed`() = live {
+        sync.attach(ship.channel)
+        ship.lose = { if (it.app == "settings") lost else null }
+        sync.setNotifyLevel("~bus", NotifyLevel.NONE)
+        sync.setNotifyLevel("~nec", NotifyLevel.ALL)
+        sync.applySettingsEvent(fact("put-entry", "notify-prefs", """"entry-key":"~bus","value":"{\"level\":\"none\"}""""))
+        sync.applySettingsEvent(fact("put-entry", "notify-prefs", """"entry-key":"~nec","value":"{\"level\":\"none\"}""""))
+        assertEquals(listOf("notify-prefs/~nec"), db.settingsOutbox().all().map { it.slot })
+        assertEquals(NotifyLevel.ALL, db.notifyPrefs().levelFor("~nec"), "the waiting change stands")
+        ship.lose = { null }
+        sync.flushPending()
+        assertEquals(listOf("~nec"), sent().map { Regex("\"entry-key\":\"([^\"]+)\"").find(it)!!.groupValues[1] })
     }
 
     // ─── folder keys (H7) ─────────────────────────────────────────
