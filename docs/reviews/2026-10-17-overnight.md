@@ -61,3 +61,27 @@ Calls, sync and the shells were reviewed in depth hours ago; their new code is i
 - A2-14 Low: raw error text on Orrery pages (`OrreryScreen.kt:420` NotOnHere `it.message`; ReadingRow `_error`).
 - A2-15 Low: "was not ticked" for a failed untick (`HomeScreen.kt:1391`).
 - A2-16 Low: the Orrery and Armillary retry loops run every 15 min in the background (`OrreryRepo.kt:830-838`, `ArmillaryRepo.kt:258-267`).
+
+### Area 4, chat screen and composer
+
+- A4-1 High: deleting a queued DM hides it, but the drain still sends it (`TlonChatRepo.kt:3250-3266` delete, `:1466-1484` drain; `MessageDao.kt:84-85, 236-237, 252-253` softDelete keeps status queued, queued() has no isDeleted filter). Offline, delete throws, so a queued message can't be withdrawn. Fix: a queued or failed row is removed locally with no poke and dropped from neverSent; queued() and queuedCount() filter isDeleted = 0.
+- A4-2 High: a voice message being sent is lost when the chat is left, and its file deleted (`ChatComposer.kt:982-1011` send on the screen scope, `:388-393` onDispose deletes). Android and iOS. Fix: upload and send in repo.carry; don't delete while uploading.
+- A4-3 Med: a pending, queued or failed channel post's menu sends its `local_` id (delete, react, reply, edit, pin, copy link), and a failed one can never be removed (`TlonChatRepo.kt:1180-1188, 3250-3266`, `UrbitIds.kt:20`, `DmChatScreen.kt:1041-1185, 2522-2559`). Fix: delete local rows locally; hide the others for `local_` ids; onEditLast skips them.
+- A4-4 Med: a poll card never counts votes (`StoryRenderer.kt:721-734`, `PollFormat.kt:15-18`, `ReactionPalette.kt:66-67`: VOTE_EMOJIS keep U+FE0F, stored reactions are normalized without it). The test seeds unnormalized emoji. Fix: compare normalized forms for tallies and mineIndex.
+- A4-5 Med: sending a voice message wipes the box's text (`ChatComposer.kt:1001-1003`). Fix: keep the draft.
+- A4-6 Med: a failed edit throws away the edited text (`ChatComposer.kt:782-791`, `DmChatScreen.kt:1308-1321`, `ThreadList.kt:628-645`). Fix: keep editing state until the write resolves; restore on failure.
+- A4-7 Med: pin and unpin run on the chat's scope, outside carry (`TlonChatRepo.kt:3529-3577`, `DmChatScreen.kt:1172-1183`). Fix: carry.
+- A4-8 Med: Copy text, New event notes and the assistant's reads get the shortened link label, not the URL (`StoryCache.kt:124`, `Story.kt:448, 337`; callers `DmChatScreen.kt:695-698, 1095-1099`, `ThreadList.kt:374-378`, `AiFeatures.kt:26`, `ToolCatalog.kt:137, 320`). Fix: build textFor from hrefs.
+- A4-9 Med: desktop Ctrl+V takes the clipboard's image over its text when both exist (`FileDropTarget.desktop.kt:107-111`, `ChatComposer.kt:1207-1211`). Fix: when a string flavor exists, paste the text.
+- A4-10 Med polish: a restored draft opens with the caret at the start (`ChatComposer.kt:127, 272`). Fix: TextRange(length).
+- A4-11 Low-Med: a jump to a post not kept locally lands at the bottom silently (`DmChatScreen.kt:273-275, 481-506`). Fix: fetch the post, or say "not loaded here".
+- A4-12 Low: Enter after ":D" picks an emoji (`EmojiPicker.kt:91-107`, `ChatComposer.kt:1246-1251`). Fix: open the picker from 2 characters.
+- A4-13 Low: the thread menu offers Delete on others' replies to non-admins (`ThreadList.kt:358`). Fix: canModerate as in DmChatScreen.
+- A4-14 Low: editing your own comment on a gallery or notebook post always fails (`ThreadList.kt:359`, `TlonChatRepo.kt:3401`). Fix: gate Edit to chat/ or let edit take any channel nest.
+- A4-15 Low: Add or Remove contact from a chat's profile sheet is silent on failure and cancelled by leaving (`DmChatScreen.kt:1410-1419`). Fix: repo.carry with a failure line.
+- A4-16 Low (iOS): "Another calendar app" may do nothing (`StoryRenderer.kt:900-911`, `Files.kt:33-37`). Low confidence; needs iOS knowledge.
+- A4-17 Low: chat dialogs survive a chat switch and act on the new chat's whom (`DmChatScreen.kt:667-682`). Fix: remember(whom) or use target.whom.
+- A4-18 Low: after a ship switch another ship's rows can show for the first frames (`DmChatScreen.kt:2156-2161, 325` ChatRowsSnapshot keyed by whom only). Fix: key by ship, or clear on switch.
+- A4-19 Low, privacy, DECISION: every http(s) link in a received message is fetched from the reader's device (`LinkPreviewCache.kt:102-103`, `DmChatScreen.kt:1830-1838`), with no setting.
+- A4-20 Low: "Hide composer buttons" is ignored in threads (`RightPaneHost.kt:85-99`, `TalonApp.kt:2529-2555`, `App.kt:2715-2735`).
+- New angles: M14 via fetchCitePost and fetchThread storing isolated old rows; F1's multi-file drop loop still on the screen scope (`ChatComposer.kt:717-720`); raw `it.message` in `SlashCommands.kt` 219, 316, 343, 387; ReactionDetailsSheet names clip without ellipsis.
