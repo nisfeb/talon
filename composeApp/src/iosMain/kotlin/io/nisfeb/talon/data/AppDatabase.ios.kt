@@ -7,6 +7,7 @@ import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSFileProtectionComplete
+import platform.Foundation.NSFileProtectionCompleteUntilFirstUserAuthentication
 import platform.Foundation.NSFileProtectionKey
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSUserDomainMask
@@ -85,21 +86,51 @@ internal fun appSupportDir(): String {
     return dir
 }
 
+private val UNTIL_FIRST_UNLOCK = mapOf<Any?, Any?>(NSFileProtectionKey to NSFileProtectionCompleteUntilFirstUserAuthentication)
+
+/**
+ * The databases' own folder in Application Support, protected until the
+ * first unlock after a restart rather than whenever the phone is locked.
+ * A call keeps Talon running on a locked phone, and under
+ * NSFileProtectionComplete every read and write failed about ten seconds
+ * after the lock (B4-3, sneagan's call 2026-10-18). SQLite makes -wal
+ * and -shm afresh on each open, and a new file takes its folder's
+ * protection, so the folder carries it. Credentials stay in the files
+ * IosFiles keeps at NSFileProtectionComplete.
+ */
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+internal fun databaseDir(): String {
+    val dir = appSupportDir() + "/db"
+    val fm = NSFileManager.defaultManager
+    if (!fm.fileExistsAtPath(dir)) {
+        fm.createDirectoryAtPath(path = dir, withIntermediateDirectories = true, attributes = UNTIL_FIRST_UNLOCK, error = null)
+    } else {
+        fm.setAttributes(UNTIL_FIRST_UNLOCK, ofItemAtPath = dir, error = null)
+    }
+    return dir
+}
+
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 fun createAppDatabase(shipKey: String): AppDatabase {
     val name = "talon-${sanitizeShipKey(shipKey)}.db"
-    val dir = appSupportDir()
-    // Builds before the move kept the db in Documents; bring it across
-    // once, -wal/-shm included, or an upgrade would open an empty db
-    // and leave the real one exposed.
+    val dir = databaseDir()
+    // Earlier builds kept the db in Documents, then in Application
+    // Support itself; bring it across once, -wal/-shm included, or an
+    // upgrade would open an empty db and leave the real one behind. A
+    // moved file keeps its own protection, so it is set again here.
     val fm = NSFileManager.defaultManager
-    val docs = documentsDir()
-    for (suffix in listOf("", "-wal", "-shm")) {
-        val old = "$docs/$name$suffix"
-        val new = "$dir/$name$suffix"
-        if (fm.fileExistsAtPath(old) && !fm.fileExistsAtPath(new)) {
-            runCatching { fm.moveItemAtPath(srcPath = old, toPath = new, error = null) }
+    for (from in listOf(documentsDir(), appSupportDir())) {
+        for (suffix in listOf("", "-wal", "-shm")) {
+            val old = "$from/$name$suffix"
+            val new = "$dir/$name$suffix"
+            if (fm.fileExistsAtPath(old) && !fm.fileExistsAtPath(new)) {
+                runCatching { fm.moveItemAtPath(srcPath = old, toPath = new, error = null) }
+            }
         }
+    }
+    for (suffix in listOf("", "-wal", "-shm")) {
+        val file = "$dir/$name$suffix"
+        if (fm.fileExistsAtPath(file)) fm.setAttributes(UNTIL_FIRST_UNLOCK, ofItemAtPath = file, error = null)
     }
     val path = "$dir/$name"
     // Explicit factory: the default path resolves @ConstructedBy via

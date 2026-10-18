@@ -14,9 +14,9 @@ private const val PENDING_FILE = "pending-erase"
 /**
  * iOS's copy: the database and its write-ahead siblings, named through
  * the same sanitiser that created them, plus the ship's drafts file.
- * The db lives in Application Support now; builds before the move left
- * it in Documents, so both are searched rather than reporting success
- * over a surviving copy.
+ * The db lives in Application Support's db folder now; earlier builds
+ * left it in Application Support itself or in Documents, so all three
+ * are searched rather than reporting success over a surviving copy.
  */
 @OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 class IosShipDataEraser : ShipDataEraser {
@@ -25,6 +25,7 @@ class IosShipDataEraser : ShipDataEraser {
         val name = "talon-${sanitizeShipKey(ship)}.db"
         val fm = NSFileManager.defaultManager
         val dirs = listOf(
+            databaseDir(),
             appSupportDir(),
             NSSearchPathForDirectoriesInDomains(
                 NSDocumentDirectory, NSUserDomainMask, true,
