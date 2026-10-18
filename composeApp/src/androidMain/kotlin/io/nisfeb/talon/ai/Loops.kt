@@ -466,29 +466,11 @@ class Loops(
         suspend fun calendarAnswer(text: String, earlier: List<DictationFlow.Earlier>, decider: io.nisfeb.talon.orrery.Decider?): String? {
             val cal = calendar ?: return null
             if (decider == null) return null
-            val zone = io.nisfeb.talon.ui.screens.zoneFor(cal.zone.value)
-            val now = System.currentTimeMillis()
-            val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
-            val asked = System.currentTimeMillis()
-            val span = CalendarQuestion.decide(decider, text, earlier, today) {
-                io.nisfeb.talon.util.Log.i("Dictation", "$it, in ${System.currentTimeMillis() - asked} ms")
-            } ?: return null
-            val t0 = System.currentTimeMillis()
-            read.await()
-            val b = CalendarQuestion.bounds(span, zone)
-            // The read covers six hours back to a month ahead; earlier today, or further, is asked for.
-            val covered = b.first >= now - io.nisfeb.talon.calendar.CalendarRepo.BEHIND_MS + 60_000 &&
-                b.last <= now + io.nisfeb.talon.calendar.CalendarRepo.AHEAD_MS - 60_000
-            val rows = (if (covered) cal.rows.value else null) ?: cal.windowRows(b.first, b.last + 1) ?: return null
-            val tasks = cal.tasks.value.orEmpty()
-            val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
-            val due = tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true }
-            card = DictationCard(
-                days = DictationCards.days(rows, span.from, span.to, zone, now, twentyFour),
-                tasks = DictationCards.tasks(due, zone, now),
-            )
-            io.nisfeb.talon.util.Log.i("Dictation", "calendar answered on the phone in ${System.currentTimeMillis() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
-            return CalendarQuestion.answer(span, rows, tasks, zone, now, twentyFour)
+            val seen = CardSeen()
+            return CalendarQuestion.fromCalendar(
+                cal, decider, text, earlier, android.text.format.DateFormat.is24HourFormat(context), seen,
+                ready = { read.await() },
+            ) { io.nisfeb.talon.util.Log.i("Dictation", it) }?.also { card = cardOf(seen, zone(), contacts.await()) }
         }
 
         /** Orrery for [block], attached headless, or null where Orrery is off. */

@@ -148,7 +148,15 @@ class AssistantScreenTest {
         return io.nisfeb.talon.calendar.CalendarRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L).also { it.attach("https://ship.example") }
     }
 
-    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, withOrrery: Boolean = false, block: ComposeUiTest.(AppDatabase) -> Unit) {
+    /** What the decision model was asked, when it is on. */
+    private val decided: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** The decision model's answer, as the vendor's route gives it. */
+    private fun decision(calendarOnly: Double, days: String) =
+        """{"answers":{"calendar_only":{"noul":$calendarOnly},"days":{"choice":"$days","probabilities":{"$days":0.9}}},"usage":{"input_tokens":400,"cost":0.0001}}"""
+
+    /** With [decisions], the vendor's decision model is on and answers so, and the assistant's model is the vendor's row. */
+    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, withOrrery: Boolean = false, decisions: String? = null, block: ComposeUiTest.(AppDatabase) -> Unit) {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
@@ -171,10 +179,19 @@ class AssistantScreenTest {
             return@createContext
         }
         server.start()
-        val ai = FakeAiSettings(AiSettings.Config(
-            provider = AiSettings.Provider.Custom, apiKey = "k", model = "test-model",
-            baseUrl = "http://127.0.0.1:${server.address.port}/v1", agentEnabled = true,
-        ))
+        val base = "http://127.0.0.1:${server.address.port}/v1"
+        val ai = FakeAiSettings(if (decisions == null) {
+            AiSettings.Config(provider = AiSettings.Provider.Custom, apiKey = "k", model = "test-model", baseUrl = base, agentEnabled = true)
+        } else {
+            io.nisfeb.talon.ai.paidSettings(row = io.nisfeb.talon.ai.armillaryRow(base = base, suggested = mapOf("default" to "test-model", "decision" to "typesafe/jev-1.13")))
+                .let { it.copy(savedProfile = it.savedProfile!!.copy(jev = true)) }
+        })
+        val decisionHttp = decisions?.let { said ->
+            io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+                decided += req.body.toByteArray().decodeToString()
+                respond(said, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json"))
+            })
+        }
         val tmp = createTempDirectory(prefix = "talon-assistant-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -194,7 +211,7 @@ class AssistantScreenTest {
                         if (showing.value) AssistantScreen(
                             db = db, aiSettings = ai, embedder = null, onOpenMessage = { _, _, _ -> }, repo = repo,
                             session = session, forceExpanded = true, calendar = calendar, mail = mail, orrery = orrery,
-                            onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" },
+                            onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" }, http = decisionHttp,
                         )
                     }
                 }
@@ -522,7 +539,8 @@ class AssistantScreenTest {
             onNodeWithText("Brief me").performClick()
             waitUntil(timeoutMillis = 10_000) { shows("You have 1 new email, and no new messages. Tea with Rose is in half an hour.") }
             // The day's card: today's events and the unread mail.
-            assertTrue(shows("Today") && shows("Seed swap") && shows("Seed catalogue"))
+            waitUntil(timeoutMillis = 5_000) { shows("Seed catalogue") }
+            assertTrue(shows("Today") && shows("Seed swap"))
             val opener = asked.single()
             assertTrue("do not say those numbers again" in opener, "Archie's own opener prompt")
             assertTrue("First event today: Tea with Rose at" in opener && "Andrea is away, so you drop off." in opener, opener.takeLast(800))
@@ -550,6 +568,47 @@ class AssistantScreenTest {
             waitUntil(timeoutMillis = 10_000) { shows("A busy one.") && shows("Seed catalogue") }
             assertTrue(shows("Tea with Rose"))
             assertTrue("You have 1 new email, and no new messages." in asked.last() && "No brief today." in asked.last(), asked.last().takeLast(600))
+        }
+    }
+
+    // ─── what is on, with no model ────────────────────────────────
+
+    // The voice card answers "what's on today" from the calendar with no
+    // model call, where the decision model says that is all it asks.
+    @Test
+    fun `a plain question about what is on is answered from the calendar with its card and no model call`() {
+        aDay()
+        assistant(withCalendar = true, decisions = decision(0.97, "today")) { db ->
+            ask("what's on today")
+            waitUntil(timeoutMillis = 10_000) { shows("Today you have 2 events.") }
+            assertTrue(shows("You're in Seed swap until") && shows("Next is Tea with Rose at"), "the line Archie says")
+            // The card, drawn once the run has answered: each event by name alone.
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Tea with Rose").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(onAllNodesWithText("Seed swap").fetchSemanticsNodes().isNotEmpty() && shows("Today"), "the day's card")
+            assertTrue(asked.isEmpty(), "no model call")
+            assertTrue("what's on today" in decided.single(), "the decision model was asked, once")
+            waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+        }
+    }
+
+    @Test
+    fun `a question the decision model calls more than the calendar goes to the model`() {
+        aDay()
+        assistant(withCalendar = true, decisions = decision(0.2, "today")) {
+            ask("what's left before Barcelona?")
+            waitUntil(timeoutMillis = 10_000) { shows("Tuesday, at the library.") }
+            assertEquals(1, asked.size)
+            assertEquals(1, decided.size)
+        }
+    }
+
+    @Test
+    fun `with the decision model off nothing is decided and the model answers`() {
+        aDay()
+        assistant(withCalendar = true) {
+            ask("what's on today")
+            waitUntil(timeoutMillis = 10_000) { shows("Tuesday, at the library.") }
+            assertTrue(decided.isEmpty())
         }
     }
 

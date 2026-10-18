@@ -459,6 +459,14 @@ fun AssistantScreen(
     )
     // Today's brief for the opener: none where orrery is off or did not answer.
     suspend fun openerBrief() = orrery?.briefLast()?.getOrNull()?.let { Briefing.todays(it, today()) }
+    // A plain question about what is on, answered from the calendar with no
+    // model, where the decision model is on and says it is one. It costs
+    // every question a decision first, three seconds at most.
+    suspend fun calendarAnswer(text: String, earlier: List<io.nisfeb.talon.ai.DictationFlow.Earlier>): String? {
+        val cal = calendar ?: return null
+        val decider = http?.let { io.nisfeb.talon.ai.CalendarQuestion.decider(it, aiSettings.state.value) } ?: return null
+        return io.nisfeb.talon.ai.CalendarQuestion.fromCalendar(cal, decider, text, earlier, twentyFourHour, session.seen) { Log.i("AssistantScreen", it) }
+    }
     val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
@@ -586,7 +594,8 @@ fun AssistantScreen(
     /**
      * Ask what is typed, or [asked]. [quick] answers with no agent loop
      * where it can, from the exchanges before ([DictationFlow.Earlier]);
-     * null, and the model takes it.
+     * null, and the model takes it. Without one, a plain question about
+     * what is on is answered from the calendar where it can be.
      */
     fun submit(asked: String? = null, quick: (suspend (List<io.nisfeb.talon.ai.DictationFlow.Earlier>) -> String?)? = null) {
         val loop = agentLoop ?: return
@@ -746,7 +755,8 @@ fun AssistantScreen(
                     )
                 }
 
-                val said = quick?.invoke(prior.map { io.nisfeb.talon.ai.DictationFlow.Earlier(it.question, it.answer) })
+                val earlier = prior.map { io.nisfeb.talon.ai.DictationFlow.Earlier(it.question, it.answer) }
+                val said = if (quick != null) quick(earlier) else calendarAnswer(q, earlier)
                 if (said != null) {
                     finalAnswer = said
                     transcript.add(Line.Said(said))
