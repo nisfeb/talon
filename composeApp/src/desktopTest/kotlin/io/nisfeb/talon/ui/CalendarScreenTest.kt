@@ -167,6 +167,15 @@ class CalendarScreenTest {
         waitUntil(timeoutMillis = 5_000) { writes.isNotEmpty() }
         val body = writes.single().second
         assertTrue("Lunch with Bus" in body, body)
+        // On show once the ship has it, though its window never has: the
+        // repo's own stand-in, which every screen reads, and not this
+        // screen's beside it as well.
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch with Bus") }
+        assertEquals(
+            onAllNodesWithText("Dentist").fetchSemanticsNodes().size,
+            onAllNodesWithText("Lunch with Bus").fetchSemanticsNodes().size,
+            "shown as often as an event the ship has, not twice",
+        )
     }
 
     // ─── task priority ────────────────────────────────────────────

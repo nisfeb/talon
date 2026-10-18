@@ -723,7 +723,7 @@ class CalendarRepo(
      * the calendar's own copy in; returns what takes it out again. Only the
      * calendar screen showed it, and the home page's today had it only once
      * the reading came in. Null for a series, a date each year or a task,
-     * which wait for the reading.
+     * which wait for the reading, and for one that fell in neither list.
      */
     private fun assumeAdd(body: JsonObject): (() -> Unit)? {
         fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
@@ -739,10 +739,14 @@ class CalendarRepo(
         )
         val now = nowMs()
         val month = range
+        var placed = false
         fun put(rows: List<CalendarRow>?, from: Long, to: Long) =
-            if (rows == null || r <= from || l >= to) rows else (rows + row).sortedWith(compareBy({ it.l }, { it.r }))
+            if (rows == null || r <= from || l >= to) rows
+            else (rows + row).sortedWith(compareBy({ it.l }, { it.r })).also { placed = true }
         _rows.update { put(it, now - BEHIND_MS, now + AHEAD_MS) }
         if (month != null) _rangeRows.update { put(it, month.first, month.second) }
+        // In neither list (outside them, or none read yet): a screen's own stand-in stays.
+        if (!placed) return null
         return { _rows.update { it?.filterNot { x -> x === row } }; _rangeRows.update { it?.filterNot { x -> x === row } } }
     }
 
