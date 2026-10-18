@@ -34,6 +34,16 @@ class LiveMessageAlertTest {
         assertTrue(alerts(whom = "chat/~bus/general", level = null), "no level is all, as notifyAllowed reads it")
     }
 
+    // TalonApplication reads a mention off the story for the ship it listens for.
+    @Test
+    fun `a mention is of our ship only and no ship is mentioned by nothing`() {
+        val story = """[{"inline":[{"ship":"~zod"}," hi"]}]"""
+        assertTrue(isMentioned(story, "~zod"))
+        assertFalse(isMentioned(story, "~bus"))
+        assertFalse(isMentioned(story, null))
+        assertFalse(isMentioned(story, ""))
+    }
+
     @Test
     fun `muted is silent and a reply that counts passes mentions only`() {
         assertFalse(alerts(level = NotifyLevel.NONE))
