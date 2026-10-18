@@ -69,4 +69,13 @@ class LiveMessageAlertTest {
         assertEquals(ChatAlert.Quiet, chatAlert(hint = false, shownAgoMs = 60_000, shownIsHint = true))
         assertEquals(ChatAlert.Post, chatAlert(hint = false, shownAgoMs = 60_001, shownIsHint = true))
     }
+
+    // A message eyre replays after a resume is the one already showing:
+    // it is left alone, an hour on or a second.
+    @Test
+    fun `the very message showing is not posted again`() {
+        assertEquals(ChatAlert.Skip, chatAlert(hint = false, shownAgoMs = 3_600_000, shownIsHint = false, samePost = true))
+        assertEquals(ChatAlert.Skip, chatAlert(hint = false, shownAgoMs = 1_000, shownIsHint = true, samePost = true))
+        assertEquals(ChatAlert.Post, chatAlert(hint = false, shownAgoMs = null, shownIsHint = false, samePost = true), "dismissed, it is news again")
+    }
 }

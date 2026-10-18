@@ -545,6 +545,7 @@ object Notifications {
             hint = hint,
             shownAgoMs = shown?.let { System.currentTimeMillis() - it.postTime },
             shownIsHint = shown?.notification?.extras?.getBoolean(EXTRA_HINT) == true,
+            samePost = postId != null && shown?.notification?.extras?.getString(EXTRA_POST) == postId,
         )
         if (alert == io.nisfeb.talon.notify.ChatAlert.Skip) return
 
@@ -580,7 +581,7 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setWhen(sentMs)
             .setShowWhen(true)
-            .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_HINT, hint) })
+            .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_HINT, hint); putString(EXTRA_POST, postId) })
             .setOnlyAlertOnce(alert == io.nisfeb.talon.notify.ChatAlert.Quiet)
             .build()
 
@@ -589,6 +590,8 @@ object Notifications {
 
     /** Set on a chat notification that is a relay's hint. */
     private const val EXTRA_HINT = "talon.hint"
+    /** The post a chat notification is for. */
+    private const val EXTRA_POST = "talon.post"
 
     /**
      * New mail. Its own channel because mail is considered

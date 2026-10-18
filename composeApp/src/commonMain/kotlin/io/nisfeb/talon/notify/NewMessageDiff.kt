@@ -209,9 +209,12 @@ enum class ChatAlert { Post, Quiet, Skip }
  * alerted. A hint says only "new activity", so over a notification shown
  * a moment ago it is dropped; the message itself replacing a hint shown a
  * moment ago replaces it without a second alert. Anything shown longer
- * ago than [windowMs], or none ([shownAgoMs] null), alerts as new.
+ * ago than [windowMs], or none ([shownAgoMs] null), alerts as new; but
+ * the very message showing ([samePost]), which eyre replays after a
+ * resume, is left alone however long ago it went up.
  */
-fun chatAlert(hint: Boolean, shownAgoMs: Long?, shownIsHint: Boolean, windowMs: Long = 60_000L): ChatAlert = when {
+fun chatAlert(hint: Boolean, shownAgoMs: Long?, shownIsHint: Boolean, samePost: Boolean = false, windowMs: Long = 60_000L): ChatAlert = when {
+    shownAgoMs != null && samePost -> ChatAlert.Skip
     shownAgoMs == null || shownAgoMs > windowMs -> ChatAlert.Post
     hint -> ChatAlert.Skip
     shownIsHint -> ChatAlert.Quiet
