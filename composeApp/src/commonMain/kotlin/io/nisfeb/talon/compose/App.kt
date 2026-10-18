@@ -1669,6 +1669,8 @@ fun App(
         //   * mode = Brand → null (explicit opt-out also stays brand).
         val accentSettings by uiSettings.accentSettings.collectAsState()
         val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
+        // A thread's composer follows the setting too; only the chat's did.
+        val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
         // User font scale (Ctrl/Cmd +/-/0). Layered on top of the
         // density preset's own multiplier below.
         val userFontScale by uiSettings.fontScale.collectAsState()
@@ -2759,6 +2761,7 @@ fun App(
                             onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { threadMicTrigger.tryEmit(Unit) } } else null,
                             voicePlayer = voicePreviewPlayer,
                             powerFeaturesEnabled = powerFeaturesEnabled,
+                            hideComposerButtons = hideComposerButtons,
                         )
                     }
                     else -> {
@@ -3813,6 +3816,7 @@ fun App(
                                             }
                                         },
                                         powerFeaturesEnabled = powerFeaturesEnabled,
+                                        hideComposerButtons = hideComposerButtons,
                                     )
                                 }
                             },

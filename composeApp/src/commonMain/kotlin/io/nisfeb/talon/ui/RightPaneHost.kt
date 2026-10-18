@@ -54,6 +54,7 @@ fun RightPaneHost(
     voicePlayer: (@Composable (path: String, sending: Boolean) -> Unit)? = null,
     onSlashMic: (() -> Unit)? = null,
     powerFeaturesEnabled: Boolean = false,
+    hideComposerButtons: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -97,6 +98,7 @@ fun RightPaneHost(
                     voicePlayer = voicePlayer,
                     onSlashMic = onSlashMic,
                     powerFeaturesEnabled = powerFeaturesEnabled,
+                    hideComposerButtons = hideComposerButtons,
                 )
                 is RightPaneContent.GroupInfo -> GroupInfoPane(
                     db = db,

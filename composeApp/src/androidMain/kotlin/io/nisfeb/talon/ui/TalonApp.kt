@@ -2467,6 +2467,8 @@ fun TalonApp(
                         VoicePreviewPlayButton(path = path, enabled = !sending)
                     },
                     powerFeaturesEnabled = app.uiSettings.powerFeaturesEnabled.collectAsState().value,
+                    // A thread's composer follows the setting too; only the chat's did.
+                    hideComposerButtons = app.uiSettings.hideComposerButtons.collectAsState().value,
                     modifier = mod,
                 )
             }
