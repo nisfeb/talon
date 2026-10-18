@@ -241,7 +241,8 @@ actual fun VoicePreviewPlayButton(path: String, enabled: Boolean) {
     IconButton(enabled = enabled && player != null, onClick = {
         val p = player ?: return@IconButton
         if (playing) { p.pause(); playing = false } else {
-            runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
+            // During a call TalonRtc owns the session: Playback here cut the call's mic.
+            if (!IosVoipBridge.callLive.value) runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
             if (p.currentTime >= p.duration) p.currentTime = 0.0
             p.play(); playing = true
         }
@@ -315,7 +316,8 @@ private fun IosInlineAudioPlayer(url: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = {
             if (playing) { player.pause(); playing = false } else {
-                runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
+                // During a call TalonRtc owns the session: Playback here cut the call's mic.
+                if (!IosVoipBridge.callLive.value) runCatching { AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null) }
                 player.play(); playing = true
             }
         }) { Icon(if (playing) TalonIcons.Pause else Icons.Filled.PlayArrow, contentDescription = if (playing) "Pause" else "Play") }
