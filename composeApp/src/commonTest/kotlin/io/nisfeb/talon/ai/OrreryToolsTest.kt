@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.orrery.OrreryError
+
 import io.nisfeb.talon.orrery.ItemAnswer
 import io.nisfeb.talon.orrery.ObserveAnswer
 import io.nisfeb.talon.orrery.OrreryApi
@@ -65,8 +67,11 @@ class OrreryToolsTest {
         }
         /** Each read of the open list gives the next of these, and the last again. */
         val open = mutableListOf<List<io.nisfeb.talon.orrery.OrreryAction>>(emptyList())
+        /** The read of the open list from which each fails: the ship stopped answering. */
+        var actionsFailFrom = Int.MAX_VALUE
         override suspend fun actions(): Result<List<io.nisfeb.talon.orrery.OrreryAction>> {
             actionReads++
+            if (actionReads >= actionsFailFrom) return Result.failure(OrreryError.Unreachable(RuntimeException("timeout")))
             return Result.success(if (open.size > 1) open.removeAt(0) else open.single())
         }
         val answered = mutableListOf<String>()

@@ -303,6 +303,37 @@ class OrreryWritesTest {
     }
 
     @Test
+    fun `a snooze the list does not show is not confirmed either way`() = runTest {
+        val until = kotlin.time.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs() + 3_600_000).toString()
+        val unsnoozed = OrreryToolsTest.Tap().apply { open[0] = listOf(high(late)) }
+        assertEquals(
+            "Not confirmed (orrery still shows Say you are running late to Park at JAX for DL 2627 as not snoozed). $NOT_CONFIRMED",
+            run(unsnoozed, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 60) }),
+        )
+        val still = OrreryToolsTest.Tap().apply { open[0] = listOf(high(late, until)) }
+        assertEquals(
+            "Not confirmed (orrery still shows Say you are running late to Park at JAX for DL 2627 as snoozed until $until). $NOT_CONFIRMED",
+            run(still, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 0) }),
+        )
+        // A snooze already over is no snooze.
+        val over = kotlin.time.Instant.fromEpochMilliseconds(io.nisfeb.talon.util.nowMs() - 60_000).toString()
+        val ended = OrreryToolsTest.Tap().apply { open[0] = listOf(high(late, over)) }
+        assertTrue("as not snoozed." in run(ended, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", 0) }))
+    }
+
+    @Test
+    fun `a list that cannot be read before or after says so`() = runTest {
+        val before = OrreryToolsTest.Tap().apply { open[0] = listOf(late); actionsFailFrom = 1 }
+        assertEquals("Could not read orrery's actions: no answer from the ship. Nothing was changed.", run(before, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+        assertTrue(before.marks.isEmpty())
+        val after = OrreryToolsTest.Tap().apply { open[0] = listOf(late); actionsFailFrom = 2 }
+        assertEquals("Not confirmed: orrery took it, but its list could not be read back. $NOT_CONFIRMED", run(after, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+        assertEquals(listOf("a1 high=true snooze=null"), after.marks)
+        assertTrue("Error" in run(after, "orrery_mark", buildJsonObject { put("high", true) }), "no id")
+        assertTrue("Error" in run(after, "orrery_mark", buildJsonObject { put("id", "a1"); put("snooze_minutes", "soon") }), "no number")
+    }
+
+    @Test
     fun `a mark the list does not show is not confirmed`() = runTest {
         val t = OrreryToolsTest.Tap().apply { open[0] = listOf(late) }
         assertEquals(

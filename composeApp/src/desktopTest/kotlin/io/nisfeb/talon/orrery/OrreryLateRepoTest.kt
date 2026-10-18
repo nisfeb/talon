@@ -148,6 +148,7 @@ class OrreryLateRepoTest {
             assertFalse(repo.actions.value.first { it.id == "a1" }.high)
             assertTrue(repo.actions.value.first { it.id == "a2" }.high)
             assertEquals(listOf("a2"), repo.late(), "a proposal marked high and past its due is late")
+            assertEquals(listOf("a2"), io.nisfeb.talon.ui.newActions(repo.actions.value).map { it.id }, "and still waits on Home's New")
             withTimeout(5_000) { while (taken.size < 2) delay(20) }
             assertEquals(
                 setOf("/apps/orrery/api/actions/a1/priority {\"priority\":\"\"}", "/apps/orrery/api/actions/a2/priority {\"priority\":\"high\"}"),
@@ -173,6 +174,7 @@ class OrreryLateRepoTest {
         ship { repo ->
             repo.answer("a1", "done")
             assertEquals(emptyList<String>(), repo.actions.value.map { it.id }, "gone from every list at once")
+            assertEquals(emptyList<io.nisfeb.talon.ui.NewAction>(), io.nisfeb.talon.ui.newActions(repo.actions.value), "Home's New with it")
             withTimeout(5_000) { while (taken.isEmpty()) delay(20) }
             assertEquals(listOf("/apps/orrery/api/actions/a1 {\"status\":\"approved\"}"), posts.toList(), "done waits for approved")
             apply()

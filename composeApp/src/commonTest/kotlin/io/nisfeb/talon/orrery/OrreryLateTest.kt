@@ -212,6 +212,23 @@ class OrreryLateTest {
         )
     }
 
+    // With this install's key, a mark goes on the key's client, as the
+    // other writes do: the ship then holds the key's scope to it.
+    @Test
+    fun a_mark_under_the_key_goes_on_the_key_client() = runTest {
+        val seen = mutableListOf<String>()
+        val api = OrreryApi(
+            HttpClient(MockEngine { error("not the owner's") }),
+            HttpClient(MockEngine { req ->
+                seen += "${req.url.encodedPath} ${req.headers["Authorization"]} ${req.body.toByteArray().decodeToString()}"
+                respond("""{"ok":true,"id":"a1","priority":"high"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            }),
+            "https://ship.test",
+        )
+        assertEquals("high", api.priority("k1.secret", "a1", high = true))
+        assertEquals(listOf("""/apps/orrery/api/actions/a1/priority Bearer k1.secret {"priority":"high"}"""), seen)
+    }
+
     @Test
     fun the_version_is_read_and_an_orrery_without_the_route_is_old() = runTest {
         var said: Pair<HttpStatusCode, String> = HttpStatusCode.OK to """{"version":110}"""
