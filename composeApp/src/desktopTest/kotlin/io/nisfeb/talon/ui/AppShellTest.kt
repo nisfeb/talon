@@ -73,6 +73,7 @@ class AppShellTest {
         sessions: ((FakeShip) -> io.nisfeb.talon.urbit.SessionStore)? = null,
         relay: io.nisfeb.talon.notify.RelaySettings = io.nisfeb.talon.notify.InMemoryRelaySettings(),
         drafts: DraftStore = InMemoryDraftStore(),
+        notifier: io.nisfeb.talon.notify.Notifier = io.nisfeb.talon.notify.NoopNotifier,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -110,6 +111,7 @@ class AppShellTest {
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             createUiSettings = { ui },
                             callEngineProvider = calls,
+                            notifier = notifier,
                         )
                     }
                 }
@@ -218,6 +220,7 @@ class AppShellTest {
                 path == "/apps/orrery/api/version" -> """{"version":$version}"""
                 path == "/apps/orrery/api/actions" ->
                     """[{"id":"a1","kind":"task","title":"Check in for DL 2627","payload":{"priority":"high"},"due":"$due","status":"approved"}]"""
+                method == "POST" && path == "/apps/orrery/api/actions/a1" -> """{"ok":true}"""
                 method == "POST" && path == "/apps/orrery/api/actions/a1/snooze" ->
                     """{"ok":true,"id":"a1","snooze_until":"${kotlin.time.Instant.fromEpochMilliseconds(System.currentTimeMillis() + 3_600_000)}"}"""
                 else -> null
@@ -247,6 +250,26 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { ship.api.any { "/snooze" in it } }
         assertEquals(listOf("POST /apps/orrery/api/actions/a1/snooze {\"minutes\":60}"), ship.api.filter { "/snooze" in it })
         assertTrue(showing("Check in for DL 2627"), "still listed, to be done")
+    }
+
+    // Done takes back the nag: the app's own slot, and on iOS the ship's
+    // push under its tag, which the system shows as it came.
+    @Test
+    fun `Done on a late one takes back its nag under both its keys`() {
+        val cleared = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val notifier = object : io.nisfeb.talon.notify.Notifier {
+            override fun notify(title: String, body: String, key: String?) {}
+            override fun clear(key: String) { cleared += key }
+        }
+        app(ai = orreryOn, setup = { orrery(110) }, notifier = notifier) { ship ->
+            openOrrery()
+            waitUntil(timeoutMillis = 10_000) { showing("Late · 1") }
+            onNodeWithText("Done").performClick()
+            waitUntil(timeoutMillis = 10_000) { !showing("Late ·") }
+            waitUntil(timeoutMillis = 10_000) { ship.api.any { it.startsWith("POST /apps/orrery/api/actions/a1 ") } }
+            assertEquals(listOf("POST /apps/orrery/api/actions/a1 {\"status\":\"done\"}"), ship.api.filter { it.startsWith("POST /apps/orrery/api/actions/a1 ") })
+            assertTrue("action:a1" in cleared && "orrery-overdue-a1" in cleared, cleared.toString())
+        }
     }
 
     @Test
