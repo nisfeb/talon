@@ -37,6 +37,7 @@ class SyncStateMigrationTest {
             BundledSQLiteDriver().open(path).apply {
                 execSQL("DROP TABLE settings_outbox")
                 execSQL("DROP TABLE marks")
+                execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 execSQL("PRAGMA user_version = 56")
                 close()
             }

@@ -1288,6 +1288,7 @@ fun App(
             io.nisfeb.talon.ai.LoopRunner(
                 loops = db.loops(),
                 runs = db.loopRuns(),
+                holds = db.loopHolds(),
                 tools = io.nisfeb.talon.ai.ToolCatalog.default(
                     repo, db, searchEmbedderClient,
                     braveSearch = if (loopBraveOn) {

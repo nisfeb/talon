@@ -118,6 +118,7 @@ class UrbUnfurlKeptTest {
         BundledSQLiteDriver().open(path).also { c ->
             c.execSQL("DROP TABLE urb_unfurls")
             c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+            c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
             c.execSQL("PRAGMA user_version = 49")
             c.close()
         }

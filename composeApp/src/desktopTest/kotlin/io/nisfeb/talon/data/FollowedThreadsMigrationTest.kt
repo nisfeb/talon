@@ -33,6 +33,7 @@ class FollowedThreadsMigrationTest {
             // As 1.8.1-rc24 left it: version 53, no table.
             BundledSQLiteDriver().open(path).apply {
                 execSQL("DROP TABLE followed_threads")
+                execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 execSQL("PRAGMA user_version = 53")
                 close()
             }

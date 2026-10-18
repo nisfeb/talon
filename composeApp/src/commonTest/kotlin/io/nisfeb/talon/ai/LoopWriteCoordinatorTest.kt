@@ -101,6 +101,7 @@ class LoopWriteCoordinatorTest {
         val runner = LoopRunner(
             loops = LeaseFakeLoopDao(loop),
             runs = runDao,
+            holds = FakeLoopHoldDao(),
             tools = emptyList(),
             completer = { _, _, _ -> AgentTurn.Final("done") },
             aiConfig = { paidSettings() },

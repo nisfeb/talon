@@ -1669,6 +1669,8 @@ class SettingsSyncImpl(
                 intervalMinutes = obj["intervalMinutes"].asInt() ?: 60,
                 enabled = (obj["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
                 writesAuthorized = existing?.writesAuthorized ?: false,
+                // This device's too, as the write grant it tightens.
+                askBeforeSharing = existing?.askBeforeSharing ?: false,
                 createdAt = obj["createdAt"].asLong() ?: 0L,
                 updatedAt = obj["updatedAt"].asLong() ?: 0L,
                 // First arrival on this device: stamp lastRunAt=now so the

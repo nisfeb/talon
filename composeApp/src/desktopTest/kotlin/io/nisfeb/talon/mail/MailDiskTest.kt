@@ -58,6 +58,7 @@ class MailDiskTest {
             c.execSQL("DROP TABLE orrery_accounts")
             c.execSQL("INSERT INTO rail_item_prefs (itemName, visible) VALUES ('Mail', 0)")
             c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+            c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
             c.execSQL("PRAGMA user_version = 41")
             c.close()
         }
