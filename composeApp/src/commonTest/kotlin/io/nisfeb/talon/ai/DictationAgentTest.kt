@@ -75,6 +75,8 @@ class DictationAgentTest {
             tool("create_event", true), tool("update_event", true), tool("create_task", true), tool("complete_task", true),
             tool("send_mail", true), tool("send_message", true), tool("delete_event", true), tool("react", true),
             tool("share_calendar", true), tool("send_event", true), tool("orrery_configure", true), tool("orrery_correct", true),
+            // The assistant's alone: dictation and loops are not offered it.
+            tool("orrery_mark", true),
         )
         val unlocked = DictationAgent.toolsFor(all, locked = false).map { it.spec.name }.toSet()
         assertEquals(
