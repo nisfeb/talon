@@ -263,13 +263,15 @@ class SettingsSyncOutboxTest {
     @Test
     fun `a delete that leaves rows marks nothing, and each list marks its own last`() = live {
         sync.attach(ship.channel)
+        sync.addBookmark("chat/~bus/general", "170.2", 4)
         sync.setNotifyLevel("~bus", NotifyLevel.NONE)
         sync.setNotifyLevel("~nec", NotifyLevel.ALL)
         sync.clearNotifyLevel("~bus")
-        assertTrue(sent().none { "emptied" in it }, "~nec stands")
         sync.clearNotifyLevel("~nec")
         sync.addBookmark("chat/~bus/general", "170.1", 5)
         sync.removeBookmark("chat/~bus/general", "170.1")
+        assertTrue(sent().none { "emptied" in it }, "170.2 stands")
+        sync.removeBookmark("chat/~bus/general", "170.2")
         sync.setRailItemVisibility(io.nisfeb.talon.ui.RailItem.entries.first(), false)
         sync.setRailItemVisibility(io.nisfeb.talon.ui.RailItem.entries.first(), true)
         val marks = sync.createBookmarkFolder("Recipes", 0)
@@ -279,7 +281,8 @@ class SettingsSyncOutboxTest {
         sync.pushGroupOrders()
         val emptied = sent().filter { "emptied" in it }.map { Regex("\"bucket-key\":\"([a-z-]+)\"").find(it)!!.groupValues[1] }
         assertEquals(
-            listOf("notify-prefs", "bookmarks", "rail-items", "bookmark-folder-members", "bookmark-folders", "group-orders"),
+            // notify-prefs held: trunk reads it, and its reader is not known here.
+            listOf("bookmarks", "rail-items", "bookmark-folder-members", "bookmark-folders", "group-orders"),
             emptied,
         )
     }

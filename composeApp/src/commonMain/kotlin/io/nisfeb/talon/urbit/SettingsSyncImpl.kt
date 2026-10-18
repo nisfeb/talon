@@ -157,8 +157,8 @@ class SettingsSyncImpl(
          * The entry a list bucket holds once a delete here left it empty
          * ([markIfEmptied]). No decoder reads it as a row, rc10's
          * included: each wants a numeric key, a `:` or `|` in it, or a
-         * field this has none of. The relay's notify-prefs reader wants
-         * `level`, which it lacks too.
+         * field this has none of. Never put in notify-prefs, which
+         * trunk reads too (see [markIfEmptied]).
          */
         const val ENTRY_EMPTIED = "emptied"
 
@@ -1242,7 +1242,6 @@ class SettingsSyncImpl(
     override suspend fun clearNotifyLevel(whom: String) {
         db.notifyPrefs().clear(whom)
         pokeDelEntry(BUCKET_NOTIFY_PREFS, whom)
-        markIfEmptied(BUCKET_NOTIFY_PREFS)
         levelMirror?.invoke(whom, null)
     }
 
@@ -1834,7 +1833,9 @@ class SettingsSyncImpl(
         val empty = when (bucket) {
             BUCKET_FOLDERS -> db.folders().streamFolders().first().isEmpty()
             BUCKET_FOLDER_MEMBERS -> db.folders().streamMembers().first().isEmpty()
-            BUCKET_NOTIFY_PREFS -> db.notifyPrefs().streamAll().first().isEmpty()
+            // Not notify-prefs: trunk reads that bucket on the ship, and
+            // whether its reader takes an entry without a level is not
+            // known here. Held until it is.
             BUCKET_RAIL_ITEMS -> db.railItemPrefs().streamAll().first().isEmpty()
             BUCKET_BOOKMARKS -> db.bookmarks().streamAll().first().isEmpty()
             BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().streamFolders().first().isEmpty()
