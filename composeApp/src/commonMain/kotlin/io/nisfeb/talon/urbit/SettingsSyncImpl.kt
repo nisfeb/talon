@@ -17,6 +17,10 @@ import io.nisfeb.talon.data.FolderMemberEntity
 import io.nisfeb.talon.data.GroupOrderEntity
 import io.nisfeb.talon.data.NotifyPreferenceEntity
 import io.nisfeb.talon.data.RailItemPrefEntity
+import io.nisfeb.talon.data.SettingsOutboxEntity
+import io.nisfeb.talon.util.runSuspendCatching
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.railItemOrNull
 import kotlinx.coroutines.flow.Flow
@@ -47,7 +51,9 @@ import kotlinx.serialization.json.put
  * to the user's %settings agent on the ship. Source of truth is the
  * ship — on login we scry and replace Room with whatever %settings
  * holds, then pokes flow both ways: local change → poke, remote
- * change → subscription event → Room write.
+ * change → subscription event → Room write. A local change the ship
+ * has not taken yet is kept (the settings outbox), held over the
+ * ship's word, and sent again at the next connect.
  *
  * All per-row values are small JSON blobs; we never store message
  * content here.
@@ -146,6 +152,15 @@ class SettingsSyncImpl(
             BUCKET_NOTIFY_PREFS, BUCKET_RAIL_ITEMS,
             BUCKET_BOOKMARKS, BUCKET_BOOKMARK_FOLDERS, BUCKET_BOOKMARK_FOLDER_MEMBERS,
         )
+
+        /**
+         * The entry a list bucket holds once a delete here left it empty
+         * ([markIfEmptied]). No decoder reads it as a row, rc10's
+         * included: each wants a numeric key, a `:` or `|` in it, or a
+         * field this has none of. Never put in notify-prefs, which
+         * trunk reads too (see [markIfEmptied]).
+         */
+        const val ENTRY_EMPTIED = "emptied"
 
         private const val CLAIM_SETTLE_MS = 3_000L
         // Single-entry bucket: the seen high-water mark is global to the
@@ -387,8 +402,9 @@ class SettingsSyncImpl(
     /**
      * On session start: scry `%settings /desk/<DESK>` for everything
      * we care about and overwrite local Room tables with whatever the
-     * ship holds. Ship wins — local edits made offline without a poke
-     * don't survive this. Subscribe afterward so live changes flow in.
+     * ship holds. Ship wins, except over a local edit the ship has not
+     * taken yet: those are applied again on top ([reapplyPending]) and
+     * sent ([resubscribe]). Subscribe afterward so live changes flow in.
      */
     override suspend fun bootstrap() {
         val ch = channel
@@ -396,6 +412,23 @@ class SettingsSyncImpl(
             Log.w(TAG, "bootstrap skipped: channel not attached")
             return
         }
+        // While the desk is read and applied, a write made here is kept,
+        // not sent: one the ship took after the read but before the apply
+        // was applied away, and no longer kept to apply again. The lock
+        // first waits out a write already on the wire.
+        sending.withLock { holdingWrites = true }
+        val read = try { readDesk(ch) } finally { holdingWrites = false }
+        if (!read) return
+        // Subscribe for live updates from other devices.
+        resubscribe()
+        Log.i(TAG, "bootstrap done")
+    }
+
+    /** See [send]: true while [bootstrap] reads and applies the desk. */
+    @Volatile private var holdingWrites = false
+
+    /** [bootstrap]'s read and apply; false when the ship could not be read. */
+    private suspend fun readDesk(ch: UrbitChannel): Boolean {
         Log.i(TAG, "bootstrap starting")
         val scried = runCatching { ch.scry("settings", "/desk/$DESK") }
         if (scried.isFailure) {
@@ -404,7 +437,7 @@ class SettingsSyncImpl(
             // over whatever the ship and other devices hold. The next
             // connect runs bootstrap again.
             Log.w(TAG, "bootstrap scry failed; not seeding", scried.exceptionOrNull())
-            return
+            return false
         }
         val body = scried.getOrNull() as? JsonObject
 
@@ -457,6 +490,9 @@ class SettingsSyncImpl(
                 val entries = deskMap!![bucket] as? JsonObject
                 if (!bucketIsMissingOrEmpty(entries)) applyBucket(bucket, entries)
             }
+            // Before the orphan check, so a folder made here and not yet
+            // sent still has its members.
+            runCatching { reapplyPending() }.onFailure { Log.w(TAG, "unsent settings not applied again", it) }
             runCatching { dropOrphanedMembers() }.onFailure { Log.w(TAG, "orphaned folder members", it) }
 
             // Per-bucket recovery for the Room-backed buckets: any the
@@ -488,7 +524,7 @@ class SettingsSyncImpl(
                 ui?.fontSettings?.value?.takeIf { it.fonts.isNotEmpty() || it.removed.isNotEmpty() }?.let { f ->
                     val encoded = encodeFonts(f)
                     noteSyncedUiPref(ENTRY_FONTS, encoded)
-                    runCatching { pokePutEntry(BUCKET_UI_PREFS, ENTRY_FONTS, encoded) }
+                    runCatching { pokePutEntry(BUCKET_UI_PREFS, ENTRY_FONTS, encoded, keep = false) }
                 }
             }
         }
@@ -505,7 +541,7 @@ class SettingsSyncImpl(
         // recovery above.
         if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject).isNullOrEmpty()) {
             Log.i(TAG, "ship missing ai-settings bucket — seeding from local")
-            runCatching { pushAiSettings() }
+            runCatching { putAiSettings(keep = false) }
                 .onFailure { Log.w(TAG, "ai-settings seed push failed", it) }
         } else {
             // Schema upgrade: an entry older than this build's says
@@ -518,7 +554,7 @@ class SettingsSyncImpl(
             } ?: false
             if (legacy) {
                 Log.i(TAG, "ship has an older ai-settings entry, upgrading to schemaVersion=$AI_SCHEMA")
-                runCatching { pushAiSettings() }
+                runCatching { putAiSettings(keep = false) }
                     .onFailure { Log.w(TAG, "ai-settings upgrade push failed", it) }
             }
             // Keys no longer travel. The ones an older build left on the
@@ -526,18 +562,18 @@ class SettingsSyncImpl(
             // keeps what it has.
             if ((deskMap?.get(BUCKET_AI_SETTINGS) as? JsonObject)?.containsKey(AI_KEYS_ENTRY) == true) {
                 Log.i(TAG, "ship holds AI keys from an older build, taking them off")
-                runCatching { pokeDelEntry(BUCKET_AI_SETTINGS, AI_KEYS_ENTRY) }
+                runCatching { pokeDelEntry(BUCKET_AI_SETTINGS, AI_KEYS_ENTRY, keep = false) }
                     .onFailure { Log.w(TAG, "removing the old credentials entry failed", it) }
             }
         }
-
-        // Subscribe for live updates from other devices.
-        resubscribe()
-        Log.i(TAG, "bootstrap done")
+        return true
     }
 
     override suspend fun resubscribe() {
         val ch = channel ?: return
+        // What waited for the ship goes now it answers: after a bootstrap's
+        // apply, which held it over the ship's word, or on a quick reconnect.
+        runCatching { flushPending() }.onFailure { Log.w(TAG, "unsent settings not sent", it) }
         runCatching { ch.subscribe("settings", "/desk/$DESK") }
             .onFailure {
                 // A resumed channel watches nothing again: kept, it would go
@@ -590,6 +626,7 @@ class SettingsSyncImpl(
                             put(o.flag, buildJsonObject { put("ordinal", o.ordinal) })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -607,6 +644,7 @@ class SettingsSyncImpl(
                             })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -624,6 +662,7 @@ class SettingsSyncImpl(
                             })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -638,6 +677,7 @@ class SettingsSyncImpl(
                             put(p.whom, buildJsonObject { put("level", p.level) })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -652,6 +692,7 @@ class SettingsSyncImpl(
                             put(r.itemName, buildJsonObject { put("visible", r.visible) })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -668,6 +709,7 @@ class SettingsSyncImpl(
                             })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -685,6 +727,7 @@ class SettingsSyncImpl(
                             })
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -702,6 +745,7 @@ class SettingsSyncImpl(
                             )
                         }
                     },
+                    keep = false,
                 )
             }
     }
@@ -715,12 +759,14 @@ class SettingsSyncImpl(
      * UiSettings; they push through their existing entry points.
      */
     private suspend fun pushUiPrefsFromLocal() {
+        // A seed, decided by the ship's state as read: not kept to send
+        // again later, when it may be stale ([send]).
+        suspend fun push(entry: String, encoded: JsonElement) {
+            noteSyncedUiPref(entry, encoded)
+            pokePutEntry(BUCKET_UI_PREFS, entry, encoded, keep = false)
+        }
         val settings = ui
         if (settings != null) {
-            suspend fun push(entry: String, encoded: JsonElement) {
-                noteSyncedUiPref(entry, encoded)
-                pokePutEntry(BUCKET_UI_PREFS, entry, encoded)
-            }
             push(ENTRY_GROUP_CHANNEL_ORDER, str(settings.groupChannelOrder.value.name))
             push(ENTRY_FOLDER_ITEM_ORDER, str(settings.folderItemOrder.value.name))
             push(ENTRY_SMART_SEARCH, bool(settings.smartSearchPreferred.value))
@@ -731,8 +777,8 @@ class SettingsSyncImpl(
             push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))
             push(ENTRY_FONTS, encodeFonts(settings.fontSettings.value))
         }
-        pushAlwaysPatp(io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
-        pushNonCometNames(io.nisfeb.talon.ui.AzimuthNames.enabled.value)
+        push(ENTRY_ALWAYS_PATP, bool(io.nisfeb.talon.ui.ShipNames.alwaysPatp.value))
+        push(ENTRY_NON_COMET_NAMES, bool(io.nisfeb.talon.ui.AzimuthNames.enabled.value))
     }
 
     /** Apply a %settings SSE fact to the right bucket. */
@@ -796,12 +842,14 @@ class SettingsSyncImpl(
                 flags.forEachIndexed { i, f ->
                     put(f, buildJsonObject { put("ordinal", i) })
                 }
+                // None left: marked so, as a delete marks a list it empties.
+                if (flags.isEmpty()) put(ENTRY_EMPTIED, emptiedMarker())
             },
         )
     }
 
     override suspend fun createFolder(name: String, sortOrder: Int): Long {
-        val id = db.folders().createFolder(FolderEntity(name = name, sortOrder = sortOrder))
+        val id = db.folders().createFolder(FolderEntity(id = newFolderId(), name = name, sortOrder = sortOrder))
         pokePutEntry(
             BUCKET_FOLDERS, id.toString(),
             buildJsonObject {
@@ -835,6 +883,8 @@ class SettingsSyncImpl(
         // name. Left behind, they were given to the next folder a new
         // device made under this id.
         members.forEach { pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(id, it.whom)) }
+        markIfEmptied(BUCKET_FOLDERS)
+        if (members.isNotEmpty()) markIfEmptied(BUCKET_FOLDER_MEMBERS)
     }
 
     override suspend fun addFolderMember(folderId: Long, whom: String) {
@@ -864,6 +914,7 @@ class SettingsSyncImpl(
     override suspend fun removeFolderMember(folderId: Long, whom: String) {
         db.folders().removeMember(folderId, whom)
         pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(folderId, whom))
+        markIfEmptied(BUCKET_FOLDER_MEMBERS)
     }
 
     /** Alias for clarity — groups live in the same table as whoms. */
@@ -904,7 +955,10 @@ class SettingsSyncImpl(
      * older builds read, and the instructions. No key, provider or model:
      * Armillary is per ship and each device asks its own ship for a key.
      */
-    override suspend fun pushAiSettings() {
+    override suspend fun pushAiSettings() = putAiSettings(keep = true)
+
+    /** [pushAiSettings]; [keep] false for the bootstrap's seed and upgrade, which are not edits. */
+    private suspend fun putAiSettings(keep: Boolean) {
         val cfg = aiSettings.state.value
         pokePutEntry(
             BUCKET_AI_SETTINGS, AI_ENTRY,
@@ -920,21 +974,12 @@ class SettingsSyncImpl(
                 put("loopPrompt", cfg.loopPrompt)
                 put("switches", cfg.profile().switches())
             },
+            keep,
         )
     }
 
     /** Nuke the ship's AI settings bucket, for callers that want the user's AI prefs fully off the ship. */
-    suspend fun clearAiSettingsOnShip() {
-        val ch = channel ?: return
-        val payload = buildJsonObject {
-            put("del-bucket", buildJsonObject {
-                put("desk", DESK)
-                put("bucket-key", BUCKET_AI_SETTINGS)
-            })
-        }
-        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
-            .onFailure { Log.w(TAG, "del-bucket ai-settings failed", it) }
-    }
+    suspend fun clearAiSettingsOnShip() = pokeDelBucket(BUCKET_AI_SETTINGS)
 
     override suspend fun pushAssistantTurn(
         conversation: io.nisfeb.talon.data.AssistantConversationEntity,
@@ -964,17 +1009,8 @@ class SettingsSyncImpl(
     }
 
     override suspend fun clearAssistantHistoryOnShip() {
-        val ch = channel ?: return
-        for (bucket in listOf(BUCKET_ASSISTANT_CONVERSATIONS, BUCKET_ASSISTANT_TURNS)) {
-            val payload = buildJsonObject {
-                put("del-bucket", buildJsonObject {
-                    put("desk", DESK)
-                    put("bucket-key", bucket)
-                })
-            }
-            runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
-                .onFailure { Log.w(TAG, "del-bucket $bucket failed", it) }
-        }
+        pokeDelBucket(BUCKET_ASSISTANT_CONVERSATIONS)
+        pokeDelBucket(BUCKET_ASSISTANT_TURNS)
     }
 
     override suspend fun pushLoop(loop: io.nisfeb.talon.data.LoopEntity) {
@@ -1058,12 +1094,14 @@ class SettingsSyncImpl(
     }
 
     private suspend fun writeClaim(gid: String, holder: String, at: Long) {
+        // Not kept: a lease sent late would claim a time long past.
         pokePutEntry(
             BUCKET_AUTOMATION_CLAIMS, gid,
             buildJsonObject {
                 put("holder", holder)
                 put("claimedAt", at)
             },
+            keep = false,
         )
     }
 
@@ -1118,6 +1156,7 @@ class SettingsSyncImpl(
     override suspend fun removeBookmark(whom: String, postId: String) {
         db.bookmarks().remove(whom, postId)
         pokeDelEntry(BUCKET_BOOKMARKS, bookmarkKey(whom, postId))
+        markIfEmptied(BUCKET_BOOKMARKS)
     }
 
     // ───────── bookmark folder CRUD ───────────────────────────
@@ -1125,7 +1164,7 @@ class SettingsSyncImpl(
     /** Create a new bookmark folder; returns its newly assigned id. */
     override suspend fun createBookmarkFolder(name: String, sortOrder: Int): Long {
         val id = db.bookmarkFolders().createFolder(
-            BookmarkFolderEntity(name = name, sortOrder = sortOrder),
+            BookmarkFolderEntity(id = newFolderId(), name = name, sortOrder = sortOrder),
         )
         pokePutEntry(
             BUCKET_BOOKMARK_FOLDERS, id.toString(),
@@ -1156,6 +1195,8 @@ class SettingsSyncImpl(
         pokeDelEntry(BUCKET_BOOKMARK_FOLDERS, id.toString())
         // As with a chat folder: its members go from the ship by name.
         members.forEach { pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(id, it.whom, it.postId)) }
+        markIfEmptied(BUCKET_BOOKMARK_FOLDERS)
+        if (members.isNotEmpty()) markIfEmptied(BUCKET_BOOKMARK_FOLDER_MEMBERS)
     }
 
     override suspend fun addBookmarkToFolder(folderId: Long, whom: String, postId: String) {
@@ -1176,6 +1217,7 @@ class SettingsSyncImpl(
             BUCKET_BOOKMARK_FOLDER_MEMBERS,
             bookmarkFolderMemberKey(folderId, whom, postId),
         )
+        markIfEmptied(BUCKET_BOOKMARK_FOLDER_MEMBERS)
     }
 
     /**
@@ -1209,6 +1251,7 @@ class SettingsSyncImpl(
             // deleting restores the default.
             db.railItemPrefs().delete(item.name)
             pokeDelEntry(BUCKET_RAIL_ITEMS, item.name)
+            markIfEmptied(BUCKET_RAIL_ITEMS)
         } else {
             db.railItemPrefs().upsert(RailItemPrefEntity(item.name, visible = false))
             pokePutEntry(
@@ -1693,19 +1736,118 @@ class SettingsSyncImpl(
         val folders = db.folders().streamFolders().first().map { it.id }.toSet()
         db.folders().streamMembers().first().filter { it.folderId !in folders }.forEach {
             db.folders().removeMember(it.folderId, it.whom)
-            pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(it.folderId, it.whom))
+            pokeDelEntry(BUCKET_FOLDER_MEMBERS, folderMemberKey(it.folderId, it.whom), keep = false)
         }
         val marks = db.bookmarkFolders().streamFolders().first().map { it.id }.toSet()
         db.bookmarkFolders().streamMembers().first().filter { it.folderId !in marks }.forEach {
             db.bookmarkFolders().removeMember(it.folderId, it.whom, it.postId)
-            pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(it.folderId, it.whom, it.postId))
+            pokeDelEntry(BUCKET_BOOKMARK_FOLDER_MEMBERS, bookmarkFolderMemberKey(it.folderId, it.whom, it.postId), keep = false)
         }
     }
 
     // ───────── poke helpers ─────────
 
-    private suspend fun pokePutEntry(bucket: String, entry: String, value: JsonElement) {
+    /**
+     * Sends one at a time: a kept write sent again must not land after a
+     * newer one to its slot ([flushPending] checks the row is still the
+     * newest, under this). Writes queue behind a slow poke, as they did
+     * behind the ship.
+     */
+    private val sending = Mutex()
+
+    /**
+     * Send one settings write. Kept first ([keep]), in the outbox, until
+     * the ship takes or refuses it: a write made before the channel was
+     * attached, while the ship was out of reach, or cut off midway used
+     * to be dropped, and the next bootstrap's ship-wins apply then wiped
+     * the change here too. A kept one is held over the ship's word
+     * ([reapplyPending]) and sent at the next connect ([flushPending]).
+     * Not kept: what a bootstrap decides from the ship's state as it read
+     * it (seeds, orphan cleanup), and leases; sent days later, a seed
+     * would overwrite what other devices wrote since.
+     */
+    private suspend fun send(slot: String, payload: JsonObject, keep: Boolean) = sending.withLock {
+        val id = if (keep) db.settingsOutbox().keep(SettingsOutboxEntity(slot = slot, payload = payload.toString())) else null
+        val ch = channel ?: return@withLock
+        // A bootstrap is reading the desk: this goes with its last step.
+        if (keep && holdingWrites) return@withLock
+        if (deliver(ch, slot, payload)) id?.let { db.settingsOutbox().done(it) }
+    }
+
+    /**
+     * True once the ship has answered: it took the write, or refused it,
+     * which sending again would not change. Silence is neither: a poke
+     * not acked inside the wait is kept, since it may not have landed.
+     */
+    private suspend fun deliver(ch: UrbitChannel, slot: String, payload: JsonObject): Boolean {
+        val failed = runSuspendCatching {
+            ch.poke(app = "settings", mark = "settings-event", payload = payload, confirm = true)
+        }.exceptionOrNull() ?: return true
+        Log.w(TAG, if (failed is PokeNacked) "$slot refused" else "$slot not sent", failed)
+        return failed is PokeNacked
+    }
+
+    /**
+     * Send what was kept, oldest first. Stops at the first the ship does
+     * not answer: the rest go at the next connect, or with the next drain
+     * of the chat queue (TlonChatRepo.drainQueue).
+     */
+    override suspend fun flushPending() {
         val ch = channel ?: return
+        for (row in db.settingsOutbox().all()) {
+            val answered = sending.withLock {
+                // A bootstrap is reading the desk; it sends these after.
+                if (holdingWrites) return@withLock false
+                // Replaced by a newer write since the list was read, which
+                // goes on its own.
+                if (!db.settingsOutbox().has(row.id)) return@withLock true
+                val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull()
+                if (payload != null && !deliver(ch, row.slot, payload)) return@withLock false
+                db.settingsOutbox().done(row.id)
+                true
+            }
+            if (!answered) return
+        }
+    }
+
+    /**
+     * What was written here and not yet taken, applied again over what
+     * the ship said, whose word is from before it. Applied as the fact
+     * its poke will bring back: the same path, so it lands the same way.
+     */
+    private suspend fun reapplyPending() {
+        for (row in db.settingsOutbox().all()) {
+            val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull() ?: continue
+            runSuspendCatching { applySettingsEvent(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
+        }
+    }
+
+    /**
+     * After a delete here: a list left empty says so on the ship, with
+     * [ENTRY_EMPTIED]. A bucket missing or empty is seeded from whichever
+     * device connects next (bootstrap), so a deliberate deletion was
+     * undone by any device that had not heard of it. A marked bucket is
+     * not empty: every device applies it, as no rows, and none seeds it.
+     */
+    private suspend fun markIfEmptied(bucket: String) {
+        val empty = when (bucket) {
+            BUCKET_FOLDERS -> db.folders().streamFolders().first().isEmpty()
+            BUCKET_FOLDER_MEMBERS -> db.folders().streamMembers().first().isEmpty()
+            // Not notify-prefs: trunk reads that bucket on the ship, and
+            // whether its reader takes an entry without a level is not
+            // known here. Held until it is.
+            BUCKET_RAIL_ITEMS -> db.railItemPrefs().streamAll().first().isEmpty()
+            BUCKET_BOOKMARKS -> db.bookmarks().streamAll().first().isEmpty()
+            BUCKET_BOOKMARK_FOLDERS -> db.bookmarkFolders().streamFolders().first().isEmpty()
+            BUCKET_BOOKMARK_FOLDER_MEMBERS -> db.bookmarkFolders().streamMembers().first().isEmpty()
+            else -> false
+        }
+        if (empty) pokePutEntry(bucket, ENTRY_EMPTIED, emptiedMarker())
+    }
+
+    private fun emptiedMarker(): JsonObject = buildJsonObject { put("emptied", nowMs()) }
+
+    private suspend fun pokePutEntry(bucket: String, entry: String, value: JsonElement, keep: Boolean = true) {
         val payload = buildJsonObject {
             put("put-entry", buildJsonObject {
                 put("desk", DESK)
@@ -1717,12 +1859,10 @@ class SettingsSyncImpl(
                 put("value", JsonPrimitive(Json.encodeToString(JsonElement.serializer(), value)))
             })
         }
-        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
-            .onFailure { Log.w(TAG, "put-entry $bucket/$entry failed", it) }
+        send("$bucket/$entry", payload, keep)
     }
 
-    private suspend fun pokeDelEntry(bucket: String, entry: String) {
-        val ch = channel ?: return
+    private suspend fun pokeDelEntry(bucket: String, entry: String, keep: Boolean = true) {
         val payload = buildJsonObject {
             put("del-entry", buildJsonObject {
                 put("desk", DESK)
@@ -1730,12 +1870,10 @@ class SettingsSyncImpl(
                 put("entry-key", entry)
             })
         }
-        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
-            .onFailure { Log.w(TAG, "del-entry $bucket/$entry failed", it) }
+        send("$bucket/$entry", payload, keep)
     }
 
-    private suspend fun pokePutBucket(bucket: String, entries: JsonObject) {
-        val ch = channel ?: return
+    private suspend fun pokePutBucket(bucket: String, entries: JsonObject, keep: Boolean = true) {
         // Each entry's value must be sent as a JSON string — see
         // pokePutEntry for the reason.
         val stringified = buildJsonObject {
@@ -1750,8 +1888,19 @@ class SettingsSyncImpl(
                 put("bucket", stringified)
             })
         }
-        runCatching { ch.poke(app = "settings", mark = "settings-event", payload = payload) }
-            .onFailure { Log.w(TAG, "put-bucket $bucket failed", it) }
+        // A bucket's slot is its name, which holds no '/': an entry's is
+        // bucket/entry, so the two never meet.
+        send(bucket, payload, keep)
+    }
+
+    private suspend fun pokeDelBucket(bucket: String) {
+        val payload = buildJsonObject {
+            put("del-bucket", buildJsonObject {
+                put("desk", DESK)
+                put("bucket-key", bucket)
+            })
+        }
+        send(bucket, payload, keep = true)
     }
 
     // ───────── helpers ─────────
@@ -1791,6 +1940,20 @@ class SettingsSyncImpl(
     private fun parseBookmarkFolderMemberKey(key: String): Triple<Long, String, String>? =
         io.nisfeb.talon.urbit.parseBookmarkFolderMemberKey(key)
 }
+
+/**
+ * A new folder's id, chat or bookmark: its key on the ship, so the same
+ * on every device. Each device's own autoincrement gave two devices'
+ * first folders the same key, and each overwrote the other's name. Still
+ * a number, as every build reads one (rc10's decoder takes the key's
+ * `toLongOrNull`): the time in ms and three random digits, so unique
+ * across devices, ordered by when it was made, and under 2^53. An rc10
+ * device that takes one counts its own on from it.
+ */
+// ponytail: two made on one device in the same ms can collide (1 in 1000):
+// the insert then fails and nothing is made. A per-device counter if seen.
+internal fun newFolderId(nowMs: Long = io.nisfeb.talon.util.nowMs()): Long =
+    nowMs * 1000 + kotlin.random.Random.nextInt(1000)
 
 /**
  * Parse `<folderId>|<whom>|<postId>` — pure helper exposed at file

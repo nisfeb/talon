@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -73,6 +74,9 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
      * the request fails with this.
      */
     @Volatile var landThenFail: (Poke) -> Throwable? = { null }
+
+    /** A poke the ship takes and never answers, as a wedged flow to a peer: in [pokes], with no ack. */
+    @Volatile var silent: (Poke) -> Boolean = { false }
 
     /** Every poke sent, lost or not. */
     val attempted: MutableList<Poke> = java.util.concurrent.CopyOnWriteArrayList()
@@ -283,7 +287,7 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                             lose(p)?.let { throw it }
                             pokes += p
                             val err = refuse(p)
-                            answer(
+                            if (!silent(p)) answer(
                                 path,
                                 if (err == null) """{"id":$id,"response":"poke","ok":"ok"}"""
                                 else """{"id":$id,"response":"poke","err":${JsonPrimitive(err)}}""",
@@ -409,4 +413,28 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
 
     /** The pokes made to [app], in order. */
     fun pokesTo(app: String): List<Poke> = synchronized(pokes) { pokes.filter { it.app == app } }
+
+    /**
+     * %settings' desk `talon` as a ship that took every settings poke so
+     * far holds it, over [base]: a bucket stays, emptied, after its last
+     * entry goes. What another device's bootstrap then reads.
+     */
+    fun settingsDesk(base: String = """{"desk":{}}"""): String {
+        val desk = linkedMapOf<String, LinkedHashMap<String, JsonElement>>()
+        Json.parseToJsonElement(base).jsonObject["desk"]!!.jsonObject.forEach { (b, m) -> desk[b] = LinkedHashMap(m.jsonObject) }
+        fun JsonObject.str(k: String) = this[k]!!.jsonPrimitive.content
+        for (p in pokesTo("settings")) {
+            val o = p.json.jsonObject
+            o["put-entry"]?.jsonObject?.let { e -> desk.getOrPut(e.str("bucket-key")) { linkedMapOf() }[e.str("entry-key")] = e["value"]!! }
+            o["del-entry"]?.jsonObject?.let { e -> desk[e.str("bucket-key")]?.remove(e.str("entry-key")) }
+            o["put-bucket"]?.jsonObject?.let { e -> desk[e.str("bucket-key")] = LinkedHashMap(e["bucket"]!!.jsonObject) }
+            o["del-bucket"]?.jsonObject?.let { e -> desk.remove(e.str("bucket-key")) }
+        }
+        return buildJsonObject { put("desk", JsonObject(desk.mapValues { JsonObject(it.value) })) }.toString()
+    }
+
+    /** The desk scry answers [settingsDesk] over [base], as the ship takes each poke. */
+    fun answerSettingsDesk(base: String = """{"desk":{}}""") {
+        answerScry = { p -> if (p == "settings/desk/talon") settingsDesk(base) else null }
+    }
 }

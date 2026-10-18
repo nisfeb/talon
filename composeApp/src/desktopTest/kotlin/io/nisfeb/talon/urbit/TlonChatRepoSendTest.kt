@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.jsonArray
@@ -309,6 +310,38 @@ class TlonChatRepoSendTest {
         assertEquals(0 to 0, row.count to row.notifyCount)
         // The mark Tlon's client sends (12.1.0); see the next for older ships.
         assertEquals("activity-action-2", ship.pokesTo("activity").single().mark)
+    }
+
+    // Mark all read ran on the home list's scope: opening a chat midway
+    // cancelled the reads still on the wire, and none was kept as owed
+    // (review M15, 2026-10-17). Real time: the ship's hold is real.
+    @Test
+    fun `mark all read still reaches the ship when the list is left midway`() = live {
+        for (w in listOf("~bus", "~nec")) db.unreads().upsert(UnreadEntity(w, count = 2, notifyCount = 1, recencyMs = 1))
+        ship.holdPoke = 400
+        val list = CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        list.launch { repo.markAllRead(listOf("~bus", "~nec")) }
+        delay(100)
+        list.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        kotlinx.coroutines.withTimeout(10_000) { while (ship.pokesTo("activity").size < 2) delay(50) }
+        assertEquals(setOf("~bus", "~nec"), ship.pokesTo("activity").map { it.json.toString().substringAfter("\"ship\":\"").substringBefore("\"") }.toSet())
+        assertEquals(listOf(0, 0), listOf("~bus", "~nec").map { db.unreads().getOne(it)!!.count })
+    }
+
+    // The iPhone's icon badge took the ship's total over the counts here,
+    // so a chat read while the ship was out of reach kept its alerts on
+    // the icon (review Low, App.kt 855-862). Real time: the read's own
+    // retries wait out about seven seconds before it is owed.
+    @Test
+    fun `the ship's badge total stands aside while a read made here is owed`() = live {
+        repo.applyActivityUpdate(Json.parseToJsonElement("""{"activity":{"base":{"count":4,"notify-count":4,"recency":1,"notify":true,"unread":null}}}""").jsonObject)
+        assertEquals(4, repo.notifiedTotal.first())
+        ship.lose = { if (it.app == "activity") java.io.IOException("The network connection was lost.") else null }
+        repo.markRead("~bus")
+        assertNull(repo.notifiedTotal.first(), "the badge counts what is here")
+        ship.lose = { null }
+        repo.drainQueue()
+        assertEquals(4, repo.notifiedTotal.first(), "heard: the ship's number again")
     }
 
     @Test

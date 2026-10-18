@@ -172,7 +172,9 @@ class SettingsSyncBootstrapTest {
         val folderPokes = sent()
         assertTrue(folderPokes.any { "put-entry" in it && "\"entry-key\":\"$id\"" in it && "Play" in it }, folderPokes.toString())
         assertTrue(folderPokes.any { "put-entry" in it && "\"entry-key\":\"$id:~bus/garden\"" in it })
-        assertTrue(folderPokes.last().let { "del-entry" in it && "$id:~bus/garden" in it })
+        // Then the list it emptied is marked so (review M16), last.
+        assertTrue(folderPokes.dropLast(1).last().let { "del-entry" in it && "$id:~bus/garden" in it }, folderPokes.toString())
+        assertTrue(folderPokes.last().let { "\"bucket-key\":\"folder-members\"" in it && "\"entry-key\":\"emptied\"" in it })
     }
 
     @Test
