@@ -110,10 +110,10 @@ fun NotebookListScreen(
         onDispose { repo.setOpenChat(null) }
     }
     LaunchedEffect(whom) {
-        // Always scry newest on mount so we catch up on anything the
-        // SSE stream missed (and so first-open isn't empty). The
-        // subscription keeps us live after.
-        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshConversation(whom, count = 30) }.isFailure
+        // Read newest on the first open of a connect, so first-open isn't
+        // empty. The subscription keeps us live after; it read 30 posts on
+        // every open (review B5-12).
+        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshOnOpen(whom) }.isFailure
         loading = false
     }
 

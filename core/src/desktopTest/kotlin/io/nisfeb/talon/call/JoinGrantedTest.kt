@@ -53,6 +53,8 @@ class JoinGrantedTest {
             c.joinGranted(line, "~zod", TrunkTicket("lounge", "http://sfu.test/a/", "tok"), "~nec")
             h.await { presence(h, "enter-room", "~zod", "lounge") > 0 }
             assertEquals(PartyState.Connecting("lounge"), line.state.value)
+            // Which host a chat's Record tells (review B5-1): the line's own.
+            assertEquals("~zod/lounge", c.lineKey)
 
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
             h.await { presence(h, "leave-room", "~zod", "lounge") > 0 }
@@ -66,6 +68,7 @@ class JoinGrantedTest {
                 ) as kotlinx.serialization.json.JsonObject,
             )
             assertEquals("Bus lounge", (line.state.value as PartyState.Live).topic)
+            assertEquals("~bus/lounge", c.lineKey, "the slug is the same, the host is not")
 
             // Asked again for the line we are on: nothing to leave.
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")

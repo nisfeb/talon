@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.safeDrawing
@@ -195,7 +196,10 @@ private fun DesktopRail(
         Column(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxHeight().padding(vertical = 8.dp),
+            // Scrolls: a short window clipped Settings off the end (review B1-7).
+            modifier = Modifier.fillMaxHeight()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(vertical = 8.dp),
         ) {
             for (item in enabledItems) {
                 // A modal destination (Assistant) wins the highlight while

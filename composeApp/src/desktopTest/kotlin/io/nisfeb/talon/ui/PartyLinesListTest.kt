@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
@@ -38,7 +40,12 @@ class PartyLinesListTest {
         channelGroups = listOf(ChannelGroupEntity("chat/~zod/garden", "~zod/garden")),
     )
 
-    private fun lines(rooms: String, block: ComposeUiTest.(FakeShip) -> Unit) {
+    private class Window(focused: Boolean) : androidx.compose.ui.platform.WindowInfo {
+        var focused by androidx.compose.runtime.mutableStateOf(focused)
+        override val isWindowFocused: Boolean get() = focused
+    }
+
+    private fun lines(rooms: String, window: Window? = null, block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-lines-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -55,7 +62,11 @@ class PartyLinesListTest {
                 waitUntil(timeoutMillis = 10_000) { calls.wire.value == 9 }
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        PartyLinesList(db = db, callController = calls, partyLine = null, contacts = contacts, onOpenLine = { opened += it })
+                        val list = @androidx.compose.runtime.Composable {
+                            PartyLinesList(db = db, callController = calls, partyLine = null, contacts = contacts, onOpenLine = { opened += it })
+                        }
+                        if (window == null) list()
+                        else androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalWindowInfo provides window) { list() }
                     }
                 }
                 block(ship)
@@ -83,5 +94,19 @@ class PartyLinesListTest {
     @Test
     fun `with no lines anywhere it says who turns one on`() = lines("[]") {
         waitUntil(timeoutMillis = 5_000) { shows("A group admin turns one on from the group's info page.") }
+    }
+
+    // Review B5-4: the list asked every host every 20 s with the app behind.
+    @Test
+    fun `behind it asks the hosts nothing, and back in front it asks`() {
+        val window = Window(focused = false)
+        lines("""[{"name":"garden","title":"garden","listen":false,"members":["~zod"],"admins":["~zod"]}]""", window) { ship ->
+            val asked = { ship.pokesTo("trunk").count { "occupancy-of" in it.json.toString() } }
+            waitUntil(timeoutMillis = 5_000) { shows("The Garden") }
+            Thread.sleep(1_000)
+            assertEquals(0, asked(), "behind")
+            window.focused = true
+            waitUntil(timeoutMillis = 5_000) { asked() == 1 }
+        }
     }
 }

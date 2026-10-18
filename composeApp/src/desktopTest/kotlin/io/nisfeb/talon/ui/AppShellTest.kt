@@ -336,6 +336,26 @@ class AppShellTest {
         }
     }
 
+    // Review B1-2: below 840dp the More menu is the only navigation, and
+    // it had no Home. Orrery is offered there only while it is on.
+    @Test
+    fun `with no rail the More menu opens Home`() = app(width = 600.dp) {
+        onNodeWithContentDescription("More").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        assertTrue(!showing("Orrery"), "Orrery is off")
+        onNodeWithText("Home").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+        assertTrue(!present("New message"), "the home page, not the list")
+    }
+
+    // With a rail, Home is on it, so the overflow menu leaves it out.
+    @Test
+    fun `with the rail the More menu has no second Home`() = app {
+        onNodeWithContentDescription("More").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        assertTrue(onAllNodesWithText("Home").fetchSemanticsNodes().isEmpty())
+    }
+
     @Test
     fun `a thread opened from a message sits beside the chat`() = app(seed = {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat"))
@@ -1135,6 +1155,17 @@ class AppShellTest {
         addOnContacts("~bus")
         waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: your ship is slow or out of reach. Try again when it's back.") }
         assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
+    }
+
+    // Review B1-8: Remove was fire and forget, and a refusal said nothing.
+    @Test
+    fun `a remove the ship refuses says why and keeps the contact`() = app { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Remove") }
+        ship.refuse = { if (it.app == "contacts") "not now" else null }
+        onNodeWithText("Remove").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't remove ~bus: the ship refused it (not now).") }
+        assertTrue(showing("Remove"), "still in the book, to try again")
     }
 
     // Leaving Contacts mid-add does not stop it: it runs on the repo's scope.

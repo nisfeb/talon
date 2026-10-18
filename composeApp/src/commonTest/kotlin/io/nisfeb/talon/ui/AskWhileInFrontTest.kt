@@ -37,4 +37,20 @@ class AskWhileInFrontTest {
         assertEquals(3, asks, "back in front after the interval asks at once")
         job.cancel()
     }
+
+    // Review B5-3: an empty line was asked who records it every 15 s.
+    @Test
+    fun anEmptyLineIsAskedOnceAndAnOccupiedOneIsPolled() = runBlocking {
+        val front = MutableStateFlow(true)
+        var asks = 0
+        val empty = launch { askRecorders(occupied = false, front, everyMs = 200) { asks++ } }
+        delay(700)
+        assertEquals(1, asks, "asked once, not polled")
+        assertEquals(true, empty.isCompleted)
+        asks = 0
+        val busy = launch { askRecorders(occupied = true, front, everyMs = 200) { asks++ } }
+        delay(700)
+        busy.cancel()
+        assertEquals(true, asks >= 3, "polled: $asks")
+    }
 }

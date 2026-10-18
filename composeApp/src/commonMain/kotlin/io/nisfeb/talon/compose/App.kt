@@ -2394,7 +2394,7 @@ fun App(
                                         loggedInShip = who
                                     }
                                     .onFailure {
-                                        loginNotice = "The ship booted but signing in failed: ${it.message}"
+                                        loginNotice = io.nisfeb.talon.ui.screens.bootedLoginNotice(it)
                                         localShipSetupOpen = false
                                     }
                             }
@@ -2696,9 +2696,7 @@ fun App(
                         // On the repo's scope, awaited: Contacts keeps what was
                         // typed until the ship has it, and says why when not.
                         onAddContact = { patp, nickname -> repo.carry { repo.addContact(patp, nickname) } },
-                        onRemoveContact = { patp ->
-                            rightPaneScope.launch { runCatching { repo.removeContact(patp) } }
-                        },
+                        onRemoveContact = { patp -> repo.carry { repo.removeContact(patp) } },
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
@@ -3019,8 +3017,9 @@ fun App(
                                         )
                                 }
                                 val partyStateNow by partyStateFlow.collectAsState()
-                                val onThisLine =
-                                    partyStateNow is io.nisfeb.talon.call.PartyState.Live
+                                val onThisLine = io.nisfeb.talon.ui.onThisLine(
+                                    partyStateNow, partyRoomHere, callController?.lineKey,
+                                )
                                 // Why we couldn't find out, when we
                                 // couldn't. Silence here is what turns
                                 // "no line in this group" and "your
@@ -3042,6 +3041,7 @@ fun App(
                                     partyLine = partyLine,
                                     partyRoomHere = partyRoomHere,
                                     onThisLine = onThisLine,
+                                    occupied = partyShown > 0 || onThisLine,
                                     http = http,
                                     aiConfig = aiSettings.state.value,
                                     ourShip = ship.orEmpty(),
@@ -3532,6 +3532,10 @@ fun App(
                                         onOpenActivity = onOpenActivity,
                                         onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },
+                                        // Below 840dp this menu is the only
+                                        // navigation, so Home and Orrery are here.
+                                        onOpenHome = { onRailItemClicked(RailItem.Home) },
+                                        onOpenActions = { onRailItemClicked(RailItem.Actions) }.takeIf { orreryOn },
                                         onOpenAdministration = { showGroupAdminList = true },
                                         onOpenSettings = { showSettings = true },
                                         onOpenSidebarSettings = {
@@ -3644,6 +3648,10 @@ fun App(
                                         // Settings underneath, so Back lands there.
                                         onRailItemClicked(io.nisfeb.talon.ui.RailItem.Settings)
                                         showSidebarSettings = true
+                                    },
+                                    onContacts = {
+                                        closeDrawer()
+                                        leaveAllFor { showContacts = true }
                                     },
                                 )
                             },

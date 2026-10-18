@@ -109,6 +109,8 @@ class CallController(
     private val restartGiveUpMs: Long = RESTART_GIVE_UP_MS,
     /** How often a recording is announced again. A knob for tests. */
     private val recordHeartbeatMs: Long = RECORD_HEARTBEAT_MS,
+    /** How often we tell a host we are on its line. A knob for tests. */
+    private val presenceHeartbeatMs: Long = PRESENCE_HEARTBEAT_MS,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -1152,10 +1154,16 @@ class CallController(
             } ?: return@launch
             try {
                 val beat = launch {
+                    var first = true
                     while (true) {
                         enterRoom(host, name) // doubles as heartbeat
-                        occupancyOf(host, name)
-                        delay(PRESENCE_HEARTBEAT_MS)
+                        // A host that pushes its roster (wire 9) sends the
+                        // count with every change, so it is asked on the
+                        // first beat and on leave only. One that does not
+                        // is asked every beat (review B5-15).
+                        if (first || !announces(host)) occupancyOf(host, name)
+                        first = false
+                        delay(presenceHeartbeatMs)
                     }
                 }
                 line.first { it is PartyState.Idle || it is PartyState.Failed }
@@ -1187,6 +1195,10 @@ class CallController(
 
     /** The line [joinGranted] last stepped onto, "host/name": a room is a slug, the same on two hosts. */
     @Volatile private var grantedKey: String? = null
+
+    /** The line we were last granted, "host/name", or null. A chat is on
+     *  the line only when its own host and room are this. */
+    val lineKey: String? get() = grantedKey
 
     /**
      * Step [line] onto the line [ticket] from [host] grants: the

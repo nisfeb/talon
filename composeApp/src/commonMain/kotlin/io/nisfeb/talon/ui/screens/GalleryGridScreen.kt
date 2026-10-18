@@ -114,7 +114,8 @@ fun GalleryGridScreen(
         onDispose { repo.setOpenChat(null) }
     }
     LaunchedEffect(whom) {
-        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshConversation(whom, count = 30) }.isFailure
+        // Once a connect, as a chat reads (review B5-12).
+        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshOnOpen(whom) }.isFailure
         loading = false
     }
 

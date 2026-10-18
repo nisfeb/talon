@@ -15,6 +15,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextInput
@@ -103,6 +107,20 @@ class LoginScreenTest {
         onNodeWithText("Ship URL").performTextInput(url)
         onNodeWithText("+code").performTextInput(code)
         onNodeWithText("Connect").performClick()
+    }
+
+    // Review B1-3: the form did not scroll, so the keyboard or a landscape
+    // phone hid Connect and the error line under it.
+    @Test
+    fun `a short window scrolls the form to Connect`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(400.dp, 240.dp)) {
+                    LoginScreen(session = UrbitSession(HttpClient(MockEngine { respondOk() }), store), onLoggedIn = {})
+                }
+            }
+        }
+        onNodeWithText("Connect").performScrollTo().assertIsDisplayed()
     }
 
     // "backing out of the qr scanner should leave the fields populated. if

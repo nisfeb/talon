@@ -188,13 +188,26 @@ class FontRepoTest {
         answering = false // the ship does not answer at first
         val listed = InMemoryUiSettings().apply { setFontSettings(FontSettings(listOf(InstalledFont(id, "X")), family = "X")) }
         val there = device("desktop", listed)
-        val keeping = scope.launch { there.keepInLine(waits = listOf(50L)) }
+        val keeping = scope.launch { there.keepInLine(waits = List(100) { 50L }) }
         settled { asked.size >= 2 }
         assertTrue(!there.files.has(id))
         answering = true
         settled { there.files.has(id) }
         settled { keeping.isCompleted }
         assertNull(there.status.value)
+    }
+
+    // Review B5-14: a listed font that never reached the ship was asked
+    // about every ten minutes for as long as Talon ran.
+    @Test
+    fun `a font that never arrives is asked about after each wait and then left`() = runBlocking<Unit> {
+        dirs += "talon"; dirs += "talon/fonts"
+        val listed = InMemoryUiSettings().apply { setFontSettings(FontSettings(listOf(InstalledFont("f".repeat(64), "X")), family = "X")) }
+        val there = device("desktop", listed)
+        val keeping = scope.launch { there.keepInLine(waits = listOf(50L, 50L)) }
+        settled { keeping.isCompleted }
+        assertEquals(3, asked.count { it.startsWith("GET kids") }, "a try, then one after each wait")
+        assertTrue(there.status.value != null, "still says it is missing")
     }
 
     // It asked the ship every ten minutes for as long as Talon ran: a 404

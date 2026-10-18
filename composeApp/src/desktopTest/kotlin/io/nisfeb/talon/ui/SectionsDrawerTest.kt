@@ -66,4 +66,28 @@ class SectionsDrawerTest {
         assertEquals(1, lefts.distinct().size, "label lefts: $lefts")
         assertTrue(onAllNodesWithText("A").fetchSemanticsNodes().isEmpty(), "no letter standing in for an icon")
     }
+
+    // Review B1-1: a phone had no way into Contacts. It is not a section,
+    // so it sits by Edit menu, outside the synced order.
+    @Test
+    fun `contacts is in the drawer beside edit menu`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                SectionsDrawer(
+                    order = listOf(RailItem.Chats, RailItem.Settings),
+                    visibility = emptyMap(),
+                    active = RailItem.Chats,
+                    onSection = { went += railLabel(it) },
+                    onEditMenu = { went += "edit" },
+                    onContacts = { went += "contacts" },
+                )
+            }
+        }
+        val settings = onNodeWithText("Settings").fetchSemanticsNode().boundsInRoot.top
+        val contacts = onNodeWithText("Contacts").fetchSemanticsNode().boundsInRoot.top
+        val edit = onNodeWithText("Edit menu").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(settings < contacts && contacts < edit, "after the sections, before Edit menu")
+        onNodeWithText("Contacts").performClick()
+        assertEquals(listOf("contacts"), went.toList())
+    }
 }

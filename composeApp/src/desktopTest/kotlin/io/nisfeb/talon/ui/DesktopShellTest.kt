@@ -24,6 +24,8 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
@@ -32,6 +34,26 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class DesktopShellTest {
+
+    // Review B1-7: a window about 614dp tall clipped Settings off the rail.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `a short window's rail scrolls to Settings`() = runComposeUiTest {
+        setContent {
+            Box(Modifier.size(width = 1000.dp, height = 400.dp)) {
+                DesktopShell(
+                    activeRailTab = RailTab.Chats,
+                    enabledItems = RailItem.entries.toList(),
+                    onItemClicked = {},
+                    list = { Text("LIST") },
+                    detail = { Text("DETAIL") },
+                    listFraction = 0.30f,
+                    onListFractionChange = {},
+                )
+            }
+        }
+        onNodeWithContentDescription("Settings").performScrollTo().assertIsDisplayed()
+    }
 
     @OptIn(ExperimentalTestApi::class)
     @Test

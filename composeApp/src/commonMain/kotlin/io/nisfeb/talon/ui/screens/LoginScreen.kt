@@ -10,6 +10,8 @@ package io.nisfeb.talon.ui.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,9 +108,13 @@ object LoginLapses {
     }
 }
 
+/** What the login form says when a ship run here booted but did not sign
+ *  in: the sign-in's own plain words, not the exception's text. */
+fun bootedLoginNotice(err: Throwable): String = "The ship booted. " + friendlyError(err)
+
 /** What the login form says to a ship whose sign-in lapsed. */
 fun lapsedLoginNotice(ship: String): String =
-    "You were signed out of $ship. Sign in again to keep getting its messages."
+    "You were signed out of ${io.nisfeb.talon.ui.shipHandle(ship)}. Sign in again to keep getting its messages."
 
 @Composable
 fun LoginScreen(
@@ -208,9 +214,12 @@ fun LoginScreen(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
+        // Scrolls, so the keyboard or a landscape phone cannot hide
+        // Connect and the error under it.
         Column(
             modifier = Modifier
                 .widthIn(max = 420.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -286,7 +295,7 @@ fun LoginScreen(
                                 .onSuccess { ship ->
                                     // login() keeps the leading ~ on the
                                     // ship name — don't prepend another.
-                                    status = "Connected as $ship"
+                                    status = "Connected as ${io.nisfeb.talon.ui.shipHandle(ship)}"
                                     LoginDraft.clear()
                                     onLoginCode(ship, typedCode)
                                     onLoggedIn(ship)

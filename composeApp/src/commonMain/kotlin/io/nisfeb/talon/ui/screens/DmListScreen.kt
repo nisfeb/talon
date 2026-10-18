@@ -146,6 +146,8 @@ fun DmListScreen(
     /** Open the home page. Null where the host has no Home surface,
      *  which hides the entry rather than offering a dead one. */
     onOpenHome: (() -> Unit)? = null,
+    /** Open Orrery's actions. Null where Orrery is off. */
+    onOpenActions: (() -> Unit)? = null,
     /** Per-ship persistent "I've seen this" timestamps for the More
      *  menu's freshness dots. Tap-throughs on Statuses / Invites mark
      *  the corresponding entry seen so the pip clears even though the
@@ -925,9 +927,9 @@ fun DmListScreen(
                         }
                     }
                     // First in the list where a host has one at all.
-                    // Desktop reaches Home from the rail; a phone has
-                    // no rail, so this is the way in.
-                    onOpenHome?.let { open ->
+                    // A wide window reaches Home from the rail; a narrow
+                    // one has no rail, so this is the way in.
+                    if (RailItem.Home in kebabItems) onOpenHome?.let { open ->
                         DropdownMenuItem(
                             text = { Text("Home") },
                             onClick = {
@@ -1005,6 +1007,15 @@ fun DmListScreen(
                             onOpenContacts()
                         },
                     )
+                    if (RailItem.Actions in kebabItems) onOpenActions?.let { open ->
+                        DropdownMenuItem(
+                            text = { Text(io.nisfeb.talon.ui.railLabel(RailItem.Actions)) },
+                            onClick = {
+                                menuOpen = false
+                                open()
+                            },
+                        )
+                    }
                     if (RailItem.Administration in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Administration") },
@@ -1928,10 +1939,10 @@ internal fun ShipSwitcherDrawer(
                     if (onSignOut != null || onForget != null) {
                         Spacer(Modifier.weight(1f))
                         Box {
-                            io.nisfeb.talon.ui.IconButton(tip = "What to do with $ship", onClick = { menuFor = ship }) {
+                            io.nisfeb.talon.ui.IconButton(tip = "What to do with ${io.nisfeb.talon.ui.shipHandle(ship)}", onClick = { menuFor = ship }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
-                                    contentDescription = "What to do with $ship",
+                                    contentDescription = "What to do with ${io.nisfeb.talon.ui.shipHandle(ship)}",
                                 )
                             }
                             DropdownMenu(
@@ -1987,11 +1998,11 @@ internal fun ShipSwitcherDrawer(
     confirmForget?.let { ship ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmForget = null },
-            title = { Text("Delete $ship's data?") },
+            title = { Text("Delete ${io.nisfeb.talon.ui.shipHandle(ship)}'s data?") },
             text = {
                 Text(
                     "Signs out and removes everything stored on this device for " +
-                        "$ship: its chats, groups and unread marks. Nothing on the " +
+                        "${io.nisfeb.talon.ui.shipHandle(ship)}: its chats, groups and unread marks. Nothing on the " +
                         "ship itself is touched, and signing in again downloads it " +
                         "afresh.",
                 )
