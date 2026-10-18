@@ -201,3 +201,32 @@ Fix groups, one owner per file:
 - B1-17 Low polish: maxLines with no ellipsis at `ActivityList.kt:254, 313`, `BookmarksScreen.kt:261`, `GroupInvitesScreen.kt:257`.
 - B1-18 Low polish: the drawer marks the open section differently in the two shells (`TalonApp.kt:1752`, `App.kt:3617`); "Always on the sidebar" on phones.
 - False positives (reviewer's): the lightbox Close label, admin and invite spinners, MenuBadgeDot, 32dp IconButtons, icons inside text buttons, the dead gatedOff branch, iPhone landscape sidebar, the admin title.
+
+### Area B2, voice and the assistant
+
+- B2-1 High bug: only the first message proposal is read aloud, but a spoken "send" approves every waiting proposal (`QuickDictation.kt:704-705`, `DictationFlow.kt:167-170`, `DictationSpeech.kt:36`). Fix: read every waiting proposal aloud.
+- B2-2 High, DECISION: with Orrery off, a dictation sends mail and messages with no confirmation in a run that also reads other people's content (`DictationAgent.kt:45, 135-142`, `confirm = { _, _ -> true }`); `AgentLoop.kt:17-22` claims injection is contained by construction. Option: route a dictation's send_message and send_mail through ownerDecides.
+- B2-3 Med-High bug: AgentClient raises a plain error, never ModelHttpError (`AgentClient.kt:161-164`), so the assistant, Archie, dictation and loops never show Top up or a calm 429 or 5xx line. Fix: throw ModelHttpError, with outOfCredit for 402; loops' error through modelProblem.
+- B2-4 Med bug: send_message says "Sent." and send_event "Posted" when the message was only queued (`ToolCatalog.kt:158-159`, `AssistantActions.kt:759-760`, `DictationAgent.kt:196`). Fix: check the queue as sendConfirmed does and say it is queued.
+- B2-5 Med bug: Voice.say gives up after 60 s without tts.stop() (`QuickDictation.kt:1066-1078`), so a long paragraph is cut off by the next and the mic opens while Archie talks. Fix: a length-scaled budget and tts.stop() on expiry.
+- B2-6 Med, DECISION: write-authorized loops can call share_calendar and answer_calendar_offer unattended (`LoopRunner.kt:66`, `DESTRUCTIVE_TOOLS = setOf("delete_event")`). Recommendation: add both.
+- B2-7 Med bug and cost: Archie keeps the whole read-out in the system prompt for every later turn (`VoiceConversation.kt:95`), unlabelled as others' words. Fix: carry it as the reading turn's reply, capped and labelled.
+- B2-8 Med, DECISION: a locked phone reads messages and mail aloud and shows them on the card (`DictationAgent.kt:170-171` filters writes only). A privacy default.
+- B2-9 Med bug: an Archie turn that fails after a write asks the owner to say it again, and the write happens twice (`QuickDictation.kt:469-477`, `VoiceConversation.kt:96-105`). Fix: "It may have done part of it" when a write ran.
+- B2-10 Med bug: Archie's opener waits uncapped for the calendar read and the mail listing (`Loops.kt:356, 363`). Fix: withTimeoutOrNull on both.
+- B2-11 Med-Low, DECISION: a dictation's transcription can wait 11 minutes (ARMILLARY_WAIT_MS, chosen 2026-10-16 for slow home hardware); the wake lock is 10 minutes and two comments say 120 s and 180 s. Option: a shorter cap for dictation and Archie turns.
+- B2-12 Med polish (cost), DECISION: no prompt caching, and the NOW line at the end of the system prompt would defeat it (`AgentClient.kt:197-209, 283-299`). Needs a live provider check the loop cannot make.
+- B2-13 Low-Med bug: "check off …" and "let me know when …" are routed as questions (`DictationFlow.kt:188, 201`). Fix: narrow LOOKUP.
+- B2-14 Low-Med, DECISION (a feature): an assistant run cannot be stopped (`AssistantScreen.kt:761, 805-810`). Option: a Stop button while busy.
+- B2-15 Low bug: an assistant run that fails after a write saves nothing to history and puts the question back (`AssistantScreen.kt:628-637`).
+- B2-16 Low bug: complete_task says "Done" when the calendar refused (`CalendarRepo.kt:667-668`).
+- B2-17 Low bug: all loops due in one Android fire share one 120 s budget (`Loops.kt:94, 590`). New angle on M40.
+- B2-18 Low polish: spoken confirmations read ids and ISO dates (`DictationAgent.kt:190-198`).
+- B2-19 Low polish: the confirm card names the recipient by nickname only (`AssistantScreen.kt:1244-1246`).
+- B2-20 Low, DECISION: lattice-save runs unconfirmed alongside chat and mail reads (`LatticeMemory.kt:18-23`).
+- False positives (reviewer's): DictationService is not exported; LOCKED_OK calendar; orrery_instruct in LOCKED_WRITES unreachable; LoopWorker overlap; the desktop ticker restart; the Ask route label; M4 and M5 guards present; Retry re-reads the lock; AskUrbit and friends have no tools.
+
+### Lead's verification so far (03:50)
+
+- Hold, read in the code: B1-1 (no Contacts path where isDrawerNavigation, since c5fc4f85 on 2026-09-11), B1-2 (no RailItem.Actions case; App.kt passes no onOpenHome), B1-3, B1-6, B1-7 (no verticalScroll in the four), B1-4, B1-5 (title and tap; the author is unverified), B2-1, B2-3, B2-4, B2-5, B2-7, B2-10, B4-1 (run locally: gdbus prints usage for a bare "-1" and exits 1, and "--" fixes it), B4-2.
+- B2-11 moved to decisions: the 11-minute wait is deliberate.
