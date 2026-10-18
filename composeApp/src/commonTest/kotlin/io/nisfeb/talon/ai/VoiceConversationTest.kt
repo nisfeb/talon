@@ -7,6 +7,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -132,6 +134,49 @@ class VoiceConversationTest {
         assertTrue(VoiceConversation.READ_OUT in reply && "can you grab milk?" in reply, "the next turn knows what was read, as others' words: $reply")
         assertTrue("can you grab milk?" !in model.calls.last().first, "and not in the system prompt")
         assertTrue("list_unread's, read to them the same way with aloud true" in model.calls.first().first, "Archie is told how")
+    }
+
+    // A turn that failed after a write asked to be said again, and the
+    // write was done twice.
+    @Test
+    fun `a turn that stops after a write says it may have done part of it`() = runBlocking {
+        val task = tool("create_task", true) { "Added task \"Milk\"." }
+        // With a read beside it, the model is asked to word the turn, and fails.
+        val failing = Model(AgentTurn.Calls(null, listOf(call("create_task", "name" to "Milk"), call("list_events"))))
+        val t = talk(failing, extra = listOf(task))
+        assertFailsWith<IllegalStateException> { t.next("Add milk and text Andrea") }
+        val said = t.failed("Add milk and text Andrea", "No network", "No network. Say it again, or close me.")
+        assertEquals("No network. It may have done part of it before it stopped, so check before saying it again.", said.line)
+        assertTrue("- Added task \"Milk\"." in said.shown, said.shown)
+        assertEquals(DictationFlow.Earlier("Add milk and text Andrea", said.shown), t.said.last(), "kept, so the next turn knows")
+    }
+
+    // Out of time in the middle, as the card's budget cuts it: on real time.
+    @Test
+    fun `a turn out of time after a write or during one says so too`() = runBlocking {
+        var asked = 0
+        val after = VoiceConversation(
+            { _, _, _ -> if (asked++ == 0) AgentTurn.Calls(null, listOf(call("create_task", "name" to "Milk"), call("list_events"))) else kotlinx.coroutines.awaitCancellation() },
+            tools = listOf(tool("create_task", true) { "Added task \"Milk\"." }, tool("list_events", false)), tell = null, brief = { null },
+        )
+        assertNull(kotlinx.coroutines.withTimeoutOrNull(300) { after.next("Add milk") })
+        val late = after.failed("Add milk", "That took too long", "That took too long. Say it again?")
+        assertTrue(late.line.startsWith("That took too long. It may have done part of it") && "- Added task \"Milk\"." in late.shown, late.shown)
+        val during = VoiceConversation(
+            { _, _, _ -> AgentTurn.Calls(null, listOf(call("create_task", "name" to "Milk"))) },
+            tools = listOf(Tool(ToolSpec("create_task", "", toolSchema(required = emptyList())), true) { kotlinx.coroutines.awaitCancellation() }), tell = null, brief = { null },
+        )
+        assertNull(kotlinx.coroutines.withTimeoutOrNull(300) { during.next("Add milk") })
+        assertTrue("- create_task, still going when it stopped" in during.failed("Add milk", "That took too long", "again").shown)
+    }
+
+    @Test
+    fun `a turn that stops before any write is asked again`() = runBlocking {
+        val read = Model(AgentTurn.Calls(null, listOf(call("list_events"))))
+        val t = talk(read)
+        assertFailsWith<IllegalStateException> { t.next("What's on?") }
+        assertEquals(VoiceConversation.Next.Say("No network. Say it again, or close me."), t.failed("What's on?", "No network", "No network. Say it again, or close me."))
+        assertTrue(t.said.none { it.words == "What's on?" }, "nothing to keep")
     }
 
     // A long read-out went whole with every later turn.

@@ -53,6 +53,10 @@ class VoiceConversation(
     /** Each exchange so far, oldest first. */
     val said: List<DictationFlow.Earlier> get() = turns.toList()
 
+    /** The writes this turn has done, as they are said, and those it began, for a turn that then fails ([failed]). */
+    private val done = mutableListOf<String>()
+    private val begun = mutableMapOf<String, ToolCall>()
+
     /** What this turn asked to have read out, set by the brief and unread tools, and the line said before it. */
     private var reading: String? = null
     private var readingLine = READING
@@ -88,6 +92,8 @@ class VoiceConversation(
         if (Briefing.ends(words)) return Next.End(GOODBYE)
         if (turns.size >= MAX_TURNS) return Next.End(TOO_LONG)
         reading = null
+        done.clear()
+        begun.clear()
         val prior = turns.takeLast(MAX_CONTEXT).flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
         val line = AgentLoop(completer, turnTools(), prompt, maxSteps).run(
             question = words,
@@ -97,6 +103,12 @@ class VoiceConversation(
             confirm = { _, _ -> true },
             // What is read out needs no model call to say so.
             finish = { turn -> if (reading != null && turn.all { it.first.name in READS_OUT }) readingLine else DictationAgent.plainly(turn) },
+            onEvent = { ev ->
+                if (ev is AgentLoop.Event.ToolStarted && ev.write) begun[ev.call.id] = ev.call
+                if (ev is AgentLoop.Event.ToolFinished && begun.remove(ev.call.id) != null) {
+                    done += DictationAgent.plainly(listOf(ev.call to ToolResult(ev.call.id, ev.call.name, ev.result))) ?: ev.call.name
+                }
+            },
         )
         val read = reading
         // What was read out stays in mind as this turn's reply, so "approve
@@ -105,6 +117,21 @@ class VoiceConversation(
         turns += DictationFlow.Earlier(words, if (read == null) line else line + "\n\n" + READ_OUT + read.take(READ_KEPT))
         if (read == null) return Next.Say(line)
         return Next.Say(line, Briefing.spokenParagraphs(read), shown = line + "\n\n" + read)
+    }
+
+    /**
+     * What to say when the turn on [words] failed or ran out of time, for
+     * [why]: [again] where it wrote nothing. After a write, saying it again
+     * did it twice, so the owner is told it may have done part of it, and
+     * the turn is kept with what it did for the next one to know.
+     */
+    fun failed(words: String, why: String, again: String): Next.Say {
+        val did = done + begun.values.map { "${it.name}, still going when it stopped" }
+        if (did.isEmpty()) return Next.Say(again)
+        val line = "$why. It may have done part of it before it stopped, so check before saying it again."
+        val shown = line + "\n\nDone before it stopped:\n" + did.joinToString("\n") { "- $it" }
+        turns += DictationFlow.Earlier(words, shown)
+        return Next.Say(line, shown = shown)
     }
 
     /**

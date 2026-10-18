@@ -466,14 +466,15 @@ class DictationService : Service() {
                         }
                         missed = 0
                         QuickDictation.show(QuickDictation.Stage.Working("Thinking…"))
+                        // A turn that stops after a write says so, not "say it again" ([VoiceConversation.failed]).
                         val next = try {
                             withTimeoutOrNull(RUN_BUDGET_MS) { talk.next(words) }
-                                ?: io.nisfeb.talon.ai.VoiceConversation.Next.Say("That took too long. Say it again?")
+                                ?: talk.failed(words, "That took too long", "That took too long. Say it again?")
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Throwable) {
                             Log.w(TAG, "a turn failed", e)
-                            io.nisfeb.talon.ai.VoiceConversation.Next.Say("${DictationRun.why(e)}. Say it again, or close me.")
+                            DictationRun.why(e).let { talk.failed(words, it, "$it. Say it again, or close me.") }
                         }
                         // Closed while it thought: kept, and not said to a card that is gone.
                         if (QuickDictation.hangUp) {
