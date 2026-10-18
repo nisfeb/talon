@@ -718,19 +718,9 @@ private fun PollWidgetBlock(
     // Per-option tallies from the keycap-digit reactions. Any reaction
     // with a non-keycap emoji is ignored for vote counting but still
     // shows in the normal reaction bar.
-    val tallies = remember(reactions, options.size) {
-        IntArray(options.size).also { arr ->
-            for (r in reactions) {
-                val idx = VOTE_EMOJIS.indexOf(r.emoji)
-                if (idx in 0 until options.size) arr[idx] += 1
-            }
-        }
-    }
+    val tallies = remember(reactions, options.size) { pollTallies(reactions.map { it.emoji }, options.size) }
     val mineIndex = remember(reactions, ourPatp) {
-        if (ourPatp == null) -1
-        else VOTE_EMOJIS.indexOf(
-            reactions.firstOrNull { it.author == ourPatp }?.emoji
-        )
+        if (ourPatp == null) -1 else voteIndex(reactions.firstOrNull { it.author == ourPatp }?.emoji)
     }
     val totalVotes = tallies.sum()
     Surface(

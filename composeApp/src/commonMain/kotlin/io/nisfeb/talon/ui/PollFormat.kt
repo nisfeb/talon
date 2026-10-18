@@ -19,6 +19,24 @@ val VOTE_EMOJIS: List<String> = listOf(
 
 const val MAX_POLL_OPTIONS: Int = 10
 
+/** [VOTE_EMOJIS] as reactions are stored: normalized, so without the U+FE0F most of them carry. */
+private val VOTE_KEYS: List<String> = VOTE_EMOJIS.map(ReactionPalette::normalize)
+
+/**
+ * Which option [emoji] votes for, or -1. A reaction is stored normalized,
+ * which drops the U+FE0F in "1️⃣", so the raw keycaps never matched one
+ * and a poll counted no votes at all.
+ */
+fun voteIndex(emoji: String?): Int = emoji?.let { VOTE_KEYS.indexOf(ReactionPalette.normalize(it)) } ?: -1
+
+/** The votes for each of [options] options, from a post's reactions. */
+fun pollTallies(reactions: List<String>, options: Int): IntArray = IntArray(options).also { tally ->
+    for (r in reactions) {
+        val i = voteIndex(r)
+        if (i in 0 until options) tally[i] += 1
+    }
+}
+
 sealed interface PollParseResult {
     data class Ok(val poll: Poll) : PollParseResult
     data class Err(val error: String) : PollParseResult
