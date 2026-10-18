@@ -33,6 +33,12 @@ class DictationFlowTest {
         assertEquals(DictationRoute.Ask, DictationFlow.route("Tell me what's on tomorrow."))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Read me my unread messages"), "not a todo for orrery: something to hear")
         assertEquals(DictationRoute.Tell, DictationFlow.route("Reading list: add Dune."), "only read me")
+        assertEquals(DictationRoute.Tell, DictationFlow.route("Check off the milk."), "a tick, not a lookup")
+        assertEquals(DictationRoute.Tell, DictationFlow.route("Check the milk off"))
+        assertEquals(DictationRoute.Tell, DictationFlow.route("Please let me know when Andrea lands."), "a reminder, not a lookup")
+        assertEquals(DictationRoute.Ask, DictationFlow.route("Check my calendar for Friday"))
+        assertEquals(DictationRoute.Ask, DictationFlow.route("Let me know what's on tomorrow"))
+        assertEquals(DictationRoute.Ask, DictationFlow.route("Can you check if the store is open"))
     }
 
     @Test

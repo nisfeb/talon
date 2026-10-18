@@ -104,8 +104,13 @@ class DictationFlow(
         /** How a request phrased as a question starts: "can you text Andrea …?" is something to do. */
         private val REQUEST = Regex("""^(please|can you|could you|would you|will you|would you mind|can i get you to)\b""")
 
-        /** A request that is a question after all: "could you tell me what's on tomorrow?", "read me my unread messages". */
-        private val LOOKUP = Regex("""^(please |can you |could you |would you |will you )?(tell me|show me|read me|look up|check|find out|let me know)\b""")
+        /**
+         * A request that is a question after all: "could you tell me what's
+         * on tomorrow?", "read me my unread messages". Not "check off the
+         * milk" or "let me know when Andrea lands": a tick and a reminder,
+         * which went to a lookup that can do neither.
+         */
+        private val LOOKUP = Regex("""^(please |can you |could you |would you |will you )?(tell me|show me|read me|look up|check(?!(\s+\S+){0,2}\s+off\b)|find out|let me know(?!\s+when\b))\b""")
 
         /**
          * Where [text] goes. A question is one whisper wrote with a
