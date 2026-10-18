@@ -323,8 +323,10 @@ class TlonChatRepo(
      * thread that counts for the owner (followed, a DM's, their own: see
      * [threadCounts]), and always with `replyToUs` true: following is
      * asking for it, so a chat at "mentions only" still lets it through.
+     * `heard` says the row was here before this delta: a post sent again,
+     * or one a read of the chat brought first. It was news then, not now.
      */
-    @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
+    @Volatile var messageListener: ((m: MessageEntity, replyToUs: Boolean, heard: Boolean) -> Unit)? = null
 
     /**
      * A chat the ship says is read to the end, here or on any other client:
@@ -4154,6 +4156,9 @@ class TlonChatRepo(
         }
     }
 
+    /** Whether [m]'s row was here before it came again: see [messageListener]. */
+    private suspend fun heard(m: MessageEntity) = db.messages().getOne(m.whom, m.id) != null
+
     private suspend fun applyChatDelta(
         whom: String,
         id: String,
@@ -4162,8 +4167,9 @@ class TlonChatRepo(
         (response["add"] as? JsonObject)?.let { add ->
             val essay = add["essay"] as? JsonObject ?: return@let
             val entity = toEntity(whom, id, essay)
+            val heard = heard(entity)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
-            if (entity.author != ourPatp) messageListener?.invoke(entity, false)
+            if (entity.author != ourPatp) messageListener?.invoke(entity, false, heard)
             return
         }
         response["del"]?.let {
@@ -4201,9 +4207,10 @@ class TlonChatRepo(
         (delta["add"] as? JsonObject)?.let { add ->
             val replyEssay = add["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, replyEssay)
+            val heard = heard(entity)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
             // For the owner, whatever the chat's level: following is asking.
-            if (entity.author != ourPatp && replyCounts(entity)) messageListener?.invoke(entity, true)
+            if (entity.author != ourPatp && replyCounts(entity)) messageListener?.invoke(entity, true, heard)
             return
         }
         delta["del"]?.let {
@@ -4277,6 +4284,7 @@ class TlonChatRepo(
                 val msgs = mutableListOf<MessageEntity>()
                 val rx = mutableListOf<ReactionEntity>()
                 ingestPost(nest, intent.post, msgs, rx)
+                val heard = msgs.firstOrNull { it.id == intent.id }?.let { heard(it) } ?: false
                 db.messages().upsertAllWithMedia(db.messageMedia(), msgs)
                 if (rx.isNotEmpty()) {
                     db.reactions().clearForPost(nest, intent.id)
@@ -4287,7 +4295,7 @@ class TlonChatRepo(
                 }
                 msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
-                    ?.let { messageListener?.invoke(it, false) }
+                    ?.let { messageListener?.invoke(it, false, heard) }
             }
             is ChannelDeltaIntent.PostTombstone, is ChannelDeltaIntent.PostDeleted -> {
                 val id = when (intent) {
@@ -4335,11 +4343,12 @@ class TlonChatRepo(
         when (inner) {
             is ReplyIntent.Upsert -> {
                 val entity = toReplyEntity(whom, parentId, replyId, inner.replyEssay)
+                val heard = heard(entity)
                 db.messages().upsertWithMedia(db.messageMedia(), entity)
                 if (entity.author == ourPatp) {
                     reapOwnEchoTwin(whom, entity.sentMs)
                 } else if (replyCounts(entity)) {
-                    messageListener?.invoke(entity, true)
+                    messageListener?.invoke(entity, true, heard)
                 }
             }
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {

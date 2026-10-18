@@ -45,7 +45,7 @@ class FollowedThreadsTest {
     private val forOwner = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
 
     init {
-        repo.messageListener = { m, toUs -> heard += m.id; forOwner += toUs }
+        repo.messageListener = { m, toUs, _ -> heard += m.id; forOwner += toUs }
     }
 
     @AfterTest
