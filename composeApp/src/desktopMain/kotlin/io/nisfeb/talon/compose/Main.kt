@@ -189,8 +189,6 @@ private class DesktopAppGraph {
     }
 
     fun shutdown() {
-        // The local ship first: |exit lets it checkpoint. Bounded inside.
-        runCatching { kotlinx.coroutines.runBlocking { localShip.stop() } }
         // Best-effort teardown. Order matters:
         //  1. Cancel update scope so its in-flight HTTP calls bail.
         //  2. dispatcher.cancelAll() — soft signal to dispatcher-
@@ -230,6 +228,11 @@ private class DesktopAppGraph {
                 }
             }
         }
+        // The local ship last: |exit lets it checkpoint, and its stop can
+        // take a minute, past ExitPolicy's 10 s halt. First, the halt cut
+        // off the database close above; now it can only cut the wait for
+        // a ship that was already told to exit.
+        runCatching { kotlinx.coroutines.runBlocking { localShip.stop() } }
     }
 }
 
