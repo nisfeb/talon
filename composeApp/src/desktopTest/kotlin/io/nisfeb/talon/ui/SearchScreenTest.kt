@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.runtime.mutableStateOf
+import io.nisfeb.talon.ui.screens.SearchDraft
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -62,7 +65,7 @@ class SearchScreenTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() { SearchDraft.query = ""; db.close() }
 
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
@@ -77,13 +80,18 @@ class SearchScreenTest {
         override suspend fun computeHighlights() = highlights
     }
 
+    /** Whether Search is on screen. Opening a message or a person takes
+     *  it off, as Android's chat does when it covers Search. */
+    private val shown = mutableStateOf(true)
+
     private fun search(embedder: SearchEmbedderClient? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        SearchDraft.query = ""
         setContent {
             TalonTheme(darkTheme = false) {
-                SearchScreen(
+                if (shown.value) SearchScreen(
                     db = db, aiSettings = FakeAiSettings(), uiSettings = ui,
                     onOpenConversation = { opened += "dm $it" },
-                    onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent" },
+                    onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent"; shown.value = false },
                     onOpenGroup = { opened += "group $it" },
                     onBack = {},
                     embedder = embedder,
@@ -123,6 +131,28 @@ class SearchScreenTest {
         onNodeWithText("Lunch Club").performClick()
         onNodeWithText("lunch at noon").performClick()
         assertEquals(listOf("group ~bus/crew", "dm ~nec", "msg ~bus 1 null"), opened)
+    }
+
+    @Test
+    fun `back from a result comes back to the same search`() = search {
+        type("lunch", "lunch plans tomorrow")
+        onNodeWithText("lunch plans tomorrow").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("lunch plans tomorrow") }
+        onNode(hasSetTextAction()).assertTextContains("lunch")
+        assertEquals("", SearchDraft.query, "taken once: the next Search starts empty")
+    }
+
+    @Test
+    fun `search opened afresh starts empty`() = search {
+        type("lunch", "lunch at noon")
+        shown.value = false
+        waitForIdle()
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("Search tips") }
+        waitForIdle()
+        assertTrue(!shows("lunch at noon"))
     }
 
     @Test

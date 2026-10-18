@@ -45,6 +45,15 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.flowOf
 
+/**
+ * The query a result was opened from. Android keeps Search open under the
+ * chat but drops it from the screen, and Back from the chat must come back
+ * to the same search, not an empty one. Taken by the next Search screen.
+ */
+internal object SearchDraft {
+    var query = ""
+}
+
 @Composable
 fun SearchScreen(
     db: AppDatabase,
@@ -66,14 +75,15 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(SearchDraft.query.also { SearchDraft.query = "" }) }
     var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
 
     // Debounce typing — `db.messages().search(...)` is a full-table LIKE
     // scan with no index. On a 50K-row archive every keystroke would
     // jank the typing thread; settle for 250ms after the user pauses.
-    val debouncedTrimmed by produceState(initialValue = "", trimmed) {
+    // A query brought back from a result starts settled: no wait, no flash of nothing.
+    val debouncedTrimmed by produceState(initialValue = trimmed, trimmed) {
         if (trimmed.length < 2) {
             value = trimmed
             return@produceState
@@ -284,6 +294,7 @@ fun SearchScreen(
                     contentType = { "hl" },
                 ) { m ->
                     ResultRow(m, contactMap) {
+                        SearchDraft.query = query
                         onOpenMessage(m.whom, m.id, m.parentId)
                     }
                     HorizontalDivider()
@@ -346,7 +357,7 @@ fun SearchScreen(
                         PersonRow(
                             contact = p,
                             hasChatHistory = p.ship in activeWhomSet,
-                            onClick = { onOpenConversation(p.ship) },
+                            onClick = { SearchDraft.query = query; onOpenConversation(p.ship) },
                         )
                         HorizontalDivider()
                     }
@@ -361,6 +372,7 @@ fun SearchScreen(
                         contentType = { "hit" },
                     ) { m ->
                         ResultRow(m, contactMap) {
+                            SearchDraft.query = query
                             onOpenMessage(m.whom, m.id, m.parentId)
                         }
                         HorizontalDivider()
