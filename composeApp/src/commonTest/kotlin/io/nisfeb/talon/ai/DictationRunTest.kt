@@ -1,6 +1,16 @@
 package io.nisfeb.talon.ai
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.HttpTimeoutCapability
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -125,4 +135,46 @@ class DictationRunTest {
         assertEquals(DictationRun.NO_SPEECH_TO_TEXT, DictationRun.blocker(cfg(speech = false), hasShip = true))
     }
 
+    // ─── a transcription the owner waits on (B2-11) ───────────────
+
+    @Test
+    fun `a transcription out of time says so calmly, and only a transcription's does`() = runBlocking {
+        val late = HttpRequestTimeoutException("https://armillary.test/v1/audio/transcriptions", 180_000)
+        for (e in listOf(late, io.ktor.client.network.sockets.SocketTimeoutException("read timed out"), RuntimeException("wrapped", late))) {
+            val out = DictationRun(transcribe = { throw e }, act = { "x" }).fromAudio(audio)
+            assertIs<DictationOutcome.TranscribeFailed>(out)
+            assertEquals(DictationRun.SPEECH_TOO_SLOW, out.why, "$e")
+            assertTrue("180000" in out.details || "timed out" in out.details, "the error whole is kept")
+        }
+        // A model call out of time is no speech service.
+        val run = DictationRun(transcribe = { "call the dentist" }, act = { throw late }).fromAudio(audio)
+        assertIs<DictationOutcome.RunFailed>(run)
+        assertEquals("No network, or the service did not answer", run.why)
+        // Nor is a refusal or a dead network.
+        assertEquals("No network, or the service did not answer", (DictationRun(transcribe = { throw kotlinx.io.IOException("reset") }, act = { "x" }).fromAudio(audio) as DictationOutcome.TranscribeFailed).why)
+    }
+
+    @Test
+    fun `a spoken transcription gives up at its own wait, on real time, and a recording keeps eleven minutes`() = runBlocking {
+        val waits = mutableListOf<Long?>()
+        val http = HttpClient(MockEngine { req ->
+            val t = req.getCapabilityOrNull(HttpTimeoutCapability)
+            waits += t?.requestTimeoutMillis
+            waits += t?.socketTimeoutMillis
+            delay(10_000)
+            respond("""{"text":"too late"}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { install(HttpTimeout) }
+        val hearing = Hearing("https://armillary.test/v1", "k", "openai/whisper-large-v3-turbo")
+        val started = kotlin.time.TimeSource.Monotonic.markNow()
+        val out = DictationRun(
+            transcribe = { ArmillaryTranscribe.transcribe(http, hearing, it, "wav", timeoutMs = 200) },
+            act = { error("acted on words that never came") },
+        ).fromAudio(audio)
+        assertIs<DictationOutcome.TranscribeFailed>(out)
+        assertEquals(DictationRun.SPEECH_TOO_SLOW, out.why)
+        assertTrue(started.elapsedNow().inWholeMilliseconds < 5_000, "it waited for the answer anyway")
+        assertEquals(listOf<Long?>(200, 200), waits, "the request and its socket")
+        assertEquals(3 * 60_000L, ArmillaryTranscribe.SPOKEN_WAIT_MS)
+        assertEquals(11 * 60_000L, ARMILLARY_WAIT_MS, "a call recording waits as long as the proxy may")
+    }
 }

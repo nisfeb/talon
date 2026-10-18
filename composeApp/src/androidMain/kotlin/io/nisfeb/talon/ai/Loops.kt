@@ -245,15 +245,24 @@ class Loops(
         }
 
         /**
-         * Act on [transcript], autonomously (writes need no confirmation,
-         * see [DictationAgent]), and return the line for the notification.
+         * Act on [transcript], autonomously (writes need no confirmation
+         * but a send, which waits for [send], see [DictationAgent]), and
+         * return the line for the notification.
          * The loop's mail, calendar and message tools plus orrery's where
          * Orrery is on, [DictationAgent.TOOLS] of them; while [locked], only
-         * [DictationAgent.LOCKED_WRITES] among the writes. No write
+         * [DictationAgent.LOCKED_WRITES] among the writes. While [lockedNow],
+         * a read of messages or mail waits for [unlock]. No write
          * coordinator: a dictation runs only on the device it was spoken
          * into. Throws when the run fails.
          */
-        suspend fun dictate(transcript: String, locked: Boolean, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+        suspend fun dictate(
+            transcript: String,
+            locked: Boolean,
+            earlier: List<DictationFlow.Earlier>,
+            send: suspend (CardProposal) -> Boolean?,
+            lockedNow: () -> Boolean,
+            unlock: suspend () -> Boolean,
+        ): String {
             started.await()
             val cfg = aiSettings.state.value
             val known = contacts.await()
@@ -292,6 +301,10 @@ class Loops(
                     completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                     tools = offered,
                     systemPrompt = DictationAgent.prompt,
+                    ownerSends = send,
+                    name = known::conversationLabel,
+                    locked = lockedNow,
+                    unlock = unlock,
                 ).run(transcript, earlier).also { card = seen.card(actions.zone(), known) }
             }
         }
@@ -385,11 +398,13 @@ class Loops(
          * while [locked] only its locked writes, orrery's where it is on, and
          * orrery's proposals put to the owner by [decide] before they go ahead.
          * [locked] is read at each turn: the phone can lock mid-conversation.
+         * While it is, a read of messages or mail waits for [unlock].
          */
         suspend fun conversation(
             locked: () -> Boolean,
             orrery: io.nisfeb.talon.orrery.OrreryRepo?,
             decide: suspend (String, List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
+            unlock: suspend () -> Boolean,
         ): VoiceConversation {
             started.await()
             val known = contacts.await()
@@ -419,6 +434,7 @@ class Loops(
                 },
                 brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
                 locked = locked,
+                unlock = unlock,
             )
         }
 
@@ -457,8 +473,15 @@ class Loops(
          * Answer a question, looking things up only: where Orrery is on,
          * everything that is not a question is orrery's ([DictationFlow]).
          * [orrery] is the one the flow attached, read for what it holds.
+         * While [locked], a read of messages or mail waits for [unlock].
          */
-        suspend fun ask(question: String, earlier: List<DictationFlow.Earlier> = emptyList(), orrery: io.nisfeb.talon.orrery.OrreryRepo? = null): String {
+        suspend fun ask(
+            question: String,
+            earlier: List<DictationFlow.Earlier>,
+            orrery: io.nisfeb.talon.orrery.OrreryRepo?,
+            locked: () -> Boolean,
+            unlock: suspend () -> Boolean,
+        ): String {
             val cfg = aiSettings.state.value
             if (!cfg.loopsCanRun()) return DictationRun.NO_MODEL_FOR_QUESTIONS
             started.await()
@@ -476,6 +499,8 @@ class Loops(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                 tools = tools,
                 systemPrompt = DictationAgent.askPrompt,
+                locked = locked,
+                unlock = unlock,
             ).run(question, earlier).also { card = seen.card(actions.zone(), known) }
         }
 

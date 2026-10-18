@@ -35,6 +35,11 @@ class VoiceConversation(
      * leaves out, and gets them back once unlocked.
      */
     private val locked: () -> Boolean = { false },
+    /**
+     * The fingerprint before a locked phone reads messages or mail
+     * ([unlockingReads]): true once unlocked. Asked again on a later turn.
+     */
+    private val unlock: suspend () -> Boolean = { false },
 ) {
     /** What comes after a turn. */
     sealed interface Next {
@@ -68,7 +73,7 @@ class VoiceConversation(
     /** The tools a turn may call now, for a test and the log. */
     val toolNames: List<String> get() = turnTools().map { it.spec.name }
 
-    private fun turnTools(): List<Tool> = DictationAgent.whileLocked(offered, locked())
+    private fun turnTools(): List<Tool> = DictationAgent.whileLocked(offered, locked()).unlockingReads(locked, unlock)
 
     /**
      * The rest of the opener, written from [digest] ([Briefing.openerDigest])

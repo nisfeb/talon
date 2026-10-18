@@ -1,20 +1,23 @@
 package io.nisfeb.talon.ai
 
 import io.ktor.client.HttpClient
+import io.nisfeb.talon.urbit.asText
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.JsonObject
 
 /**
- * One voice dictation, run through the agent and acted on with NO
- * confirmation — the "dictate straight into orrery" surfaces (widget,
- * Quick Settings tile, assist-app) fire this.
+ * One voice dictation, run through the agent and acted on with no
+ * confirmation but for its sends. The "dictate straight into orrery"
+ * surfaces (widget, Quick Settings tile, assist-app) fire this.
  *
  * Unlike the assistant screen, which confirms each write before it runs,
- * a dictation authorises every write up front: the owner asked for the
+ * a dictation authorises its writes up front: the owner asked for the
  * least possible friction (speak, done), so the agent writes to orrery /
- * the calendar / the ship directly and the result notification is the
- * only after-the-fact signal. This is the same autonomy a scheduled Loop
- * has; a dictation is just a one-shot of it with the spoken text as the
- * turn.
+ * the calendar directly and the result notification is the only
+ * after-the-fact signal. A message or a mail is the exception: the run
+ * reads other people's words, so each send waits for the owner's word
+ * ([ownerSends], sneagan 2026-10-18). While [locked], a read of messages
+ * or mail waits for the fingerprint ([unlock]).
  *
  * A blank transcript runs nothing, so a mis-fire or a silent recording
  * is a no-op rather than an empty agent round-trip.
@@ -30,6 +33,14 @@ class DictationAgent(
     private val tools: List<Tool>,
     private val systemPrompt: String = prompt,
     private val maxSteps: Int = 8,
+    /** The owner's word on a send before it goes ([askingToSend]); with none, nothing is sent. */
+    private val ownerSends: suspend (CardProposal) -> Boolean? = { null },
+    /** A conversation's or a ship's name, for the card that asks. */
+    private val name: (String) -> String = { it },
+    /** Whether the phone is locked now, read at each read of messages or mail. */
+    private val locked: () -> Boolean = { false },
+    /** The fingerprint while [locked] ([unlockingReads]): true once the phone is unlocked. */
+    private val unlock: suspend () -> Boolean = { false },
 ) {
     /**
      * Run [transcript] and return the agent's own summary of what it
@@ -41,7 +52,8 @@ class DictationAgent(
         if (text.isEmpty()) return ""
         // A follow-up goes on from what was asked and answered before it.
         val prior = earlier.flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
-        return AgentLoop(completer, tools, systemPrompt, maxSteps)
+        val gated = tools.askingToSend(name, ownerSends).unlockingReads(locked, unlock)
+        return AgentLoop(completer, gated, systemPrompt, maxSteps)
             .run(question = text, priorTurns = prior, confirm = { _, _ -> true }, finish = ::plainly)
     }
 
@@ -162,6 +174,48 @@ class DictationAgent(
             "list_tasks", "create_task", "complete_task", "send_mail",
         )
 
+        /** Talon's own sends: each is put to the owner before it goes ([askingToSend]). */
+        val SENDS: Set<String> = setOf("send_message", "send_mail")
+
+        /** What the model reads of a send the owner declined or did not answer. */
+        const val NOT_SENT = "The owner did not send it."
+
+        /**
+         * The reads that give other people's words, their messages and
+         * mail: a locked phone asks for the fingerprint first
+         * ([unlockingReads]). Not the calendar's, nor orrery's own record.
+         */
+        val PRIVATE_READS: Set<String> = setOf(
+            "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
+        )
+
+        /** What the model reads, and the card shows, while the phone stays locked. */
+        const val UNLOCK_TO_READ = "Unlock your phone to hear messages."
+
+        /**
+         * What a send would do, as the card asks it: a message or a mail,
+         * to whom by [name], and what it says. Null where the call lacks
+         * what the tool needs to send at all.
+         */
+        fun outgoing(tool: String, args: JsonObject, name: (String) -> String): CardProposal? {
+            fun arg(k: String) = args[k].asText()
+            return when (tool) {
+                "send_message" -> {
+                    val whom = arg("whom") ?: return null
+                    val text = arg("text")?.takeIf { it.isNotBlank() } ?: return null
+                    CardProposal("message", "Message to ${name(whom)}", to = name(whom), text = text.trim())
+                }
+                "send_mail" -> {
+                    val to = arg("to").orEmpty().split(',').map { it.trim() }.filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() } ?: return null
+                    val body = arg("body")?.takeIf { it.isNotBlank() } ?: return null
+                    val names = to.joinToString { name(it) }
+                    val subject = arg("subject")?.trim()?.takeIf { it.isNotEmpty() }
+                    CardProposal("message", "Mail to $names" + (subject?.let { ": $it" } ?: ""), to = names, text = body.trim())
+                }
+                else -> null
+            }
+        }
+
         /** [all] as a dictation may use them: [TOOLS] only, and while [locked], only [LOCKED_WRITES] among the writes. */
         fun toolsFor(all: List<Tool>, locked: Boolean): List<Tool> =
             whileLocked(all.dedupToolNames().filter { it.spec.name in TOOLS }, locked)
@@ -207,6 +261,43 @@ class DictationAgent(
 fun List<Tool>.waitingFor(names: Set<String>, ready: suspend () -> Unit): List<Tool> =
     map { t -> if (t.spec.name !in names) t else Tool(t.spec, t.write) { args -> ready(); t.execute(args) } }
 
+/**
+ * These tools with each send ([DictationAgent.SENDS]) put to the owner by
+ * [ask] first, as the card shows it ([DictationAgent.outgoing]): it goes
+ * only on true, and otherwise the model reads [DictationAgent.NOT_SENT].
+ * A send missing whom or what is refused here, so no send runs unasked.
+ */
+fun List<Tool>.askingToSend(name: (String) -> String, ask: suspend (CardProposal) -> Boolean?): List<Tool> =
+    map { t ->
+        if (t.spec.name !in DictationAgent.SENDS) t
+        else Tool(t.spec, t.write) { args ->
+            val p = DictationAgent.outgoing(t.spec.name, args, name) ?: return@Tool "Error: say whom it goes to and what it says."
+            if (ask(p) == true) t.execute(args) else DictationAgent.NOT_SENT
+        }
+    }
+
+/**
+ * These tools with each read of other people's words
+ * ([DictationAgent.PRIVATE_READS]) waiting, while [locked], for [unlock]:
+ * refused with [DictationAgent.UNLOCK_TO_READ] where the phone stays
+ * locked, so nothing private is said or drawn. One refusal stands for
+ * these tools' run while the phone stays locked, so it is asked once.
+ */
+fun List<Tool>.unlockingReads(locked: () -> Boolean, unlock: suspend () -> Boolean): List<Tool> {
+    var refused = false
+    return map { t ->
+        if (t.spec.name !in DictationAgent.PRIVATE_READS) t
+        else Tool(t.spec, t.write) { args ->
+            if (locked() && (refused || !unlock())) {
+                refused = true
+                DictationAgent.UNLOCK_TO_READ
+            } else {
+                t.execute(args)
+            }
+        }
+    }
+}
+
 /** How one dictation ended. Every one of them is a notification. */
 sealed interface DictationOutcome {
     /** Acted on: what was heard, and the agent's line. */
@@ -243,7 +334,7 @@ class DictationRun(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            return DictationOutcome.TranscribeFailed(why(e), io.nisfeb.talon.util.errorDetailsOf(e))
+            return DictationOutcome.TranscribeFailed(if (tookTooLong(e)) SPEECH_TOO_SLOW else why(e), io.nisfeb.talon.util.errorDetailsOf(e))
         }
         return if (text.isEmpty()) DictationOutcome.NothingHeard else fromText(text)
     }
@@ -287,6 +378,18 @@ class DictationRun(
             hearing(cfg) == null -> NO_SPEECH_TO_TEXT
             !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null
+        }
+
+        /** A transcription out of time ([ArmillaryTranscribe.SPOKEN_WAIT_MS]), said calmly. */
+        const val SPEECH_TOO_SLOW = "The speech service took too long"
+
+        /**
+         * Whether [e] is a request that ran out of time. Only a
+         * transcription's says [SPEECH_TOO_SLOW]: [why] serves the model's
+         * calls too, and one of those is no speech service.
+         */
+        fun tookTooLong(e: Throwable): Boolean = generateSequence(e) { it.cause }.take(5).any {
+            it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
         }
 
         /** Where a dictation is heard: the Armillary vendor's transcription model ([armillaryHearing]), else nowhere. */

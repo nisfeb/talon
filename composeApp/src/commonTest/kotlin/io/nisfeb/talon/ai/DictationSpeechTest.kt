@@ -93,4 +93,16 @@ class DictationSpeechTest {
         // Not a time: a ratio, a verse, a list label.
         assertEquals("The score was 3:1 and John 3:16 says.", DictationSpeech.spoken("The score was 3:1 and John 3:16 says."))
     }
+
+    @Test
+    fun `a dictation's own send is asked aloud as orrery's are`() {
+        fun asked(tool: String, vararg args: Pair<String, String>): String {
+            val p = DictationAgent.outgoing(tool, kotlinx.serialization.json.buildJsonObject { args.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) } }) {
+                mapOf("~bus" to "Andrea", "~zod" to "Zod")[it] ?: it
+            }!!
+            return DictationSpeech.prompt(p.title, sending = true, waiting = listOf(p))
+        }
+        assertEquals("Send to Andrea: Running late? Say send, or cancel.", asked("send_message", "whom" to "~bus", "text" to "Running late."))
+        assertEquals("Send to Andrea, Zod: Friday at 7? Say send, or cancel.", asked("send_mail", "to" to "~bus,~zod", "subject" to "Dinner", "body" to "Friday at 7?"))
+    }
 }
