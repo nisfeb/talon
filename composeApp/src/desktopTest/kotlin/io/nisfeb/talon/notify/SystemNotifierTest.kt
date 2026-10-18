@@ -78,4 +78,12 @@ class SystemNotifierTest {
         assertEquals(emptyList(), ran)
         assertEquals(listOf("a"), tray)
     }
+
+    @Test fun `the icon is kept in talon's cache and not the shared temp directory`() {
+        var args = emptyList<String>()
+        SystemNotifier(trayFallback = { _, _ -> }, linux = true, start = { args = it; Ran("1\n", 0) }).deliver("a", "b", null)
+        val icon = java.io.File(args[args.indexOf("-i") + 1])
+        assertEquals(java.io.File(io.nisfeb.talon.util.cacheDirPath).canonicalFile, icon.parentFile.canonicalFile)
+        assertTrue(icon.length() > 0)
+    }
 }

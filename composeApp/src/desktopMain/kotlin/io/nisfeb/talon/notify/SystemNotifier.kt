@@ -1,5 +1,6 @@
 package io.nisfeb.talon.notify
 
+import io.nisfeb.talon.util.cacheDirPath
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -187,17 +188,14 @@ class SystemNotifier(
         val bytes = ClassLoader.getSystemResourceAsStream("icon.png")?.use { it.readBytes() }
             ?: return null
         return runCatching {
-            // Per-PID temp file so concurrent Talon instances don't
-            // race on the same path.
-            val tmp = File(
-                System.getProperty("java.io.tmpdir"),
-                "talon-notify-${ProcessHandle.current().pid()}.png",
-            )
-            if (!tmp.exists()) {
-                Files.write(tmp.toPath(), bytes)
-                tmp.deleteOnExit()
+            // Under Talon's own cache, not the shared temp directory,
+            // where a predictable name could be someone else's symlink.
+            val icon = File(cacheDirPath, "notify-icon.png")
+            if (icon.length() != bytes.size.toLong()) {
+                icon.parentFile.mkdirs()
+                Files.write(icon.toPath(), bytes)
             }
-            iconFile.compareAndSet(null, tmp)
+            iconFile.compareAndSet(null, icon)
             iconFile.get()
         }.getOrNull()
     }
