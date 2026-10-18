@@ -707,18 +707,25 @@ class OrreryRepo(
         if (api != null && _availability.value != OrreryAvailability.MISSING) {
             // Skipped only when known off. One whose state could not be read
             // is sent off too (each write is a merge), and a ship that has no
-            // such reader answers 404, which is nothing to stop.
+            // such reader answers 404, which is nothing to stop. A ship that
+            // did not answer one is not asked the rest: each was a timeout
+            // more, ten requests one behind another, and each is said missed.
+            var down = false
             suspend fun stop(on: Boolean?, what: String, write: suspend () -> Result<Unit>) {
                 if (on == false) return
-                write().onFailure { if (it !is OrreryError.Refused || it.status != 404) missed += what }
+                if (down) { missed += what; return }
+                write().onFailure {
+                    if (it is OrreryError.Unreachable) down = true
+                    if (it !is OrreryError.Refused || it.status != 404) missed += what
+                }
             }
             if (_chatReader.value == null) loadChatReader()
             stop(_chatReader.value?.let { it.enabled || it.sendDms }, "reading your chats") {
                 setChatReader(buildJsonObject { put("enabled", false); put("send_dms", false) })
             }
-            if (_mailReader.value == null) loadMailReader()
+            if (_mailReader.value == null && !down) loadMailReader()
             stop(_mailReader.value, "reading your mail") { setMailReader(false) }
-            if (_generatorSettings.value == null) runCatching { loadGenerator() }
+            if (_generatorSettings.value == null && !down) runCatching { loadGenerator() }
             stop(_generatorSettings.value?.enabled, "writing your brief") { setGenerator(false) }
         }
         val u = shipUrl

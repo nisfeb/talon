@@ -146,10 +146,15 @@ class OrreryRecoveryTest {
             until("the check failed") { repo.error.value != null }
             assertEquals(OrreryAvailability.UNKNOWN, repo.availability.value)
             var off = false
+            val before = asked.size
             assertEquals(
                 listOf("reading your chats", "reading your mail", "writing your brief", "taking back this device's key"),
                 repo.switchOff { off = true },
             )
+            // The chat reader's state, its write, and the key: after the first
+            // write found nobody there, the mail reader and the brief were not
+            // asked. It made eleven requests, each a timeout on a real ship.
+            assertEquals(5, asked.size - before, asked.drop(before).toString())
             assertTrue(off, "off here all the same")
             assertTrue(db.orreryAccounts().get("~zod") != null, "the key is kept, to give back at the next start")
         }
