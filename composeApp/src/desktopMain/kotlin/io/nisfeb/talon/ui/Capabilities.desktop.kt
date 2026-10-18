@@ -68,6 +68,7 @@ actual val isWindowFullScreenSupported: Boolean = true
 // ring lands only while it is open, minimised or unfocused included.
 // Settings says so.
 actual val isBackgroundCallRingSupported: Boolean = false
+actual val needsPushForBackgroundRing: Boolean = false
 
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true

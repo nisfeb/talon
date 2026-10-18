@@ -161,4 +161,20 @@ class AndroidLifecycleGuardTest {
         val callBack = talonApp.substringAfter("LaunchedEffect(callController, initialCallBack) {").substringBefore("\n            }\n")
         assertTrue("if (loggedInShip != app.activeShipFlow.value) return@LaunchedEffect" in callBack, "the old ship's controller calls back")
     }
+
+    // B3-3: keepAliveNeeded (KeepAliveTest); the line shows only where the flag is on.
+    @Test
+    fun `without push Settings says calls ring only while Talon is open`() {
+        assertTrue("actual val needsPushForBackgroundRing: Boolean = true" in read("$android/ui/Capabilities.android.kt"))
+        assertTrue("actual val needsPushForBackgroundRing: Boolean = false" in read("composeApp/src/desktopMain/kotlin/io/nisfeb/talon/ui/Capabilities.desktop.kt"))
+        assertTrue("actual val needsPushForBackgroundRing: Boolean = false" in read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/Capabilities.ios.kt"))
+        val settings = read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/screens/SettingsScreen.kt")
+        val tab = settings.substringAfter("if (safeTab == SettingsTab.Notifications) {").substringBefore("ShipNotificationsRow(relayConfig)")
+        assertTrue("io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush" in tab && "Without push, calls ring only while Talon is open." in tab, tab)
+        // Push alone decides it: mail keeps the process, not a ring.
+        assertTrue("keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT" in talonApp)
+        val noPush = talonApp.substringAfter("noPush = io.nisfeb.talon.notify.keepAliveNeeded(").substringBefore(")\n")
+        assertTrue("mailNeedsProcess" !in noPush, noPush)
+        assertTrue("noPush = noPush," in talonApp, "Settings is not told")
+    }
 }

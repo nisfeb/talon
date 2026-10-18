@@ -1270,6 +1270,9 @@ fun TalonApp(
     // the ship finishing turns it off, "Use the relay" before registering
     // turns it back on.
     var keepAlive by remember { mutableStateOf(true) }
+    // No push reaches this phone for the ship, mail aside: calls ring only
+    // while Talon is open, and Settings says so.
+    var noPush by remember { mutableStateOf(false) }
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         // No ship left signed in: nothing to keep the stream for.
@@ -1297,11 +1300,11 @@ fun TalonApp(
             val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)?.takeIf {
                 runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(context).isNotEmpty() }.getOrDefault(true)
             }
-            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(
+            noPush = io.nisfeb.talon.notify.keepAliveNeeded(
                 app.relaySettings, ship, endpoint,
-                mailNeedsProcess = mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT,
                 shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
             )
+            keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT
             if (keepAlive) {
                 runCatching { TalonSyncService.start(context) }
             } else {
@@ -2435,6 +2438,7 @@ fun TalonApp(
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,
                     systemNotificationProbe = systemProbe,
+                    noPush = noPush,
                     relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                         client = relayClient,
                         settings = app.relaySettings,

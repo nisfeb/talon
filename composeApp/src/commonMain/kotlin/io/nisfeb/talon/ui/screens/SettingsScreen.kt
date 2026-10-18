@@ -109,6 +109,10 @@ fun SettingsScreen(
      *  rows. */
     systemNotificationProbe: io.nisfeb.talon.notify.SystemNotificationProbe =
         io.nisfeb.talon.notify.NoopSystemNotificationProbe,
+    /** No push reaches this device for the active ship (keepAliveNeeded,
+     *  mail aside). Where a ring needs one ([needsPushForBackgroundRing]),
+     *  the Notifications tab says calls ring only while Talon is open. */
+    noPush: Boolean = false,
     /** Optional relay-registration controls. When non-null, the
      *  Notification Health panel grows a Push relay sub-panel that
      *  lets the user register / unregister their device with a
@@ -713,6 +717,15 @@ fun SettingsScreen(
             }
             }
             if (safeTab == SettingsTab.Notifications) {
+            // Said plainly, so a missed call is not how the owner learns it (B3-3).
+            if (io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush) {
+                Text(
+                    "Without push, calls ring only while Talon is open.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
             if (relayConfig != null) ShipNotificationsRow(relayConfig)
             if (relayConfig != null && io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
                 PhoneNotificationsRow(relayConfig)
