@@ -467,7 +467,7 @@ fun AssistantScreen(
         val decider = http?.let { io.nisfeb.talon.ai.CalendarQuestion.decider(it, aiSettings.state.value) } ?: return null
         return io.nisfeb.talon.ai.CalendarQuestion.fromCalendar(cal, decider, text, earlier, twentyFourHour, session.seen) { Log.i("AssistantScreen", it) }
     }
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour, http) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
