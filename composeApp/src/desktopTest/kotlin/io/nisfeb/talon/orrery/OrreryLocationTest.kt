@@ -163,6 +163,23 @@ class OrreryLocationTest {
         assertEquals(2, ship.positions.size, "asked again a day on: the ship may have been updated")
     }
 
+    // A fix queued for the network outlived the switch going off, and
+    // went up after it (Android's LocationWorker asks this as it sends).
+    @Test
+    fun `nothing goes up once sharing is off, even mid-send`() = withDb { db ->
+        val ship = Ship()
+        val bare = shipClient(ship, state)
+        val owner = HttpClient(MockEngine { respond("{}") })
+        val at = fix(40.6790, -73.9442)
+        assertTrue(sendLocation(owner, db, "https://ship", "~zod", at, null, bare, sharing = { false }).isSuccess, "off is not a failure to retry")
+        assertEquals(emptyList(), ship.order.toList(), "off before it began: the ship is asked nothing")
+        // Turned off while the places were read: the position had gone, the place does not.
+        var asks = 0
+        sendLocation(owner, db, "https://ship", "~zod", at, null, bare, sharing = { asks++ == 0 }).getOrThrow()
+        assertEquals(1, ship.positions.size)
+        assertEquals(0, ship.observed, "the place is not said once sharing is off")
+    }
+
     @Test
     fun `any other refusal of the position fails the send`() = withDb { db ->
         val ship = Ship(position = 500)

@@ -329,9 +329,10 @@ class AuspexApi(
         const val DEFAULT_PAGE = 50
 
         /** The ship's caps, mirrored so a file can be refused when it is
-         *  picked rather than after a quarter-megabyte upload comes back
-         *  rejected. A guard rail, never the boundary. */
-        const val MAX_BLOB_BYTES = 262_144
+         *  picked rather than after a large upload comes back rejected. A
+         *  guard rail, never the boundary. 16 MiB since auspex 16, whose
+         *  413 reads "attachment over the 16777216 byte limit for one file". */
+        const val MAX_BLOB_BYTES = 16_777_216
         const val MAX_ATTACHMENTS = 16
 
         /** A thread or draft that is gone, which is not a load failure. */

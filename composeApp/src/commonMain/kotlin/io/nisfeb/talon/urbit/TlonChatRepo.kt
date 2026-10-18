@@ -41,6 +41,8 @@ import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.data.DmInviteEntity
 import io.nisfeb.talon.data.FollowedThreadEntity
 import io.nisfeb.talon.data.GroupEntity
+import io.nisfeb.talon.data.MarkDao
+import io.nisfeb.talon.data.MarkEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.UnreadEntity
@@ -48,6 +50,7 @@ import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -60,6 +63,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Semaphore
 import io.nisfeb.talon.data.latestPerConversation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -249,7 +253,7 @@ class TlonChatRepo(
     /** The thread the user is reading, as [openWhom] is the chat. Set
      *  by the thread list and by the gallery / notebook post screens
      *  (whose comments are that post's thread). */
-    private var openThread: Pair<String, String>? = null
+    @Volatile private var openThread: Pair<String, String>? = null
     private fun focusedThread(): Pair<String, String>? = if (appForegrounded) openThread else null
 
     fun setOpenThread(whom: String?, parentId: String?) {
@@ -398,10 +402,20 @@ class TlonChatRepo(
         baseUrl = session.baseUrl
         scope.launch {
             // One-shot cleanup for anyone whose DM history was doubled
-            // by the applyChatDelta dotted-id bug. Idempotent: on a
-            // clean DB it's a no-op.
-            runCatching { dedupeDottedIds() }
-                .onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
+            // by the applyChatDelta dotted-id bug. Once a database: every
+            // write undots (MessageDao.upsert, setStatus), and the scan
+            // reads every row, the LIKE having no index to use.
+            runCatching {
+                if (db.marks().get(MarkDao.DOTTED_IDS_DEDUPED) == null) {
+                    dedupeDottedIds()
+                    db.marks().put(MarkEntity(MarkDao.DOTTED_IDS_DEDUPED, nowMs()))
+                }
+            }.onFailure { Log.w(TAG, "dotted-id dedupe failed", it) }
+            // A post left in flight by the last run (killed mid-send) goes
+            // with the queue: the refresh's purge used to delete it instead.
+            runCatching { db.messages().requeueStalePending() }
+                .onSuccess { if (it > 0) Log.i(TAG, "$it post(s) left in flight queued") }
+                .onFailure { Log.w(TAG, "in-flight posts not queued", it) }
             runSessionLoop(session)
         }
         // Rows stored before searchText existed get it, a batch at a
@@ -415,9 +429,8 @@ class TlonChatRepo(
     /**
      * Walk every row whose id / postId is dot-grouped and collapse it
      * onto its undotted twin (or rename in place if none exists). See
-     * [DottedIdDedupe] for the planner. Cheap — runs once per boot,
-     * the `LIKE '%.%'` scan is indexed by the primary key path and
-     * skips the common undotted case entirely.
+     * [DottedIdDedupe] for the planner. Runs once a database ([start]):
+     * the `LIKE '%.%'` scan reads every row.
      */
     internal suspend fun dedupeDottedIds() {
         val msgRows = db.messages().findDottedIdRows()
@@ -527,6 +540,73 @@ class TlonChatRepo(
         lastEventMs = nowMs()
         notificationHealth.markSseConnected(true)
         notificationHealth.markSseEvent(lastEventMs)
+        // The event stream opens with the channel, once it has had a PUT
+        // (eyre has no channel to stream before its first): eyre answers
+        // each poke down it. Opened only after the pass, every poke the
+        // pass made (settings, levels, the queue's drain) waited out its
+        // ack and lost the answer, so a refused queued DM was taken as
+        // sent. What it brings is applied only once the pass is done
+        // ([applying]), as before, so no fact lands under a scry that was
+        // read before it.
+        val applying = CompletableDeferred<Unit>()
+        // A stream that fails while the pass reads ends the session after
+        // the pass, not in the middle of it: the next pass resumes a kept
+        // channel, which reads nothing.
+        var streamFailed: Throwable? = null
+        // Acks ride their own queue instead of being awaited inline. Each
+        // ack is a network PUT to the ship; awaiting it after every event
+        // capped ingestion at one round-trip per event, so a burst of
+        // events (and the poke-echo that un-greys a just-sent message)
+        // drained only as fast as we could ack — the "pending stays on
+        // screen long after it posted" lag. Draining acks on a separate
+        // coroutine lets applyEvent (which does the reap) run at DB speed;
+        // the single consumer keeps acks in order and Eyre tolerates them
+        // arriving a beat behind ingestion.
+        val ackQueue = Channel<Long>(Channel.UNLIMITED)
+        val ackJob = launch {
+            // In batches: one ack covers every event before it.
+            ackInBatches(ackQueue) { ch.ack(it) }
+        }
+        fun stream() = launch {
+            try {
+                // Buffered without bound: held at the gate, the stream
+                // would stop at the first event, and every ack behind it.
+                ch.events().buffer(Channel.UNLIMITED).collect { event ->
+                    applying.await()
+                    lastEventMs = nowMs()
+                    notificationHealth.markSseEvent(lastEventMs)
+                    runCatching { applyEvent(event.body) }
+                        .onFailure {
+                            // Rethrow cancellation so structured-concurrency
+                            // children of applyEvent can propagate properly;
+                            // without this any future child coroutine that
+                            // gets cancelled would silently fall through and
+                            // the caller would see a "stuck" UI.
+                            if (it is kotlinx.coroutines.CancellationException) throw it
+                            Log.w(TAG, "apply event failed", it)
+                        }
+                    // Acked once applied, never before: an event acked and
+                    // then lost with the session is not replayed.
+                    event.id?.let {
+                        ch.applied(it)
+                        ackQueue.trySend(it)
+                    }
+                }
+                Log.w(TAG, "event stream completed; will reconnect")
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                streamFailed = t
+            } finally {
+                // Close on normal completion AND cancellation so the ack
+                // consumer drains what's queued and exits with us.
+                ackQueue.close()
+                // The channel stays: the next stream resumes it. It is
+                // deleted where it is given up, in stop() and when the ship
+                // dropped one of its subscriptions (see applyEvent).
+            }
+        }
+        var streaming: Job? = null
         if (kept != null) {
             Log.i(TAG, "resuming the channel")
             // What came while it was down is replayed: nothing to read again.
@@ -608,6 +688,7 @@ class TlonChatRepo(
                     }
                     .onFailure { Log.e(TAG, "subscribe failed", it) }
             }
+            streaming = stream()
 
             // Re-scry init-posts + activity every reconnect so we catch up on
             // anything that landed while the stream was down. The
@@ -800,6 +881,10 @@ class TlonChatRepo(
             // streamed, so the deep read launched above still finishes.
             if (ch.gone) {
                 lastBootstrapMs = 0L
+                streaming?.cancelAndJoin()
+                // Gone by the stream itself, a 403 among them: said, so the
+                // next pass waits as the loop has it wait for that.
+                streamFailed?.let { throw it }
                 return@coroutineScope
             }
         }
@@ -811,50 +896,8 @@ class TlonChatRepo(
         // quietest ship: measuring events alone made this fire on every
         // idle ship, forever, and each reconnect re-ran the whole
         // bootstrap. See UrbitChannel.streamIdleMs.
-        // Acks ride their own queue instead of being awaited inline. Each
-        // ack is a network PUT to the ship; awaiting it after every event
-        // capped ingestion at one round-trip per event, so a burst of
-        // events (and the poke-echo that un-greys a just-sent message)
-        // drained only as fast as we could ack — the "pending stays on
-        // screen long after it posted" lag. Draining acks on a separate
-        // coroutine lets applyEvent (which does the reap) run at DB speed;
-        // the single consumer keeps acks in order and Eyre tolerates them
-        // arriving a beat behind ingestion.
-        val ackQueue = Channel<Long>(Channel.UNLIMITED)
-        val ackJob = launch {
-            // In batches: one ack covers every event before it.
-            ackInBatches(ackQueue) { ch.ack(it) }
-        }
-        val collectJob = launch {
-            try {
-                ch.events().collect { event ->
-                    lastEventMs = nowMs()
-                    notificationHealth.markSseEvent(lastEventMs)
-                    runCatching { applyEvent(event.body) }
-                        .onFailure {
-                            // Rethrow cancellation so structured-concurrency
-                            // children of applyEvent can propagate properly;
-                            // without this any future child coroutine that
-                            // gets cancelled would silently fall through and
-                            // the caller would see a "stuck" UI.
-                            if (it is kotlinx.coroutines.CancellationException) throw it
-                            Log.w(TAG, "apply event failed", it)
-                        }
-                    event.id?.let {
-                        ch.applied(it)
-                        ackQueue.trySend(it)
-                    }
-                }
-            } finally {
-                // Close on normal completion AND cancellation so the ack
-                // consumer drains what's queued and exits with us.
-                ackQueue.close()
-                // The channel stays: the next stream resumes it. It is
-                // deleted where it is given up, in stop() and when the ship
-                // dropped one of its subscriptions (see applyEvent).
-            }
-            Log.w(TAG, "event stream completed; will reconnect")
-        }
+        val collectJob = streaming ?: stream()
+        applying.complete(Unit)
         collectJob.invokeOnCompletion { ackJob.cancel() }
         sessionJob = collectJob
         // A reconnect asked for while this one was connecting is answered
@@ -875,6 +918,7 @@ class TlonChatRepo(
         }
         collectJob.join()
         watchdogJob.cancel()
+        streamFailed?.let { throw it }
     }
 
     /**
@@ -1481,6 +1525,12 @@ class TlonChatRepo(
         }
         slowDetails.value = null
         drainPauseMs = FIRST_DRAIN_PAUSE_MS
+        // Settings writes the ship has not taken go with the rest: a
+        // resumed channel runs no settings bootstrap to send them.
+        if (settingsSync != null) {
+            io.nisfeb.talon.util.runSuspendCatching { settingsSync.flushPending() }
+                .onFailure { Log.w(TAG, "kept settings not sent", it) }
+        }
     }
 
     /**
@@ -1500,13 +1550,17 @@ class TlonChatRepo(
     }
 
     /**
-     * Whether our queued channel [row] is on the ship already: its newest
-     * posts (or the thread) read, and a copy of ours from that moment found.
+     * Whether our queued channel [row] is on the ship already: its posts
+     * from the row's time on (or the thread) read, and a copy of ours from
+     * that moment found.
      * Its local twin goes, as an echo would have taken it.
      */
     private suspend fun landedAlready(row: MessageEntity): Boolean {
         val parent = row.parentId
-        if (parent == null) refreshConversation(row.whom, count = LANDED_CHECK_COUNT) else fetchThread(row.whom, parent)
+        // From the post's own time, less the clocks' skew: the newest
+        // thirty missed one that landed further back, which went twice.
+        if (parent == null) refreshConversation(row.whom, count = LANDED_CHECK_COUNT, fromMs = row.sentMs - LANDED_SKEW_MS)
+        else fetchThread(row.whom, parent)
         if (db.messages().shipCopyCount(row.whom, ourPatp, row.sentMs) == 0) return false
         db.messages().reapLocalTwin(row.whom, ourPatp, row.sentMs)
         db.messageMedia().reapLocalTwinMedia(row.whom, ourPatp, row.sentMs)
@@ -1573,6 +1627,8 @@ class TlonChatRepo(
         val ch = channel ?: error("not connected")
         require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
         val name = nickname?.trim()?.takeIf { it.isNotBlank() }
+        // Confirmed, both: the screen says the contact was added, and a
+        // ship that never answered was that, after its 15 s wait.
         // 1. Track the peer.
         ch.poke(
             app = "contacts",
@@ -1580,11 +1636,13 @@ class TlonChatRepo(
             payload = buildJsonObject {
                 put("meet", buildJsonArray { add(JsonPrimitive(ship)) })
             },
+            confirm = true,
         )
         // 2. Create the book page (our overlay = optional nickname).
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
+            confirm = true,
             payload = buildJsonObject {
                 put("page", buildJsonObject {
                     put("kip", ship)
@@ -2355,14 +2413,16 @@ class TlonChatRepo(
      *
      * markRead itself swallows transient errors and retries; this
      * helper only ensures each whom gets its own attempt.
+     *
+     * On [pushScope], as [markThreadsRead]: on the list's own scope,
+     * opening a chat midway cancelled the reads not yet heard, and none
+     * was kept as owed.
      */
-    suspend fun markAllRead(whoms: Collection<String>) {
+    fun markAllRead(whoms: Collection<String>) {
         if (whoms.isEmpty()) return
-        kotlinx.coroutines.coroutineScope {
-            whoms.forEach { whom ->
-                // Asked for: told whatever the local count says.
-                launch { runCatching { markRead(whom, force = true) } }
-            }
+        whoms.forEach { whom ->
+            // Asked for: told whatever the local count says.
+            pushScope.launch { runCatching { markRead(whom, force = true) } }
         }
     }
 
@@ -2746,8 +2806,12 @@ class TlonChatRepo(
      * but never applied) gets backfilled. Idempotent upsert — no dupes.
      * Throws when the ship did not answer, so a screen can tell a
      * conversation it could not load from an empty one.
+     *
+     * [fromMs], for a channel: the [count] posts from that time on are
+     * asked for first (`newer`), the newest after them for a ship
+     * without it.
      */
-    suspend fun refreshConversation(whom: String, count: Int = 100) {
+    suspend fun refreshConversation(whom: String, count: Int = 100, fromMs: Long? = null) {
         val ch = channel ?: error("not connected")
         val newest = db.messages().newestIdFor(whom)
         // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
@@ -2774,6 +2838,10 @@ class TlonChatRepo(
             val versions = listOf("v4", "v3", "v2", "v1", "v5")
             val channelMarks = listOf("post", "outline")
             val writMarks = listOf("heavy", "light")
+            if (fromMs != null && app == "channels") {
+                val from = UrbitTime.daToUd(UrbitTime.unixMsToDa(fromMs))
+                for (v in versions) for (mark in channelMarks) add("/$v/$whom/posts/newer/$from/$count/$mark")
+            }
             for (v in versions) {
                 when (app) {
                     "chat" -> for (mark in writMarks) {
@@ -3562,8 +3630,10 @@ class TlonChatRepo(
 
     /**
      * When the last read of every chat's posts began, init-posts or
-     * /changes; 0 before the first. In memory only: a launch reads
-     * init-posts, as it always has.
+     * /changes; 0 before the first. Kept in the database too (marks):
+     * in memory only, a launch read init-posts' ten a chat, opening read
+     * the newest fifty, and paging asked only below the oldest kept, so
+     * a busy chat kept a hole between them for good.
      */
     @Volatile private var postsReadMs = 0L
 
@@ -3578,11 +3648,11 @@ class TlonChatRepo(
      */
     private suspend fun catchUpPosts(ch: UrbitChannel) {
         val start = nowMs()
-        val since = postsReadMs
+        val since = postsReadMs.takeIf { it > 0 } ?: db.marks().get(MarkDao.POSTS_READ) ?: 0L
         if (useChanges(since, start, changesUnserved)) {
             try {
                 readChanges(ch, since - CHANGES_OVERLAP_MS)
-                postsReadMs = start
+                postsRead(start)
                 return
             } catch (t: Throwable) {
                 // A slow ship is not asked for init-posts on top.
@@ -3592,7 +3662,12 @@ class TlonChatRepo(
             }
         }
         bootstrap(ch, count = INITIAL_PAGE_COUNT)
-        postsReadMs = start
+        postsRead(start)
+    }
+
+    private suspend fun postsRead(startMs: Long) {
+        postsReadMs = startMs
+        db.marks().put(MarkEntity(MarkDao.POSTS_READ, startMs))
     }
 
     /**
@@ -4033,7 +4108,7 @@ class TlonChatRepo(
             val latencyMs = nowMs() - sentMs
             Log.i(TAG, "echo reaped twin whom=$whom latencyMs=$latencyMs")
         } else if (nowMs() - sentMs < 60_000) {
-            val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp)
+            val fallback = db.messages().reapOldestLocalTwin(whom, ourPatp, sentMs)
             if (fallback > 0) {
                 Log.w(TAG, "reap exact miss whom=$whom sentMs=$sentMs latencyMs=${nowMs() - sentMs}; FIFO fallback cleared grey twin")
             }
@@ -4216,9 +4291,10 @@ class TlonChatRepo(
 
     /** %activity's base notify-count: what the app-icon badge shows, the
      *  number the ship's %trunk sends with an iPhone's alerts. Null until a
-     *  summary carries it. */
+     *  summary carries it, and while a read made here is owed: the ship's
+     *  number does not know of it yet, so the badge counts what is here. */
     private val _notifiedTotal = MutableStateFlow<Int?>(null)
-    val notifiedTotal: StateFlow<Int?> = _notifiedTotal.asStateFlow()
+    val notifiedTotal: Flow<Int?> = combine(_notifiedTotal, owedReads) { total, owed -> total.takeIf { owed.isEmpty() } }
 
     internal suspend fun applyActivityUpdate(obj: JsonObject) {
         val focused = focusedWhom()
@@ -5570,6 +5646,8 @@ class TlonChatRepo(
         private const val MAX_DRAIN_PAUSE_MS = 60_000L
         /** How many of a channel's newest posts are read to see whether a queued one landed. */
         private const val LANDED_CHECK_COUNT = 30
+        /** How far before a queued post's own time that read starts: the ship's clock and ours may differ. */
+        private const val LANDED_SKEW_MS = 60_000L
 
         /** How long a message menu waits to ask for the admin groups again after a read failed. */
         private const val ADMIN_RETRY_MS = 60_000L

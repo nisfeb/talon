@@ -200,12 +200,19 @@ internal class ScriptedCallEngine(
     private val desc: SessionDesc = SessionDesc(
         "v=0\na=fingerprint:sha-256 AA:BB\n", "sha-256 AA:BB",
     ),
+    /** What [restartIce] offers; null is an engine that cannot restart (iOS). */
+    private val restart: SessionDesc? = null,
 ) : CallEngine {
     val stateFlow = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = stateFlow
 
     @Volatile var answersSet = 0
         private set
+    @Volatile var switched = 0
+        private set
+
+    override suspend fun restartIce(): SessionDesc? = restart
+    override fun switchCamera() { switched++ }
 
     override suspend fun createOffer(): SessionDesc = desc
     override suspend fun acceptOffer(remote: SessionDesc): SessionDesc = desc

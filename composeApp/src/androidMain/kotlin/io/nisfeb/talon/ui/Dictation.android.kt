@@ -32,26 +32,28 @@ import io.nisfeb.talon.DictationTileService
 import io.nisfeb.talon.DictationWidgetProvider
 import io.nisfeb.talon.R
 
-/** The system's speech recogniser, through its own prompt. */
+/**
+ * The system's speech recogniser, through its own prompt. Null where the
+ * phone has none (GrapheneOS ships without one), so the assistant's field
+ * takes the cursor instead of a mic that does nothing. The manifest's
+ * <queries> lets Android 11 and later say whether one is there.
+ */
 @Composable
 actual fun rememberDictation(onResult: (String) -> Unit): (() -> Unit)? {
     val current = rememberUpdatedState(onResult)
+    val ctx = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         val text = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!text.isNullOrBlank()) current.value(text)
     }
     return remember {
-        {
-            runCatching {
-                launcher.launch(
-                    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Tell your assistant")
-                    },
-                )
-            }
+        val listen = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Tell your assistant")
         }
+        if (listen.resolveActivity(ctx.packageManager) == null) null
+        else { { runCatching { launcher.launch(listen) } } }
     }
 }
 

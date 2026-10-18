@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.io.File
@@ -460,9 +461,13 @@ class TlonChatRepoStartupTest {
         loseWatch = { w -> if (w == RECIPES && once.getAndSet(false)) java.io.IOException("lost") else null }
     }) { _ ->
         until("the notebook watched") { RECIPES in ship.subscribed }
-        until("a stream on the new channel") { channelsStreamed().isNotEmpty() }
+        until("a stream on the new channel") { channelsPut().size == 2 && channelsStreamed().lastOrNull() == channelsPut().last() }
         assertEquals(2, channelsPut().size, "a second channel: ${channelsPut()}")
-        assertEquals(channelsPut().last(), channelsStreamed().single(), "the stream is the one with every watch")
+        // The stream opens with the subscribe PUT, so the poke answers of
+        // the pass reach it (review H8): the channel given up had one too,
+        // dropped with it. The one that stays is on the channel with
+        // every watch.
+        assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
     // Its watch goes out before the stream opens, so a channel given up
@@ -591,5 +596,102 @@ class TlonChatRepoStartupTest {
         until("the invite gone") { repo.invitesFlow.value?.none { it.flag == "~bus/garden" } == true }
         assertEquals(1, announced.size, "announced once")
     }
-}
 
+    // Eyre answers each poke down the event stream, and the stream opened
+    // only after the whole first pass: every poke made while the pass read
+    // waited out its 15 s ack, and a refused one was taken as sent (review
+    // H8, 2026-10-17). The notebook list, the pass's last read, is held,
+    // so the queue's drain runs while the pass still reads.
+    @Test
+    fun `a poke made while the first pass reads hears the ship's answer, a refusal included`() = runBlocking<Unit> {
+        val refused = "~zod/170141184506"
+        val taken = "~zod/170141184507"
+        for ((id, text, sent) in listOf(Triple(refused, "refused here", 5_000L), Triple(taken, "taken", 6_000L))) {
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", id, "~zod", sent, """[{"inline":["$text"]}]""", "/chat", status = "queued"))
+        }
+        started(prepare = {
+            scries[init] = initPosts
+            holdScry = { if (it == "notes/v0/notebooks") 30_000 else 0 }
+            refuse = { if (it.app == "chat" && "refused here" in it.json.toString()) "not allowed" else null }
+        }) { repo ->
+            val t0 = System.currentTimeMillis()
+            withTimeout(10_000) {
+                while (db.messages().getOne("~bus", refused)?.status != "failed" || db.messages().getOne("~bus", taken)?.status != null) delay(50)
+            }
+            assertTrue(System.currentTimeMillis() - t0 < 10_000)
+            assertTrue("notes/v0/notebooks" in ship.scried, "the pass was still reading: ${ship.scried}")
+            assertEquals(2, ship.pokesTo("chat").size, "each answered, neither waited out")
+            // A confirmed poke, which fails on silence, is answered as well.
+            withTimeout(5_000) { repo.addContact("~nec") }
+            assertTrue("~nec" in repo.bookContacts.value)
+        }
+    }
+
+    // A post in flight when the last run was killed stayed "pending" with
+    // no send of it running, and the refresh's purge deleted it (review M1).
+    @Test
+    fun `a post left in flight by the last run goes with the queue`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("chat/~bus/general", "local_1", "~zod", 5_000, """[{"inline":["mid-send"]}]""", "/chat", status = "pending"))
+        started(prepare = {
+            scries[init] = initPosts
+            scries["channels/v4/chat/~bus/general/posts/newest/30/post"] = """{"posts":{}}"""
+        }) { _ ->
+            until("asked whether it landed, then sent again") { ship.pokesTo("channels").any { "mid-send" in it.json.toString() } }
+            until("in flight again, until its echo") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "pending" }
+        }
+    }
+
+    // A settings change the ship did not answer went only with a new
+    // channel's settings bootstrap: a resumed channel never sent it, and
+    // the next bootstrap's ship-wins apply then wiped it (review H7).
+    @Test
+    fun `a settings change kept for the ship goes when the channel resumes, and a bootstrap keeps it`() = runBlocking<Unit> {
+        val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings())
+        ship.scries[init] = initPosts
+        // The desk as the ship holds it, each settings poke taken into it.
+        ship.answerSettingsDesk("""{"desk":{"folders":{"5":"{\"name\":\"From the ship\",\"sortOrder\":1}"}}}""")
+        // Made before the session: no channel to send it on.
+        val early = sync.createFolder("Early", 0)
+        val repo = TlonChatRepo(db, settingsSync = sync)
+        repo.start(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") })
+        try {
+            withTimeout(60_000) {
+                connected(repo)
+                until("the early folder sent") { ship.pokesTo("settings").any { "\"entry-key\":\"$early\"" in it.json.toString() } }
+                assertEquals(setOf("From the ship", "Early"), db.folders().streamFolders().first().map { it.name }.toSet())
+                ship.lose = { if (it.app == "settings") java.io.IOException("lost") else null }
+                sync.setNotifyLevel("~bus", io.nisfeb.talon.data.NotifyLevel.NONE)
+                ship.lose = { null }
+                val before = streams()
+                ship.endStreams()
+                until("the stream again") { streams() > before }
+                until("the kept change sent") { ship.pokesTo("settings").any { "~bus" in it.json.toString() } }
+                assertEquals(1, channelsStreamed().size, "resumed, not a new channel")
+                assertEquals(emptyList(), db.settingsOutbox().all())
+            }
+        } finally {
+            repo.stop()
+        }
+    }
+
+    // postsReadMs was in memory only: a launch read init-posts' ten a
+    // chat, opening a chat its newest fifty, and paging only below the
+    // oldest kept, so a busy chat kept a hole between them for good
+    // (review M14). The next launch reads what changed since.
+    @Test
+    fun `a launch reads what changed since the last run's read, not ten of every chat`() = runBlocking<Unit> {
+        val began = System.currentTimeMillis()
+        started(prepare = { scries[init] = initPosts }) { repo -> connected(repo) }
+        started(prepare = { answerScry = { p -> if (p.startsWith("groups-ui/v11/changes/")) changes else null } }) { _ ->
+            until("its post") { db.messages().getOne("chat/~bus/general", "170141184511") != null }
+            assertEquals(1, ship.scried.count { "init-posts/10" in it }, "init-posts once, at the first launch: ${ship.scried}")
+            val asked = ship.scried.first { it.startsWith("groups-ui/v11/changes/") }.removePrefix("groups-ui/v11/changes/")
+            val m = Regex("""~(\d{4})\.(\d{1,2})\.(\d{1,2})\.\.(\d{2})\.(\d{2})\.(\d{2})""").matchEntire(asked)
+            assertNotNull(m, asked)
+            val (y, mo, d, h, mi, se) = m.destructured
+            val sinceMs = java.time.ZonedDateTime.of(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), mi.toInt(), se.toInt(), 0, java.time.ZoneOffset.UTC)
+                .toInstant().toEpochMilli()
+            assertTrue(sinceMs in (began - CHANGES_OVERLAP_MS - 2_000L)..(began - CHANGES_OVERLAP_MS + 30_000L), "since $asked against $began")
+        }
+    }
+}

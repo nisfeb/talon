@@ -34,7 +34,7 @@ class NotesRepoTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
     private val ship = FakeShip("~zod")
-    private val notes = NotesRepo(db, CoroutineScope(SupervisorJob())).apply { attach(ship.channel) }
+    private val notes = NotesRepo(db, CoroutineScope(SupervisorJob()), deleteSettleMs = 200).apply { attach(ship.channel) }
     private val book = NotesFlag("~bus", "recipes")
 
     private fun summary(updatedAt: Long = 1784592399) =
@@ -110,15 +110,15 @@ class NotesRepoTest {
         ship.answerApi = { method, path, _ ->
             if (method == "PUT" && path == "/notes/~/v1/notebooks/~bus/recipes/notes/11") """{"body":{"type":"ok"}}""" else null
         }
-        assertTrue(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
+        assertNull(notes.updateNote(book, 11, "Simmer all day.", expectedRevision = 3))
         val sent = ship.api.single { !it.startsWith("GET ") }
         assertTrue("\"expectedRevision\":3" in sent && "Simmer all day." in sent, sent)
         assertEquals(false, db.notes().note(book.flagString, 11)?.pending, "no longer marked in flight")
 
         ship.answerApi = { _, _, _ -> """{"body":{"type":"error","errorType":"revision-mismatch"}}""" }
-        assertFalse(notes.updateNote(book, 11, "mine", expectedRevision = 2), "someone else saved first")
+        assertEquals(NotesRepo.NOTE_CHANGED, notes.updateNote(book, 11, "mine", expectedRevision = 2), "someone else saved first")
         ship.answerApi = { _, _, _ -> null }
-        assertFalse(notes.updateNote(book, 11, "mine", expectedRevision = 3), "the ship could not be reached")
+        assertTrue(notes.updateNote(book, 11, "mine", expectedRevision = 3) != NotesRepo.NOTE_CHANGED, "a route the ship lacks is not a conflict")
         assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the ship's copy stands")
     }
 
@@ -244,5 +244,65 @@ class NotesRepoTest {
         assertTrue("notes/v0/notes/~bus/recipes/stream" in ship.subscribed && "notes/v0/notes/~bus/drinks/stream" in ship.subscribed)
         assertTrue(2 in ship.subscribePuts, "${ship.subscribePuts}")
     }
-}
 
+    // Every failed save was called a conflict, and with the ship down the
+    // unsaved body stood in the notebook as the saved one: the edit is put
+    // in before the save, and the read after it failed too.
+    @Test
+    fun `a save with the ship down says so and leaves the host's copy, not the unsaved body`() = live {
+        notes.bootstrap()
+        ship.answerApi = { _, _, _ -> throw java.io.IOException("Connection refused") }
+        ship.loseScry = { kotlinx.io.IOException("The network connection was lost.") }
+        val said = notes.updateNote(book, 11, "not saved", expectedRevision = 3)
+        assertEquals("Your ship is slow, so it didn't go through. Try again when it's back.", said)
+        val row = db.notes().note(book.flagString, 11)
+        assertEquals("Simmer **long**.", row?.bodyMd, "the host's copy, not the edit")
+        assertEquals(false, row?.pending)
+    }
+
+    @Test
+    fun `a save each host refuses is said as what it is`() = live {
+        notes.bootstrap()
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"error","errorType":"not-authorized"}}""" }
+        assertEquals("You can't edit this notebook. Its owner can make you an editor.", notes.updateNote(book, 11, "mine", expectedRevision = 3))
+        ship.answerApi = { _, _, _ -> """{"body":{"type":"pending"}}""" }
+        assertTrue(notes.updateNote(book, 11, "mine", expectedRevision = 3)!!.startsWith("Sent."), "a cross-ship save in flight")
+        ship.answerApi = { _, _, _ -> """{"body":{"errorType":"unknown","message":[],"type":"error"}}""" }
+        assertEquals(NotesRepo.NOTE_CHANGED, notes.updateNote(book, 11, "mine", expectedRevision = 2), "the live ship's word for a stale revision")
+        assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd)
+    }
+
+    // A reader's delete in someone else's notebook is answered before its
+    // host has, and a host that refuses it says nothing: the note stayed
+    // hidden here until the notebook next changed.
+    @Test
+    fun `a note deleted here comes back if its host kept it, and stays gone if not`() = live {
+        notes.bootstrap()
+        assertTrue(notes.deleteNote(book, 11))
+        assertNull(db.notes().note(book.flagString, 11), "gone at once")
+        // The host kept it: its notebook still has it.
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().note(book.flagString, 11) == null) delay(50) }
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[]"
+        assertTrue(notes.deleteNote(book, 11))
+        delay(600)
+        assertNull(db.notes().note(book.flagString, 11), "the host took it: it stays gone")
+    }
+
+    // Made from a group's page, on that page's scope: leaving while the
+    // host answered lost the notebook it made from the cache and the stream.
+    @Test
+    fun `a group notebook made from a page that is left still finishes`() = live {
+        ship.answerApi = { method, path, _ ->
+            if (method == "POST" && path == "/notes/~/v1/notebooks") {
+                Thread.sleep(500)
+                """{"body":{"type":"notebook","notebook":${summary()}}}"""
+            } else null
+        }
+        val page = CoroutineScope(SupervisorJob())
+        page.launch { notes.createGroupNotebook("~bus/garden", "Recipes") }
+        delay(150)
+        page.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().notebook(book.flagString) == null) delay(50) }
+        assertEquals(listOf("Pho"), titles(), "read in, as when the page stays")
+    }
+}

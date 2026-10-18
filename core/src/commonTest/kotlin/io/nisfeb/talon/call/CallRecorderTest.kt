@@ -28,6 +28,27 @@ class CallRecorderTest {
         assertEquals(setOf("~bus"), call.clips.keys, "a muted aside reaches no file")
     }
 
+    // Dropped, a muted frame took its time out of our track, and what we
+    // said after the mute ran early against everyone else's.
+    @Test
+    fun aMuteMidRecordingIsKeptAsSilenceOfItsLength() {
+        var muted = false
+        // A clock of its own: a millisecond between start and the first
+        // frame is lead silence, and would be counted here.
+        val rec = CallRecorder("test", now = { 1_000L }) { muted }
+        rec.start()
+        val us = rec.sink("~zod", isSelf = true)!!
+        us(tone(480), 48_000)
+        muted = true
+        us(tone(480), 48_000)
+        muted = false
+        us(tone(480), 48_000)
+        val clip = rec.stop().clips.getValue("~zod")
+        assertEquals(3 * 960, clip.size, "the muted frame keeps its place")
+        assertTrue(clip.copyOfRange(960, 1920).all { it == 0.toByte() }, "and none of its sound")
+        assertTrue(clip[0] != 0.toByte() && clip[1920] != 0.toByte())
+    }
+
     @Test
     fun afterStopNoSinkIsHandedOutAndTheRecordingIsKept() {
         val rec = CallRecorder("test") { false }

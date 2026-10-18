@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,6 +59,8 @@ class MailRepoWriteTest {
 
     private fun <T> withRepo(
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
+        /** How often the repo's own poll reads; far past the test unless a test is about the poll. */
+        pollMs: Long = 60 * 60 * 1000L,
         block: suspend (MailRepo, List<String>) -> T,
     ): T {
         val scope = CoroutineScope(SupervisorJob())
@@ -68,9 +71,8 @@ class MailRepoWriteTest {
                 handler(req)
             },
         )
-        // A poll interval far past the test, so only explicit refreshes run.
         return try {
-            runBlocking { block(MailRepo(http, scope, pollIntervalMs = 60 * 60 * 1000L), hits) }
+            runBlocking { block(MailRepo(http, scope, pollIntervalMs = pollMs), hits) }
         } finally {
             scope.cancel()
         }
@@ -278,6 +280,181 @@ class MailRepoWriteTest {
             )
             assertNull(r.error.value, "not having mail installed is a state, not a failure")
             assertTrue(hits.any { it.contains("desks/stock") }, "and the probe did run")
+        }
+    }
+
+    private fun unread(id: String, subject: String) = row(id, subject).replace("\"unread\":false", "\"unread\":true")
+
+    // ─── the poll, wherever the reader is ───────────────────────────
+
+    // The poll read only the listing on screen, and new mail was announced
+    // from the inbox alone: after one search or folder switch no notice
+    // came, and the Mail section's pip stood still.
+    @Test
+    fun `new mail is announced and lights the pip while another folder is open`() {
+        // Unread when Talon opened: the baseline, never announced.
+        val inboxRows = AtomicReference(listOf(row("0v1", "one"), unread("0v5", "old news")))
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") && req.url.parameters["view"] == "inbox" -> jsonOk(this, pageWith(*inboxRows.get().toTypedArray()))
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+            }
+        }, pollMs = 200) { r, _ ->
+            val news = CopyOnWriteArrayList<MailNotification>()
+            r.onNewMail = { news += it }
+            r.attach("https://ship.example")
+            settle(r)
+            r.selectFolder(MailFolder.View(MailView.SENT))
+            until("the sent listing") { r.page.value?.threads?.isEmpty() == true }
+            inboxRows.set(listOf(row("0v1", "one"), unread("0v5", "old news"), unread("0v9", "news")))
+            until("the new mail's notice") { news.isNotEmpty() }
+            assertEquals(listOf("0v9"), news.map { it.threadId }, "only what came since; what was unread at the start is the baseline")
+            assertTrue(r.inboxUnread.value, "the pip")
+            assertEquals(MailFolder.View(MailView.SENT), r.folder.value, "and the reader stays where they were")
+            assertTrue(r.page.value!!.threads.isEmpty(), "the listing on screen is still Sent's")
+        }
+    }
+
+    // A 403 stopped the poll, and signing in again to the same ship never
+    // started it: mail was read only when somebody opened it.
+    @Test
+    fun `the poll a dead session stopped starts again with the next read that goes through`() {
+        val signedOut = java.util.concurrent.atomic.AtomicBoolean(true)
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                signedOut.get() -> respondError(HttpStatusCode.Forbidden, """{"error":"forbidden"}""")
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith(row("0v1", "one")))
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+            }
+        }, pollMs = 200) { r, hits ->
+            r.attach("https://ship.example")
+            until("signed out") { r.availability.value == MailAvailability.SIGNED_OUT }
+            signedOut.set(false)
+            fun reads() = hits.count { it.endsWith("/api/inbox") }
+            val stopped = reads()
+            delay(800)
+            assertEquals(stopped, reads(), "stopped while signed out")
+            r.refresh()
+            assertEquals(MailAvailability.PRESENT, r.availability.value)
+            val back = reads()
+            until("the poll's own read") { reads() > back }
+        }
+    }
+
+    // ─── what is kept when the ship does not take it ────────────────
+
+    // "What was written is still here until Talon closes", said of a draft
+    // that was in neither Drafts nor anywhere the list could open it.
+    @Test
+    fun `a draft the ship did not take is kept whole, to open again`() = withRepo({ req ->
+        val path = req.url.encodedPath
+        when {
+            path.endsWith("/api/draft") -> respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+            path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+            else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+        }
+    }) { r, _ ->
+        r.attach("https://ship.example")
+        settle(r)
+        val draft = Draft(id = "0vd", to = listOf("~nec"), subject = "Plans", body = "half a thought")
+        val file = MailRepo.Outgoing("x".encodeToByteArray(), "notes.txt", "text/plain")
+        r.keepDraft(draft, listOf(file))
+        until("the draft kept here") { r.unsent.value.isNotEmpty() }
+        val kept = r.unsent.value.single()
+        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Talon closes.", kept.line)
+        // What the list's Open gives back: the text, and the file.
+        val reopened = io.nisfeb.talon.ui.screens.unsentIntent(kept)
+        assertEquals("half a thought" to listOf("notes.txt"), reopened.body to reopened.edits.files.map { it.displayName })
+        r.keepDraft(draft.copy(body = "a whole thought"))
+        until("the newer one in its place") { r.unsent.value.singleOrNull()?.draft?.body == "a whole thought" }
+    }
+
+    // ─── an attachment, with our own ship down ──────────────────────
+
+    // A ship that did not answer was read as "no copy here", so the network
+    // was asked and waited on, and the sender was blamed.
+    @Test
+    fun `an attachment asked of our own ship while it is down throws, and a refusal does not`() = withRepo({ req ->
+        val path = req.url.encodedPath
+        when {
+            "/api/blob/" in path || path.endsWith("/api/fetch-blob") -> respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+            path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+            else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+        }
+    }) { r, _ ->
+        r.attach("https://ship.example")
+        settle(r)
+        assertTrue(runCatching { r.blob("0vh", "a.pdf", "application/pdf") }.exceptionOrNull() is AuspexError.Unreachable)
+        assertTrue(runCatching { r.fetchBlob("0vh", "~nec") }.exceptionOrNull() is AuspexError.Unreachable)
+    }
+
+    // ─── filters and lists, past the sheet ──────────────────────────
+
+    // Saved from the organise sheet, on the sheet's scope: closing it while
+    // a busy ship held the write cancelled it.
+    @Test
+    fun `a filter or a list saved from a sheet that closes still lands`() {
+        val landed = CopyOnWriteArrayList<String>()
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                req.method.value == "POST" -> { delay(600); landed += path.substringAfter("/api/"); jsonOk(this, "{}") }
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> jsonOk(this, "[]")
+            }
+        }) { r, hits ->
+            r.attach("https://ship.example")
+            settle(r)
+            val writes: List<Pair<String, suspend () -> Boolean>> = listOf(
+                "rule" to { r.saveRule(Rule("r1", from = "~zod")) },
+                "rule-delete" to { r.deleteRule("r1") },
+                "list" to { r.saveList(MailingList("team", listOf("~nec"))) },
+                "list-delete" to { r.deleteList("team") },
+            )
+            for ((route, write) in writes) {
+                val sheet = CoroutineScope(SupervisorJob())
+                sheet.launch { write() }
+                delay(150)
+                sheet.cancel()
+                until("$route to land") { route in landed }
+            }
+            // Awaited, each says it went.
+            assertEquals(listOf(true, true, true, true), writes.map { it.second() })
+            until("the lists read again behind them") { hits.any { it.endsWith("/api/rules") } && hits.any { it.endsWith("/api/lists") } }
+        }
+    }
+
+    // ─── filing to Lattice ──────────────────────────────────────────
+
+    @Test
+    fun `a filing that fails is said in words, never the error's own text`() {
+        val down = java.util.concurrent.atomic.AtomicBoolean(true)
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") -> jsonOk(this, pageWith())
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                req.method.value == "POST" && down.get() -> throw java.io.IOException("Connection refused")
+                req.method.value == "POST" -> respondError(HttpStatusCode.InternalServerError, "<html>crash</html>")
+                else -> respondError(HttpStatusCode.NotFound, "")
+            }
+        }) { r, _ ->
+            r.attach("https://ship.example")
+            settle(r)
+            until("our ship known") { r.ourShip != null }
+            assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
+            assertEquals("Could not file to Lattice: your ship did not answer. Try again when it's back.", r.problem.value)
+            down.set(false)
+            assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
+            assertEquals("Could not file to Lattice: your ship did not keep it. Try again shortly.", r.problem.value)
         }
     }
 }

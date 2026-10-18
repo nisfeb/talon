@@ -91,6 +91,9 @@ interface CallEngine {
      */
     suspend fun setCameraEnabled(enabled: Boolean): Boolean
 
+    /** Flip between front and back cameras. Nothing where there is one lens, or no camera on. */
+    fun switchCamera() {}
+
     /** Screens, then windows, that [setScreenShare] can send. Empty where sharing isn't built. */
     suspend fun screenSources(): List<ScreenSource> = emptyList()
 

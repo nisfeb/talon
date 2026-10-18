@@ -24,7 +24,6 @@ class SectionFlagsGuardTest {
     /** Not full-screen sections: a sheet, an overlay or a composer inside one. */
     private val notSections = setOf(
         "calendarPageOpen", // a page inside the calendar section, not a section
-        "shareLoginQrOpen", // a dialog over whatever is on screen
         "notebookComposeOpen", // a composer inside a notebook, with its own back
         "galleryComposeOpen", // a composer inside a gallery, with its own back
         "showNewDmRequest", // a one-shot request, not a screen
@@ -45,6 +44,29 @@ class SectionFlagsGuardTest {
             .map { it.groupValues[1] }
             .filter { name.matches(it) && it !in notSections }
             .toList()
+
+    private val shells = listOf(
+        "composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt",
+        "composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt",
+    )
+
+    /**
+     * A section with a back handler of its own outranked the newest one:
+     * Contacts, then Mail from a profile, and back closed the Contacts
+     * hidden under Mail. The registry's one handler closes the newest.
+     */
+    @Test
+    fun `no section has a back handler of its own`() {
+        for (path in shells) {
+            val src = File(root, path).readText()
+            val made = Regex("""var (\w+) by (?:remember \{\s*sections\.(?:flag|page)|\w+Section\b)""")
+                .findAll(src).map { it.groupValues[1] }.toSet()
+            assertTrue(made.size > 10, "$path: the guard no longer finds the sections ($made)")
+            val own = Regex("""BackHandler\(\s*enabled = (\w+)""").findAll(src)
+                .map { it.groupValues[1] }.filter { it in made }.toList()
+            assertTrue(own.isEmpty(), "$path: sections with a back handler of their own: $own. Let sections.closeLast() decide.")
+        }
+    }
 
     @Test
     fun `every android section is made by the registry`() {

@@ -150,6 +150,33 @@ class VoiceConversationTest {
         assertEquals("Orrery did not take it: the day's limit", result)
     }
 
+    // The lock was read once, when the conversation began, and an unlocked
+    // start kept delete_event for half an hour after the phone locked.
+    @Test
+    fun `a phone that locks mid-conversation loses the writes a locked phone may not make`() = runBlocking {
+        var locked = false
+        val model = Model(AgentTurn.Final("Sure."), AgentTurn.Final("Done."), AgentTurn.Final("Back."))
+        val t = VoiceConversation(
+            model.completer,
+            tools = listOf(tool("list_events", false), tool("delete_event", true), tool("create_event", true), tool("orrery_file_text", true)),
+            tell = { "Done." },
+            brief = { brief },
+            locked = { locked },
+        )
+        t.next("What's on today?")
+        locked = true
+        t.next("Delete the dentist")
+        locked = false
+        t.next("And now?")
+        val offered = model.calls.map { it.third }
+        assertEquals(listOf("list_events", "delete_event", "create_event", "orrery_file_text", "orrery_instruct", "read_brief"), offered[0])
+        assertEquals(listOf("list_events", "create_event", "orrery_file_text", "orrery_instruct", "read_brief"), offered[1], "no delete behind a lock")
+        assertEquals(offered[0], offered[2], "unlocked again, it is back")
+        assertEquals(offered[2], t.toolNames)
+        val unsaid = VoiceConversation(model.completer, listOf(tool("delete_event", true)), null, { null })
+        assertEquals(listOf("delete_event", "read_brief"), unsaid.toolNames, "unlocked unless the host says")
+    }
+
     @Test
     fun `it ends on the owner's word with no model call, and after twenty turns`() = runBlocking {
         val model = Model()

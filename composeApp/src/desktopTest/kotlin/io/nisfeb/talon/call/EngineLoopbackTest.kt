@@ -30,4 +30,25 @@ class EngineLoopbackTest {
             a.close(); b.close()
         }
     }
+
+    // Signalling here does not trickle, so a restart offer is all the
+    // candidates the far side will get. It waited on the first gather's
+    // deferred, long complete, and went out with few or none.
+    @Test
+    fun aRestartOfferCarriesItsNewCandidates() {
+        if (System.getenv("TRUNK_E2E") == null) {
+            println("TRUNK_E2E not set — skipping engine loopback test")
+            return
+        }
+        runBlocking {
+            val a = DesktopCallEngine()
+            val b = DesktopCallEngine()
+            a.setAnswer(b.acceptOffer(a.createOffer()))
+            withTimeout(30_000) { a.state.first { it == MediaState.Live } }
+            val restart = a.restartIce()!!
+            val candidates = restart.sdp.lines().count { it.startsWith("a=candidate") }
+            kotlin.test.assertTrue(candidates > 0, "a restart offer with no candidates:\n${restart.sdp}")
+            a.close(); b.close()
+        }
+    }
 }

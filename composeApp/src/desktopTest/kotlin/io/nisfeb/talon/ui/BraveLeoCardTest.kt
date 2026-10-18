@@ -185,24 +185,35 @@ class BraveLeoCardTest {
 
         answer = { HttpStatusCode.InternalServerError to """{"error":"boom"}""" }
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: HTTP 500: boom") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship refused: boom.") }
         assertTrue(onAllNodesWithText("Server endpoint").fetchSemanticsNodes().isEmpty(), "no answer is not the old one")
 
         // Closing and opening again asks again.
         answer = { HttpStatusCode.NotFound to """{"error":"no key yet"}""" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: it holds no Armillary key yet") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship holds no Armillary key for this device yet.") }
 
         answer = { HttpStatusCode.NotFound to "" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: Armillary is not on it") }
+        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your ship.") }
 
+        // nginx's page for a ship that is down: no answer, never its HTML.
+        answer = { HttpStatusCode.BadGateway to "<html><body>502 Bad Gateway</body></html>" }
+        more("Use in Brave Leo")
+        more("Use in Brave Leo")
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Try Refresh in a moment.") }
+        assertTrue(onAllNodesWithText("html", substring = true).fetchSemanticsNodes().isEmpty())
+
+        answer = { HttpStatusCode.NotFound to "" }
+        more("Use in Brave Leo")
+        more("Use in Brave Leo")
+        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your ship.") }
         answer = { throw java.io.IOException("connection reset") }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer for Leo: no answer from the ship") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Try Refresh in a moment.") }
         assertTrue(seen.all { it.startsWith("GET ") }, seen.toString())
     }
 

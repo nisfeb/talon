@@ -149,6 +149,31 @@ class TlonChatRepoQueueTest {
         assertNotNull(db.messages().getOne(nest, "170141184506"))
     }
 
+    // The guard read the channel's newest thirty: a post that landed
+    // further back than that, the ship slow and the channel busy, went
+    // twice (review M17). It reads from the post's own time now.
+    @Test
+    fun `a queued channel post that landed thirty posts back is not posted twice`() = live {
+        ship.landThenFail = { lost }
+        val id = repo.send(nest, "landed long ago")
+        val row = db.messages().getOne(nest, id)!!
+        ship.landThenFail = { null }
+        val later = (1..30).joinToString(",") { n ->
+            val pid = "${170141184600L + n}"
+            """"$pid":{"seal":${seal(pid)},"essay":${essay("later $n", row.sentMs + n * 1_000L).replace("~zod", "~bus")}}"""
+        }
+        ship.scries["channels/v4/$nest/posts/newest/30/post"] = """{"posts":{$later}}"""
+        // Wire: %channels' newer/<start>/<count>/<mode>, start a dotted @ud
+        // of the time a minute before ours.
+        val from = UrbitTime.daToUd(UrbitTime.unixMsToDa(row.sentMs - 60_000L))
+        ship.scries["channels/v4/$nest/posts/newer/$from/30/post"] =
+            """{"posts":{"170141184506":{"seal":${seal("170141184506")},"essay":${essay("landed long ago", row.sentMs)}}}}"""
+        repo.drainQueue()
+        assertEquals(1, ship.pokesTo("channels").size, "posted once")
+        assertNull(db.messages().getOne(nest, id), "the stand-in went, as an echo takes it")
+        assertEquals("channels/v4/$nest/posts/newer/$from/30/post", ship.scried.first { "/posts/" in it })
+    }
+
     @Test
     fun `a channel post that did not land goes again, and waits for its echo`() = live {
         ship.lose = { lost }
@@ -207,12 +232,27 @@ class TlonChatRepoQueueTest {
         }
     }
 
+    // Nor one refused ("Not sent") or still in flight: the purge kept only
+    // queued rows, so a refusal vanished on the next refresh (review M1).
     @Test
     fun `opening the channel does not throw away a message waiting for the ship`() = live {
         db.messages().upsert(MessageEntity(nest, "local_9", "~zod", 9_000, "[]", "/chat", status = "queued"))
+        db.messages().upsert(MessageEntity(nest, "local_10", "~zod", 10_000, "[]", "/chat", status = "failed"))
+        db.messages().upsert(MessageEntity(nest, "local_11", "~zod", 11_000, "[]", "/chat", status = "pending"))
         ship.scries["channels/v4/$nest/posts/newest/100/post"] = """{"posts":{}}"""
         repo.refreshConversation(nest)
-        assertEquals("queued", db.messages().getOne(nest, "local_9")?.status)
+        assertEquals(listOf("queued", "failed", "pending"), listOf("local_9", "local_10", "local_11").map { db.messages().getOne(nest, it)?.status })
+    }
+
+    @Test
+    fun `a post refused by the ship still says so after the channel is read again`() = live {
+        ship.refuse = { if (it.app == "channels") "no" else null }
+        assertFailsWith<PokeNacked> { repo.send(nest, "refused") }
+        val id = db.messages().before(nest, Long.MAX_VALUE, 5).single().id
+        assertEquals("failed", db.messages().getOne(nest, id)?.status)
+        ship.scries["channels/v4/$nest/posts/newest/100/post"] = """{"posts":{}}"""
+        repo.refreshConversation(nest)
+        assertEquals("failed", db.messages().getOne(nest, id)?.status, "still shown as not sent")
     }
 
     @Test

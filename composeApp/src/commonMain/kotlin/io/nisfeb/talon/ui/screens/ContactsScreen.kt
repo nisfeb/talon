@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.ContactEntity
 import io.nisfeb.talon.ui.Avatar
@@ -54,7 +55,8 @@ import io.nisfeb.talon.urbit.PATP_REGEX
 fun ContactsScreen(
     db: AppDatabase,
     bookContacts: Set<String>,
-    onAddContact: (patp: String, nickname: String?) -> Unit,
+    /** Adds the ship to the book, returning once the ship has it; throws when it does not. */
+    onAddContact: suspend (patp: String, nickname: String?) -> Unit,
     onRemoveContact: (patp: String) -> Unit,
     onOpenContact: (patp: String) -> Unit,
     onBack: () -> Unit,
@@ -64,6 +66,9 @@ fun ContactsScreen(
     var query by remember { mutableStateOf("") }
     var newPatp by remember { mutableStateOf("") }
     var newName by remember { mutableStateOf("") }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var adding by remember { mutableStateOf(false) }
+    var addProblem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
 
     // Any name a comet answers to: its @p, its twelve-word name, or a
     // short name or nickname of somebody already in the book.
@@ -112,11 +117,29 @@ fun ContactsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val canAdd = isValidPatp && !alreadyInBook
-                val add = {
-                    onAddContact(asPatp, newName.trim().takeIf { it.isNotBlank() })
-                    newPatp = ""
-                    newName = ""
+                val canAdd = isValidPatp && !alreadyInBook && !adding
+                // What was typed stays until the ship has it: cleared at
+                // once, a refusal left nothing to try again with, and said
+                // nothing. The shell runs the write on the repo's scope, so
+                // leaving Contacts does not stop it.
+                val add: () -> Unit = {
+                    val patp = asPatp
+                    val name = newName.trim().takeIf { it.isNotBlank() }
+                    adding = true
+                    addProblem = null
+                    scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        try {
+                            onAddContact(patp, name)
+                            newPatp = ""
+                            newName = ""
+                        } catch (c: kotlinx.coroutines.CancellationException) {
+                            throw c
+                        } catch (t: Throwable) {
+                            addProblem = io.nisfeb.talon.util.problemOf("Couldn't add ${shipHandle(patp)}", t)
+                        } finally {
+                            adding = false
+                        }
+                    }
                 }
                 OutlinedTextField(
                     value = newPatp,
@@ -141,7 +164,7 @@ fun ContactsScreen(
                 TextButton(
                     enabled = canAdd,
                     onClick = add,
-                ) { Text("Add") }
+                ) { Text(if (adding) "Adding…" else "Add") }
             }
             io.nisfeb.talon.ui.ShipSuggestions(newPatp, onPick = { newPatp = it }, Modifier.padding(top = 4.dp))
             if (isValidPatp && alreadyInBook) {
@@ -153,6 +176,7 @@ fun ContactsScreen(
                 )
             }
         }
+        addProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
         HorizontalDivider()
 
         if (bookContacts.isNotEmpty()) {

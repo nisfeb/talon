@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -60,6 +61,60 @@ class SectionsTest {
         assertTrue(s.anyOpen)
         s.closeLast()
         assertFalse(mail.value)
+    }
+
+    // A group's page was a plain value, outside the registry: the drawer
+    // could not leave it, and back closed whatever lay behind it.
+    @Test
+    fun `a page is a section while it names something`() {
+        val s = Sections()
+        val settings = s.flag()
+        val group = s.page<String>()
+        assertFalse(s.anyOpen)
+        settings.value = true
+        group.value = "~bus/crew"
+        assertTrue(s.closeLast())
+        assertEquals(null, group.value, "the page on top goes first")
+        assertTrue(settings.value)
+        group.value = "~bus/crew"
+        s.closeAll()
+        assertEquals(null, group.value)
+        assertFalse(s.anyOpen)
+    }
+
+    @Test
+    fun `a page moved to another group is the newest again, and one can start open`() {
+        val s = Sections()
+        val admin = s.page<String>()
+        val home = s.page(initial = "~bus/crew")
+        assertTrue(s.anyOpen)
+        admin.value = "~nec/club"
+        home.value = "~nec/club" // another group's page, opened over the admin page
+        s.closeLast()
+        assertEquals(null, home.value)
+        assertEquals("~nec/club", admin.value)
+        admin.value = "~nec/club" // the same again changes nothing
+        s.closeLast()
+        assertFalse(s.anyOpen)
+    }
+
+    // Android draws Search under the chat it opened: back closes the chat
+    // first, and only another section over the chat outranks it.
+    @Test
+    fun `a section other than those drawn under the chat is told apart`() {
+        val s = Sections()
+        val search = s.flag()
+        val newDm = s.flag()
+        val profile = s.flag()
+        assertFalse(s.anyOpenExcept(search, newDm))
+        search.value = true
+        newDm.value = true
+        assertFalse(s.anyOpenExcept(search, newDm), "only the ones under the chat")
+        assertTrue(s.anyOpenExcept(search))
+        profile.value = true
+        assertTrue(s.anyOpenExcept(search, newDm))
+        profile.value = false
+        assertFalse(s.anyOpenExcept(search, newDm))
     }
 
     @Test

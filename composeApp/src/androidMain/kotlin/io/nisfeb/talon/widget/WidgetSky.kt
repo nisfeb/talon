@@ -14,6 +14,8 @@ import io.nisfeb.talon.ui.parseForecast
  * The same preferences the app's own settings write, by the same keys.
  * A widget with its own copy of the place would be a second thing to
  * set and a second thing to get wrong.
+ *
+ * Android-only: no desktop analog, as [ClockWidgetProvider].
  */
 object WidgetSky {
 

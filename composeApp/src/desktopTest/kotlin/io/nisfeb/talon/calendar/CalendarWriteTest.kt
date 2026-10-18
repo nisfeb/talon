@@ -14,6 +14,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.atTime
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import java.util.concurrent.CopyOnWriteArrayList
@@ -47,6 +49,24 @@ class CalendarWriteTest {
         @Volatile var refuse = false
         /** The ship refuses writes whose body holds this, and takes the rest. */
         @Volatile var refuseIf: String? = null
+        /** Every poke the ship took, its body, in order. */
+        val pokes = CopyOnWriteArrayList<String>()
+        /** Every other write (a share, a revoke, an import): its path. */
+        val posts = CopyOnWriteArrayList<String>()
+        /**
+         * Why the calendar refuses a poke it has taken, by its body, or null
+         * to keep it: it answers 200 and keeps the refusal in outcomes.json.
+         */
+        @Volatile var refuseLater: (String) -> String? = { null }
+        val refusals = CopyOnWriteArrayList<String>()
+        /** Down: the web server in front of the ship answers everything with its 502 page. */
+        @Volatile var down = false
+        /** Every read is refused 403: the session is over. */
+        @Volatile var signedOut = false
+        /** config.json fails (a 500), as a busy or crashed nexus does. */
+        @Volatile var configFails = false
+        /** The calendar's own zone in config.json; null for none. */
+        @Volatile var zone: String? = "UTC"
         fun clear() = reads.clear()
     }
 
@@ -54,31 +74,57 @@ class CalendarWriteTest {
         calendars: String = """[{"id":"default","name":"Personal","kind":"local"}]""",
         tasks: (Ship) -> String = { """[$undated,$dated]""" },
         window: (Ship) -> String = { """{"rows":[]}""" },
+        pollMs: Long = 60 * 60_000L,
+        /** The app's scope is a screen's, whose Job is plain: one failed child cancels it. */
+        plainJob: Boolean = false,
+        setup: Ship.() -> Unit = {},
         block: suspend (CalendarRepo, Ship) -> Unit,
     ) = runBlocking {
-        val scope = CoroutineScope(SupervisorJob())
-        val ship = Ship()
+        val scope = CoroutineScope(if (plainJob) kotlinx.coroutines.Job() else SupervisorJob())
+        val ship = Ship().apply(setup)
         val repo = CalendarRepo(
             HttpClient(
                 MockEngine { req ->
                     val path = req.url.encodedPath
+                    if (ship.down) return@MockEngine respond(io.nisfeb.talon.mail.NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
                     if (path.startsWith("/grubbery/api/poke/")) {
                         // A request cancelled while held never gets here: the write is lost.
                         if (ship.holdWriteMs > 0) kotlinx.coroutines.delay(ship.holdWriteMs)
+                        val body = req.body.toByteArray().decodeToString()
                         val refuseIf = ship.refuseIf
-                        if (ship.refuse || (refuseIf != null && refuseIf in req.body.toByteArray().decodeToString())) {
+                        if (ship.refuse || (refuseIf != null && refuseIf in body)) {
                             return@MockEngine respond("", HttpStatusCode.BadRequest, json)
+                        }
+                        ship.pokes += body
+                        ship.refuseLater(body)?.let { why ->
+                            val poke = kotlinx.serialization.json.Json.parseToJsonElement(body) as kotlinx.serialization.json.JsonObject
+                            ship.refusals += buildJsonObject {
+                                put("at_ms", System.currentTimeMillis())
+                                put("action", (poke["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
+                                put("id", (poke["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "")
+                                put("why", why)
+                            }.toString()
                         }
                         ship.writtenAt.set(System.currentTimeMillis())
                         return@MockEngine respond("", HttpStatusCode.OK, json)
                     }
+                    if (req.method == io.ktor.http.HttpMethod.Post) {
+                        if (ship.holdWriteMs > 0) kotlinx.coroutines.delay(ship.holdWriteMs)
+                        if (ship.refuse) return@MockEngine respond("", HttpStatusCode.BadRequest, json)
+                        ship.posts += path
+                        return@MockEngine respond("""{"notified":true}""", HttpStatusCode.OK, json)
+                    }
                     ship.reads += path + (req.url.encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" } ?: "")
+                    if (ship.signedOut) return@MockEngine respond("""{"error":"forbidden"}""", HttpStatusCode.Forbidden, json)
                     if (ship.holdReadsMs > 0 && ship.writtenAt.get() > 0) kotlinx.coroutines.delay(ship.holdReadsMs)
                     val body = when {
                         path.endsWith("/events.json") -> tasks(ship)
                         path.endsWith("/window.json") -> window(ship)
                         path.endsWith("/calendars.json") -> calendars
-                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":"UTC","ball":"abc","lead_min":30}"""
+                        path.endsWith("/config.json") && ship.configFails -> return@MockEngine respond("", HttpStatusCode.InternalServerError, json)
+                        path.endsWith("/config.json") -> """{"title":"Calendar","zone":${ship.zone?.let { "\"$it\"" } ?: "null"},"ball":"abc","lead_min":30}"""
+                        path.endsWith("/zones.json") -> """["UTC","${kotlinx.datetime.TimeZone.currentSystemDefault().id}"]"""
+                        path.endsWith("/outcomes.json") -> """{"refusals":[${ship.refusals.joinToString(",")}],"faults":{}}"""
                         path.endsWith("/google.json") -> """{"connected":true,"linked":{}}"""
                         else -> "[]"
                     }
@@ -86,7 +132,7 @@ class CalendarWriteTest {
                 },
             ),
             scope,
-            pollIntervalMs = 60 * 60_000L,
+            pollIntervalMs = pollMs,
         )
         try {
             repo.attach("https://ship.test")
@@ -363,5 +409,248 @@ class CalendarWriteTest {
         assertTrue(ship.asked("/window.json") && ship.asked("/events.json"), "${ship.reads}")
         assertTrue(ship.reads.none { r -> listOf("/calendars.json", "/config.json", "/shares.json", "/tags.json", "/google.json").any { r.substringBefore('?').endsWith(it) } }, "${ship.reads}")
     }
-}
 
+    // ─── an event's edit shown everywhere at Save ──────────────────
+
+    // The home page's today reads the window, and only the calendar screen
+    // showed an edit before the ship's copy came back: Home kept the old
+    // event for as long as a busy ship took.
+    @Test
+    fun `an event's edit is in the window and the month at once and back if refused`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(window = { """{"rows":[${dentist(soon)}]}""" }) { repo, ship ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            ship.holdWriteMs = 800
+            val day = LocalDate(2026, 9, 25)
+            val moved = EventDraft(name = "Dentist at 3", date = day, minuteOfDay = 15 * 60, durMin = 30, cal = "default")
+            val at3 = day.atTime(15, 0).toInstant(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds()
+            val w = CoroutineScope(SupervisorJob()).async { repo.writeEvent(eventBody(moved, "e1"), readBack = false) }
+            kotlinx.coroutines.delay(200)
+            assertTrue(ship.pokes.isEmpty(), "the ship has not taken it yet")
+            for (rows in listOf(repo.rows.value, repo.rangeRows.value)) {
+                val e1 = rows?.single { it.id == "e1" }
+                assertEquals("Dentist at 3", e1?.name, "the home page's today and the month, at once")
+                assertEquals(at3 to at3 + 30 * 60_000L, e1?.l to e1?.r, "on its new time, in the calendar's zone")
+            }
+            val taken = w.await()
+            assertTrue(taken.ok)
+            // Taken, then refused by the calendar: the screen's check undoes it.
+            taken.undo()
+            assertEquals("Dentist", repo.rows.value?.single()?.name)
+            assertEquals(soon, repo.rangeRows.value?.single()?.l)
+
+            ship.holdWriteMs = 0
+            ship.refuse = true
+            assertTrue(!repo.writeEvent(eventBody(moved, "e1"), readBack = false).ok)
+            assertEquals("Dentist", repo.rows.value?.single()?.name, "refused: as it was")
+            assertEquals("Dentist", repo.rangeRows.value?.single()?.name)
+        }
+    }
+
+    // Every screen reads the window and the month, so what an edit puts
+    // there at Save must be that event alone, as the ship will have it.
+    @Test
+    fun `an event's edit moves that event alone and keeps what it does not edit`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        val day = LocalDate(2026, 9, 25)
+        val dentist = """{"id":"e1","cal":"default","cat":"timed","kind":"once","all":false,"meta":{"name":"Dentist","conference":"https://meet.example/x"},"l":$soon,"r":${soon + 3_600_000}}"""
+        val standup = """{"id":"s1","cal":"default","idx":2,"cat":"timed","kind":"daily","all":false,"meta":{"name":"Standup"},"l":${soon + 7_200_000},"r":${soon + 8_100_000}}"""
+        calendar(window = { """{"rows":[$dentist,$standup,${event("e2", "Swim", soon + 60_000)}]}""" }) { repo, _ ->
+            repo.loadRange(soon - 86_400_000, soon + 86_400_000)
+            val before = repo.rows.value
+            // An id the lists do not have changes neither.
+            repo.writeEvent(eventBody(EventDraft(name = "Elsewhere", date = day, cal = "default"), "e9"), readBack = false)
+            assertEquals(before, repo.rows.value)
+            // A day out on another calendar, all day: its days, its calendar,
+            // its link kept; nothing else moves.
+            val allDay = EventDraft(name = "Dentist, all day", cat = EventCat.ALLDAY, date = day, spanDays = 2, cal = "work")
+            repo.writeEvent(eventBody(allDay, "e1"), readBack = false)
+            val dayStart = day.atTime(0, 0).toInstant(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds()
+            for (rows in listOf(repo.rows.value!!, repo.rangeRows.value!!)) {
+                val e1 = rows.single { it.id == "e1" }
+                assertEquals(Triple(dayStart, dayStart + 2 * 86_400_000L, true), Triple(e1.l, e1.r, e1.all))
+                assertEquals("work" to "https://meet.example/x", e1.cal to io.nisfeb.talon.calendar.joinLink(e1.meta))
+                assertEquals("Dentist, all day", e1.name)
+                assertEquals("Swim" to (soon + 60_000), rows.single { it.id == "e2" }.let { it.name to it.l }, "the rest as it was")
+            }
+            // A series keeps its occurrences: its words change, not its times.
+            repo.writeEvent(eventBody(EventDraft(name = "Standup, renamed", date = day, cal = "default"), "s1"), readBack = false)
+            val s1 = repo.rows.value!!.single { it.id == "s1" }
+            assertEquals("Standup, renamed" to (soon + 7_200_000), s1.name to s1.l)
+        }
+    }
+
+    // "Only this one" on a calendar with it (34) is that occurrence alone.
+    @Test
+    fun `only this one moves that occurrence and no other of its series`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        val tomorrow = soon + 86_400_000
+        fun occ(idx: Int, l: Long) = """{"id":"s1","cal":"default","idx":$idx,"cat":"timed","kind":"daily","all":false,"meta":{"name":"Standup"},"l":$l,"r":${l + 900_000}}"""
+        calendar(window = { """{"rows":[${occ(1, soon)},${occ(2, tomorrow)}]}""" }) { repo, _ ->
+            val day = LocalDate(2026, 9, 25)
+            val moved = EventDraft(name = "Standup, moved", date = day, minuteOfDay = 15 * 60, durMin = 15, cal = "default")
+            repo.writeEvent(io.nisfeb.talon.calendar.editAtBody(moved, "s1", home = "default", atMs = soon), readBack = false)
+            val at3 = day.atTime(15, 0).toInstant(kotlinx.datetime.TimeZone.UTC).toEpochMilliseconds()
+            val rows = repo.rows.value!!
+            assertEquals(listOf(at3 to "Standup, moved"), rows.filter { it.idx == 1 }.map { it.l to it.name })
+            assertEquals(listOf(tomorrow to "Standup"), rows.filter { it.idx == 2 }.map { it.l to it.name }, "the next one stays")
+        }
+    }
+
+    @Test
+    fun `undoing an edit leaves alone a copy the ship has read back since`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(window = { ship -> """{"rows":[${event("e1", if (ship.pokes.isEmpty()) "Dentist" else "Dentist at 3", soon)}]}""" }) { repo, _ ->
+            val w = repo.writeEvent(eventBody(EventDraft(name = "Dentist at 3", date = LocalDate(2026, 9, 25), cal = "default"), "e1"))
+            w.shown.join()
+            w.undo()
+            assertEquals("Dentist at 3", repo.rows.value?.single()?.name, "the ship's own copy stays")
+        }
+    }
+
+    // ─── what the calendar refused after taking it ─────────────────
+
+    // "Added to Work" for an event the calendar then refused: the ship
+    // acks a poke before reading it, and keeps why it refused in outcomes.json.
+    @Test
+    fun `a task the calendar refuses after taking it is said and kept for later and leaves the list`() = calendar(
+        setup = { refuseLater = { if ("Buy bread" in it) "the task could not be read" else null } },
+        tasks = { ship -> if (ship.pokes.any { "Buy eggs" in it }) """[$undated,$dated,{"id":"t3","cal":"default","cat":"todo","meta":{"name":"Buy eggs"}}]""" else """[$undated,$dated]""" },
+    ) { repo, ship ->
+        val said = CopyOnWriteArrayList<String>()
+        repo.addTask(EventDraft(name = "Buy bread", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")) { said += it }
+        assertEquals(1, repo.pendingTasks.value.size, "on the list at once")
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.pendingTasks.value.isNotEmpty()) kotlinx.coroutines.delay(50) }
+        assertEquals(listOf("\"Buy bread\" was not added: the task could not be read"), said.toList())
+        assertEquals("\"Buy bread\" was not added: the task could not be read", repo.unheard.value, "said when the calendar next opens, if no screen heard it")
+        // One it keeps is read into the list.
+        ship.clear()
+        repo.addTask(EventDraft(name = "Buy eggs", cat = EventCat.TODO, date = LocalDate(2026, 9, 25), cal = "default")) { said += it }
+        kotlinx.coroutines.withTimeout(10_000) { while (repo.pendingTasks.value.isNotEmpty()) kotlinx.coroutines.delay(50) }
+        assertEquals(1, said.size, "nothing more said")
+        assertTrue(repo.tasks.value.orEmpty().any { it.name == "Buy eggs" }, "the list read back: ${ship.reads}")
+    }
+
+    @Test
+    fun `an event from a chat card the calendar refuses is not called added`() {
+        val soon = System.currentTimeMillis() + 3_600_000
+        calendar(
+            setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },
+            window = { ship -> """{"rows":[${if (ship.pokes.any { "Tea" in it }) event("e9", "Tea", soon) else ""}]}""" },
+        ) { repo, ship ->
+            assertTrue(!repo.addShared("default", "Picnic", soon, soon + 3_600_000))
+            assertEquals(1, ship.pokes.size)
+            assertEquals("\"Picnic\" was not added: no such calendar", repo.unheard.value)
+            assertTrue(repo.addShared("default", "Tea", soon, soon + 3_600_000), "one it keeps is added")
+        }
+    }
+
+    @Test
+    fun `an event written behind a chat says why it did not land`() = calendar(
+        setup = { refuseLater = { if ("Picnic" in it) "no such calendar" else null } },
+    ) { repo, ship ->
+        val said = CopyOnWriteArrayList<String>()
+        val picnic = eventBody(EventDraft(name = "Picnic", date = LocalDate(2026, 9, 25), cal = "default"))
+        repo.writeInBackground(picnic) { said += it }
+        kotlinx.coroutines.withTimeout(10_000) { while (said.isEmpty()) kotlinx.coroutines.delay(50) }
+        assertEquals("\"Picnic\" was not added: no such calendar", said.single())
+        ship.down = true
+        repo.writeInBackground(picnic) { said += it }
+        kotlinx.coroutines.withTimeout(10_000) { while (said.size < 2) kotlinx.coroutines.delay(50) }
+        assertTrue("isn't answering" in said[1] && "did not take" !in said[1], said[1])
+    }
+
+    // ─── a ship down is not a refusal, nor a refusal a ship down ────
+
+    @Test
+    fun `a share write while the ship is down says so and a refusal after it says refused`() = calendar { repo, ship ->
+        ship.down = true
+        assertTrue(!repo.revoke("default", "~nec"))
+        assertTrue("isn't answering" in repo.failedLine("refused"), repo.failedLine("refused"))
+        assertTrue(!repo.importIcs("default", "BEGIN:VCALENDAR"))
+        assertTrue("isn't answering" in repo.failedLine("refused"))
+        ship.down = false
+        ship.refuse = true
+        assertTrue(!repo.accept("~nec/work"))
+        assertEquals("refused", repo.failedLine("refused"), "not the ship down of the write before")
+    }
+
+    // ─── writes carried on past the screen that made them ───────────
+
+    // A share, revoke, offer answered, sync, make-local, import and log
+    // cleared each ran on the calendar screen's scope, and leaving the
+    // screen while a busy ship held one cancelled it.
+    @Test
+    fun `every calendar write goes on after the screen that made it has gone`() = calendar { repo, ship ->
+        ship.holdWriteMs = 600
+        val writes: List<Pair<String, suspend () -> Any?>> = listOf(
+            "/share/share" to { repo.share("default", "~nec", edit = false) },
+            "/share/revoke" to { repo.revoke("default", "~nec") },
+            "/share/accept" to { repo.accept("~nec/work") },
+            "/share/decline" to { repo.decline("~nec/work") },
+            "/share/sync" to { repo.syncShares() },
+            "/migrate" to { repo.makeLocal("family") },
+            "/import" to { repo.importIcs("default", "BEGIN:VCALENDAR") },
+            "/google/conflicts/clear" to { repo.clearConflicts() },
+        )
+        for ((path, write) in writes) {
+            ship.clear()
+            val screen = CoroutineScope(SupervisorJob())
+            screen.launch { write() }
+            kotlinx.coroutines.delay(150)
+            screen.cancel()
+            kotlinx.coroutines.withTimeout(10_000) { while (ship.posts.none { it.endsWith(path) }) kotlinx.coroutines.delay(20) }
+            // And read back behind it, as when the screen stays.
+            kotlinx.coroutines.withTimeout(10_000) { while (!ship.asked("/window.json")) kotlinx.coroutines.delay(20) }
+        }
+    }
+
+    @Test
+    fun `a failure inside a carried write does not stop the repo's other work`() = calendar(plainJob = true) { repo, ship ->
+        ship.down = true
+        val thrown = runCatching { repo.share("default", "~nec", edit = false) }.exceptionOrNull()
+        assertTrue(thrown is io.nisfeb.talon.mail.AuspexError.Unreachable, "$thrown")
+        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "said in words")
+        assertTrue(repo.refreshTasks().isFailure)
+        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "a read too")
+        ship.down = false
+        assertTrue(repo.revoke("default", "~nec"), "the repo's scope still runs writes")
+    }
+
+    // ─── the calendar's own zone ────────────────────────────────────
+
+    // A failed config read left the zone unknown, and the device's zone
+    // was written over the calendar's own: a traveller's phone moved it.
+    @Test
+    fun `a config read that fails never sets the calendar's zone`() = calendar(setup = { configFails = true }) { repo, ship ->
+        repo.refresh()
+        assertTrue(ship.pokes.none { "\"config\"" in it }, "${ship.pokes}")
+        assertEquals(null, repo.notice.value)
+    }
+
+    @Test
+    fun `a calendar that says it has no zone takes the device's`() = calendar(setup = { zone = null }) { _, ship ->
+        val config = ship.pokes.single { "\"config\"" in it }
+        assertTrue(kotlinx.datetime.TimeZone.currentSystemDefault().id in config, config)
+    }
+
+    // ─── signed out, and in again ───────────────────────────────────
+
+    // A 403 stopped the poll for the session: signed in again, the
+    // calendar was read only when somebody opened it.
+    @Test
+    fun `the poll stopped by a signed-out answer starts again with the next read that goes through`() = calendar(
+        pollMs = 200,
+        setup = { signedOut = true },
+    ) { repo, ship ->
+        assertEquals(CalendarAvailability.SIGNED_OUT, repo.availability.value)
+        ship.signedOut = false
+        ship.clear()
+        kotlinx.coroutines.delay(800)
+        assertTrue(ship.reads.isEmpty(), "stopped: ${ship.reads}")
+        repo.refresh()
+        assertEquals(CalendarAvailability.PRESENT, repo.availability.value)
+        ship.clear()
+        kotlinx.coroutines.withTimeout(5_000) { while (!ship.asked("/window.json")) kotlinx.coroutines.delay(20) }
+    }
+}

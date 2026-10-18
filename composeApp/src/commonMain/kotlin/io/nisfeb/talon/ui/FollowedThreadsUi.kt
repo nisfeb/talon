@@ -77,6 +77,7 @@ fun FollowedThreadsList(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (row.unread > 0) Badge { Text("${row.unread}") }

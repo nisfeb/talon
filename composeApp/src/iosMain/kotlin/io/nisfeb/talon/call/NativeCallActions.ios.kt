@@ -126,6 +126,11 @@ internal object IosCallKitCalls {
                     }
                 }
                 is CallUiState.Incoming -> {
+                    // Glare took their ring for our call: ours is over. As
+                    // ended by the far side, not by us, which would come
+                    // back through onEnd and decline the ring we took.
+                    abandonedOutgoing(reported, outgoing, controller.currentCallId)
+                        ?.let { kit.reportEnded(it, remote = true) }
                     // CallPush.swift reported this one from the push.
                     reported = controller.currentCallId; outgoing = false; connected = false; lastMuted = null
                 }

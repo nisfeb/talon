@@ -290,7 +290,8 @@ fun AssistantScreen(
             publish(client, defs)
         }.onFailure { e ->
             mcpTools = emptyList()
-            mcpStatus = "Ship tools unavailable: ${e.message ?: e::class.simpleName}"
+            // In words: the exception's own text read as a stack trace.
+            mcpStatus = io.nisfeb.talon.util.problemOf("Ship tools unavailable", e).line
             Log.w("AssistantScreen", "MCP tool load failed", e)
         }
     }

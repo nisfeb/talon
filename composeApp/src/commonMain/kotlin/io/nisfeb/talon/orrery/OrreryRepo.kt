@@ -85,6 +85,8 @@ class OrreryRepo(
     private val stopHealth: () -> Unit = {},
     /** The model a test reads with, in place of the ladder, as [bareClient] is its ship. */
     private val readWith: LocalModel? = null,
+    /** The first pause before a failed check of the ship is tried again; a test's own. */
+    private val probeRetryFirstMs: Long = PROBE_RETRY_FIRST_MS,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -364,10 +366,7 @@ class OrreryRepo(
         val now = nowMs()
         val waiting = answering.updateAndGet { m ->
             m.filter { (id, sent) ->
-                val there = fromShip.firstOrNull { it.id == id }
-                // Shown: gone from the open list, or no longer a proposal.
-                val shown = there == null || there.status != "proposed"
-                !shown && now - sent.second < ANSWER_GRACE_MS
+                !answerShown(fromShip.firstOrNull { it.id == id }, sent.first) && now - sent.second < ANSWER_GRACE_MS
             }
         }
         val list = waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }
@@ -412,7 +411,12 @@ class OrreryRepo(
             // Held, not turned off: there is one switch, and turning it
             // off here turned it off for the ship that has a pipe.
             location.pause(!_enabled.value)
-            if (_availability.value == OrreryAvailability.PRESENT) {
+            // Whenever orrery is first seen, not only by this first check:
+            // one that failed (no network yet, a 502 mid-restart) left the
+            // beacon and the actions unread for the session, however often
+            // Settings saw orrery there after.
+            launch {
+                _availability.first { it == OrreryAvailability.PRESENT }
                 refreshActions()
                 // Orrery's beacon moves once for every write that changed
                 // something: a new proposal, or an answer given anywhere.
@@ -658,6 +662,9 @@ class OrreryRepo(
         if (current === this) current = null
         attaching?.cancel()
         attaching = null
+        retrying?.cancel()
+        retrying = null
+        probeSaid = null
         stopPipe()
         watching?.cancel()
         watching = null
@@ -695,19 +702,24 @@ class OrreryRepo(
      */
     suspend fun switchOff(after: () -> Unit = {}): List<String> = scope.async {
         val missed = mutableListOf<String>()
-        if (_availability.value == OrreryAvailability.PRESENT) {
-            // Only what is on: a ship older than a reader has nothing to stop.
+        // Not only with Orrery known present: a first check that failed left
+        // it unknown, and every reader was skipped while the page said off.
+        if (api != null && _availability.value != OrreryAvailability.MISSING) {
+            // Skipped only when known off. One whose state could not be read
+            // is sent off too (each write is a merge), and a ship that has no
+            // such reader answers 404, which is nothing to stop.
+            suspend fun stop(on: Boolean?, what: String, write: suspend () -> Result<Unit>) {
+                if (on == false) return
+                write().onFailure { if (it !is OrreryError.Refused || it.status != 404) missed += what }
+            }
             if (_chatReader.value == null) loadChatReader()
-            _chatReader.value?.let { r ->
-                if (r.enabled || r.sendDms) {
-                    setChatReader(buildJsonObject { put("enabled", false); put("send_dms", false) })
-                        .onFailure { missed += "reading your chats" }
-                }
+            stop(_chatReader.value?.let { it.enabled || it.sendDms }, "reading your chats") {
+                setChatReader(buildJsonObject { put("enabled", false); put("send_dms", false) })
             }
             if (_mailReader.value == null) loadMailReader()
-            if (_mailReader.value == true) setMailReader(false).onFailure { missed += "reading your mail" }
+            stop(_mailReader.value, "reading your mail") { setMailReader(false) }
             if (_generatorSettings.value == null) runCatching { loadGenerator() }
-            if (_generatorSettings.value?.enabled == true) setGenerator(false).onFailure { missed += "writing your brief" }
+            stop(_generatorSettings.value?.enabled, "writing your brief") { setGenerator(false) }
         }
         val u = shipUrl
         val s = ship
@@ -799,7 +811,31 @@ class OrreryRepo(
                 if (_error.value != null && _error.value == probeSaid) _error.value = null
                 probeSaid = null
             }
-            .onFailure { _availability.value = OrreryAvailability.UNKNOWN; probeSaid = it.message; _error.value = it.message }
+            .onFailure {
+                _availability.value = OrreryAvailability.UNKNOWN
+                // In words: Settings shows it while it waits, where it said
+                // only "Checking your ship" with the reason hidden.
+                probeProblemLine(it).let { line -> probeSaid = line; _error.value = line }
+                retryProbe()
+            }
+    }
+
+    private var retrying: Job? = null
+
+    /**
+     * A check that failed, tried again further apart each time and never
+     * in step with other clients, until the ship answers. Whoever asked:
+     * the first check at attach, or Settings opening.
+     */
+    private fun retryProbe() {
+        if (retrying?.isActive == true || api == null) return
+        retrying = scope.launch {
+            var failures = 0
+            while (_availability.value == OrreryAvailability.UNKNOWN && probeSaid != null) {
+                delay(io.nisfeb.talon.urbit.jittered(probeRetryMs(++failures, probeRetryFirstMs)))
+                probe()
+            }
+        }
     }
 
     /**
@@ -1766,17 +1802,22 @@ class OrreryRepo(
      * time it could not move, or refused outright.
      *
      * It stays proposed either way: approving is the same tap it was.
+     * On this repo's scope: a dialog closed while the model reads does
+     * not drop the revision or what it filed beside it.
      */
-    suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = runCatching {
+    suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = scope.async { runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         val answer = a.refine(db.orreryAccounts().get(s)?.token, id, text)
         answer.action?.let { revised ->
             _actions.value = (_actions.value.map { if (it.id == revised.id) revised else it } + answer.extras)
                 .distinctBy { it.id }
+            // Seen in the dialog that asked for them, as [instruct]'s are:
+            // the next read raised a notification for each.
+            seenProposals = seenProposals?.plus(answer.extras.filter { it.status in OPEN_STATUSES }.map { it.id })
         }
         answer
-    }
+    } }.await()
 
     /**
      * The same, taken at once: the lists change now and the ship is told
@@ -1794,7 +1835,9 @@ class OrreryRepo(
             setAction(id, status, note).onFailure { e ->
                 answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
-                _answerProblem.value = "Orrery did not take that answer: ${e.message ?: "no reason given"}"
+                // No answer is not a refusal: said as one, a proxy's error page was the reason.
+                _answerProblem.value = if (e is OrreryError.Unreachable) "Your ship did not answer, so that answer was not given. Try it again."
+                else "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
             }
         }
@@ -1869,11 +1912,12 @@ class OrreryRepo(
          * connection, or a proxy answering 502 or 503 with no ship behind
          * it, cost it nothing, and waiting longer after those left the pipe
          * idle for hours after a restart. The first waits longer each time;
-         * the second keeps the usual ten minutes.
+         * the second keeps the usual ten minutes. A proxy's 504 is a ship
+         * too busy to answer in time, which is the first.
          */
         internal fun costTheShip(e: Throwable): Boolean = when (e) {
             is OrreryError.Refused -> e.status != 502 && e.status != 503
-            is OrreryError.Unreachable -> generateSequence(e.cause) { it.cause }.take(5).any {
+            is OrreryError.Unreachable -> (e.cause as? ProxyAnswered)?.let { it.status == 504 } ?: generateSequence(e.cause) { it.cause }.take(5).any {
                 it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
             }
             else -> !io.nisfeb.talon.util.isTransientNetworkError(e)
@@ -1991,6 +2035,21 @@ class OrreryRepo(
 
 /** The key's id is the part of the token before the dot; the ship answers it separately too. */
 
+/**
+ * Whether the ship's list shows an answer sent as [sent]: the action gone
+ * from it, or at that open status or past it (proposed, then approved,
+ * then claimed). An answer that closes it shows only once it is gone.
+ * "No longer a proposal" was the rule, so Mark done or Remove on an
+ * approved action came back while the ship still listed it approved.
+ */
+internal fun answerShown(there: OrreryAction?, sent: String): Boolean {
+    if (there == null) return true
+    val at = OPEN_ORDER.indexOf(sent)
+    return at >= 0 && OPEN_ORDER.indexOf(there.status) >= at
+}
+
+private val OPEN_ORDER = listOf("proposed", "approved", "claimed")
+
 /** The open list after an answer: approved stays, to be done; anything else has left it. */
 internal fun settledActions(list: List<OrreryAction>, id: String, status: String): List<OrreryAction> =
     if (status == "approved" || status == "claimed") list.map { if (it.id == id) it.copy(status = status) else it }
@@ -2024,6 +2083,22 @@ suspend fun settleOrreryGate(
             if (repo.availability.first { it != OrreryAvailability.UNKNOWN } == OrreryAvailability.PRESENT) repo.ensureEnabled()
     }
 }
+
+/** A failed check for orrery, said plainly: no status codes and no error pages. */
+internal fun probeProblemLine(e: Throwable): String = when (e) {
+    is OrreryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
+        ?.let { "Orrery on your ship could not answer: $it." } ?: "Orrery on your ship could not answer."
+    is OrreryError.Garbled -> "Your ship's answer about Orrery could not be read."
+    else -> "Your ship did not answer."
+} + " Talon asks again by itself."
+
+/** The first pause before a failed check for orrery is tried again, and the most it grows to. */
+internal const val PROBE_RETRY_FIRST_MS = 30_000L
+internal const val PROBE_RETRY_MAX_MS = 15 * 60_000L
+
+/** The pause before the [failures]th retry of a failed check: [first], doubling, to [PROBE_RETRY_MAX_MS]. */
+internal fun probeRetryMs(failures: Int, first: Long = PROBE_RETRY_FIRST_MS): Long =
+    (first shl (failures - 1).coerceIn(0, 10)).coerceAtMost(PROBE_RETRY_MAX_MS)
 
 /** The beacon's first pause after a stream ends, and the floor it goes back to. */
 internal const val BEACON_FIRST_PAUSE_MS = 3_000L

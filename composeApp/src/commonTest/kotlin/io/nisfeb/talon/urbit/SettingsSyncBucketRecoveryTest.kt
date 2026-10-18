@@ -25,6 +25,16 @@ import kotlin.test.assertTrue
  * Regression risk if this flips: silent-don't-sync (false negative,
  * the rc9 bug returns) or stale-overwrites (false positive, this
  * device clobbers another device's good state).
+ *
+ * Changed 2026-10-17 (review M16): "empty or absent synced data never
+ * wins over local data, and a deliberate deletion syncs until the user
+ * adds something back" (sneagan). An empty bucket cannot tell a list
+ * never filled from one a deletion emptied, so a device that missed
+ * the deletion seeded it back. A deletion that empties a list now
+ * leaves [SettingsSyncImpl.ENTRY_EMPTIED] in it: such a bucket is not
+ * empty, so it is applied (as no rows) and never seeded. A bare `{}`
+ * still seeds: an rc10 device's deletion leaves exactly that, and so
+ * may whatever else empties a bucket, so the rc9 contract stands there.
  */
 class SettingsSyncBucketRecoveryTest {
 
@@ -33,6 +43,12 @@ class SettingsSyncBucketRecoveryTest {
         assertTrue(SettingsSyncImpl.bucketIsMissingOrEmpty(null))
         // {} — bucket exists but has no entries. Treat as missing.
         assertTrue(SettingsSyncImpl.bucketIsMissingOrEmpty(buildJsonObject {}))
+    }
+
+    @Test
+    fun `a bucket a deletion emptied is the ship's word, not a gap to seed`() {
+        val emptied = buildJsonObject { put(SettingsSyncImpl.ENTRY_EMPTIED, """{"emptied":1784592399000}""") }
+        assertFalse(SettingsSyncImpl.bucketIsMissingOrEmpty(emptied))
     }
 
     @Test

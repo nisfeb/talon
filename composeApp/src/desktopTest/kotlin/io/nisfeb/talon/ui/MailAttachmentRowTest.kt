@@ -38,12 +38,16 @@ class MailAttachmentRowTest {
     /** Whether this ship holds the bytes yet; asking the network makes it so. */
     @Volatile private var held = true
     @Volatile private var calendarTakes = true
+    /** Our own ship is down: the web server in front of it answers with its 502 page. */
+    @Volatile private var down = false
     private val bytes = "BEGIN:VCALENDAR\nEND:VCALENDAR".encodeToByteArray()
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath
         val json = { body: String -> respond(body, HttpStatusCode.OK, headersOf("Content-Type", "application/json")) }
         when {
+            down && ("/api/blob/" in path || path.endsWith("/api/fetch-blob")) ->
+                respond(io.nisfeb.talon.mail.NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
             "/api/blob/" in path ->
                 if (held) respond(bytes, HttpStatusCode.OK, headersOf("Content-Disposition", "attachment; filename=\"got.bin\""))
                 else respond("", HttpStatusCode.Conflict)
@@ -151,6 +155,19 @@ class MailAttachmentRowTest {
             onNodeWithText("Add to calendar").performClick()
             onNodeWithText("Personal").performClick()
             until("Personal did not take the event.")
+            assertTrue(shows("Try again"))
+        }
+    }
+
+    // Our own ship down was read as "no copy here": the network was asked,
+    // waited on for half a minute, and the sender was blamed.
+    @Test
+    fun `a file asked of our own ship while it is down says so, not that the sender is offline`() {
+        down = true
+        row(file) {
+            onNodeWithText("Get").performClick()
+            until("isn't answering")
+            assertTrue(!shows("Whoever holds it") && "asked the network" !in did, "the network was not asked: $did")
             assertTrue(shows("Try again"))
         }
     }

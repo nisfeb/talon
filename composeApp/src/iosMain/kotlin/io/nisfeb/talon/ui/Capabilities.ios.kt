@@ -2,12 +2,13 @@ package io.nisfeb.talon.ui
 
 import platform.StoreKit.SKPaymentQueue
 import platform.UIKit.UIDevice
+import platform.UIKit.UIUserInterfaceIdiomPhone
 
 // iOS capability matrix. The semantic-search embedder (isOnDeviceAiSupported,
 // MediaPipe / DJL-ONNX) has no iOS backend and gates off, but local triage
 // (isLocalTriageSupported) runs on Apple's system model and the cloud Assistant
 // is pure HTTP, so both are on. Loops run while the app is up
-// (isLoopsSupported); true background scheduling (digest) would need
+// (isLoopsSupported); running them with the app closed would need
 // BGTaskScheduler wiring that doesn't exist yet, so that gates off. Touch
 // affordances (swipe-nav, tap-to-open-menu) are on.
 
@@ -45,13 +46,13 @@ actual val isWindowFullScreenSupported: Boolean = false
 // a call already in progress.
 actual val isBackgroundCallRingSupported: Boolean = true
 
-// Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
 // iOS: port pending (a ReplayKit broadcast extension).
 actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
+// Supplied by MainViewController's edge strip -> IosBackDispatcher.
 actual val isEdgeSwipeBackSupported: Boolean = true
 
 // Apple Color Emoji is the system default; the span was a no-op
@@ -82,5 +83,10 @@ actual val isAppIconBadgeSupported: Boolean = true
 /** Brave for iOS has had Leo's Bring your own model form since 1.88. */
 actual val isBraveLeoSupported: Boolean = true
 
-/** A tel: link offers the call. */
-actual val isPhoneDialSupported: Boolean = true
+/**
+ * A tel: link offers the call on an iPhone. An iPad has no dialer for it
+ * to open (one paired with an iPhone could hand the call over, but the
+ * tool would say a dialer opened), so only the phone idiom counts.
+ */
+actual val isPhoneDialSupported: Boolean =
+    UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone

@@ -55,8 +55,10 @@ object Notifications {
      */
     const val CHANNEL_CALL_ONGOING = "call_ongoing"
 
-    const val EXTRA_ANSWER_FROM = "answer_from"
-    const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
+    const val EXTRA_ANSWER_FROM = io.nisfeb.talon.call.RingIntents.ANSWER_FROM
+    const val EXTRA_ANSWER_CALL_ID = io.nisfeb.talon.call.RingIntents.ANSWER_CALL_ID
+    /** A ring to show, from the full-screen intent or a tap on the body: it never answers. */
+    const val EXTRA_RINGING_FROM = io.nisfeb.talon.call.RingIntents.RINGING_FROM
     /** A ship to call back, from a missed-call notification. */
     const val EXTRA_CALL_BACK = "call_back"
 
@@ -287,7 +289,9 @@ object Notifications {
      * Answering opens the app carrying EXTRA_ANSWER_FROM, and TalonApp
      * accepts as soon as the controller is up and ringing for that
      * peer — the media negotiation lives in CallController and needs a
-     * running app and a live channel, so it can't happen here. It has
+     * running app and a live channel, so it can't happen here. Only the
+     * Answer action carries it: the full-screen intent and a tap on the
+     * body carry EXTRA_RINGING_FROM and show the ring (RingIntents). It has
      * to be handled on arrival, though: without that the action just
      * showed the in-app ring and the user had to press Answer twice.
      * Declining works from here alone, being one poke and no media.
@@ -321,15 +325,19 @@ object Notifications {
                         .lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
                 )
 
-        val answerIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_ANSWER_FROM, from)
-            putExtra(EXTRA_ANSWER_CALL_ID, callId)
-        }
-        val answer = PendingIntent.getActivity(
-            context, callId.hashCode(), answerIntent,
+        fun open(tap: io.nisfeb.talon.call.RingIntents.Tap) = PendingIntent.getActivity(
+            context, io.nisfeb.talon.call.RingIntents.requestCode(tap, callId),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                io.nisfeb.talon.call.RingIntents.extras(tap, from, callId).forEach { (k, v) -> putExtra(k, v) }
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val answer = open(io.nisfeb.talon.call.RingIntents.Tap.Answer)
+        // Android fires the full-screen intent by itself over a locked or
+        // dark screen. As the Answer, it answered a phone in a pocket and
+        // went live with the mic on; a tap on the body answered too.
+        val show = open(io.nisfeb.talon.call.RingIntents.Tap.Show)
         val decline = PendingIntent.getBroadcast(
             context, callId.hashCode() + 1,
             Intent(context, CallActionReceiver::class.java).apply {
@@ -354,14 +362,14 @@ object Notifications {
             // running app. A caller who gives up while the phone sleeps
             // would leave "Incoming call" on screen forever.
             .setTimeoutAfter(io.nisfeb.talon.call.CallController.DEFAULT_RING_TIMEOUT_MS)
-            .setContentIntent(answer)
+            .setContentIntent(show)
 
         // The full-screen intent stays on in BOTH branches: Android 12+
         // refuses a CallStyle notification without one — build() throws
         // IllegalArgumentException — and the system only launches an
         // FSI over a locked or dark screen, never over the app the
         // user is currently looking at.
-        builder.setFullScreenIntent(answer, true)
+        builder.setFullScreenIntent(show, true)
         if (inAppRingExpected) builder.setSilent(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -645,9 +653,20 @@ object Notifications {
      * re-running a loop replaces its own row while distinct loops keep
      * separate rows even if they share a name (Android dedupes per
      * (tag, id)). Tap just opens the app — there's no per-loop deep link yet.
+     *
+     * Recorded in the Activity feed too, as on desktop: a loop runs
+     * headless from its alarm, and this is the one place every result
+     * passes on Android.
      */
-    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) =
+    fun showLoop(context: Context, loopId: Long, title: String, body: String, whenMs: Long) {
         post(context, "loop:$loopId", CHANNEL_LOOPS, title, body, alarm = false, whenMs = whenMs)
+        runCatching {
+            (context.applicationContext as? TalonApplication)?.notices()?.record(
+                "loop:$loopId", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_ASSISTANT,
+                "loop-result", title, body, "loop:$loopId",
+            )
+        }
+    }
 
     fun clear(context: Context, whom: String) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)

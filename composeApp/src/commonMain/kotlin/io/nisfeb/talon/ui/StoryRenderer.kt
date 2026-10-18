@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import io.nisfeb.talon.urbit.MENTION_TAG
@@ -689,7 +690,7 @@ private fun InlineCitation(cite: StoryPart.Citation) {
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
             )
             if (body.isNotBlank()) {
-                Text(body, style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                Text(body, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Text(
@@ -859,6 +860,8 @@ private fun CalWidgetBlock(
     title: String,
 ) {
     val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(startEpochMs, endEpochMs) }
+    // Why an add did not go, from the calendar: "Not added" alone left the owner guessing.
+    var why by remember { mutableStateOf<String?>(null) }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -882,6 +885,7 @@ private fun CalWidgetBlock(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             val calendarLauncher = LocalCalendarLauncher.current
@@ -920,10 +924,14 @@ private fun CalWidgetBlock(
                             onClick = {
                                 menuOpen = false
                                 added = "Adding…"
+                                why = null
                                 addScope.launch {
-                                    val ok = shipCalendar!!.addShared(c.id, title, startEpochMs, endEpochMs)
+                                    val cal = shipCalendar!!
+                                    val ok = cal.addShared(c.id, title, startEpochMs, endEpochMs)
                                     addedDone = ok
                                     added = if (ok) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                    // The calendar's own refusal, said here and so not again on the calendar.
+                                    if (!ok) why = cal.unheard.value?.also { cal.heard() } ?: cal.failedLine("The calendar did not take it.")
                                 }
                             },
                         )

@@ -281,6 +281,7 @@ class MailRepo(
         seenUnread = null
         pageCache.value = emptyMap()
         threadCache.value = emptyMap()
+        pollStopped = false
         if (poll) startPolling()
     }
 
@@ -288,6 +289,7 @@ class MailRepo(
         askAgain?.cancel()
         poller?.cancel()
         poller = null
+        pollStopped = false
         api = null
         shipUrl = null
         _availability.value = MailAvailability.UNKNOWN
@@ -305,7 +307,35 @@ class MailRepo(
     fun setForeground(on: Boolean) {
         val was = foreground
         foreground = on
-        if (on && !was) scope.launch { refresh() }
+        if (on && !was) scope.launch { refreshForNews() }
+    }
+
+    /**
+     * [refresh], and the inbox as well where another listing is open: what
+     * the poll and coming back read. New mail is announced from the inbox
+     * alone, and the Mail section's pip is read off its listing, so after a
+     * search or a folder switch no notice came and the pip stood still.
+     * Not every refresh: one after each write would read the ship twice.
+     */
+    private suspend fun refreshForNews() {
+        refresh()
+        if (pageKey() != INBOX) readInboxAside()
+    }
+
+    /** The inbox's first page, read beside the listing on screen and left off it. */
+    private suspend fun readInboxAside() = gate.withLock {
+        val a = api ?: return@withLock
+        val have = pageCache.value[INBOX]?.threads?.size ?: 0
+        val p = try {
+            a.inbox(view = MailView.INBOX, limit = have.coerceIn(AuspexApi.DEFAULT_PAGE, MAX_PAGE))
+        } catch (e: AuspexError) {
+            // The listing on screen has said whatever is wrong with the ship.
+            Log.w(TAG, "inbox not read beside the open listing", e)
+            return@withLock
+        }
+        pageCache.update { it + (INBOX to p) }
+        INBOX.stored?.let { store(it, p) }
+        announceInbox(p)
     }
 
 
@@ -332,6 +362,9 @@ class MailRepo(
         val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE), spin = asked || _page.value == null)
             ?: return@withLock
         _availability.value = MailAvailability.PRESENT
+        // A 403 stopped the poll; signed in again, this read is the first
+        // to go through, and nothing else would start it again.
+        if (pollStopped) { pollStopped = false; startPolling(readFirst = false) }
         if (ourShip == null) {
             ourShip = try {
                 a.whoami()
@@ -389,7 +422,11 @@ class MailRepo(
      * session only seeds the baseline.
      */
     private fun announce(p: InboxPage) {
-        if (viewAndLabel().first != MailView.INBOX || _query.value.isNotEmpty()) return
+        if (pageKey() == INBOX) announceInbox(p)
+    }
+
+    /** [announce] of a page known to be the inbox's. */
+    private fun announceInbox(p: InboxPage) {
         val before = seenUnread
         if (before == null) {
             seenUnread = seedMailBaseline(p.threads)
@@ -420,9 +457,9 @@ class MailRepo(
             e.isSignedOut -> {
                 _availability.value = MailAvailability.SIGNED_OUT
                 _error.value = "Signed out of the ship."
-                // Nothing retries its way back from this one.
-                poller?.cancel()
-                poller = null
+                // Nothing retries its way back from this one; the next read
+                // that goes through, once signed in again, starts it.
+                poller?.let { it.cancel(); poller = null; pollStopped = true }
             }
             probeAbsentApp && e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND -> {
                 val url = shipUrl
@@ -508,7 +545,12 @@ class MailRepo(
             io.nisfeb.talon.urbit.LatticePublish.publish(http, url, ship, slug, gemtext)
         }.onFailure {
             Log.w(TAG, "lattice publish failed", it)
-            _problem.value = "Could not file to Lattice: ${it.message}"
+            // In words: it showed the save's own text, a transport's included.
+            _problem.value = "Could not file to Lattice: " + when {
+                io.nisfeb.talon.util.isTransientNetworkError(it) || Regex("returned 50[234]$").containsMatchIn(it.message.orEmpty()) ->
+                    "your ship did not answer. Try again when it's back."
+                else -> "your ship did not keep it. Try again shortly."
+            }
         }.getOrNull()
     }.await()
 
@@ -569,14 +611,29 @@ class MailRepo(
         threadCache.update { it - threadId }
     }) { it.deleteThread(threadId); forget(threadId) }
 
-    /** Ask the network for an attachment we do not hold. */
+    /** Ask the network for an attachment we do not hold. Throws [AuspexError.Unreachable], as [blob] does. */
     suspend fun fetchBlob(hash: String, from: String) {
-        call { it.fetchBlob(hash, from) }
+        callOrDown { it.fetchBlob(hash, from) }
     }
 
-    /** An attachment's bytes, or null while this ship holds no copy. */
-    suspend fun blob(hash: String, name: String, mime: String): Blob? {
-        return call { it.blob(hash, name, mime) }
+    /**
+     * An attachment's bytes, or null while this ship holds no copy. Our own
+     * ship not answering is thrown, not null: read as "not here", the
+     * network was asked and waited on, and the row said whoever holds it
+     * may be offline, when it was the owner's ship that was.
+     */
+    suspend fun blob(hash: String, name: String, mime: String): Blob? = callOrDown { it.blob(hash, name, mime) }
+
+    /** [call], with no answer from our own ship thrown rather than null. */
+    private suspend fun <T> callOrDown(block: suspend (AuspexApi) -> T): T? {
+        val a = api ?: return null
+        return try {
+            block(a)
+        } catch (e: AuspexError) {
+            onFailure(e)
+            if (e is AuspexError.Unreachable) throw e
+            null
+        }
     }
 
     /**
@@ -658,6 +715,9 @@ class MailRepo(
 
     private val _problem = MutableStateFlow<String?>(null)
 
+    /** How a message is named in a line about it: its subject, quoted, or "A message". */
+    private fun named(subject: String) = subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
+
     /**
      * Something asked of the ship that did not happen: an archive, label
      * or delete it refused, a draft that did not land, a thread not
@@ -716,8 +776,7 @@ class MailRepo(
             null
         }
         return problem?.also {
-            val what = draft.subject.ifBlank { "A message" }.let { s -> if (s == "A message") s else "\"$s\"" }
-            val line = "$what was not sent: $it" + if (kept) " It is in Drafts." else ""
+            val line = "${named(draft.subject)} was not sent: $it" + if (kept) " It is in Drafts." else ""
             _unsent.update { list -> list + Unsent(line, draft, files) }
         }
     }
@@ -879,7 +938,13 @@ class MailRepo(
      */
     fun markManyRead(ids: Collection<String>, read: Boolean): Job =
         many(ids, if (read) "marked read" else "marked unread") { id ->
-            val t = threadCache.value[id] ?: loadThread(id) ?: return@many null
+            // A reply since the thread was read leaves the copy here with
+            // nothing unread while its row says unread, and the mark did
+            // nothing: that copy is read again.
+            val cached = threadCache.value[id]
+            val stale = read && cached != null && cached.messages.none { !it.read } &&
+                pageCache.value.values.any { p -> p.threads.any { it.id == id && it.unread } }
+            val t = cached?.takeUnless { stale } ?: loadThread(id) ?: return@many null
             val msgs = if (read) t.messages.filter { !it.read }.map { it.id }
             else listOfNotNull(t.messages.maxByOrNull { it.sent }?.id)
             if (msgs.isEmpty()) return@many null
@@ -937,17 +1002,25 @@ class MailRepo(
         call { _rules.value = it.rules() }
     }
 
-    suspend fun saveRule(r: Rule) = mutate(::refreshRules) { it.saveRule(r) }
+    /**
+     * [block] on this repo's scope, awaited. A filter or list saved from the
+     * organise sheet ran on the sheet's scope, and closing the sheet while a
+     * busy ship held the write cancelled it. A failure is caught inside and
+     * thrown here: an async that fails takes a scope with a plain Job with it.
+     */
+    private suspend fun <T> carry(block: suspend () -> T): T = scope.async { runSuspendCatching { block() } }.await().getOrThrow()
 
-    suspend fun deleteRule(id: String) = mutate(::refreshRules) { it.deleteRule(id) }
+    suspend fun saveRule(r: Rule) = carry { mutate(::refreshRules) { it.saveRule(r) } }
+
+    suspend fun deleteRule(id: String) = carry { mutate(::refreshRules) { it.deleteRule(id) } }
 
     suspend fun refreshLists() {
         call { _lists.value = it.lists() }
     }
 
-    suspend fun saveList(l: MailingList) = mutate(::refreshLists) { it.saveList(l) }
+    suspend fun saveList(l: MailingList) = carry { mutate(::refreshLists) { it.saveList(l) } }
 
-    suspend fun deleteList(name: String) = mutate(::refreshLists) { it.deleteList(name) }
+    suspend fun deleteList(name: String) = carry { mutate(::refreshLists) { it.deleteList(name) } }
 
     // ---- drafts --------------------------------------------------------
 
@@ -967,12 +1040,16 @@ class MailRepo(
      * its way out of composition, whose own scope dies with it. The
      * repo's scope outlives every screen, so the save still lands.
      */
-    fun keepDraft(d: Draft) {
+    fun keepDraft(d: Draft, files: List<Outgoing> = emptyList()) {
         scope.launch {
-            // A save that does not land is said so: silence here is a
-            // message the owner believes is kept and is not.
+            // A save that does not land is kept with what did not go, to
+            // open again: said to be "still here", it was in neither Drafts
+            // nor anywhere the list could open it, and was lost.
             val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
-            if (!ok) _problem.value = "The draft did not reach the ship; what was written is still here until Talon closes."
+            if (!ok) {
+                val line = "${named(d.subject)} was not saved: the draft did not reach the ship. It is kept here until Talon closes."
+                _unsent.update { list -> list.filterNot { it.draft.id == d.id } + Unsent(line, d, files) }
+            }
         }
     }
 
@@ -994,20 +1071,28 @@ class MailRepo(
      * fans out to nobody, which is why a poll is the right shape here and
      * was the wrong shape for party-line presence.
      */
-    private fun startPolling() {
+    private fun startPolling(readFirst: Boolean = true) {
         poller?.cancel()
         poller = scope.launch {
-            restore(pageKey())
-            refresh()
+            if (readFirst) {
+                restore(pageKey())
+                refresh()
+            }
             while (isActive) {
                 delay(jittered(pollIntervalMs))
-                if (foreground && _availability.value != MailAvailability.SIGNED_OUT) refresh()
+                if (foreground && _availability.value != MailAvailability.SIGNED_OUT) refreshForNews()
             }
         }
     }
 
+    /** A signed-out answer stopped the poll; the next read that goes through starts it again. */
+    @kotlin.concurrent.Volatile private var pollStopped = false
+
     companion object {
         private const val TAG = "MailRepo"
+
+        /** The inbox as it arrives: no label, no search. */
+        private val INBOX = PageKey(MailView.INBOX, null, "")
 
         /** Threads kept for a quick return; the oldest read goes first. */
         private const val THREAD_CACHE = 40

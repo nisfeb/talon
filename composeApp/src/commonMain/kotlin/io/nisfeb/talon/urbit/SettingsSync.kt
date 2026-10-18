@@ -43,6 +43,14 @@ interface SettingsSync : io.nisfeb.talon.ai.LoopWriteCoordinator {
 
     /** A quick reconnect's: watch the desk again, without reading it whole. */
     suspend fun resubscribe() = bootstrap()
+
+    /**
+     * Send the writes kept for the ship (made before the channel was
+     * attached, or while the ship did not answer), oldest first, stopping
+     * at the first it still does not take. A resumed channel and a drain
+     * of the chat queue call this; [bootstrap] and [resubscribe] do too.
+     */
+    suspend fun flushPending() {}
     suspend fun applySettingsEvent(payload: JsonObject)
 
     /**

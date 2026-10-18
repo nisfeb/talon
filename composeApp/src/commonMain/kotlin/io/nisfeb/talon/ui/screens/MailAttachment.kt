@@ -159,7 +159,7 @@ fun MailAttachmentRow(
                                     invite = when {
                                         bytes == null -> Invite.Failed("The invite could not be fetched, so nothing was added.")
                                         shipCalendar.importIcs(c.id, bytes.decodeToString()) -> Invite.Added(to)
-                                        else -> Invite.Failed("$to did not take the event.")
+                                        else -> Invite.Failed(shipCalendar.failedLine("$to did not take the event."))
                                     }
                                 }
                             },
@@ -189,10 +189,10 @@ private sealed interface Invite {
     }
 }
 
-/** Bytes a picture may cost without being asked for. Bounded by the
- *  ship's own blob cap: anything bigger cannot come from this ship
- *  anyway, so the sender-claimed size is never what lets a large
- *  fetch through (AuspexApi refuses over-cap blobs on read). */
+/** Bytes a picture may cost without being asked for, whatever the
+ *  sender claims; the measured bytes decide whether it is drawn.
+ *  ponytail: kept at the old 256 KiB ship cap, below auspex 16's 16 MiB;
+ *  whether an unasked fetch should happen at all is the owner's call. */
 private const val IMAGE_AUTO_MAX = 262_144L
 
 /**
@@ -206,16 +206,21 @@ private suspend fun pull(
     from: String,
     say: (String) -> Unit,
 ): AttachState {
-    val held = fetching { repo.blob(a.hash, a.name, a.mime) }
-    if (held != null) return AttachState.Held(held.bytes, held.name)
+    try {
+        val held = fetching { repo.blob(a.hash, a.name, a.mime) }
+        if (held != null) return AttachState.Held(held.bytes, held.name)
 
-    say("Asking the network")
-    repo.fetchBlob(a.hash, from)
-    repeat(POLLS) {
-        delay(POLL_MS)
-        say("Waiting for it (${it + 1} of $POLLS)")
-        val now = fetching { repo.blob(a.hash, a.name, a.mime) }
-        if (now != null) return AttachState.Held(now.bytes, now.name)
+        say("Asking the network")
+        repo.fetchBlob(a.hash, from)
+        repeat(POLLS) {
+            delay(POLL_MS)
+            say("Waiting for it (${it + 1} of $POLLS)")
+            val now = fetching { repo.blob(a.hash, a.name, a.mime) }
+            if (now != null) return AttachState.Held(now.bytes, now.name)
+        }
+    } catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
+        // Our own ship, not the sender's: said as that, not waited out.
+        return AttachState.Failed(e.said())
     }
     return AttachState.Failed(
         "No copy came back. Whoever holds it may be offline; it can be asked for again.",
@@ -223,11 +228,14 @@ private suspend fun pull(
 }
 
 /** One blob read where null means "not here" — never "the view went
- *  away", which a blanket runCatching would swallow mid-poll. */
+ *  away", which a blanket runCatching would swallow mid-poll, nor our
+ *  own ship not answering, which [pull] says. */
 private suspend fun fetching(block: suspend () -> Blob?): Blob? = try {
     block()
 } catch (c: CancellationException) {
     throw c
+} catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
+    throw e
 } catch (e: Exception) {
     null
 }

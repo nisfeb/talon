@@ -45,6 +45,8 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun followedThreads(): FollowedThreadDao
     actual abstract fun orreryCache(): OrreryCacheDao
     actual abstract fun notices(): NoticeDao
+    actual abstract fun settingsOutbox(): SettingsOutboxDao
+    actual abstract fun marks(): MarkDao
 }
 
 /**
@@ -71,7 +73,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45,
             MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50,
             MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55,
-            MIGRATION_55_56,
+            MIGRATION_55_56, MIGRATION_56_57,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -490,6 +492,13 @@ private val MIGRATION_54_55 = object : Migration(54, 55) {
 private val MIGRATION_55_56 = object : Migration(55, 56) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(NOTICE_SQL)
+    }
+}
+
+/** The settings outbox and the marks. Shared statements. */
+private val MIGRATION_56_57 = object : Migration(56, 57) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        SYNC_STATE_SQL.forEach { db.execSQL(it) }
     }
 }
 

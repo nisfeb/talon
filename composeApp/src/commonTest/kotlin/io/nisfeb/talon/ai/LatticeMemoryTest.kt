@@ -42,4 +42,15 @@ class LatticeMemoryTest {
         assertFalse(tools.getValue("lattice-save").write)
         assertTrue(tools.getValue("lattice-delete").write)
     }
+
+    // An empty registry (a Lattice still arriving) was kept for the
+    // process: the memory never came, however often the Assistant opened.
+    @Test fun `no tools is not kept, so the next opening asks again`() = runTest {
+        val base = "https://empty.example"
+        LatticeMemory.keep(ship, base, emptyList())
+        assertEquals(null, LatticeMemory.cached(ship, base))
+        val tools = LatticeMemory.connect(ship, base)
+        LatticeMemory.keep(ship, base, tools)
+        assertEquals(tools, LatticeMemory.cached(ship, base))
+    }
 }

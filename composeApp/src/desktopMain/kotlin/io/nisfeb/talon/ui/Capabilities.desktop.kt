@@ -62,16 +62,17 @@ actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = true
 actual val isWindowFullScreenSupported: Boolean = true
 
-// A long-running process: the channel stays open, so rings land even
-// with the window unfocused or minimised.
-actual val isBackgroundCallRingSupported: Boolean = true
+// Off: closing the window quits Talon (Main.kt's onCloseRequest), so a
+// ring lands only while it is open, minimised or unfocused included.
+// Settings says so.
+actual val isBackgroundCallRingSupported: Boolean = false
 
-// No touch edge on desktop; the logo click opens the switcher.
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true
 actual val isScreenShareSupported: Boolean = true
 actual val isCameraSwitchSupported: Boolean = false
 
+// No touch edge on desktop; the logo click opens the switcher.
 actual val isEdgeSwipeBackSupported: Boolean = false
 
 // Desktop resolves a bundled emoji family; the span does the work.

@@ -36,6 +36,10 @@ object LatticeMemory {
     private var cached: List<Tool>? = null
     fun cached(http: HttpClient, shipBase: String): List<Tool>? = cached.takeIf { cacheKey == http to shipBase }
     fun keep(http: HttpClient, shipBase: String, tools: List<Tool>) {
+        // None is not kept: a ship whose Lattice was still arriving, or
+        // whose registry answered empty once, had no memory for the rest
+        // of the process. Asked again at the next opening instead.
+        if (tools.isEmpty()) return
         cacheKey = http to shipBase
         cached = tools
     }

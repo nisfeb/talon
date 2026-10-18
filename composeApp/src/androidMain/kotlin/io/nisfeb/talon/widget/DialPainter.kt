@@ -49,6 +49,8 @@ import kotlin.math.roundToInt
  * The colours and the bands come from the app's own dial rather than
  * from a second copy of the palette. Two dials that disagree about
  * what six in the evening looks like would be worse than one dial.
+ *
+ * Android-only: no desktop analog, as [ClockWidgetProvider].
  */
 object DialPainter {
 

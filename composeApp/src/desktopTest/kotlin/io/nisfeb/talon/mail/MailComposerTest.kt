@@ -50,12 +50,15 @@ class MailComposerTest {
         sendAnswer: Pair<HttpStatusCode, String>? = null,
         /** Thread 0vt, where a test has one. */
         thread: String? = null,
+        /** The ship is down for a draft: the web server in front of it answers with its 502. */
+        draftDown: Boolean = false,
     ): MailRepo {
         val http = HttpClient(
             MockEngine { req ->
                 seen += req
                 val path = req.url.encodedPath
                 val (status, body) = when {
+                    path.endsWith("/api/draft") && draftDown -> HttpStatusCode.BadGateway to NGINX_502
                     path.endsWith("/api/send") && sendAnswer != null -> sendAnswer
                     path.endsWith("/api/thread/0vt") && thread != null -> HttpStatusCode.OK to thread
                     path.endsWith("/api/drafts") -> HttpStatusCode.OK to draftsListed()
@@ -499,5 +502,47 @@ class MailComposerTest {
         onNodeWithText("Add recipient").performClick()
         waitForIdle()
         onNodeWithText("This signed message goes to people who have not seen it.").assertIsDisplayed()
+    }
+
+    // Closed with the ship down: said to be "still here until Talon
+    // closes", the draft was in neither Drafts nor the list, and was lost.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `closing with the ship down keeps what was written for the list to open`() = runComposeUiTest {
+        val showing = androidx.compose.runtime.mutableStateOf(true)
+        val r = repo(draftDown = true)
+        setContent {
+            TalonTheme(darkTheme = false) {
+                if (showing.value) MailComposer(repo = r, intent = MailIntent(), onSent = {}, onCancel = { showing.value = false })
+            }
+        }
+        onNodeWithText("Message").performTextInput("half a thought")
+        onNodeWithContentDescription("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { r.unsent.value.isNotEmpty() }
+        val kept = r.unsent.value.single()
+        assertEquals("half a thought", kept.draft.body)
+        assertTrue("was not saved" in kept.line, kept.line)
+    }
+
+    // A file too big to attach: the cap is the ship's, 16 MiB since
+    // auspex 16, and one that could not be stored says why in words.
+    @Test
+    fun `the mail cap is the ship's, and a file not stored says why in words`() {
+        assertEquals(16_777_216, AuspexApi.MAX_BLOB_BYTES, "auspex 16's own limit for one file")
+        val noStorage = io.nisfeb.talon.urbit.UploadFailed(
+            "The upload didn't go through: this ship has no image storage set up.", IllegalStateException("no memex token"),
+        )
+        assertEquals(
+            "big.mov was not stored. The upload didn't go through: this ship has no image storage set up. A ship stores files once storage is set up in Landscape.",
+            io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", noStorage),
+        )
+        val keys = io.nisfeb.talon.urbit.UploadFailed(
+            "The upload didn't go through: your ship's storage turned down its keys (see Storage in Landscape's settings).", IllegalStateException("S3 PUT failed: HTTP 403 <Error>"),
+        )
+        assertTrue("set up in Landscape" !in io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", keys), "the hint only where it is the reason")
+        val down = io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", IllegalStateException("not connected"))
+        assertTrue("slow or out of reach" in down && "not connected" !in down, down)
+        val raw = io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", IllegalStateException("upload: {\"error\":\"<html>\"}"))
+        assertTrue("<html>" !in raw && "{" !in raw, raw)
     }
 }

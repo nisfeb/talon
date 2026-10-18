@@ -214,7 +214,7 @@ class PartyLine(
 
     /**
      * The finished recording. Published rather than only returned so a
-     * recording finalized by [teardown] — leaving the line, or the app
+     * recording finalized by [endLine] — leaving the line, or the app
      * closing the screen — still reaches the UI instead of being lost
      * with the control that would have stopped it.
      */
@@ -334,6 +334,7 @@ class PartyLine(
         canSpeak = "present" in perms
         ops = "op" in perms
         _state.value = PartyState.Connecting(ticket.name)
+        val gen = ++lineGen
         val old = pump
         pump = scope.launch {
             // A quick leave→join must wait out the old pump: its
@@ -379,6 +380,10 @@ class PartyLine(
                 }
             } finally {
                 net.cancel()
+                // The line is over only here: a retry after a drop keeps
+                // the recording, the camera and the share, and never
+                // reads Idle, which ended the presence heartbeat.
+                endLine(current = gen == lineGen)
             }
         }
     }
@@ -422,7 +427,7 @@ class PartyLine(
             // exactly once. Tearing down here as well raced a quick
             // re-join — the old pump's delayed finally executed
             // against the NEW session's links.
-            if (p != null) p.cancel() else teardown()
+            if (p != null) p.cancel() else { closeSession(); endLine() }
         }
     }
 
@@ -703,7 +708,7 @@ class PartyLine(
             // Whole, though the pump was cancelled: under cancellation the
             // socket's close threw at once, so Galène never saw us go.
             // Every wait in it is bounded, so this cannot hold a leave.
-            withContext(NonCancellable) { teardown() }
+            withContext(NonCancellable) { closeSession() }
         }
     }
 
@@ -1391,7 +1396,14 @@ class PartyLine(
         }
     }
 
-    private suspend fun teardown() {
+    /**
+     * End one session on the SFU: the socket, the links, who was on it.
+     * A retry after a drop stands a new one up, so what belongs to the
+     * line, a recording, our camera, our share, outlives it ([endLine]).
+     * Nor is the state touched here: the join loop says Connecting, and
+     * [endLine] Idle.
+     */
+    private suspend fun closeSession() {
         levelPoll?.cancel()
         levelPoll = null
         upWatch?.cancel()
@@ -1423,11 +1435,28 @@ class PartyLine(
         upLink?.close()
         upLink = null
         _upLink.value = null
+        sharedOn = null
         downLinks.values.forEach { it.close() }
         downLinks.clear()
         roster.clear()
         adminMuted.clear()
-        // Video state is per-session: a fresh line starts camera-off,
+        upOffered = false
+        // The others' camera flags are per connection, and theirs are new.
+        videoOnBy.clear()
+        refreshVideoOn()
+        upState = MediaState.Idle
+    }
+
+    /** Bumped by each [join]: an old line ending does not say Idle over the next. */
+    @Volatile private var lineGen = 0
+
+    /**
+     * The line is over: what [closeSession] keeps for a retry goes too.
+     * Not [current] when a join has started since, which says Connecting
+     * already: an Idle between ended the new line's presence heartbeat.
+     */
+    private fun endLine(current: Boolean = true) {
+        // Video state is per line: a fresh line starts camera-off,
         // nobody pinned, no remembered camera flags — otherwise a rejoin
         // would auto-open the camera (via publishUp) with no user intent.
         // Finalize a running recording rather than dropping it. Leaving
@@ -1442,14 +1471,12 @@ class PartyLine(
         }
         recorder.reset()
         recSelfShip = null
-        upOffered = false
         _cameraOn.value = false
         stopSharingState()
         _focusedVideo.value = null
         videoOnBy.clear()
         _videoOn.value = emptySet()
-        upState = MediaState.Idle
-        if (_state.value !is PartyState.Failed) _state.value = PartyState.Idle
+        if (current && _state.value !is PartyState.Failed) _state.value = PartyState.Idle
     }
 
     companion object {

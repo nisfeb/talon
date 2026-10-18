@@ -84,6 +84,8 @@ fun NoteScreen(
     /** Revision the draft was opened against, for conflict detection. */
     var baseRevision by remember(noteId) { mutableStateOf(0L) }
     var conflict by remember(noteId) { mutableStateOf(false) }
+    /** Why the last save did not go, where it was not the note moving on. */
+    var saveProblem by remember(noteId) { mutableStateOf<String?>(null) }
     var confirmDelete by remember(noteId) { mutableStateOf(false) }
     /** False only while we're still waiting for the row to show up. */
     var settled by remember(noteId) { mutableStateOf(false) }
@@ -161,10 +163,17 @@ fun NoteScreen(
                     onClick = {
                         val body = draft
                         saving = true
+                        saveProblem = null
                         scope.launch {
-                            val ok = repo.notes.updateNote(flag, noteId, body, baseRevision)
+                            val said = repo.notes.updateNote(flag, noteId, body, baseRevision)
                             saving = false
-                            if (ok) editing = false else conflict = true
+                            // Each failure as what it is: it was always "changed
+                            // on the ship", a ship down and a reader's save too.
+                            when (said) {
+                                null -> editing = false
+                                io.nisfeb.talon.urbit.NotesRepo.NOTE_CHANGED -> conflict = true
+                                else -> saveProblem = said
+                            }
                         }
                     },
                 ) {
@@ -233,7 +242,7 @@ fun NoteScreen(
             }
         }
 
-        actionError?.let {
+        (saveProblem.takeIf { editing } ?: actionError)?.let {
             Text(
                 it,
                 color = MaterialTheme.colorScheme.error,
@@ -293,14 +302,7 @@ fun NoteScreen(
         AlertDialog(
             onDismissRequest = { conflict = false },
             title = { Text("Couldn't save") },
-            text = {
-                Text(
-                    "This note changed on the ship since you started editing, " +
-                        "so the save was rejected to avoid overwriting it. Your " +
-                        "text is still here — copy anything you need, then back " +
-                        "out and re-open to get the latest version.",
-                )
-            },
+            text = { Text(io.nisfeb.talon.urbit.NotesRepo.NOTE_CHANGED) },
             confirmButton = { TextButton(onClick = { conflict = false }) { Text("OK") } },
         )
     }
