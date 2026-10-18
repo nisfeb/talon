@@ -40,6 +40,9 @@ class AssistantSessionTest {
         s.pending = Pending(io.nisfeb.talon.ai.ToolCall("c1", "send_message", kotlinx.serialization.json.JsonObject(emptyMap())),
             io.nisfeb.talon.ai.Tool(io.nisfeb.talon.ai.ToolSpec("send_message", "", kotlinx.serialization.json.JsonObject(emptyMap())), true) { "" },
             kotlinx.coroutines.CompletableDeferred())
+        // Held as set, so what stop() clears is seen to be cleared.
+        assertSame(run, s.run)
+        assertTrue(s.allowAll && s.pending != null)
         s.stop()
         assertTrue(run.isCancelled)
         assertFalse(s.busy)
