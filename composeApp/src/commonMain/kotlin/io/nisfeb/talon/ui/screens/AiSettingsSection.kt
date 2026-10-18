@@ -435,7 +435,13 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         // would not open it is said, with the page's button below.
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> url?.let { runCatching { uri.openUri(it) }.onFailure { note = BROWSER_DID_NOT_OPEN to true } } }
+                .onSuccess { url ->
+                    url?.let {
+                        runCatching { uri.openUri(it) }
+                            .onSuccess { io.nisfeb.talon.util.Log.i("Armillary", "checkout: page handed to the browser") }
+                            .onFailure { e -> io.nisfeb.talon.util.Log.w("Armillary", "checkout: the browser refused the page: ${e.message}"); note = BROWSER_DID_NOT_OPEN to true }
+                    }
+                }
                 .onFailure { note = keyProblemLine(it) to true }
         }
     }

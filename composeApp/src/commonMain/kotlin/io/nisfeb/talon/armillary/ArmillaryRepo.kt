@@ -422,8 +422,14 @@ class ArmillaryRepo(
     } }.await()
 
     private suspend fun checkout(a: ArmillaryApi, rail: String, plan: String?, amountMicro: Long?): String? {
-        val first = a.checkout(rail, plan, amountMicro)
-        val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
+        // A trail for "Continue did nothing": each step, the page's host
+        // only, so a device log shows where a checkout stopped.
+        Log.i(TAG, "checkout: asking, rail=$rail plan=${plan ?: "-"} amount=${amountMicro ?: "-"}")
+        val first = runCatching { a.checkout(rail, plan, amountMicro) }
+            .onFailure { Log.w(TAG, "checkout: the ask failed: ${it.message}") }
+            .getOrThrow()
+        Log.i(TAG, "checkout: first answer ${trail(first)}")
+        val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce).also { Log.i(TAG, "checkout: followed to ${trail(it)}") } else first
         // Unknown where the account could not be read: taken as 0, any
         // balance read next settled the checkout as paid.
         val start = _account.value?.takeIf { it.hasView }?.balanceMicro
@@ -453,6 +459,13 @@ class ArmillaryRepo(
      * until the vendor's row arrives or [CHECKOUT_FOLLOW_MS] runs out.
      * A desk older than the phase route stays Pending.
      */
+    /** A checkout answer for the log: its kind, nonce and the page's host. */
+    private fun trail(c: CheckoutAnswer): String = when (c) {
+        is CheckoutAnswer.Url -> "page on ${c.url.substringAfter("://").substringBefore('/').ifBlank { "(none)" }}, nonce ${c.nonce}"
+        is CheckoutAnswer.Pending -> "pending, nonce ${c.nonce}"
+        is CheckoutAnswer.Refused -> "refused: ${c.reason}"
+    }
+
     private suspend fun followCheckout(a: ArmillaryApi, nonce: String): CheckoutAnswer {
         var waited = 0L
         while (waited < CHECKOUT_FOLLOW_MS) {
