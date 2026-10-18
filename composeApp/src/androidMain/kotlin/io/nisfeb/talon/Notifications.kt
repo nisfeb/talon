@@ -180,8 +180,11 @@ object Notifications {
             )
         }
         // Watchwords were taken out; their channel would stay in the
-        // phone's settings with nothing ever posted to it.
+        // phone's settings with nothing ever posted to it. The same for
+        // the first calls channel (now calls_v2) and the daily digest.
         mgr.deleteNotificationChannel("watchwords")
+        mgr.deleteNotificationChannel("calls")
+        mgr.deleteNotificationChannel("daily-digest")
         if (mgr.getNotificationChannel(CHANNEL_LOOPS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
