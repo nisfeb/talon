@@ -72,14 +72,15 @@ class DesktopEmbeddingIndexerTest {
 
     @Test
     fun `a pass embeds each message once and the next with nothing new embeds nothing`() = runBlocking<Unit> {
-        db.messages().upsertAll(listOf(msg("1", "lunch at noon"), msg("2", "dinner later"), msg("3", "ok")))
+        db.messages().upsertAll(listOf(msg("1", "lunch at noon"), msg("2", "dinner later"), msg("3", "ok"), msg("4", "boat")))
         pass()
-        assertEquals(2, model.calls.get(), "too short to embed is skipped")
+        assertEquals(3, model.calls.get(), "too short to embed is skipped, four letters is not")
         assertEquals(listOf("1"), found("lunch"))
-        assertEquals(IndexProgress(running = false, indexed = 2, total = 3), indexer.progress.value)
+        assertEquals(IndexProgress(running = false, indexed = 3, total = 4), indexer.progress.value)
         val before = model.calls.get()
         pass()
         assertEquals(before, model.calls.get())
+        assertEquals(IndexProgress(running = false, indexed = 3, total = 4), indexer.progress.value, "the short one is still to do")
     }
 
     @Test
@@ -93,6 +94,7 @@ class DesktopEmbeddingIndexerTest {
         pass()
         assertNull(db.embeddings().get("~bus", "2"))
         assertNotNull(db.embeddings().get("~bus", "1"))
+        assertEquals(IndexProgress(running = false, indexed = 1, total = 1), indexer.progress.value, "a deleted one is not to do")
     }
 
     @Test
