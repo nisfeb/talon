@@ -474,6 +474,26 @@ class TlonChatRepoStartupTest {
         assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
+    // The new channel's subscribe lost on the way: eyre never made it, so
+    // its stream is a 404 and the channel is given up. The pass's later
+    // watches (a notebook's here) made it on the ship after all, and it
+    // was left there, watched and read by no one (review A1-5).
+    @Test
+    fun `a channel given up while the pass reads is ended on the ship`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = NOTEBOOKS
+        // The notebook's watch after the stream has asked.
+        holdScry = { if (it == "notes/v0/notebooks") 500 else 0 }
+        val once = java.util.concurrent.atomic.AtomicBoolean(true)
+        loseWatch = { w -> if (w == "chat/v4" && once.getAndSet(false)) java.io.IOException("lost") else null }
+    }) { _ ->
+        until("a second channel") { channelsStreamed().size >= 2 }
+        val first = channelsStreamed().first()
+        assertTrue(RECIPES in ship.subscribed, "the pass watched the notebook on it")
+        until("the first ended on the ship") { first in ship.deleted }
+        assertEquals(1, ship.deleted.count { it == first }, "once")
+    }
+
     // Its watch goes out before the stream opens, so a channel given up
     // here is replaced at once, as the notebook's above.
     @Test

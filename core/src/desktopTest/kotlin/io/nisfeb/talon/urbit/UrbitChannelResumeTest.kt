@@ -3,6 +3,7 @@ package io.nisfeb.talon.urbit
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -67,6 +68,20 @@ class UrbitChannelResumeTest {
         assertTrue(ch.gone)
         assertFailsWith<ChannelGone> { ch.events().toList() }
         assertEquals(0, gets)
+    }
+
+    @Test
+    fun `a channel given up twice is ended on the ship once`() = runBlocking<Unit> {
+        val puts = CopyOnWriteArrayList<String>()
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") puts += String(req.body.toByteArray())
+            respond("", HttpStatusCode.NoContent)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        ch.delete()
+        ch.delete()
+        assertEquals(1, puts.size, "$puts")
+        assertTrue("\"action\":\"delete\"" in puts.single())
     }
 
     // Eyre ties a channel to the login that made it: anyone else gets 403,

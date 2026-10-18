@@ -908,6 +908,10 @@ class TlonChatRepo(
             // streamed, so the deep read launched above still finishes.
             if (ch.gone) {
                 lastBootstrapMs = 0L
+                // Ended on the ship too: a stream refused as unknown (its
+                // first PUT lost) leaves a channel the pass's later watches
+                // made, kept with them for twelve hours and read by no one.
+                ch.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
                 streaming?.cancelAndJoin()
                 // Gone by the stream itself, a 403 among them: said, so the
                 // next pass waits as the loop has it wait for that.

@@ -396,8 +396,13 @@ class UrbitChannel internal constructor(
         scope.launch { io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(timeoutMs) { delete() } } }
     }
 
+    /** The delete went to the ship, or is going. */
+    private val deleteSent = atomic(false)
+
     suspend fun delete() {
         retire()
+        // Once: a channel given up twice asked the ship twice.
+        if (!deleteSent.compareAndSet(false, true)) return
         val msg = buildJsonObject {
             put("id", nextRequestId())
             put("action", "delete")
