@@ -43,6 +43,17 @@ class DictationSpeechTest {
         assertEquals("", DictationSpeech.spoken("   "))
     }
 
+    // The confirmations read "2026-10-20" digit by digit.
+    @Test
+    fun `a tool's dates are said as dates`() {
+        assertEquals(
+            "Added \"Dentist\" on Tuesday, October 20 at 9 AM to the Home calendar.",
+            DictationSpeech.spoken("Added \"Dentist\" on 2026-10-20 at 09:00 to the Home calendar."),
+        )
+        assertEquals("Added task \"Buy milk\" due Saturday, October 17.", DictationSpeech.plain("Added task \"Buy milk\" due 2026-10-17."))
+        assertEquals("Version 2026-13-45 stays", DictationSpeech.plain("Version 2026-13-45 stays"), "not a date")
+    }
+
     // A flat minute cut a long paragraph off, and the mic opened over it.
     @Test
     fun `the time to say something grows with its length`() {

@@ -60,7 +60,7 @@ object DictationSpeech {
     fun sayBudgetMs(text: String): Long = 10_000L + (text.length * 100L / ArchieVoice.RATE).toLong()
 
     /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone, and times said as times. */
-    fun plain(md: String): String = times(md)
+    fun plain(md: String): String = times(dates(md))
         .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
         .replace(Regex("""(?i)\b(?:https?://|urb://|talon://|www\.)\S*[^\s.,;:!?)]"""), "")
         .replace(Regex("""(?m)^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+"""), "")
@@ -69,6 +69,18 @@ object DictationSpeech {
         .replace(Regex("""\s+"""), " ")
         .replace(Regex("""\s+([.,;:!?])"""), "$1")
         .trim()
+
+    private val ISO_DAY = Regex("""\b(\d{4})-(\d{2})-(\d{2})\b""")
+
+    /**
+     * A tool's dates as they are said: "2026-10-20" is "Tuesday, October
+     * 20". The confirmations read them digit by digit. Not a date, left.
+     */
+    fun dates(text: String): String = ISO_DAY.replace(text) { m ->
+        val d = runCatching { kotlinx.datetime.LocalDate.parse(m.value) }.getOrNull() ?: return@replace m.value
+        fun named(e: Enum<*>) = e.name.lowercase().replaceFirstChar { it.uppercase() }
+        "${named(d.dayOfWeek)}, ${named(d.month)} ${d.day}"
+    }
 
     // A twelve-hour time with its AM or PM, or a twenty-four-hour one
     // with two hour digits. A bare "3:16" may be a verse or a score.
