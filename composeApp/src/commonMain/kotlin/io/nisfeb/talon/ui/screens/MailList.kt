@@ -193,7 +193,7 @@ fun MailList(
                         scope.launch {
                             installer().fold(
                                 onSuccess = { installing = false; repo.refresh() },
-                                onFailure = { installing = false; installProblem = it.message },
+                                onFailure = { installing = false; installProblem = installFailedLine(it, "Grubbery") },
                             )
                         }
                     }),

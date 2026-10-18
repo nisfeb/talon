@@ -1491,13 +1491,13 @@ private fun EventRow(
 }
 
 /**
- * A calendar install that did not finish, in words: the installer's own
+ * An install of [what] that did not finish, in words: the installer's own
  * sentences, but never a transport's raw text ("Connection refused", a
- * trace), which reached the home page as it came.
+ * trace), which reached the home page and the mail list as it came.
  */
-internal fun installFailedLine(e: Throwable): String = when {
+internal fun installFailedLine(e: Throwable, what: String = "The calendar"): String = when {
     io.nisfeb.talon.util.isTransientNetworkError(e) -> "Your ship did not answer. Try again when it's back."
-    else -> io.nisfeb.talon.util.readableReason(e.message) ?: "The calendar did not install. Try again shortly."
+    else -> io.nisfeb.talon.util.readableReason(e.message) ?: "$what did not install. Try again shortly."
 }
 
 /** When a row is, said the way somebody glancing at it needs. */
