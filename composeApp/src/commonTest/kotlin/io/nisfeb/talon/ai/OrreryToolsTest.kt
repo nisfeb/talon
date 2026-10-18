@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.orrery.ItemAnswer
+import io.nisfeb.talon.orrery.ObserveAnswer
 import io.nisfeb.talon.orrery.OrreryApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -23,20 +25,50 @@ class OrreryToolsTest {
     /** What was asked of orrery, and what it was told to answer. */
     internal class Tap(
         val hits: List<Pair<String, String>> = emptyList(),
-        val answer: List<String> = listOf("1: written"),
+        val answer: ObserveAnswer = ObserveAnswer(emptyList(), listOf(ItemAnswer("1-a", ok = true, existing = false, error = null))),
     ) : OrreryTap {
         var wroteTo: String? = null
         var wrote: JsonObject? = null
         var observed: JsonObject? = null
+        /** Whether the last batch went as the owner's own word. */
+        var asOwner: Boolean? = null
+        var observeFails: Throwable? = null
         var read: String? = null
 
         override suspend fun find(q: String) = Result.success(hits)
         var stateText = """{"bodies":[]}"""
         override suspend fun state() = Result.success(stateText)
         override suspend fun body(id: String) = Result.success("""{"id":"$id","now":{"status":"away"}}""")
-        override suspend fun observe(batch: JsonObject): Result<List<String>> {
+        override suspend fun observe(batch: JsonObject, asOwner: Boolean): Result<ObserveAnswer> {
+            observeFails?.let { return Result.failure(it) }
             observed = batch
+            this.asOwner = asOwner
             return Result.success(answer)
+        }
+
+        /** Each read of a body gives the next of its views, and the last again once they run out. */
+        val views = mutableMapOf<String, MutableList<String>>()
+        var viewFails: Throwable? = null
+        override suspend fun view(id: String): Result<JsonObject> {
+            viewFails?.let { return Result.failure(it) }
+            val l = views[id] ?: return Result.failure(IllegalStateException("no such body"))
+            return Result.success(Json.parseToJsonElement(if (l.size > 1) l.removeAt(0) else l.single()) as JsonObject)
+        }
+        val retracted = mutableListOf<Pair<String, String>>()
+        override suspend fun retract(id: String, note: String): Result<Unit> {
+            retracted += id to note
+            return Result.success(Unit)
+        }
+        /** Each read of the open list gives the next of these, and the last again. */
+        val open = mutableListOf<List<io.nisfeb.talon.orrery.OrreryAction>>(emptyList())
+        override suspend fun actions(): Result<List<io.nisfeb.talon.orrery.OrreryAction>> =
+            Result.success(if (open.size > 1) open.removeAt(0) else open.single())
+        val answered = mutableListOf<String>()
+        var transitionFails: Throwable? = null
+        override suspend fun transition(id: String, status: String, note: String): Result<Unit> {
+            transitionFails?.let { return Result.failure(it) }
+            answered += "$id $status $note".trim()
+            return Result.success(Unit)
         }
         override suspend fun settings(name: String): Result<String> {
             read = name
@@ -113,7 +145,8 @@ class OrreryToolsTest {
         val t = Tap()
         val said = run(t, "orrery_correct", buildJsonObject { put("subject", "person/andrea"); put("attr", "location"); put("ref", "place/barcelona"); put("why", "she stayed home") })
         assertEquals("""person/andrea location {"ref":"place/barcelona"} she stayed home""", t.struck)
-        assertTrue("Struck" in said, said)
+        assertTrue("Orrery took the strike of person/andrea's location {\"ref\":\"place/barcelona\"}" in said, said)
+        assertTrue("could not be read back" in said, "no body to read is not confirmed: $said")
         run(t, "orrery_correct", buildJsonObject { put("subject", "person/sam"); put("attr", "status"); put("value", "on jury duty") })
         assertEquals("""person/sam status "on jury duty"""", t.struck)
         t.struck = null
@@ -210,7 +243,7 @@ class OrreryToolsTest {
 
     @Test
     fun `observations are a batch, and a refusal is read back`() = runTest {
-        val t = Tap(answer = listOf("1: written", "2: refused, unknown attr"))
+        val t = Tap(answer = ObserveAnswer(emptyList(), listOf(ItemAnswer("1-a", true, false, null), ItemAnswer(null, false, false, "unknown attr"))))
         val said = run(t, "orrery_observe", buildJsonObject {
             put("observations", """[{"subject":"person/alice","attr":"status","value":"away"}]""")
         })
@@ -316,9 +349,9 @@ class OrreryToolsTest {
     @Test
     fun `changing the ship asks first, looking does not`() {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
-        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct"), byWrite[true]?.toSet())
+        assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct", "orrery_set", "orrery_answer"), byWrite[true]?.toSet())
         assertEquals(
-            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences"),
+            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences", "orrery_actions"),
             byWrite[false]?.toSet(),
         )
     }
