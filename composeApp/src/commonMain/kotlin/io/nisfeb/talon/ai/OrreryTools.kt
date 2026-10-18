@@ -674,8 +674,9 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                 Change(subject, attr, JsonNull)
             }
             else -> {
+                if (wrong && list) return@Tool "Error: $attr holds a list, so there is no one old value to strike. Take the wrong one off with remove true and wrong true, then add the new one."
                 // Never strike what is about to be filed: the ship would refuse it.
-                if (wrong && !list && held != null && held != given) strike(held)?.let { return@Tool it }
+                if (wrong && held != null && held != given) strike(held)?.let { return@Tool it }
                 file(given!!)?.let { return@Tool it }
                 Change(subject, attr, given)
             }

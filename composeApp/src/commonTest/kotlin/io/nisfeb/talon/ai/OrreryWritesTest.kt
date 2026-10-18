@@ -181,6 +181,9 @@ class OrreryWritesTest {
         run(wrong, "orrery_set", set("attr" to "participants", "ref" to "person/andrea", "remove" to true, "wrong" to true))
         assertEquals("""$jax participants $andrea""", wrong.struck)
         assertTrue(wrong.retracted.isEmpty(), "a strike takes back every row itself")
+        wrong.struck = null
+        assertTrue("no one old value" in run(wrong, "orrery_set", set("attr" to "participants", "ref" to "person/rose", "wrong" to true)))
+        assertTrue(wrong.struck == null && wrong.observed == null, "nothing struck or added")
     }
 
     @Test
