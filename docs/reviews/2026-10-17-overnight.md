@@ -11,7 +11,8 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Step: fix. Triage done 01:25 EDT; six fixers launched in the worktrees below.
 - Pass 1 started: 00:10 EDT.
 - Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
-- Next firing: merge each fixer's branch as it reports (step 4), then the full suite and compiles.
+- Merged so far: shells (15 commits, 02:45).
+- Next firing: merge each fixer's branch as it reports (step 4), then the full suite and compiles. Integration notes for after the merges: bridge chatrepo's signed-out flow into `LoginLapses` in both shells (A5-18); add `dm:` and `invite:` keys to IosNotifier's postsLocally so desktop and iOS DM-request and invite clicks open them.
 
 ## Pass 1
 
@@ -37,6 +38,10 @@ Fix groups, one owner per file:
 - apps: A2-1, A2-2, A2-3, the action-match half of A2-4, A2-5, A2-6, A2-7, A2-8, A2-9, A2-10, A2-12, A2-14, A2-15, A2-16, A5-12, and the follow-ups on the key grace period and new events reaching Home.
 - shells: A3-1 and A5-1, A3-2, A3-3, A3-4, A3-5, A5-2, A5-3, A5-4, A5-6, A5-7, A5-8, A5-10, A5-11, A4-20, the screen half of A5-18, the A5 notification and sign-out Lows, and the follow-ups on the comet landing's tab and other sheets bypassing the app's link handler.
 - search-groups: A5-5, A5-15, A5-16, A5-17, A5-20, and the Low on orphan embeddings.
+
+## Found by the loop itself
+
+- The Talon desktop tests leave their temp directories in /tmp: about 6.7 GB of `/tmp/talon-*` (5,000 from the settings outbox tests alone) had filled the 16 GB tmpfs to 100% during pass 1, which broke a PIT run. Cleared at 02:50 (dirs older than 30 minutes). A pass-2 fix: the tests delete what they create.
 
 ## Decisions for sneagan
 
