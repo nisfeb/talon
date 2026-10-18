@@ -31,11 +31,24 @@ object DictationSpeech {
         return out.toString().ifEmpty { plain.take(MAX_CHARS).substringBeforeLast(' ') + "…" }.take(MAX_CHARS + 40)
     }
 
-    /** What waits, asked aloud, ending in what to say back. */
-    fun prompt(reply: String, sending: Boolean, to: String?, text: String?): String = when {
-        sending && to != null && text != null -> "Send to ${if (to == "You") "you" else to}: ${plain(text).trimEnd('.', '!', '?')}? Say send, or cancel."
-        sending -> "${spoken(reply)} Say send, or cancel."
-        else -> "${spoken(reply)} Say yes, or cancel."
+    /**
+     * What waits, asked aloud, ending in what to say back. One answer
+     * approves all of [waiting], so with more than one each is read out:
+     * only the first message was, and "send" sent the rest unheard.
+     */
+    fun prompt(reply: String, sending: Boolean, waiting: List<CardProposal>): String {
+        val end = if (sending) "Say send, or cancel." else "Say yes, or cancel."
+        fun said(p: CardProposal) = if (p.kind == "message" && p.to != null && p.text != null) {
+            "Send to ${if (p.to == "You") "you" else p.to}: ${plain(p.text).trimEnd('.', '!', '?')}"
+        } else {
+            plain(p.title).trimEnd('.', '!', '?')
+        }
+        val one = waiting.singleOrNull()
+        return when {
+            waiting.size > 1 -> "${waiting.size} things wait. " + waiting.joinToString(" ") { said(it) + "." } + " $end"
+            sending && one?.kind == "message" && one.to != null && one.text != null -> "${said(one)}? $end"
+            else -> "${spoken(reply)} $end"
+        }
     }
 
     /** [md] as words: markdown marks, link targets, list bullets and @p sigils gone, and times said as times. */

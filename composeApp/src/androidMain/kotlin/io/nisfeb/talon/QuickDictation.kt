@@ -701,8 +701,7 @@ class DictationService : Service() {
             QuickDictation.shown.first { !it }
             askInShade(ask, waiting.map { it.id })
         }
-        val message = ask.proposals.firstOrNull { it.kind == "message" }
-        val asked = DictationSpeech.prompt(reply, ask.sending, message?.to, message?.text)
+        val asked = DictationSpeech.prompt(reply, ask.sending, ask.proposals)
         // Asked aloud first, and only then listened for: not to hear itself.
         val hearing = launch(Dispatchers.IO) {
             say(asked)

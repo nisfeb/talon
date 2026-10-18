@@ -36,10 +36,30 @@ class DictationSpeechTest {
 
     @Test
     fun `what waits is asked aloud, ending in what to say back`() {
-        assertEquals("Send to you: Locked test? Say send, or cancel.", DictationSpeech.prompt("Text yourself.", sending = true, to = "You", text = "Locked test"))
-        assertEquals("Send to Andrea: **Running** late? Say send, or cancel.".replace("**", ""), DictationSpeech.prompt("r", true, "Andrea", "**Running** late"))
-        assertEquals("Add a todo to buy milk. Say yes, or cancel.", DictationSpeech.prompt("Add a todo to buy milk.", sending = false, to = null, text = null))
+        assertEquals("Send to you: Locked test? Say send, or cancel.", DictationSpeech.prompt("Text yourself.", sending = true, listOf(message("You", "Locked test"))))
+        assertEquals("Send to Andrea: Running late? Say send, or cancel.", DictationSpeech.prompt("r", true, listOf(message("Andrea", "**Running** late"))))
+        assertEquals("Add a todo to buy milk. Say yes, or cancel.", DictationSpeech.prompt("Add a todo to buy milk.", sending = false, listOf(CardProposal("task", "Buy milk"))))
+        assertEquals("Text her. Say send, or cancel.", DictationSpeech.prompt("Text her.", sending = true, listOf(CardProposal("message", "Text Andrea"))), "a message with no words to read")
         assertEquals("", DictationSpeech.spoken("   "))
+    }
+
+    private fun message(to: String, text: String) = CardProposal("message", "Text $to", to = to, text = text)
+
+    // One "send" approves all of them: the second message went unread.
+    @Test
+    fun `every waiting proposal is read before one answer approves them all`() {
+        assertEquals(
+            "2 things wait. Send to Andrea: Running late. Send to Nec: On my way. Say send, or cancel.",
+            DictationSpeech.prompt("Two texts.", sending = true, listOf(message("Andrea", "Running late."), message("Nec", "On my way"))),
+        )
+        assertEquals(
+            "2 things wait. Send to you: Milk. Add task: buy eggs. Say send, or cancel.",
+            DictationSpeech.prompt("r", sending = true, listOf(message("You", "Milk"), CardProposal("task", "Add task: buy **eggs**."))),
+        )
+        assertEquals(
+            "2 things wait. Buy milk. Call the vet. Say yes, or cancel.",
+            DictationSpeech.prompt("Two tasks.", sending = false, listOf(CardProposal("task", "Buy milk"), CardProposal("task", "Call the vet"))),
+        )
     }
 
     @Test
