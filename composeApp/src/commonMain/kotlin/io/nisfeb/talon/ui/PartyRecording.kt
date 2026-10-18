@@ -191,6 +191,18 @@ fun rememberPartyRecording(
     return PartyRecordingControls(recordingNow, recordedBy, onToggleRecord)
 }
 
+/**
+ * Whether we are live on this chat's own line, [here] as (host, room).
+ * A room is a slug, the same on two hosts, so the room alone is not
+ * enough: [lineKey] is the line we were granted
+ * ([io.nisfeb.talon.call.CallController.lineKey]). Live anywhere let
+ * Record in another group's chat record the line we were on and tell
+ * this chat's host about it.
+ */
+fun onThisLine(state: io.nisfeb.talon.call.PartyState, here: Pair<String, String>?, lineKey: String?): Boolean =
+    state is io.nisfeb.talon.call.PartyState.Live && here != null && state.room == here.second &&
+        lineKey == "${here.first}/${here.second}"
+
 /** The record button shows only for an admin on a line that supports it. */
 fun recordingAllowed(
     supported: Boolean,

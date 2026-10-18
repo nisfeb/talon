@@ -3019,8 +3019,9 @@ fun App(
                                         )
                                 }
                                 val partyStateNow by partyStateFlow.collectAsState()
-                                val onThisLine =
-                                    partyStateNow is io.nisfeb.talon.call.PartyState.Live
+                                val onThisLine = io.nisfeb.talon.ui.onThisLine(
+                                    partyStateNow, partyRoomHere, callController?.lineKey,
+                                )
                                 // Why we couldn't find out, when we
                                 // couldn't. Silence here is what turns
                                 // "no line in this group" and "your

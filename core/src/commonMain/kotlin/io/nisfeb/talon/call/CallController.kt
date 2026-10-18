@@ -1188,6 +1188,10 @@ class CallController(
     /** The line [joinGranted] last stepped onto, "host/name": a room is a slug, the same on two hosts. */
     @Volatile private var grantedKey: String? = null
 
+    /** The line we were last granted, "host/name", or null. A chat is on
+     *  the line only when its own host and room are this. */
+    val lineKey: String? get() = grantedKey
+
     /**
      * Step [line] onto the line [ticket] from [host] grants: the
      * [onTicket] of both app roots. Off another group's line first.

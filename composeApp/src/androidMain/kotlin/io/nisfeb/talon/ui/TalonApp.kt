@@ -2680,22 +2680,11 @@ fun TalonApp(
                         )
                 }
                 val partyStateNow by partyStateFlow.collectAsState()
-                val onThisLine = partyStateNow is io.nisfeb.talon.call.PartyState.Live
-                LaunchedEffect(partyRoomHere, onThisLine) {
-                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                    val cc = callController ?: return@LaunchedEffect
-                    if (!onThisLine) return@LaunchedEffect
-                    try {
-                        while (true) {
-                            cc.enterRoom(h, n)
-                            kotlinx.coroutines.delay(30_000)
-                        }
-                    } finally {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                            cc.leaveRoom(h, n)
-                        }
-                    }
-                }
+                // Presence is announced by the controller from the join
+                // (beginPresenceAnnounce), not here: an effect keyed on the
+                // open chat beat twice, told a host we left on opening a DM,
+                // and entered another group's host's room.
+                val onThisLine = io.nisfeb.talon.ui.onThisLine(partyStateNow, partyRoomHere, callController?.lineKey)
                 // Why we couldn't find out, when we couldn't. Silence
                 // here is what turns "no line in this group" and "your
                 // ship can't ask" into the same thing.
