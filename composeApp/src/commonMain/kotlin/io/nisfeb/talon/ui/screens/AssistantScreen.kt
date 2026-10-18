@@ -211,6 +211,10 @@ private const val CONV_KEEP = io.nisfeb.talon.data.ASSISTANT_CONV_KEEP
 /** Max chars of the first question used as a conversation's title. */
 private const val CONV_TITLE_CHARS = 60
 
+/** A run that failed after a write: asked again, it would do the write twice. */
+internal const val FAILED_AFTER_WRITE =
+    "It did not finish. It may have done part of it, so check before asking again."
+
 /** A run stopped after a write: asked again, it would do the write twice. */
 internal const val STOPPED_AFTER_WRITE =
     "Stopped. It may have done part of it before it stopped, so check before asking again."
@@ -687,7 +691,15 @@ fun AssistantScreen(
                     return@onFailure
                 }
                 error = io.nisfeb.talon.ai.modelProblem("Couldn't complete", it)
-                putBack()
+                // B2-15: after a write the turn is kept, as a Stop keeps it;
+                // the question put back would be sent again and done twice.
+                if (wrote) {
+                    transcript.add(Line.Said(FAILED_AFTER_WRITE))
+                    turnLog.append("failed: ${it.message}\n")
+                    withContext(NonCancellable) { keep(FAILED_AFTER_WRITE) }
+                } else {
+                    putBack()
+                }
             }
             // Stop has freed the box already, and a newer run may hold it.
             if (session.run === self) {

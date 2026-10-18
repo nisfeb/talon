@@ -49,6 +49,8 @@ class AssistantScreenTest {
     @Volatile private var status = 200
     /** From this request on, the model holds its answer until [stall] is let go: a stalled call. */
     @Volatile private var stallFrom = Int.MAX_VALUE
+    /** From this request on, the model fails (503): a provider going down mid-run. */
+    @Volatile private var failFrom = Int.MAX_VALUE
     private val stall = java.util.concurrent.CountDownLatch(1)
     /** The screen is shown; off, it is left, and its run goes on in the session. */
     private val showing = androidx.compose.runtime.mutableStateOf(true)
@@ -101,6 +103,7 @@ class AssistantScreenTest {
                     "message":{"role":"assistant","content":${kotlinx.serialization.json.JsonPrimitive(answer)}}}]}"""
             }).toByteArray()
             ex.responseHeaders.add("Content-Type", "application/json")
+            val status = if (asked.size >= failFrom) 503 else status
             val out = if (status == 200) body else """{"error":{"message":"the model is down for maintenance"}}""".toByteArray()
             ex.sendResponseHeaders(status, out.size.toLong())
             ex.responseBody.use { it.write(out) }
@@ -340,6 +343,27 @@ class AssistantScreenTest {
         assertEquals(io.nisfeb.talon.ui.screens.STOPPED_AFTER_WRITE, turn.answer)
         assertTrue(turn.log.lines().any { it.startsWith("→ send_event (write) args ") }, turn.log)
         assertTrue(turn.log.lines().contains("stopped by the owner"), turn.log)
+    }
+
+    // B2-15: the model fails after the owner allowed a send. The turn is
+    // kept with its log and the question is not put back: sent again, it
+    // would post twice.
+    @Test
+    fun `a run that fails after a write keeps the turn and not the question`() = assistant { db ->
+        toolCall = postEvent
+        failFrom = 2
+        ask("tell bus about the seed swap")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 15_000) { shows("It may have done part of it") }
+        assertTrue(ship.pokesTo("chat").isNotEmpty(), "the send went")
+        assertEquals("", onNode(hasSetTextAction()).fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+        val conv = runBlocking { db.assistantConversations().mostRecent() }!!
+        val turn = runBlocking { db.assistantHistory().forConversation(conv.id) }.single()
+        assertEquals(io.nisfeb.talon.ui.screens.FAILED_AFTER_WRITE, turn.answer)
+        assertTrue(turn.log.lines().any { it.startsWith("→ send_event (write) args ") }, turn.log)
+        assertTrue(turn.log.lines().any { it.startsWith("failed: ") }, turn.log)
     }
 
     // The run lives on the host's scope, so leaving did not end it; the
