@@ -255,6 +255,25 @@ class OrreryLateRepoTest {
         }
     }
 
+    // Another ship, or the same one after a restart, reads its own version
+    // and its own list: a mark the ship never showed is not laid over it.
+    @Test
+    fun `a detach forgets the version and the marks it held`() {
+        status["a1"] = "approved"; payload["a1"] = """{"priority":"high"}"""
+        ship { repo ->
+            repo.mark("a1", high = false)
+            withTimeout(5_000) { while (taken.isEmpty()) delay(20) }
+            repo.detach()
+            assertNull(repo.version.value)
+            version = null
+            repo.attach("https://ship.test", "~zod")
+            withTimeout(5_000) { while (repo.version.value == null) delay(20) }
+            assertEquals(0, repo.version.value, "read again")
+            repo.refreshActions()
+            assertTrue(repo.actions.value.single().high, "the ship's word, not the mark it never showed")
+        }
+    }
+
     // A late one's nag shares the action's slot: done on another device,
     // the approved one leaves the list and its last nag goes with it.
     @Test
