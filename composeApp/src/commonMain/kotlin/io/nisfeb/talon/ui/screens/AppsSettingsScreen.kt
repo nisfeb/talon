@@ -143,7 +143,7 @@ fun AppsSettingsScreen(
                         else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
                     }
                 },
-                onFailure = { note = it.message ?: "The install did not finish." },
+                onFailure = { note = io.nisfeb.talon.util.failureLine("The install did not finish", it) },
             )
             probeLattice()
             probeGroups()

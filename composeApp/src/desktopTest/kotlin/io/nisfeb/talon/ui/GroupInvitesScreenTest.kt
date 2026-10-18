@@ -138,10 +138,28 @@ class GroupInvitesScreenTest {
 
     @Test
     fun `declining tells the ship and the invite goes`() = invites { ship ->
-        onNodeWithText("Reject").performClick()
+        onNodeWithText("Decline").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("No pending invites.") }
         val no = ship.pokesTo("groups").single()
         assertTrue(no.mark == "invite-decline" && "~nec/garden" in no.json.toString(), no.toString())
+    }
+
+    // A comet's @p is the fifty-six characters its word name replaces.
+    @Test
+    fun `a comet who invited us is named by its words`() {
+        val comet = Mnemonym.shipForNym(
+            "..bespoke.unnerved.describe.convince.inhale.charade.relieve.obey.reword.dislodge.hereby.kazoo",
+        )!!
+        invites(
+            prepare = {
+                scries["groups-ui/v7/init"] = """{"groups":{},"foreigns":{
+                    "~bus/stuck":{"invites":[{"from":"$comet","valid":true}],"progress":null,"preview":{"meta":{"title":"Stuck"}}}}}"""
+            },
+        ) {
+            waitUntil(timeoutMillis = 5_000) { shows("Stuck") }
+            assertTrue(onAllNodesWithText("kazoo", substring = true).fetchSemanticsNodes().isNotEmpty(), "its word name")
+            assertTrue(onAllNodesWithText(comet, substring = true).fetchSemanticsNodes().isEmpty(), "no @p on screen")
+        }
     }
 
     @Test

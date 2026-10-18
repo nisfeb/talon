@@ -16,6 +16,8 @@ actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "Android ${android.os.Build.VERSION.RELEASE}"
 
+actual val iosDeviceName: String = "iPhone"
+
 actual fun isOnDeviceAiFeatureSupported(
     feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = true

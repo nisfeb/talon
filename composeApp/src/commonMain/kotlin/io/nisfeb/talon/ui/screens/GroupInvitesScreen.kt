@@ -187,18 +187,18 @@ private fun JoiningRow(invite: TlonChatRepo.InviteSummary, busy: Boolean, onCanc
         Column(Modifier.weight(1f)) {
             Text(invite.title ?: invite.flag, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold))
             invite.inviter?.let {
-                Text("from $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("from ${io.nisfeb.talon.ui.shipHandle(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             // The join is a poke to the host's own ship, not the
             // inviter's. Unanswered, ames resends it until the host
             // acks, which an offline host never does: say so, or the
             // row sits there with no reason given.
-            val host = invite.flag.substringBefore('/')
+            val host = io.nisfeb.talon.ui.shipHandle(invite.flag.substringBefore('/'))
             Text(
                 if (invite.hostAnswered) "$host let your ship in. Getting the group."
                 else "Waiting for $host, which hosts the group, to answer your ship. " +
                     "If this lasts, $host is likely offline; your ship keeps asking. " +
-                    "Stop joining puts it back as an invite you can reject.",
+                    "Stop joining puts it back as an invite you can decline.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -244,7 +244,7 @@ private fun InviteRow(
             }
             invite.inviter?.let {
                 Text(
-                    "from $it",
+                    "from ${io.nisfeb.talon.ui.shipHandle(it)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -255,6 +255,7 @@ private fun InviteRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
             // What you're joining, before you commit: how many people are
@@ -274,7 +275,7 @@ private fun InviteRow(
         }
         Column(horizontalAlignment = Alignment.End) {
             Button(enabled = !busy, onClick = onAccept) { Text("Accept") }
-            OutlinedButton(enabled = !busy, onClick = onReject) { Text("Reject") }
+            OutlinedButton(enabled = !busy, onClick = onReject) { Text("Decline") }
         }
     }
 }

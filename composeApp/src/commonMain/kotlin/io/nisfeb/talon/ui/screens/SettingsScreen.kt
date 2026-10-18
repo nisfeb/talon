@@ -1020,7 +1020,7 @@ private fun AboutSection(
         ).collectAsState()
     if (callController != null) {
         AboutRow(
-            label = "Calling (%trunk)",
+            label = "Your ship's calling app",
             value = when {
                 shipWire <= 0 -> "not installed on your ship"
                 shipWire < io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
@@ -1669,7 +1669,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     )
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-            "With the app closed, this iPhone hears from your ship only " +
+            "With the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears from your ship only " +
                 "through a relay. The default endpoint is the Talon-operated host."
         } else {
             "Optional: register this device with a notification relay so " +
@@ -1714,7 +1714,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                 diagnoseReport = config.pushTokens.diagnose()
             }
         },
-    ) { Text("Diagnose distributor") }
+    ) { Text("Check notification delivery") }
 
     diagnoseReport?.let { report ->
         Column(
@@ -1800,7 +1800,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
             TextButton(
                 enabled = !working,
                 onClick = { codePrompt = true; code = "" },
-            ) { Text("Re-register (rotate token)") }
+            ) { Text("Register again") }
             TextButton(
                 enabled = !working,
                 onClick = {
@@ -2411,12 +2411,12 @@ private fun PhoneNotificationsRow(config: RelayPanelConfig) {
     var asking by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Notifications on this iPhone", style = MaterialTheme.typography.bodyMedium)
+            Text("Notifications on this ${io.nisfeb.talon.ui.iosDeviceName}", style = MaterialTheme.typography.bodyMedium)
             Text(
                 when (from) {
-                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this iPhone when something arrives."
-                    io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this iPhone when something arrives."
-                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this iPhone hears nothing from your ship."
+                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this ${io.nisfeb.talon.ui.iosDeviceName} when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this ${io.nisfeb.talon.ui.iosDeviceName} when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your ship."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2445,7 +2445,7 @@ internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
             Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "Messages that notified you: direct messages, mentions and replies. " +
-                    "If no number shows, turn on Badges for Talon in the iPhone's Settings, Notifications.",
+                    "If no number shows, turn on Badges for Talon in the ${io.nisfeb.talon.ui.iosDeviceName}'s Settings, Notifications.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2471,19 +2471,20 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     var via by remember(ship) { mutableStateOf(config.settings.viaShipPush(ship)) }
     var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
     var backToShip by remember(ship) { mutableStateOf(false) }
-    val device = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) "this iPhone" else "this device"
+    val device = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) "this ${io.nisfeb.talon.ui.iosDeviceName}" else "this device"
+    val name = io.nisfeb.talon.ui.shipHandle(ship)
     val (title, body) = when {
-        via -> "Notifications come from $ship" to (
+        via -> "Notifications come from $name" to (
             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                "Your ship sends them to $device itself, through its %trunk. The Talon relay only hands them to Apple."
+                "Your ship sends them to $device itself, through its calling app. The Talon relay only hands them to Apple."
             } else {
-                "Your ship sends them to $device itself, through its %trunk. The Talon relay is not used."
+                "Your ship sends them to $device itself, through its calling app. The Talon relay is not used."
             }
             )
         declined -> "Notifications come from the Talon relay" to
-            "You chose the relay over $ship's own notifications. Register $device with the relay below to get them from it."
-        backToShip -> "Moving to $ship's notifications" to
-            "Talon moves $device the next time it starts, once a test notification from $ship arrives."
+            "You chose the relay over $name's own notifications. Register $device with the relay below to get them from it."
+        backToShip -> "Moving to $name's notifications" to
+            "Talon moves $device the next time it starts, once a test notification from $name arrives."
         else -> return
     }
     val status by produceState<String?>(null, ship, via) {

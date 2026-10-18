@@ -32,11 +32,12 @@ class SignVerifyDialogTest {
     private val asked: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val signed = SignedRecord("~zod", "3", "ed25519", "lattice", "12345", "67890")
 
-    private fun lattice(old: Boolean = false) = LatticeSign(HttpClient(MockEngine { req ->
+    private fun lattice(old: Boolean = false, down: Boolean = false) = LatticeSign(HttpClient(MockEngine { req ->
         val body = req.body.toByteArray().decodeToString()
         asked += "${req.url.encodedPath} $body"
         when {
             old -> respond("", HttpStatusCode.NotFound)
+            down -> respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway)
             req.url.encodedPath.endsWith("/sign") ->
                 respond("""{"ship":"~zod","life":3,"digest":"12345","sig":"67890"}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
             else -> {
@@ -94,6 +95,22 @@ class SignVerifyDialogTest {
         check("hello", null)
         showing("That is not a signature block.")
         assertTrue(asked.isEmpty())
+    }
+
+    // The proxy's page came back as the reason the signature was bad.
+    @Test
+    fun `a ship that is down is not a bad signature`() = dialog(lattice(down = true)) {
+        check(signed.armor(), "the words")
+        showing("Your ship is down or out of reach.")
+        assertTrue(!shows("No:") && !shows("<html>"))
+    }
+
+    @Test
+    fun `a ship that is down did not refuse to sign`() = dialog(lattice(down = true)) {
+        onNode(hasSetTextAction() and hasText("Something to sign")).performTextInput("the words")
+        onNodeWithText("Sign the text").performClick()
+        showing("Your ship is down or out of reach.")
+        assertTrue(!shows("refused") && !shows("<html>"))
     }
 
     @Test

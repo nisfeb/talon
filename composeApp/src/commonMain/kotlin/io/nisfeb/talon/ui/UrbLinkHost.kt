@@ -118,7 +118,7 @@ fun rememberUrbLinkHandler(
                         },
                         onFailure = {
                             installing = false
-                            installError = it.message
+                            installError = io.nisfeb.talon.util.failureLine("The install did not finish", it)
                         },
                     )
                 }

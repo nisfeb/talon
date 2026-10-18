@@ -52,6 +52,15 @@ class ShellDeskTest {
     }
 
     @Test
+    fun `a proxy's 502 is a ship that is down and not a shell that refused`() = runTest {
+        val down = HttpClient(MockEngine { respond("<html>Bad Gateway</html>", HttpStatusCode.BadGateway) })
+        assertEquals(LatticeInstall.SHIP_DOWN, LatticeInstall.addDesk(down, "https://ship.test", "orrery").exceptionOrNull()?.message)
+        assertEquals(LatticeInstall.SHIP_DOWN, LatticeInstall.syncStock(down, "https://ship.test", null).exceptionOrNull()?.message)
+        val refused = HttpClient(MockEngine { respond("", HttpStatusCode.InternalServerError) })
+        assertEquals("The shell would not add orrery (HTTP 500).", LatticeInstall.addDesk(refused, "https://ship.test", "orrery").exceptionOrNull()?.message)
+    }
+
+    @Test
     fun `a shell already here is not installed again`() = runTest {
         val asked = mutableListOf<Pair<String, String>>()
         var pokes = 0

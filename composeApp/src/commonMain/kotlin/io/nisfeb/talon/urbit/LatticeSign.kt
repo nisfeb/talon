@@ -41,6 +41,8 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
             setBody(content)
         }
         if (resp.status.value == 404) error("This ship's Lattice is too old to sign; it needs version 31.")
+        // The web server in front of a ship that is down: not a refusal.
+        if (resp.status.value in 502..504) error(LatticeInstall.SHIP_DOWN)
         if (!resp.status.isSuccess()) error("Lattice refused to sign: ${reason(resp.bodyAsText(), resp.status.value)}")
         return recordOf(resp.bodyAsText())
     }
@@ -73,6 +75,9 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
             setBody(body.toString())
         }
         if (resp.status.value == 404) return Verdict.No("This ship's Lattice is too old to check signatures.")
+        // A ship that is down has not said the signature is bad: its proxy's
+        // page came back as the reason it did not check out.
+        if (resp.status.value in 502..504) error(LatticeInstall.SHIP_DOWN)
         val text = resp.bodyAsText()
         if (!resp.status.isSuccess()) return Verdict.No(reason(text, resp.status.value))
         val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()

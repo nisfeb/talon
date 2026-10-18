@@ -73,6 +73,16 @@ class LatticeSignTest {
         assertTrue(e.message!!.contains("too old"), e.message)
     }
 
+    // A proxy's page in front of a ship that is down was the reason: "No:
+    // <html>..." on a check, "refused to sign" on a signing.
+    @Test
+    fun `a proxy's 502 is a ship that is down on both routes`() = runTest {
+        val down = signClient("<html>Bad Gateway</html>", HttpStatusCode.BadGateway)
+        assertEquals(LatticeInstall.SHIP_DOWN, assertFailsWith<IllegalStateException> { down.sign("hi") }.message)
+        assertEquals(LatticeInstall.SHIP_DOWN, assertFailsWith<IllegalStateException> { down.verify(rec) }.message)
+        assertEquals(LatticeInstall.SHIP_DOWN, assertFailsWith<IllegalStateException> { signClient(status = HttpStatusCode.GatewayTimeout).verify(rec) }.message)
+    }
+
     @Test
     fun `the verdict comes from the ok field`() = runTest {
         assertEquals(Verdict.Ok, signClient("""{"ok":"true"}""").verify(rec))
