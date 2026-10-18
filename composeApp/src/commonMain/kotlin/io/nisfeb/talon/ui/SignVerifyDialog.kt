@@ -60,7 +60,7 @@ fun SignVerifyDialog(signer: LatticeSign, ourShip: String, onDismiss: () -> Unit
     var outcome by remember { mutableStateOf<String?>(null) }
 
     fun fail(e: Throwable) {
-        outcome = e.message ?: "That did not work."
+        outcome = io.nisfeb.talon.util.failureLine(if (signing) "Couldn't sign it" else "Couldn't check it", e)
     }
 
     AlertDialog(

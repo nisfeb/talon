@@ -177,6 +177,8 @@ object LatticeInstall {
                 when (resp.status.value) {
                     403 -> "Your ship did not accept that; sign in to it again."
                     404 -> "The Grubbery shell is not answering on this ship."
+                    // The web server in front of a ship that is down: not a refusal.
+                    in 502..504 -> SHIP_DOWN
                     else -> "The shell would not add $name (HTTP ${resp.status.value})."
                 },
             )
@@ -252,6 +254,7 @@ object LatticeInstall {
         if (!resp.status.isSuccess()) {
             error(
                 if (resp.status.value == 401 || resp.status.value == 403) "Your ship did not accept that; sign in to it again."
+                else if (resp.status.value in 502..504) SHIP_DOWN
                 else "Grubbery would not fetch its apps (HTTP ${resp.status.value}).",
             )
         }
@@ -316,6 +319,9 @@ object LatticeInstall {
     /** What an install ends on while the fetched apps wait for the owner's approval. */
     const val APPROVE_APPS =
         "Grubbery has its apps now. Approve what they reach on your ship's permits page, and they will open."
+
+    /** A proxy's 502 to 504, said as what it is. */
+    internal const val SHIP_DOWN = "Your ship is down or out of reach. Try again when it's back."
 
     private const val POLL_MS = 3_000L
 

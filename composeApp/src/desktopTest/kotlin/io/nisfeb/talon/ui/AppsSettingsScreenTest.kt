@@ -114,6 +114,17 @@ class AppsSettingsScreenTest {
         assertTrue(shows("not installed"))
     }
 
+    // The exception's own text was the line: a URL and a class name.
+    @Test
+    fun `an install the network cut is said calmly and with no URL`() = apps(
+        installGroups = { Result.failure(kotlinx.io.IOException("Connect timeout has expired [url=https://ship.test/~/channel/1]")) },
+    ) {
+        row("Groups", "not installed")
+        onNodeWithText("Install").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("The install did not finish: your ship is slow or out of reach.") }
+        assertTrue(!shows("url="))
+    }
+
     @Test
     fun `missing Lattice is fetched with Grubbery, and missing is only offered where it can be`() {
         latticeHere = false

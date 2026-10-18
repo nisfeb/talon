@@ -98,6 +98,15 @@ fun shipSlowLine(queued: Int, health: io.nisfeb.talon.urbit.ShipHealth?): String
     else -> "Your ship is slow. $queued queued for when it's back."
 }
 
+/**
+ * One line for a failure whose own message is already a sentence for the
+ * person ("Install is taking a while"): that sentence, a slow or
+ * unreachable ship said calmly, and [what] where the message is a dump.
+ * [problemOf] would put [what] in front of a sentence that contradicts it.
+ */
+fun failureLine(what: String, err: Throwable): String =
+    if (isShipSlow(err)) problemOf(what, err).line else readableReason(err.message) ?: "$what."
+
 /** [message]'s first line when it reads as words, else null. */
 internal fun readableReason(message: String?): String? {
     val first = message?.lineSequence()?.firstOrNull()?.trim().orEmpty()

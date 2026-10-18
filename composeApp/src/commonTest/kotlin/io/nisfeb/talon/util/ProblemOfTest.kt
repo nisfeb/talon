@@ -27,6 +27,16 @@ class ProblemOfTest {
     }
 
     @Test
+    fun `a failure line keeps its own sentence and says a slow ship calmly`() {
+        assertEquals("Install is taking a while. Try again shortly.",
+            failureLine("The install did not finish", IllegalStateException("Install is taking a while. Try again shortly.")))
+        assertEquals("The install did not finish.",
+            failureLine("The install did not finish", RuntimeException("java.lang.IllegalStateException: boom")))
+        assertEquals("The install did not finish: your ship is slow or out of reach. Try again when it's back.",
+            failureLine("The install did not finish", kotlinx.io.IOException("Connect timeout has expired [url=https://ship.test/x]")))
+    }
+
+    @Test
     fun `a sentence is said, a dump is not`() {
         assertEquals("Couldn't load: The ship's list of groups could not be read.",
             problemOf("Couldn't load", IllegalStateException("The ship's list of groups could not be read.")).line)
