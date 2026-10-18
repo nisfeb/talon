@@ -752,6 +752,25 @@ class DmChatScreenTest {
         assertEquals(1, ship.pokesTo("channels").size)
     }
 
+    // Real time: the edit is held on the ship's side while the chat goes.
+    @Test
+    fun `an edit saved just before leaving the chat still lands`() {
+        val host = Host(general)
+        chat(
+            whom = general, host = host,
+            seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+            prepare = { holdPoke = 1_000 },
+        ) { ship, _ ->
+            editTo("first try", "second try")
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
+            host.shown = false
+            waitForIdle()
+            val until = System.currentTimeMillis() + 10_000
+            while (ship.pokesTo("channels").isEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertTrue("second try" in ship.pokesTo("channels").single().json.toString())
+        }
+    }
+
     // ─── words as they were written ────────────────────────────────
 
     @Test
