@@ -214,7 +214,7 @@ fun LoginQrShareScreen(
                 OutlinedButton(
                     onClick = {
                         clipboard.setText(AnnotatedString(encoded))
-                        copyStatus = "Copied talon:// URI to clipboard"
+                        copyStatus = "Copied the link"
                     },
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth(),
@@ -225,7 +225,7 @@ fun LoginQrShareScreen(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.size(8.dp))
-                    Text("Copy talon:// URI")
+                    Text("Copy the link")
                 }
                 copyStatus?.let {
                     Text(
