@@ -2710,6 +2710,7 @@ fun TalonApp(
                     partyLine = partyLine,
                     partyRoomHere = partyRoomHere,
                     onThisLine = onThisLine,
+                    occupied = partyShown > 0 || onThisLine,
                     http = app.ktorHttp,
                     aiConfig = app.aiSettings.state.value,
                     ourShip = loggedInShip.orEmpty(),

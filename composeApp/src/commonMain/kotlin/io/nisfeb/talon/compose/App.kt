@@ -3043,6 +3043,7 @@ fun App(
                                     partyLine = partyLine,
                                     partyRoomHere = partyRoomHere,
                                     onThisLine = onThisLine,
+                                    occupied = partyShown > 0 || onThisLine,
                                     http = http,
                                     aiConfig = aiSettings.state.value,
                                     ourShip = ship.orEmpty(),
