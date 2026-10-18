@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ai
 
+import io.ktor.client.engine.mock.respond
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -183,5 +184,29 @@ class AgentClientTest {
         val plain = extractApiError("api.openai.com", 500, "upstream timeout")
         assertTrue(plain.contains("api.openai.com 500"))
         assertTrue(plain.contains("upstream timeout"))
+    }
+
+    private fun refusing(status: Int, body: String) = AgentClient(
+        http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+            respond(body, io.ktor.http.HttpStatusCode.fromValue(status), io.ktor.http.headersOf("Content-Type", "application/json"))
+        }) { install(io.ktor.client.plugins.HttpTimeout) },
+    ) { AiSettings.Config(provider = AiSettings.Provider.Custom, apiKey = "k", model = "m", baseUrl = "https://llm.example/v1") }
+
+    // A plain error lost the status: no Top up, and a busy provider read as
+    // the raw line on the assistant, dictation, Archie and loops.
+    @Test
+    fun `a refused agent call keeps its status and an empty balance says so`() = kotlinx.coroutines.test.runTest {
+        suspend fun refused(status: Int, body: String) = kotlin.test.assertFailsWith<ModelHttpError> {
+            refusing(status, body).completeWithTools("s", listOf(AgentMessage.User("hi")), emptyList())
+        }
+        val broke = refused(402, """{"error":{"message":"Insufficient balance"}}""")
+        assertEquals(402, broke.status)
+        assertTrue(isOutOfCredit(broke.message), broke.message)
+        assertTrue(broke.message!!.endsWith("(llm.example 402: Insufficient balance)"), "the host once: ${broke.message}")
+        val busy = refused(503, """{"error":{"message":"upstream connect error"}}""")
+        assertEquals(503, busy.status)
+        assertEquals("llm.example 503: upstream connect error", busy.message)
+        assertTrue(modelProblem("Couldn't complete", busy).calm, "a failing provider is a calm line")
+        assertEquals(429, refused(429, "slow down").status)
     }
 }

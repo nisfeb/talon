@@ -81,7 +81,7 @@ class LoopRunner(
                 withContext(NonCancellable) { runCatching { record(loop, ts, ok = false, output = CUT_SHORT) } }
                 throw it
             }
-            "Error: ${it.message ?: it::class.simpleName}"
+            modelProblem("Error", it).line
         }
         record(loop, ts, outcome.isSuccess, output)
     }

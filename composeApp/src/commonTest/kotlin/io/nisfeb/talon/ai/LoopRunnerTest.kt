@@ -94,6 +94,21 @@ class LoopRunnerTest {
         assertEquals(1, told)
     }
 
+    // A refusal said as the assistant says it, not the raw line.
+    @Test
+    fun `a failed run says why in words`() = runBlocking {
+        val runs = FakeLoopRunDao()
+        val runner = LoopRunner(
+            loops = FakeLoopDao(), runs = runs, tools = emptyList(),
+            completer = { _, _, _ -> throw ModelHttpError(503, "llm.example 503: upstream connect error") },
+            aiConfig = { config("k") },
+            notify = { _, _, _ -> },
+            now = { 5_000 },
+        )
+        runner.runLoop(loop)
+        assertEquals(listOf(false to "Error: the model's provider is having trouble. Try again later."), runs.inserted.map { it.ok to it.output })
+    }
+
     // The Assistant row says loops run on it, and they ran with it off,
     // without its web tools (2026-10-12).
     @Test
