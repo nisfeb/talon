@@ -319,10 +319,10 @@ fun DmChatScreen(
                         StoryCache.partsFor(item.row.m.id, item.row.m.contentJson)
                     }
                 }
-                ChatRowsSnapshot.put(whom, items)
+                ChatRowsSnapshot.put(ourPatp, whom, items)
             }
             .flowOn(Dispatchers.Default)
-    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(whom))
+    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(ourPatp, whom))
 
     // Unread COUNT — drives the catch-me-up banner only. Captured on
     // entry; not used for the divider anymore (see dividerAnchorId).
@@ -679,10 +679,12 @@ fun DmChatScreen(
 
 
     // ── message action sheet state ──
-    var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // Each keyed on the chat: the desktop pane keeps this screen across a
+    // switch, and a dialog left open acted on the next chat's whom.
+    var actionTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     // The message whose full emoji browser is open, lifted out of the
     // per-row action menu so the sheet has the screen's whole height.
-    var emojiPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var emojiPickerTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     var partyNoteOpen by remember(whom) { mutableStateOf(false) }
     // Long-press / right-click on any reaction chip surfaces the
     // per-reactor breakdown. Set to the message's reactions list and
@@ -690,11 +692,11 @@ fun DmChatScreen(
     var reactionDetailsTarget by remember(whom) {
         mutableStateOf<List<ReactionEntity>?>(null)
     }
-    var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
-    var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
-    var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var confirmingDelete by remember(whom) { mutableStateOf<MessageEntity?>(null) }
+    var confirmingReport by remember(whom) { mutableStateOf<MessageEntity?>(null) }
+    var publishTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     // What was said, on its way to becoming an event or a task.
-    var calendarTarget by remember { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
+    var calendarTarget by remember(whom) { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
     // The repo is always handed in, so whether the ship has a calendar
     // is its availability, not whether there is a repo: without this
     // New event was offered on ships with no calendar and failed on Add.
@@ -791,7 +793,7 @@ fun DmChatScreen(
         }
     }
 
-    var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    var profileSheetShip by remember(whom) { mutableStateOf<String?>(null) }
 
     val currentOnOpenThread by rememberUpdatedState(onOpenThread)
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
@@ -2179,8 +2181,10 @@ private data class DisplayRow(
 private object ChatRowsSnapshot {
     /** The last few chats shown: each kept all its rows for the life of the process. */
     private val recent = RecentByKey<List<ChatListItem>>(keep = 6)
-    fun get(whom: String): List<ChatListItem> = recent[whom].orEmpty()
-    fun put(whom: String, rows: List<ChatListItem>) = recent.put(whom, rows)
+    // By ship too: two ships share a channel's whom, and after a switch
+    // the other ship's rows showed for the first frames.
+    fun get(ship: String, whom: String): List<ChatListItem> = recent["$ship $whom"].orEmpty()
+    fun put(ship: String, whom: String, rows: List<ChatListItem>) = recent.put("$ship $whom", rows)
 }
 
 /** The last [keep] values put, by key; past that, the one put longest ago goes. */

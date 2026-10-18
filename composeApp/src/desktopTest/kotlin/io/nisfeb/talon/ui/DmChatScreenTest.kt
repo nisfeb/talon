@@ -823,4 +823,21 @@ class DmChatScreenTest {
             assertEquals(2, ship.pokesTo("contacts").size, "meet, then the book page")
         }
     }
+
+    // The desktop pane keeps this screen across a chat switch, and a
+    // dialog left open acted on the next chat.
+    @Test
+    fun `a dialog open in one chat is gone in the next`() {
+        val host = Host("~bus")
+        chat(seed = {
+            messages().upsert(msg("~zod/170141184507", "~zod", "mine", 2_000))
+        }, host = host) { _, _ ->
+            menuOf("mine")
+            onNodeWithText("Delete").performClick()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isNotEmpty() }
+            host.whom = "~nec"
+            waitForIdle()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isEmpty() }
+        }
+    }
 }
