@@ -17,6 +17,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.LoopEntity
 import io.nisfeb.talon.ui.screens.LoopsScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -33,6 +34,7 @@ import kotlin.test.assertTrue
 class LoopsScreenTest {
     private var rescheduled = 0
     private val ran = mutableListOf<Long>()
+    private val allowed = mutableListOf<Long>()
     private val scheduler = object : LoopScheduler {
         override fun reschedule() { rescheduled++ }
     }
@@ -46,7 +48,7 @@ class LoopsScreenTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        LoopsScreen(db = db, scheduler = scheduler, onRunNow = { ran += it }, onBack = {})
+                        LoopsScreen(db = db, scheduler = scheduler, onRunNow = { ran += it }, onBack = {}, onAllowHeld = { allowed += it })
                     }
                 }
                 waitForIdle()
@@ -106,5 +108,65 @@ class LoopsScreenTest {
         tap("Delete")
         onAllNodesWithText("Delete")[1].performClick() // the dialog's own Delete
         waitUntil(timeoutMillis = 5_000) { runBlocking { db.loops().enabled() }.isEmpty() }
+    }
+
+    // ─── asking before sharing calendars (B2-6) ───────────────────
+
+    private fun ComposeUiTest.gone(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isEmpty()
+
+    @Test
+    fun `the ask switch shows only while the loop may write and is off by default`() = loops { db ->
+        tap("Add a loop")
+        onNode(hasSetTextAction() and hasText("Name")).performTextInput("Shares")
+        onNode(hasSetTextAction() and hasText("Prompt", substring = true)).performTextInput("share the garden")
+        assertTrue(gone("Ask before sharing calendars"), "a read-only loop has nothing to ask")
+        onAllNodes(isToggleable())[0].performClick() // let it act on the ship
+        shows("Ask before sharing calendars")
+        tap("Save")
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.loops().enabled() }.isNotEmpty() }
+        val loop = runBlocking { db.loops().enabled() }.single()
+        assertEquals(true to false, loop.writesAuthorized to loop.askBeforeSharing)
+    }
+
+    @Test
+    fun `the ask switch turned on is kept and said on the loop`() = loops(seed = { loops().upsert(digest.copy(writesAuthorized = true)) }) { db ->
+        tap("Morning digest")
+        assertTrue(gone("Asks before sharing calendars"))
+        tap("Edit")
+        shows("Ask before sharing calendars")
+        onAllNodes(isToggleable())[1].performClick()
+        tap("Save")
+        waitUntil(timeoutMillis = 5_000) { runBlocking { db.loops().enabled() }.single().askBeforeSharing }
+        shows("Asks before sharing calendars")
+        // Writes off again: the switch goes with them, and is kept for when they return.
+        tap("Edit")
+        onAllNodes(isToggleable())[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { gone("Ask before sharing calendars") }
+    }
+
+    @Test
+    fun `a held call is offered with Allow and Don't and an expired one is not`() {
+        val now = io.nisfeb.talon.util.nowMs()
+        fun hold(loopId: Long, what: String, at: Long = now) = io.nisfeb.talon.data.LoopHoldEntity(loopId = loopId, tool = "share_calendar", args = "{}", what = what, heldAt = at)
+        loops(seed = {
+            val id = loops().upsert(digest)
+            loopHolds().insert(hold(id, "Morning digest wants to share Garden with ~nec, edit on."))
+            loopHolds().insert(hold(id, "Morning digest wants to share Old with ~nec, edit off.", at = now - io.nisfeb.talon.ai.LoopRunner.HOLD_MS - 1))
+            loopHolds().insert(hold(id + 99, "Gone wants to share Work with ~bus, edit off."))
+            loopHolds().insert(hold(id, "Morning digest wants to accept the calendar offer ~nec/work."))
+        }) { db ->
+            shows("wants to share Garden")
+            assertTrue(gone("Old with ~nec"), "expired: it does nothing, so it is not offered")
+            assertTrue(gone("Gone wants"), "its loop is gone")
+            // Allow hands that one call to the host, and only that one.
+            onAllNodesWithText("Allow")[0].performClick()
+            waitForIdle()
+            assertEquals(listOf(1L), allowed)
+            // Don't drops the other and does nothing else.
+            onAllNodesWithText("Don't")[1].performClick()
+            waitUntil(timeoutMillis = 5_000) { gone("accept the calendar offer") }
+            assertEquals(listOf(1L), allowed)
+            assertEquals(listOf(1L, 2L, 3L), runBlocking { db.loopHolds().stream(0).first() }.map { it.id }.sorted(), "Allow left to the host; only the one refused is gone")
+        }
     }
 }

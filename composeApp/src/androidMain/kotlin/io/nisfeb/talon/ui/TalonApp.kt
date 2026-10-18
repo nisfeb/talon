@@ -2354,6 +2354,7 @@ fun TalonApp(
                 db = app.db,
                 scheduler = app.loops,
                 onRunNow = { app.loops.runOneNow(it) },
+                onAllowHeld = { app.loops.allowHeld(it) },
                 onBack = { loopsOpen = false },
                 settingsSync = app.settingsSync,
                 modifier = mod,
