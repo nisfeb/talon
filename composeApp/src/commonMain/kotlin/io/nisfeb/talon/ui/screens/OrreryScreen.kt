@@ -207,7 +207,7 @@ fun OrreryScreen(
         // Kept data on show and the last ask failed: say why, and how old it is.
         if (problem != null && view != null && tab != OrreryTab.ACTIONS) {
             Text(
-                "${io.nisfeb.talon.orrery.readProblemLine(problem)}; this is as of ${formatClock(view.atMs)}.",
+                "${io.nisfeb.talon.orrery.readProblemLine(problem).trimEnd('.')}; this is as of ${formatClock(view.atMs)}.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -222,7 +222,7 @@ fun OrreryScreen(
             tab == OrreryTab.ACTIONS -> actionsTab()
             state == null && turnOn != null -> NotOnHere(turnOn) { onOpen(true) }
             state == null -> Text(
-                problem?.let { io.nisfeb.talon.orrery.readProblemLine(it) + "." } ?: "Looking…",
+                problem?.let { io.nisfeb.talon.orrery.readProblemSentence(it) } ?: "Looking…",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
@@ -387,7 +387,7 @@ private fun SetUpAgain(setUp: suspend () -> Result<Unit>, onDone: () -> Unit) {
             why = null
             busy = true
             scope.launch {
-                setUp().onSuccess { onDone() }.onFailure { why = io.nisfeb.talon.orrery.readProblemLine(it) + "." }
+                setUp().onSuccess { onDone() }.onFailure { why = io.nisfeb.talon.orrery.readProblemSentence(it) }
                 busy = false
             }
         }) { Text(if (busy) "Setting up…" else "Set up this device again") }
@@ -417,7 +417,8 @@ private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
             why = null
             busy = true
             scope.launch {
-                turnOn().onSuccess { onOn() }.onFailure { why = it.message ?: "Orrery did not answer." }
+                // In words, not the request's own text ("HTTP 500: ...").
+                turnOn().onSuccess { onOn() }.onFailure { why = io.nisfeb.talon.orrery.readProblemSentence(it) }
                 busy = false
             }
         }) { Text(if (busy) "Setting up…" else "Try again") }

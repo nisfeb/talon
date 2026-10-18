@@ -182,6 +182,9 @@ fun readProblemLine(e: Throwable): String = when {
     else -> io.nisfeb.talon.util.readableReason(e.message)?.let { "Orrery could not be read: $it" } ?: "Orrery could not be read"
 }
 
+/** [readProblemLine] as a sentence of its own: a reason that ended in a full stop had two. */
+fun readProblemSentence(e: Throwable): String = readProblemLine(e).trimEnd('.') + "."
+
 /**
  * The ship refused this device's key, as the pass reads a refusal: 403
  * "forbidden". A 403 for a key's scope or a read-only key is not that,

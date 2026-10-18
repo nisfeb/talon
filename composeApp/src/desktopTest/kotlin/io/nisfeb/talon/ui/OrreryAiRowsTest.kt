@@ -187,7 +187,8 @@ class OrreryAiRowsTest {
         waitUntil(timeoutMillis = 5_000) { shows("This device is not set up for Orrery yet.") }
         assertFalse(shows("Orrery triage"))
         onNodeWithText("Try again").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("HTTP 500: no keys today") }
+        waitUntil(timeoutMillis = 5_000) { shows("Orrery could not be read: no keys today.") }
+        assertFalse(shows("HTTP 500"), "in words, not the request's own text")
         assertFalse(orrery.enabled.value)
     }
 

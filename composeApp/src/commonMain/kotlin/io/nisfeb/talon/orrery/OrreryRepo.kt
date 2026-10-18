@@ -859,7 +859,7 @@ class OrreryRepo(
     suspend fun ensureEnabled(): Result<Unit> {
         if (_enabled.value) return Result.success(Unit)
         val job = enabling?.takeIf { it.isActive } ?: scope.async { enable() }.also { enabling = it }
-        return job.await().onFailure { _error.value = it.message ?: "Orrery did not answer." }
+        return job.await().onFailure { _error.value = readProblemSentence(it) }
     }
     private var enabling: kotlinx.coroutines.Deferred<Result<Unit>>? = null
 
@@ -931,7 +931,7 @@ class OrreryRepo(
                     // Throwable: an Error from a local model's runtime
                     // ended the loop here, and nothing said so.
                     Log.w(TAG, "pass failed", e)
-                    _error.value = e.message ?: e::class.simpleName
+                    _error.value = readProblemSentence(e)
                 }
                 // A failed pass waits longer each time (see the failure rule
                 // in [push]), in steps of ten minutes, so a pass that
@@ -1194,7 +1194,8 @@ class OrreryRepo(
         // [observeSplitting]) and is not here; a model that did not answer
         // holds what it would have read and is not a failure either.
         } catch (e: OrreryError.Refused) {
-            _error.value = e.message
+            // In words: "HTTP 500: <its reason>" was the line under the row.
+            _error.value = readProblemSentence(e)
             // Only "forbidden" is the key refused. The ship answers 403
             // too for a batch reaching past the key's scope, and for a
             // read-only key, neither of which is the key gone; and for a
@@ -1231,7 +1232,7 @@ class OrreryRepo(
         } catch (e: Throwable) {
             // Throwable: an Error here skipped the put back, and the calls
             // it took exist nowhere else. The loop carries on after it.
-            _error.value = e.message ?: e::class.simpleName
+            _error.value = readProblemSentence(e)
             if (e !is OrreryError) Log.w(TAG, "pass failed", e)
             if (ran > 0 || costTheShip(e)) failuresInARow++
             requeue()
