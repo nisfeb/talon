@@ -20,8 +20,10 @@ Areas:
 1. The review fixes merged as PR #42 (`55b63366..60d99a39`), sync and calls half.
 2. The same fixes, the ship-app clients half.
 3. The same fixes, the shells, voice and platform half.
-4. Chat core and sync, beyond what the 2026-10-17 review covered.
-5. Calls, and the two shells' navigation, beyond what the 2026-10-17 review covered.
+4. The chat screen and composer: rendering, threads, reactions, attachments and uploads, link previews, slash commands. The last review barely touched them.
+5. Groups and admin, notebooks and galleries, search, the notification pipeline, sign-in and ship switching. Also lightly covered before.
+
+Calls, sync and the shells were reviewed in depth hours ago; their new code is in areas 1 and 3.
 
 ### Findings
 
