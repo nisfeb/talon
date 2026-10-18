@@ -620,11 +620,11 @@ class TlonChatRepoStartupTest {
         // at once. Signed out, the debounce dropped a sign-in made within
         // 3 s of the refused try, and chat slept (B6-5).
         ship.signedOut = false
-        delay(3_100) // forceReconnect's debounce
         repo.forceReconnect()
         until("no longer signed out") { !repo.signedOut.value }
         until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
     }
+
     // B3-4: the stream flag is the app's. An old repo stopped again after a
     // ship switch marked the new repo's stream down, and the catch-up
     // worker, seeing no stream, retried for good.
@@ -645,7 +645,6 @@ class TlonChatRepoStartupTest {
         }
         assertTrue(!health.sseConnected.value, "a started repo stopped marks it down")
     }
-
 
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
         """"$f":{"invites":[{"flag":"$f","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],"lookup":null,""" +
