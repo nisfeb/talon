@@ -6,6 +6,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import java.nio.file.StandardCopyOption
 
 /**
@@ -41,6 +42,9 @@ class DesktopSessionStore(
     private fun persist(blob: SessionsBlob) {
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(JSON.encodeToString(blob))
+        // The file holds the ships' session cookies: the owner's alone,
+        // as the comet's login code is. Windows has no POSIX modes.
+        runCatching { Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rw-------")) }
         Files.move(
             tmp.toPath(), file.toPath(),
             StandardCopyOption.ATOMIC_MOVE,

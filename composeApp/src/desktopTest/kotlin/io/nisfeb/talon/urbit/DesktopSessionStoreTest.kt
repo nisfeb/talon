@@ -176,4 +176,12 @@ class DesktopSessionStoreTest {
         val store = DesktopSessionStore(file)
         assertEquals(listOf("~zod"), store.all().map { it.ship })
     }
+
+    // The file holds the ships' cookies; it was written with the default mode.
+    @Test
+    fun `the sessions file is the owner's alone`() {
+        if (System.getProperty("os.name").lowercase().contains("win")) return
+        DesktopSessionStore(file).save(session("~zod"), makeActive = true)
+        assertEquals("rw-------", java.nio.file.attribute.PosixFilePermissions.toString(java.nio.file.Files.getPosixFilePermissions(file.toPath())))
+    }
 }
