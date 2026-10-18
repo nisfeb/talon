@@ -1231,14 +1231,14 @@ fun TalonApp(
         if (loggedInShip != null) {
             app.repo.start(app.session)
             app.shortcuts.start()
-            // Backfill semantic-search embeddings only when the user
-            // has opted in. Indexer is idempotent so it's safe to call
-            // every launch — but if the feature is off we skip the
-            // model download + CPU entirely.
-            if (app.aiSettings.state.value.smartFeaturesEnabled) {
-                app.embeddingIndexer.start()
-            }
         }
+    }
+    // The smart-search index follows the switch, mid-session too: on, a
+    // pass runs (a no-op if one is running); off, the pass stops, and the
+    // model and CPU are left alone.
+    LaunchedEffect(loggedInShip, aiState.smartFeaturesEnabled) {
+        if (loggedInShip == null) return@LaunchedEffect
+        if (aiState.smartFeaturesEnabled) app.embeddingIndexer.start() else app.embeddingIndexer.stop()
     }
 
     // Latest-value refs so the callback below doesn't close over stale state.

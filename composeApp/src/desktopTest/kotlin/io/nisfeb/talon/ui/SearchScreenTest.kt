@@ -67,9 +67,10 @@ class SearchScreenTest {
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
 
-    private class Embedder(private val meaning: List<MessageEntity>, private val highlights: List<MessageEntity>) : SearchEmbedderClient {
+    private class Embedder(@Volatile var meaning: List<MessageEntity>, private val highlights: List<MessageEntity>) : SearchEmbedderClient {
         override val progress = MutableStateFlow(IndexProgress(indexed = 3, total = 3))
-        override suspend fun start() = Unit
+        @Volatile var starts = 0
+        override suspend fun start() { starts++ }
         override suspend fun semanticSearch(query: String) = meaning
         override suspend fun keywordSearch(terms: List<String>) = emptyList<MessageEntity>()
         override suspend fun embed(text: String): FloatArray? = null
@@ -152,6 +153,33 @@ class SearchScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("✨ Smart on") && shows("3 messages indexed") }
             assertTrue(ui.smartSearchPreferred.value, "the choice is kept")
             type("evening meal", "dinner later")
+        }
+    }
+
+    @Test
+    fun `smart search runs an index pass and searches again when it ends`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = Embedder(meaning = listOf(dinner), highlights = emptyList())
+        search(embedder) {
+            waitUntil(timeoutMillis = 5_000) { embedder.starts == 1 }
+            type("evening meal", "dinner later")
+            embedder.progress.value = IndexProgress(running = true, indexed = 3, total = 4)
+            waitUntil(timeoutMillis = 5_000) { shows("Indexing 3 of 4") }
+            // The pass found a message that came in since, and ends.
+            embedder.meaning = listOf(dinner, noon)
+            embedder.progress.value = IndexProgress(running = false, indexed = 4, total = 4)
+            waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("4 messages indexed") }
+        }
+    }
+
+    @Test
+    fun `literal search runs no index pass`() {
+        ui.setSmartSearchPreferred(false)
+        val embedder = Embedder(meaning = emptyList(), highlights = emptyList())
+        search(embedder) {
+            type("lunch", "lunch at noon")
+            waitForIdle()
+            assertEquals(0, embedder.starts)
         }
     }
 }

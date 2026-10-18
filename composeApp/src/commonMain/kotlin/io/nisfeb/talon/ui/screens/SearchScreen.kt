@@ -159,7 +159,8 @@ fun SearchScreen(
 
     val semanticResults = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
     var semanticBusy by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder) {
+    // Again when a pass ends, so a search typed while it ran sees what it added.
+    androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder, indexProgress.running) {
         if (!smartMode || debouncedTrimmed.length < 2 || embedder == null) {
             semanticResults.value = emptyList()
             return@LaunchedEffect
@@ -176,9 +177,12 @@ fun SearchScreen(
         else runCatching { embedder.computeHighlights() }.getOrElse { emptyList() }
     }
 
-    // Indexer start is owned by App.kt now — it kicks off as soon as
-    // any embedder-dependent feature is enabled (smart search / topic
-    // clusters / important messages), not on first SearchScreen mount.
+    // The shells run a pass when the ship opens with smart features on;
+    // using smart search runs another, so messages that came in since,
+    // edits and deletions reach it. A no-op while one is running.
+    LaunchedEffect(smartMode, embedder) {
+        if (smartMode) runCatching { embedder?.start() }
+    }
 
     val results = if (smartMode) semanticResults.value else substringResults
 
