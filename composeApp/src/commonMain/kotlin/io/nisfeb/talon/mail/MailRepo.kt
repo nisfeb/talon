@@ -80,6 +80,8 @@ class MailRepo(
     threadDir: String? = null,
     /** The first wait before asking again a ship that did not answer. */
     private val firstRetryMs: Long = FIRST_RETRY_MS,
+    /** Coming back to the app reads the mailbox only if it was last read longer ago than this. */
+    private val focusFreshMs: Long = FOCUS_FRESH_MS,
 ) {
     private val files = threadDir?.let { MailThreadFiles(it.toPath()) }
     private var api: AuspexApi? = null
@@ -307,8 +309,13 @@ class MailRepo(
     fun setForeground(on: Boolean) {
         val was = foreground
         foreground = on
-        if (on && !was) scope.launch { refreshForNews() }
+        // Not on every alt-tab: a desktop window's focus comes back each
+        // time a menu or dialog closes, and each was a read of the ship.
+        if (on && !was && nowMs() - lastReadMs >= focusFreshMs) scope.launch { refreshForNews() }
     }
+
+    /** When a listing was last read from the ship. */
+    @kotlin.concurrent.Volatile private var lastReadMs = 0L
 
     /**
      * [refresh], and the inbox as well where another listing is open: what
@@ -318,8 +325,11 @@ class MailRepo(
      * Not every refresh: one after each write would read the ship twice.
      */
     private suspend fun refreshForNews() {
+        val before = lastReadMs
         refresh()
-        if (pageKey() != INBOX) readInboxAside()
+        // Not after a listing the ship did not answer: the inbox would not
+        // be answered either, and was a second request to a ship down.
+        if (lastReadMs != before && pageKey() != INBOX) readInboxAside()
     }
 
     /** The inbox's first page, read beside the listing on screen and left off it. */
@@ -400,6 +410,7 @@ class MailRepo(
             )
             pageCache.update { it + (key to p) }
             key.stored?.let { store(it, p) }
+            lastReadMs = nowMs()
             // Somebody who changed folder while this was on its way sees the new one.
             if (pageKey() == key) _page.value = p
             _error.value = null
@@ -1100,6 +1111,9 @@ class MailRepo(
         /** Mail is considered correspondence, not chat. The refresh
          *  control covers the case where the reader knows better. */
         const val DEFAULT_POLL_MS = 10 * 60 * 1000L
+
+        /** The least time between two reads on coming back to the app. */
+        const val FOCUS_FRESH_MS = 60 * 1000L
         const val FIRST_RETRY_MS = 15_000L
         private const val MAX_RETRY_MS = 2 * 60_000L
 
