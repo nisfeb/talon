@@ -59,6 +59,7 @@ class OrreryWritesTest {
         assertEquals(true, t.asOwner)
         assertEquals("Confirmed: $jax needs shows \"terminal drop-off\".", said)
         assertNull(t.struck, "a plan that changed is not a wrong value")
+        assertEquals(2, t.viewReads, "read first, then once more: the read back stops once it shows")
     }
 
     // The report: "it reported some changes as done when the view still
@@ -107,6 +108,33 @@ class OrreryWritesTest {
         assertNull(t.observed)
         assertTrue(run(t, "orrery_set", set("attr" to "location", "value" to "JAX terminal", "calendar" to true)).startsWith("Confirmed"))
         assertTrue("JAX terminal" in t.observed.toString())
+    }
+
+    // The calendar also writes a vanished event's status and the owner's
+    // zone (+plan-events, +cal-zone-seed): no event carries those.
+    @Test
+    fun `what the calendar wrote that no event carries goes through`() = runTest {
+        val t = OrreryToolsTest.Tap()
+        t.views[jax] = mutableListOf(
+            view("""{"status":${winner("\"cancelled\"", "calendar")}}""", "[${row("o9", "status", "\"cancelled\"", "calendar", "gone")}]"),
+            view("""{"status":${winner("\"open\"")}}"""),
+        )
+        assertEquals("Confirmed: $jax status shows \"open\".", run(t, "orrery_set", set("attr" to "status", "value" to "open")))
+    }
+
+    @Test
+    fun `a strike that fails stops the change`() = runTest {
+        val andrea = """{"ref":"person/andrea"}"""
+        val list = OrreryToolsTest.Tap().apply { correctFails = IllegalStateException("HTTP 500: crashed") }
+        list.views[jax] = mutableListOf(view("""{"participants":[${winner(andrea)}]}""", "[${row("o1", "participants", andrea)}]"))
+        assertEquals("Could not strike $andrea: HTTP 500: crashed. Nothing was changed.", run(list, "orrery_set", set("attr" to "participants", "ref" to "person/andrea", "remove" to true, "wrong" to true)))
+        assertTrue(list.retracted.isEmpty())
+
+        val single = OrreryToolsTest.Tap().apply { correctFails = IllegalStateException("HTTP 500: crashed") }
+        single.views[jax] = mutableListOf(view("""{"needs":${winner("\"a\"")}}"""))
+        assertEquals("Could not strike \"a\": HTTP 500: crashed. Nothing was changed.", run(single, "orrery_set", set("attr" to "needs", "remove" to true, "wrong" to true)))
+        assertEquals("Could not strike \"a\": HTTP 500: crashed. Nothing was changed.", run(single, "orrery_set", set("attr" to "needs", "value" to "b", "wrong" to true)))
+        assertNull(single.observed, "nothing filed after a strike that did not land")
     }
 
     @Test
@@ -214,6 +242,7 @@ class OrreryWritesTest {
         val said = run(t, "orrery_answer", buildJsonObject { put("id", "a1"); put("status", "dismissed"); put("note", "dropped off, not parking") })
         assertEquals(listOf("a1 dismissed dropped off, not parking"), t.answered)
         assertEquals("Confirmed: orrery no longer lists Say you are running late to Park at JAX for DL 2627 as waiting.", said)
+        assertEquals(3, t.actionReads, "read first, then until it shows")
 
         val stuck = OrreryToolsTest.Tap().apply { open[0] = listOf(late) }
         assertEquals(
@@ -265,6 +294,25 @@ class OrreryWritesTest {
         })
         assertTrue("Confirmed: person/a x shows \"1\"." in said && "Confirmed: person/b kids shows [{\"ref\":\"person/c\"}]." in said, said)
         assertTrue("Not confirmed (the record still shows nothing): person/a y was to be \"2\"." in said && NOT_CONFIRMED in said, said)
+
+        val all = OrreryToolsTest.Tap(answer = ObserveAnswer(emptyList(), List(2) { ItemAnswer("$it", true, false, null) }))
+        all.stateText = """{"bodies":[{"id":"person/a","attrs":{"x":"1"}},{"id":"person/b","attrs":{"y":"2"}}]}"""
+        assertEquals(
+            "1: written\n2: written\nConfirmed: person/a x shows \"1\".\nConfirmed: person/b y shows \"2\".",
+            run(all, "orrery_observe", buildJsonObject { put("observations", """[{"subject":"person/a","attr":"x","value":"1"},{"subject":"person/b","attr":"y","value":"2"}]""") }),
+        )
+    }
+
+    @Test
+    fun `the ship's answer is a line an item`() {
+        val answer = ObserveAnswer(
+            listOf(ItemAnswer("person/a", true, true, null), ItemAnswer("person/b", true, false, null), ItemAnswer("person/c", false, false, "id: bad"), ItemAnswer("person/d", false, false, null)),
+            listOf(ItemAnswer("1-a", true, true, null), ItemAnswer("2-b", true, false, null), ItemAnswer(null, false, false, "attr: unknown")),
+        )
+        assertEquals(
+            listOf("body person/a: already there", "body person/b: created", "body person/c: refused, id: bad", "body person/d: refused, no reason given", "1: already known", "2: written", "3: refused, attr: unknown"),
+            answer.lines(),
+        )
     }
 
     @Test
@@ -304,6 +352,28 @@ class OrreryWritesTest {
             changesOf(action("r1", "Closed", kind = "resolve", payload = buildJsonObject { put("situation", "situation/s"); put("outcome", "flew") })),
         )
         assertTrue(changesOf(action("p1", "x", kind = "fact")).isEmpty(), "a fact with no payload asks nothing")
+        assertEquals(
+            listOf(Change("person/sam", "status", JsonPrimitive("on jury duty"), gone = true)),
+            changesOf(action("c1", "Not on jury duty", kind = "correct", payload = buildJsonObject { put("subject", "person/sam"); put("attr", "status"); put("value", "on jury duty") })),
+        )
+    }
+
+    // What the owner approved in the transcript is carried out and read
+    // back; what still waits under Actions is not.
+    @Test
+    fun `an instruction's approved facts are read back and its waiting ones are not`() = runTest {
+        val fact = action("f1", "Plan is a drop-off", kind = "fact", payload = buildJsonObject { put("subject", jax); put("attr", "needs"); put("value", "terminal drop-off") })
+        val t = OrreryToolsTest.Tap().apply { instructed = Instructed(reply = "On it.", actions = listOf(fact)) }
+        t.views[jax] = mutableListOf(view("""{"needs":${winner("\"terminal drop-off\"")}}"""))
+        val approved = t.puttingToOwner(decide = { _, _ -> true }, answer = { _, _ -> })
+        assertEquals(
+            "Orrery says: On it.\nFiled:\n- fact: Plan is a drop-off (approved)\nConfirmed: $jax needs shows \"terminal drop-off\".",
+            run(approved, "orrery_instruct", buildJsonObject { put("text", "it is a drop-off") }),
+        )
+        val waits = t.puttingToOwner(decide = { _, _ -> null }, answer = { _, _ -> })
+        t.viewReads = 0
+        assertEquals("Orrery says: On it.\nFiled:\n- fact: Plan is a drop-off (proposed)", run(waits, "orrery_instruct", buildJsonObject { put("text", "it is a drop-off") }))
+        assertEquals(0, t.viewReads, "a proposal changes nothing yet, so nothing is read")
     }
 
     // ─── what the record carries ────────────────────────────────────
@@ -337,6 +407,14 @@ class OrreryWritesTest {
         assertTrue("worked out by the ship at 2026-10-18T17:00:00Z" in said && "neither the drive's length nor its route" in said && "is for Swim, not this" in said, said)
         assertTrue("could not be read" in leaveBasis(body, null)!!)
         assertTrue("has no leave plan now" in leaveBasis(body, JsonObject(emptyMap()))!!)
+        fun from(where: String, more: String = "") = leaveBasis(body, Json.parseToJsonElement("""{"next":{"id":"$jax","starts":"s","leave_by":"l","minutes":20,"from":"$where"$more}}""") as JsonObject)!!
+        assertTrue("from where the phone last was, and" in from("position"))
+        assertTrue("from the appointment before it, and" in from("previous"))
+        assertTrue("from work, and" in from("work"))
+        assertEquals(
+            "Worked out by the ship for a start of s: leave by l, for a 20 min drive with traffic from home; a crash on I-95, and minutes to park, 6 more for rain. The ship works it out again as the traffic and the start move.",
+            from("home", ""","incident":"a crash on I-95","weather_min":6,"weather":"rain""""),
+        )
         assertNull(leaveBasis(Json.parseToJsonElement(view()) as JsonObject, plan), "no leave-by, nothing to say")
         assertTrue(""""leave_by_basis":"Worked out""" in bodyForModel(body, leaveBasis(body, plan)))
     }

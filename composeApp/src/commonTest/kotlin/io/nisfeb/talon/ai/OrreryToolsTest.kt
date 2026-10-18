@@ -49,7 +49,11 @@ class OrreryToolsTest {
         /** Each read of a body gives the next of its views, and the last again once they run out. */
         val views = mutableMapOf<String, MutableList<String>>()
         var viewFails: Throwable? = null
+        /** Each request costs the ship seconds: how many reads of a body, and of what is open. */
+        var viewReads = 0
+        var actionReads = 0
         override suspend fun view(id: String): Result<JsonObject> {
+            viewReads++
             viewFails?.let { return Result.failure(it) }
             val l = views[id] ?: return Result.failure(IllegalStateException("no such body"))
             return Result.success(Json.parseToJsonElement(if (l.size > 1) l.removeAt(0) else l.single()) as JsonObject)
@@ -61,8 +65,10 @@ class OrreryToolsTest {
         }
         /** Each read of the open list gives the next of these, and the last again. */
         val open = mutableListOf<List<io.nisfeb.talon.orrery.OrreryAction>>(emptyList())
-        override suspend fun actions(): Result<List<io.nisfeb.talon.orrery.OrreryAction>> =
-            Result.success(if (open.size > 1) open.removeAt(0) else open.single())
+        override suspend fun actions(): Result<List<io.nisfeb.talon.orrery.OrreryAction>> {
+            actionReads++
+            return Result.success(if (open.size > 1) open.removeAt(0) else open.single())
+        }
         val answered = mutableListOf<String>()
         var transitionFails: Throwable? = null
         override suspend fun transition(id: String, status: String, note: String): Result<Unit> {
@@ -107,7 +113,9 @@ class OrreryToolsTest {
             return Result.success(instructed)
         }
         var struck: String? = null
+        var correctFails: Throwable? = null
         override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject> {
+            correctFails?.let { return Result.failure(it) }
             struck = "$subject $attr $value $why".trim()
             return Result.success(buildJsonObject { put("id", "c1") })
         }
