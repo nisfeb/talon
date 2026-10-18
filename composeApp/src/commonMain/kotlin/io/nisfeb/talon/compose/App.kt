@@ -292,7 +292,9 @@ fun App(
     // Local comet: the setup screen replaces the login form, and a
     // first login lands in the public Nisfeb Software group.
     var localShipSetupOpen by remember { mutableStateOf(false) }
-    var pendingLanding by remember { mutableStateOf<String?>(null) }
+    // The ship and the group: a landing is that ship's, and followed a
+    // switch to another, which it then joined to the group (A5-6).
+    var pendingLanding by remember { mutableStateOf<Pair<String, String>?>(null) }
     // Shown as a banner while the landing runs; null when there is
     // nothing to wait for.
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
@@ -751,8 +753,12 @@ fun App(
         // sessionStore has the new entry; the next re-key picks it up.
         val session = remember {
             UrbitSession(http, sessionStore).also { s ->
-                val restored = s.tryRestore()
-                if (restored == null && sessionStore.activeShip() != null) {
+                // Only the ship this tree is for. Signed out to add a ship,
+                // the saved active one was restored here all the same: its
+                // mail and calendar polled into the signed-out database, and
+                // a call controller started for it.
+                val restored = loggedInShip?.let { s.tryRestore(it) }
+                if (restored == null && loggedInShip != null) {
                     // The active pointer says a ship is signed in, but
                     // tryRestore couldn't hydrate the session — corrupt
                     // shipUrl, missing entry, etc. Surface it for the
@@ -878,7 +884,11 @@ fun App(
         // A comet's first login: join Nisfeb Software, put the calling
         // desk on the ship, and open the group's chat once it arrives.
         LaunchedEffect(repo, pendingLanding) {
-            val flag = pendingLanding ?: return@LaunchedEffect
+            val flag = landingFor(pendingLanding, loggedInShip) ?: run {
+                // Another ship's, or none: its banner is not this ship's.
+                landingProgress = null
+                return@LaunchedEffect
+            }
             val began = nowMs()
             landingHidden = false
             fun step(text: String) {
@@ -932,6 +942,9 @@ fun App(
                 }
             }
             openChat = whom
+            // From Home, Mail or Calendar, which take the whole area, the
+            // chat opened out of sight.
+            chatsTabWanted = true
             revealGroupRequest = flag
             // Now the messages: the chat opens empty until its first
             // page is fetched, so the banner stays up for that too.
@@ -1158,7 +1171,7 @@ fun App(
                     }
                 }
             } else null
-        val mailShipUrl = sessionStore.active()?.shipUrl
+        val mailShipUrl = if (loggedInShip != null) sessionStore.active()?.shipUrl else null
         LaunchedEffect(mailRepo, mailShipUrl) {
             if (mailShipUrl != null) mailRepo.attach(mailShipUrl) else mailRepo.detach()
         }
@@ -2112,9 +2125,13 @@ fun App(
                     nicknames.value
                 }
                 val switchShip: (String) -> Unit = { newShip ->
-                    leaveShip()
-                    sessionStore.setActive(newShip)
-                    loggedInShip = newShip
+                    // Picking the ship already open is no switch: it
+                    // closed the chat on screen for nothing.
+                    if (newShip != loggedInShip) {
+                        leaveShip()
+                        sessionStore.setActive(newShip)
+                        loggedInShip = newShip
+                    }
                 }
                 /**
                  * Drop a ship's saved session, and optionally what it
@@ -2149,6 +2166,9 @@ fun App(
                     if (wasActive) {
                         leaveShip()
                     }
+                    // Its cached list rows go too, or an erased ship came
+                    // back in the same session with every row it had.
+                    io.nisfeb.talon.ui.screens.forgetHomeListSnapshot(gone)
                     // Erasing data for a ship whose session never went
                     // away would leave a signed-in ship with nothing
                     // under it.
@@ -2328,7 +2348,7 @@ fun App(
                             loopScope.launch {
                                 session.login(ready.url, ready.code)
                                     .onSuccess { who ->
-                                        pendingLanding = io.nisfeb.talon.comet.LocalShip.LANDING_GROUP
+                                        pendingLanding = who to io.nisfeb.talon.comet.LocalShip.LANDING_GROUP
                                         localShipSetupOpen = false
                                         loggedInShip = who
                                     }
@@ -3399,17 +3419,10 @@ fun App(
                                             openAssistantAction
                                         } else null,
                                         onNewMessage = { showNewDm = true },
-                                        onSignOut = {
-                                            // session.logout() already removes just
-                                            // the active ship's entry (UrbitSession.kt
-                                            // line 89). Adding sessionStore.clearAll()
-                                            // would wipe every other saved ship too,
-                                            // which is wrong for multi-ship setups
-                                            // and only worked under Path A by accident.
-                                            session.logout()
-                                            leaveShip()
-                                            loggedInShip = null
-                                        },
+                                        // The drawer's sign-out: the ship's
+                                        // pushes stop, and another saved ship
+                                        // opens rather than the login form.
+                                        onSignOut = { loggedInShip?.let { forgetShip(it, false) } },
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,
@@ -3862,3 +3875,7 @@ private val voicePreviewPlayer: (@Composable (path: String, sending: Boolean) ->
     if (!io.nisfeb.talon.ui.isVoiceMessagesSupported) null else { path, sending ->
         io.nisfeb.talon.ui.VoicePreviewPlayButton(path = path, enabled = !sending)
     }
+
+/** The group a comet's first login lands in, while [ship] is the ship it was for; null on any other. */
+internal fun landingFor(pending: Pair<String, String>?, ship: String?): String? =
+    pending?.takeIf { it.first == ship }?.second
