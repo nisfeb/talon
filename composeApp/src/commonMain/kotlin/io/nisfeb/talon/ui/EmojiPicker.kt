@@ -85,7 +85,7 @@ fun EmojiPickerDropdown(
  * the colon when the caret is inside a valid token; null otherwise.
  *
  * Rules: the `:` must be at the start of the text or directly after
- * whitespace; the query must be at least 1 char and contain only
+ * whitespace; the query must be at least 2 chars and contain only
  * `[a-z0-9_+-]` (case-insensitive).
  */
 fun detectEmojiQuery(text: String, cursor: Int): Pair<String, Int>? {
@@ -102,6 +102,8 @@ fun detectEmojiQuery(text: String, cursor: Int): Pair<String, Int>? {
     val before = if (i == 0) ' ' else text[i - 1]
     if (!(before == ' ' || before == '\n' || before == '\t')) return null
     val query = text.substring(i + 1, cursor)
-    if (query.isEmpty()) return null
+    // Two characters at least: one was a smiley, ":D" or ":p", and the
+    // Enter that should have sent it picked an emoji in its place.
+    if (query.length < 2) return null
     return query to i
 }

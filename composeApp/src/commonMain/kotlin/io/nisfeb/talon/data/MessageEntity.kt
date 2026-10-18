@@ -49,8 +49,10 @@ data class MessageEntity(
     val image: String? = null,
     /**
      * Send-state for our own outgoing messages:
-     *  - null: not tracked (server-echoed rows, and DMs in flight).
-     *  - "pending": an optimistic channel post; the poke is in flight.
+     *  - null: not tracked (server-echoed rows, and our DMs once sent).
+     *  - "pending": the poke is in flight. A channel post stays so until
+     *    its echo; a DM or club message until the ship acks it. Still
+     *    pending at the next start, it is queued (requeueStalePending).
      *  - "queued": the ship was slow or out of reach, not refusing; the
      *    message waits and goes when it answers again
      *    (TlonChatRepo.drainQueue). Kept across restarts.
@@ -68,6 +70,14 @@ data class MessageEntity(
      */
     val searchText: String? = null,
 )
+
+/**
+ * Whether this is ours and not on the ship, as far as this device knows: a
+ * channel post's stand-in (`local_`, an id the ship never gave it), or one
+ * waiting for the ship or refused by it. A DM in flight ("pending") is on
+ * its way under its own id, and is deleted on the ship like any other.
+ */
+fun MessageEntity.isUnsent(): Boolean = id.startsWith("local_") || status == "queued" || status == "failed"
 
 /** 48 to 49: [MessageEntity.searchText]. Old rows get theirs once the repo starts. */
 internal const val MESSAGE_SEARCH_TEXT_SQL = "ALTER TABLE messages ADD COLUMN searchText TEXT"

@@ -4,8 +4,11 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.compose.ui.text.AnnotatedString
+import io.nisfeb.talon.urbit.MENTION_TAG
 import io.nisfeb.talon.urbit.Story
 import io.nisfeb.talon.urbit.StoryPart
+import io.nisfeb.talon.urbit.URL_TAG
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 
@@ -32,6 +35,14 @@ abstract class MessageDao {
 
     @Query("UPDATE messages SET searchText = :text WHERE whom = :whom AND id = :id")
     protected abstract suspend fun setSearchText(whom: String, id: String, text: String)
+
+    /**
+     * Forget the search text of rows that may hold a link or a mention,
+     * for [fillSearchText] to write again: their addresses and @p were not
+     * in it ([SEARCH_TEXT_EXTRAS_MARK]).
+     */
+    @Query("UPDATE messages SET searchText = NULL WHERE contentJson LIKE '%://%' OR contentJson LIKE '%~%'")
+    abstract suspend fun forgetLinkSearchText(): Int
 
     /**
      * Give up to [limit] rows stored before [MessageEntity.searchText]
@@ -232,12 +243,15 @@ abstract class MessageDao {
     @Query("UPDATE messages SET status = 'queued' WHERE status = 'pending'")
     abstract suspend fun requeueStalePending(): Int
 
-    /** Our messages waiting for the ship (status "queued"), oldest first, the order they go out in. */
-    @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
+    /**
+     * Our messages waiting for the ship (status "queued"), oldest first, the
+     * order they go out in. Not one deleted here: the drain sent those too.
+     */
+    @Query("SELECT * FROM messages WHERE status = 'queued' AND isDeleted = 0 ORDER BY sentMs ASC")
     abstract suspend fun queued(): List<MessageEntity>
 
     /** How many of one conversation's messages are waiting for the ship. */
-    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued'")
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued' AND isDeleted = 0")
     abstract suspend fun queuedIn(whom: String): Int
 
     /** A conversation's messages, all of them: one the ship no longer has. */
@@ -249,7 +263,7 @@ abstract class MessageDao {
     abstract suspend fun hasConversation(whom: String): Boolean
 
     /** How many messages are waiting for the ship. */
-    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
+    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued' AND isDeleted = 0")
     abstract fun queuedCount(): Flow<Int>
 
     /**
@@ -478,27 +492,57 @@ data class ReplyCount(
 internal fun MessageEntity.searchable(): MessageEntity = copy(searchText = searchTextOf(contentJson, title))
 
 /**
+ * Set once rows written before links' addresses and mentions' @p joined
+ * the search text have been given theirs again.
+ */
+internal const val SEARCH_TEXT_EXTRAS_MARK = "search-text-extras"
+
+/** Set once every row has its search text: writes fill their own from then on. */
+internal const val SEARCH_TEXT_FILLED_MARK = "search-text-filled"
+
+/** Starts the line of what search finds beside the words shown: see [shownWordsOf]. */
+private const val SEARCH_EXTRAS = "\n\u001F"
+
+/**
  * The title and the words a reader sees, for search. Not the story JSON,
  * and not the placeholders previews use ("[image]" would match "image").
+ * After them, on a line of its own, what the words stand for and do not
+ * show: a link's address where its label is cut short or named otherwise,
+ * and a mention's @p where it reads as a nickname. Search for the address
+ * or the @p found nothing.
  */
 internal fun searchTextOf(contentJson: String, title: String?): String {
     val head = listOfNotNull(title?.trim()?.takeIf { it.isNotEmpty() })
     val parts = runCatching { Story.parse(Json.parseToJsonElement(contentJson)) }.getOrNull()
         ?: return (head + contentJson).joinToString("\n")
+    val behind = LinkedHashSet<String>()
+    fun seen(text: AnnotatedString): String {
+        for (tag in listOf(URL_TAG, MENTION_TAG)) {
+            text.getStringAnnotations(tag, 0, text.length).forEach { if (it.item !in text.text) behind += it.item }
+        }
+        return text.text
+    }
     val words = parts.mapNotNull { part ->
         when (part) {
-            is StoryPart.Text -> part.text.text
+            is StoryPart.Text -> seen(part.text)
             is StoryPart.Code -> part.code
             is StoryPart.Image -> part.alt
-            is StoryPart.Table -> (listOf(part.header) + part.rows).joinToString("\n") { row -> row.joinToString(" ") { it.text } }
+            is StoryPart.Table -> (listOf(part.header) + part.rows).joinToString("\n") { row -> row.joinToString(" ") { seen(it) } }
             is StoryPart.LinkPreview -> listOfNotNull(part.title, part.url).joinToString(" ")
             is StoryPart.CalWidget -> part.title
             is StoryPart.PollWidget -> (listOf(part.question) + part.options).joinToString("\n")
             else -> null
         }
     }
-    return (head + words).joinToString("\n")
+    val shown = (head + words).joinToString("\n")
+    return if (behind.isEmpty()) shown else shown + SEARCH_EXTRAS + behind.joinToString(" ")
 }
+
+/**
+ * The words of a stored [MessageEntity.searchText], without the addresses
+ * and @p search keeps after them: an excerpt reads these.
+ */
+fun shownWordsOf(searchText: String): String = searchText.substringBefore(SEARCH_EXTRAS)
 
 internal fun MessageEntity.normalized(): MessageEntity {
     val rawId = id

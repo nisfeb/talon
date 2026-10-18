@@ -35,7 +35,12 @@ import kotlinx.coroutines.launch
  * Android-only: no desktop analog. Sharing Shortcuts are a launcher and
  * share-sheet surface; a computer has neither for Talon to fill.
  */
-class ShortcutsPublisher(private val context: Context, private val db: AppDatabase) {
+class ShortcutsPublisher(
+    private val context: Context,
+    private val db: AppDatabase,
+    /** The ship these conversations are on: a pinned shortcut outlives a switch. */
+    private val ship: String,
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
@@ -84,6 +89,8 @@ class ShortcutsPublisher(private val context: Context, private val db: AppDataba
             val intent = Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
                 putExtra(Notifications.EXTRA_OPEN_WHOM, whom)
+                // Pinned, it opened the whom under whichever ship was active.
+                putExtra(Notifications.EXTRA_FOR_SHIP, ship)
             }
 
             ShortcutInfoCompat.Builder(context, whom)

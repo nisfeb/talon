@@ -32,6 +32,7 @@ class AssistantLogMigrationTest {
             // As a 1.8.1 install left it: version 52, the table without the column.
             BundledSQLiteDriver().open(path).apply {
                 execSQL("ALTER TABLE assistant_history DROP COLUMN log")
+                execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 execSQL("PRAGMA user_version = 52")
                 close()
             }

@@ -34,13 +34,21 @@ import kotlinx.serialization.json.put
 class NotesRepo(
     private val db: AppDatabase,
     private val scope: CoroutineScope,
-    /** How long after a delete its notebook is read again: its host's answer, for one not ours. */
-    private val deleteSettleMs: Long = 3_000,
+    /**
+     * How long a deleted note stays hidden here while its host answers,
+     * and when its notebook is read again: a note the host kept comes back
+     * then. Read at three seconds, a busy host's notebook still had it,
+     * and the note came back before the host took it away again.
+     */
+    private val deleteSettleMs: Long = 30_000,
 ) {
     private var channel: UrbitChannel? = null
 
     /** Notebooks we've opened a /stream subscription for this session. */
     private val subscribed = mutableSetOf<String>()
+
+    /** Notes deleted here, `flag#id` to when they may show again: a read before then does not bring them back. */
+    private val deleted = mutableMapOf<String, Long>()
 
     /** Stale in-flight marks are swept once per process; see bootstrap. */
     private var clearedStalePending = false
@@ -200,7 +208,16 @@ class NotesRepo(
                 updatedAtMs = f.updatedAtMs,
             )
         }
-        val notes = NotesParser.notes(notesJson).map { n ->
+        // A note deleted here that the host has not let go of yet stays
+        // hidden until the settle is over; one the host no longer has is
+        // gone for good.
+        val now = nowMs()
+        val hidden = subLock.withLock {
+            val read = NotesParser.notes(notesJson).map { "$key#${it.id}" }.toSet()
+            deleted.entries.removeAll { (k, until) -> k.startsWith("$key#") && (k !in read || until <= now) }
+            deleted.keys.filter { it.startsWith("$key#") }.toSet()
+        }
+        val notes = NotesParser.notes(notesJson).filter { "$key#${it.id}" !in hidden }.map { n ->
             NotesNoteEntity(
                 flag = key,
                 noteId = n.id,
@@ -328,7 +345,8 @@ class NotesRepo(
      * concurrent edit surfaces as a failure instead of silently winning.
      * The row is marked pending and the host echo clears it. Null when
      * the host took it, otherwise what to say: [NOTE_CHANGED] when the
-     * note moved on, and the rest ([NotesParser.saveRefusal], no answer)
+     * note moved on, [SAVE_SENT] when it went to a host that has not
+     * answered yet, and the rest ([NotesParser.saveRefusal], no answer)
      * as what they are. Every failure was called a conflict.
      */
     suspend fun updateNote(
@@ -379,7 +397,8 @@ class NotesRepo(
         // make every later scry restore it and pin the note as saving
         // forever.
         db.notes().setPending(key, noteId, false)
-        if (said != null) hosts?.let { db.notes().upsertNotes(listOf(it.copy(pending = false))) }
+        // Sent to a host still to answer is not refused: nothing to put back.
+        if (said != null && said != SAVE_SENT) hosts?.let { db.notes().upsertNotes(listOf(it.copy(pending = false))) }
         // Re-read either way. On success it picks up the host's new
         // revision, which the next edit must send back as
         // expectedRevision; on failure the host's own, where it answers.
@@ -401,6 +420,7 @@ class NotesRepo(
             // and a host that refused it (a reader's delete) sends nothing,
             // so the note stayed hidden until the notebook next changed.
             db.notes().deleteNote(flag.flagString, noteId)
+            subLock.withLock { deleted["${flag.flagString}#$noteId"] = nowMs() + deleteSettleMs }
             scope.launch {
                 kotlinx.coroutines.delay(deleteSettleMs)
                 refreshNotebook(flag)
@@ -558,6 +578,13 @@ class NotesRepo(
 
     companion object {
         private const val TAG = "NotesRepo"
+
+        /**
+         * What a save says when it went to the notebook's host, which has
+         * not answered yet: taken, not refused, said calmly. The host's
+         * answer comes down the notebook's stream.
+         */
+        const val SAVE_SENT = "Sent. The notebook's host hasn't answered yet, so your change may show in a moment."
 
         /** What a save says when the note moved on since the editor opened. */
         const val NOTE_CHANGED =

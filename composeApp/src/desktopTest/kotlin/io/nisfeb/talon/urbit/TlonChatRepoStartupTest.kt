@@ -183,9 +183,13 @@ class TlonChatRepoStartupTest {
 
     // ─── Tlon 12.3.0's N-1 policy: newer paths first, older ones behind ───
 
+    // Each refusal reaches the stream before its PUT returns, as eyre's can:
+    // the fallback was registered only once the PUT returned, so the walk
+    // stopped at /v5 now and then (the startup flake).
     @Test
     fun `an older ship's activity and groups subscriptions walk back to what it has`() = started(prepare = {
         refuseWatch = { w -> if (w == "activity/v6" || w == "activity/v5" || w == "groups/v3/groups" || w == "groups/v1/foreigns") "no such path" else null }
+        holdWatchAnswer = 300
     }) {
         until("activity on /v4") { "activity/v4" in ship.subscribed }
         until("groups on /v1") { "groups/v1/groups" in ship.subscribed }
@@ -470,6 +474,26 @@ class TlonChatRepoStartupTest {
         assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
+    // The new channel's subscribe lost on the way: eyre never made it, so
+    // its stream is a 404 and the channel is given up. The pass's later
+    // watches (a notebook's here) made it on the ship after all, and it
+    // was left there, watched and read by no one (review A1-5).
+    @Test
+    fun `a channel given up while the pass reads is ended on the ship`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = NOTEBOOKS
+        // The notebook's watch after the stream has asked.
+        holdScry = { if (it == "notes/v0/notebooks") 500 else 0 }
+        val once = java.util.concurrent.atomic.AtomicBoolean(true)
+        loseWatch = { w -> if (w == "chat/v4" && once.getAndSet(false)) java.io.IOException("lost") else null }
+    }) { _ ->
+        until("a second channel") { channelsStreamed().size >= 2 }
+        val first = channelsStreamed().first()
+        assertTrue(RECIPES in ship.subscribed, "the pass watched the notebook on it")
+        until("the first ended on the ship") { first in ship.deleted }
+        assertEquals(1, ship.deleted.count { it == first }, "once")
+    }
+
     // Its watch goes out before the stream opens, so a channel given up
     // here is replaced at once, as the notebook's above.
     @Test
@@ -572,6 +596,110 @@ class TlonChatRepoStartupTest {
         }
     }
 
+    // A lapsed login (eyre forgot its cookie, as on a restart) has every
+    // channel refused, a new one too. Chat said nothing, and the refusal
+    // came back as a plain "gone": a new channel and a whole pass every
+    // two seconds, for good (review A5-18).
+    @Test
+    fun `a lapsed login says it is signed out and stops asking until told to`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        connected(repo)
+        assertTrue(!repo.signedOut.value)
+        ship.signedOut = true
+        ship.endStreams()
+        until("signed out") { repo.signedOut.value }
+        val asked = ship.requests.size
+        delay(3_500)
+        assertEquals(emptyList(), ship.requests.drop(asked), "nothing asked of the ship meanwhile")
+        repo.forceReconnect()
+        until("asked once more") { ship.requests.size > asked }
+        delay(1_000)
+        assertEquals(listOf("PUT"), ship.requests.drop(asked).map { it.substringBefore(' ') }, "a new channel's subscribe, and no pass")
+        // The ship takes the login again: one more try brings chat back,
+        // at once. Signed out, the debounce dropped a sign-in made within
+        // 3 s of the refused try, and chat slept (B6-5).
+        ship.signedOut = false
+        repo.forceReconnect()
+        until("no longer signed out") { !repo.signedOut.value }
+        until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
+    }
+
+    // B3-4: the stream flag is the app's. An old repo stopped again after a
+    // ship switch marked the new repo's stream down, and the catch-up
+    // worker, seeing no stream, retried for good.
+    @Test
+    fun `an old repo stopped again leaves the new repo's stream marked up`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        val health = io.nisfeb.talon.notify.NotificationHealth()
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val old = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        old.stop()
+        val new = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        try {
+            withTimeout(60_000) { until("the new stream") { health.sseConnected.value } }
+            old.stop()
+            assertTrue(health.sseConnected.value, "the old repo marked the new stream down")
+        } finally {
+            new.stop()
+        }
+        assertTrue(!health.sseConnected.value, "a started repo stopped marks it down")
+    }
+
+    // B5-5: every launch scanned the whole messages table for rows with
+    // no search text, though writes fill their own. Once filled, it is
+    // marked and not looked for again.
+    @Test
+    fun `rows with no search text are filled once and later launches do not look`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170141184501", "~bus", 1, """[{"inline":["hi ~zod"]}]""", "/chat"))
+        db.marks().put(io.nisfeb.talon.data.MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, 1))
+        db.messages().forgetLinkSearchText()
+        suspend fun text() = db.messages().getOne("~bus", "~bus/170141184501")!!.searchText
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val first = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
+        } finally { first.stop() }
+        db.messages().forgetLinkSearchText()
+        val next = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("the second stream") { streams() >= 2 }
+            delay(500)
+            assertNull(text(), "a later launch scanned for rows to fill")
+        } finally { next.stop() }
+    }
+
+    private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
+        """"$f":{"invites":[{"flag":"$f","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],"lookup":null,""" +
+            """"preview":{"meta":{"title":"$f","description":"","image":"","cover":""},"member-count":3,"privacy":"secret"},"progress":null,"token":null}"""
+    }
+
+    // An invite that came while the stream was down was listed and never
+    // announced: every read of invites but a live fact was quiet (review
+    // A5-9). The first read of a session stays quiet, as DM requests do.
+    @Test
+    fun `an invite that came while the stream was down is announced when it is back`() = started(prepare = {
+        scries[init] = initPosts
+        scries["groups/v1/foreigns"] = foreigns("~bus/garden")
+    }) { repo ->
+        val announced = java.util.concurrent.CopyOnWriteArrayList<String>()
+        repo.groupInviteListener = { announced += it.flag }
+        connected(repo)
+        until("the first read of invites") { repo.invitesFlow.value?.any { it.flag == "~bus/garden" } == true }
+        // While away, a long outage: a new channel and the whole pass.
+        ship.scries["groups/v1/foreigns"] = foreigns("~bus/garden", "~nec/club")
+        repo.ageForTest(byMs = 5 * 60_000L, heardMs = 10 * 60_000L)
+        ship.reap()
+        until("announced") { "~nec/club" in announced }
+        until("watched again") { ship.subscribed.count { it == "groups/v1/foreigns" } == 2 }
+        // The ship drops the invites watch: what came meanwhile is read.
+        ship.scries["groups/v1/foreigns"] = foreigns("~bus/garden", "~nec/club", "~wex/den")
+        ship.quit("groups/v1/foreigns")
+        until("announced too") { "~wex/den" in announced }
+        assertEquals(listOf("~nec/club", "~wex/den"), announced.toList(), "the one pending at launch stays quiet")
+    }
+
     // Each invite heard read the whole foreigns list again. The fact is
     // the one group that moved, in the shape the scry gives.
     @Test
@@ -638,6 +766,30 @@ class TlonChatRepoStartupTest {
         }) { _ ->
             until("asked whether it landed, then sent again") { ship.pokesTo("channels").any { "mid-send" in it.json.toString() } }
             until("in flight again, until its echo") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "pending" }
+        }
+    }
+
+    // A DM in flight was stored as sent, so the next run never sent it
+    // (review A1-6). Its id is its own: sent again, the ship takes it once.
+    @Test
+    fun `a DM left in flight by the last run goes with the queue`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~zod/170141184506", "~zod", 5_000, """[{"inline":["cut off"]}]""", "/chat", status = "pending"))
+        started(prepare = { scries[init] = initPosts }) { _ ->
+            until("sent again") { ship.pokesTo("chat").any { "cut off" in it.json.toString() } }
+            until("sent") { db.messages().getOne("~bus", "~zod/170141184506")?.status == null }
+            assertEquals(1, ship.pokesTo("chat").count { "cut off" in it.json.toString() })
+        }
+    }
+
+    // Requeued at launch, it read "Your ship is slow. 1 queued" for the
+    // whole first pass, which on a busy ship is minutes (review A1-9).
+    @Test
+    fun `a post requeued at launch is not called slow while the first pass reads`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("chat/~bus/general", "local_1", "~zod", 5_000, """[{"inline":["mid-send"]}]""", "/chat", status = "pending"))
+        started(prepare = { holdScry = { if (it == init) 3_000 else 0 } }) { repo ->
+            until("requeued") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "queued" }
+            until("the first pass reading") { init in ship.scried }
+            assertNull(repo.shipSlow.first(), "the ship has not been asked")
         }
     }
 

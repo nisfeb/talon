@@ -103,7 +103,8 @@ val BINDABLE: List<Bindable> = listOf(
     Bindable("search", "Search", ShortcutAction.FocusSearch),
     Bindable("new-message", "New message", ShortcutAction.NewDm),
 ) + RailItem.entries.map { item ->
-    Bindable("open:${item.name}", if (item == RailItem.Chats) "Messages" else item.name, ShortcutAction.Open(item))
+    // The names the rail and menus use: the enum's read "Actions" for Orrery.
+    Bindable("open:${item.name}", if (item == RailItem.Chats) "Messages" else railLabel(item), ShortcutAction.Open(item))
 }
 
 /** One bindable action: its settings [id], what the settings call it, and what it does. */

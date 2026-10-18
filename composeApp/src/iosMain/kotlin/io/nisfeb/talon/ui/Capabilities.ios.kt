@@ -28,6 +28,9 @@ actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "iOS ${UIDevice.currentDevice.systemVersion}"
 
+actual val iosDeviceName: String =
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone) "iPhone" else "iPad"
+
 actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = false
@@ -45,6 +48,8 @@ actual val isWindowFullScreenSupported: Boolean = false
 // so a backgrounded phone hears a ring. UIBackgroundModes audio sustains
 // a call already in progress.
 actual val isBackgroundCallRingSupported: Boolean = true
+// The relay's PushKit leg is offered at sign-in (isRelayNotificationSetupNeeded).
+actual val needsPushForBackgroundRing: Boolean = false
 
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true

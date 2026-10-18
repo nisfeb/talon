@@ -1,6 +1,8 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -88,9 +90,12 @@ fun ContactProfileSheet(
     val links = androidx.compose.ui.platform.LocalUriHandler.current
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
       androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
+        // Scrolls: a long bio, or a phone on its side, pushed the actions
+        // off the bottom with no way down to them.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars),
             horizontalAlignment = Alignment.CenterHorizontally,

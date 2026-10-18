@@ -23,8 +23,10 @@ import kotlinx.coroutines.withContext
  * coexist; the cosine search filter `if (v.size != queryVector.size)
  * continue` handles the mismatch — desktop ignores any Android-indexed
  * rows in the same DB and re-indexes from scratch on its own dim.
+ *
+ * Open so a test can stand in a model of its own for [embed].
  */
-class DesktopEmbedder {
+open class DesktopEmbedder {
 
     @Volatile private var model: ZooModel<String, FloatArray>? = null
     @Volatile private var predictor: Predictor<String, FloatArray>? = null
@@ -55,7 +57,7 @@ class DesktopEmbedder {
      * the caller can skip indexing this row instead of tearing down
      * the whole pipeline.
      */
-    suspend fun embed(text: String): FloatArray? = withContext(Dispatchers.IO) {
+    open suspend fun embed(text: String): FloatArray? = withContext(Dispatchers.IO) {
         runCatching {
             val p = ensurePredictor()
             val raw = p.predict(text)

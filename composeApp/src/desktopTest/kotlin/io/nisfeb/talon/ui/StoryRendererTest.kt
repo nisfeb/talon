@@ -104,9 +104,13 @@ class StoryRendererTest {
         val body = "📊 Lunch?\n${VOTE_EMOJIS[0]} pizza\n${VOTE_EMOJIS[1]} tacos\n${encodePollTag(poll)}"
         val p = parts(body)
         assertEquals(listOf<StoryPart>(StoryPart.PollWidget("Lunch?", listOf("pizza", "tacos"))), p)
-        val votes = listOf(ReactionEntity("~bus", "1", "~nec", VOTE_EMOJIS[1]), ReactionEntity("~bus", "1", "~zod", VOTE_EMOJIS[1]))
+        // As the repo stores them: normalized, without the keycaps' U+FE0F.
+        // Seeded raw, this passed while no real poll counted a vote.
+        val tacos = ReactionPalette.normalize(VOTE_EMOJIS[1])
+        val votes = listOf(ReactionEntity("~bus", "1", "~nec", tacos), ReactionEntity("~bus", "1", "~zod", tacos))
         render(p, reactions = votes) {
             assertTrue(shows("📊 Lunch?") && shows("2 votes · click to change."))
+            onNodeWithText("2", useUnmergedTree = true).assertExists()
             assertTrue(!shows("[poll|"), "the tag is not shown")
             onNodeWithText("pizza").performClick()
             assertEquals(listOf("vote ${VOTE_EMOJIS[0]}"), did)

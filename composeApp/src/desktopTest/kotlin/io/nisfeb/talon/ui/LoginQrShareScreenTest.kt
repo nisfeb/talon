@@ -44,9 +44,9 @@ class LoginQrShareScreenTest {
 
     @Test
     fun `nothing is offered until both the ship and the code are in`() = share(initialUrl = "https://zod.test") {
-        assertTrue(shows("Fill in both fields to see a QR.") && !shows("Copy talon:// URI"))
+        assertTrue(shows("Fill in both fields to see a QR.") && !shows("Copy the link"))
         onNode(hasSetTextAction() and hasText("+code")).performTextInput("lidlut-tabwed")
-        waitUntil(timeoutMillis = 5_000) { shows("Copy talon:// URI") }
+        waitUntil(timeoutMillis = 5_000) { shows("Copy the link") }
         assertTrue(!shows("Fill in both fields"))
     }
 
@@ -54,11 +54,11 @@ class LoginQrShareScreenTest {
     fun `the link copied carries the ship and code, and a new edit clears the note`() = share {
         onNode(hasSetTextAction() and hasText("Ship URL")).performTextInput(" https://zod.test ")
         onNode(hasSetTextAction() and hasText("+code")).performTextInput("lidlut-tabwed")
-        onNodeWithText("Copy talon:// URI").performClick()
+        onNodeWithText("Copy the link").performClick()
         assertEquals(TalonLoginUri.Payload("https://zod.test", "lidlut-tabwed"), TalonLoginUri.decode(copied.single()))
-        waitUntil(timeoutMillis = 5_000) { shows("Copied talon:// URI to clipboard") }
+        waitUntil(timeoutMillis = 5_000) { shows("Copied the link") }
         onNode(hasSetTextAction() and hasText("+code")).performTextReplacement("sampel-sampel")
-        waitUntil(timeoutMillis = 5_000) { !shows("Copied talon:// URI to clipboard") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Copied the link") }
     }
 
     @Test

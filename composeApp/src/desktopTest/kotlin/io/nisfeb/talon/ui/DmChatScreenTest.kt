@@ -35,7 +35,6 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.TlonChatRepo
-import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +46,9 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import io.ktor.client.engine.mock.respond
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /**
  * The conversation screen end to end: what it shows from the database,
@@ -58,11 +60,19 @@ import kotlin.test.assertTrue
 class DmChatScreenTest {
     private val threads = mutableListOf<String>()
 
+    /** What a test changes under the screen: the chat it shows, and whether it is there at all. */
+    private class Host(whom: String) {
+        var whom by androidx.compose.runtime.mutableStateOf(whom)
+        var shown by androidx.compose.runtime.mutableStateOf(true)
+    }
+
     private fun chat(
         seed: suspend AppDatabase.() -> Unit = {},
         whom: String = "~bus",
         prepare: FakeShip.() -> Unit = {},
         jumpTo: String? = null,
+        host: Host = Host(whom),
+        drafts: DraftStore = InMemoryDraftStore(),
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -84,10 +94,10 @@ class DmChatScreenTest {
                         },
                     ) {
                     TalonTheme(darkTheme = false) {
-                        DmChatScreen(
-                            db = db, repo = repo, drafts = InMemoryDraftStore(), http = createAppHttpClient(),
+                        if (host.shown) DmChatScreen(
+                            db = db, repo = repo, drafts = drafts, http = offline,
                             aiSettings = FakeAiSettings(), uiSettings = InMemoryUiSettings(),
-                            ourPatp = "~zod", whom = whom,
+                            ourPatp = "~zod", whom = host.whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
@@ -105,6 +115,11 @@ class DmChatScreenTest {
             tmp.deleteRecursively()
         }
     }
+
+    /** The web, as far as these tests go: nothing there. A link's preview is not fetched from the real one. */
+    private val offline = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+        respond("", io.ktor.http.HttpStatusCode.NotFound)
+    })
 
     /** What the screen put on the clipboard. */
     private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -599,6 +614,32 @@ class DmChatScreenTest {
         onNodeWithText("post 005").assertIsDisplayed()
     }
 
+    // B6-1: a notification names its post as %activity does, dotted, and
+    // in a channel with its author. Rows keep it undotted and bare. Each
+    // in a chat no other test opens: the first frame's rows are kept per
+    // chat for the process, and another test's broke the composition.
+    @Test
+    fun `a notification's dotted id lands on its post in a DM`() = chat(
+        whom = "~nec",
+        seed = { messages().upsertAll((0 until 260).map { i -> MessageEntity("~nec", "~nec/1701411845%03d".format(i), "~nec", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat") }) },
+        jumpTo = "~nec/1.701.411.845.005",
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+        assertTrue(onAllNodesWithText("isn't loaded", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a notification's dotted id lands on its post in a channel`() = chat(
+        whom = "chat/~bus/dotted",
+        seed = { messages().upsertAll((0 until 260).map { i -> MessageEntity("chat/~bus/dotted", "1701411845%03d".format(i), "~bus", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat") }) },
+        jumpTo = "~bus/1.701.411.845.005",
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+        assertTrue(onAllNodesWithText("isn't loaded", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
     @Test
     fun `a pinned post older than the window is gone to from the banner`() = chat(
         whom = "chat/~bus/general",
@@ -672,5 +713,187 @@ class DmChatScreenTest {
             "\"cite\":{\"chan\":{\"nest\":\"chat/~darduc-mitfen/v3l8bgc0\",\"where\":\"/msg/170.141.184.508.207.337.420.778.996.591.277.113.344\"}}" in sent,
             sent,
         )
+    }
+
+    // ─── a post the ship has not taken yet ─────────────────────────
+
+    // Its id is only ours ("local_..."): a reaction, reply, edit, pin,
+    // link, quote or follow sent with it named a post the ship never had.
+    @Test
+    fun `a post the ship has not taken offers only what can be done here`() = chat(whom = ours, seed = ourChannel(
+        post("170141184506", "~zod", "landed earlier", 1_000),
+        MessageEntity(ours, "local_170141184599", "~zod", 2_000, """[{"inline":["never landed"]}]""", "/chat", status = "failed"),
+    )) { _, _ ->
+        menuOf("never landed")
+        for (gone in listOf("React", "Reply in thread", "Edit", "Pin", "Copy link", "Quote", "Follow thread", "Unfollow thread")) {
+            assertTrue(onAllNodesWithText(gone).fetchSemanticsNodes().isEmpty(), "offered $gone")
+        }
+        onNodeWithText("Delete").assertExists()
+        onNodeWithText("Copy text").performClick()
+        // Up edits the last post the ship has, not the one it does not.
+        // The box first takes the focus the menu had.
+        onNode(hasSetTextAction()).performClick()
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionUp) }
+        waitUntil(timeoutMillis = 20_000) { draft() == "landed earlier" }
+    }
+
+    // B6-4: a post on its way, its poke on the wire, offers no Delete:
+    // the ship takes it anyway, and its echo brought it back.
+    @Test
+    fun `a post still sending offers no delete`() = chat(whom = ours, seed = ourChannel(
+        MessageEntity(ours, "local_170141184599", "~zod", 2_000, """[{"inline":["on its way"]}]""", "/chat", status = "pending"),
+    )) { _, _ ->
+        menuOf("on its way")
+        onNodeWithText("Copy text").assertExists()
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty(), "offered Delete")
+    }
+
+    // ─── an edit, until the ship has it ────────────────────────────
+
+    private val general = "chat/~bus/general"
+
+    private fun ComposeUiTest.editTo(from: String, to: String) {
+        menuOf(from)
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == from }
+        onNode(hasSetTextAction()).performTextReplacement(to)
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+    }
+
+    @Test
+    fun `an edit the ship refuses keeps the edited words and says so`() = chat(
+        whom = general,
+        seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+        prepare = { refuse = { if (it.app == "channels") "nope" else null } },
+    ) { _, _ ->
+        editTo("first try", "second try")
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("edit failed", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("second try", draft(), "the changed words are still there to save again")
+        onNodeWithText("Editing message").assertExists()
+    }
+
+    @Test
+    fun `an edit on its way says saving and keeps its words until the ship has it`() = chat(
+        whom = general,
+        seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+        prepare = { holdPoke = 1_500 },
+    ) { ship, _ ->
+        editTo("first try", "second try")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("second try", draft())
+        // A second Enter while it is on its way does not send it twice.
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Editing message").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Saving…").fetchSemanticsNodes().isEmpty() }
+        assertEquals("", draft(), "the box is back to what it held before the edit")
+        Thread.sleep(300)
+        assertEquals(1, ship.pokesTo("channels").size)
+    }
+
+    // Real time: the edit is held on the ship's side while the chat goes.
+    @Test
+    fun `an edit saved just before leaving the chat still lands`() {
+        val host = Host(general)
+        chat(
+            whom = general, host = host,
+            seed = { messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat")) },
+            prepare = { holdPoke = 1_000 },
+        ) { ship, _ ->
+            editTo("first try", "second try")
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
+            host.shown = false
+            waitForIdle()
+            val until = System.currentTimeMillis() + 10_000
+            while (ship.pokesTo("channels").isEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertTrue("second try" in ship.pokesTo("channels").single().json.toString())
+        }
+    }
+
+    // ─── words as they were written ────────────────────────────────
+
+    @Test
+    fun `copy text gives a link its whole address`() = chat(seed = {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat"))
+    }) { _, _ ->
+        menuOf("see example.com/articles…")
+        onNodeWithText("Copy text").performClick()
+        waitForIdle()
+        assertEquals(listOf("see https://example.com/articles/2026/10/a-very-long-slug"), copied.toList())
+    }
+
+    @Test
+    fun `a colon and one letter is a smiley and enter sends it`() = chat { ship, _ ->
+        send("nice :D")
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertTrue("nice :D" in ship.pokesTo("chat").single().json.toString())
+    }
+
+    @Test
+    fun `a restored draft takes more words after itself`() = chat(drafts = InMemoryDraftStore().apply { save("~bus", "hello") }) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { draft() == "hello" }
+        onNode(hasSetTextAction()).performTextInput(" there")
+        waitUntil(timeoutMillis = 20_000) { draft() == "hello there" }
+    }
+
+    // A link or a notification to a post this device does not keep opened
+    // the chat at its newest, with no word that the post was not there.
+    @Test
+    fun `a jump to a post not kept here says so and opens at the newest`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }, jumpTo = "~bus/170141184599") { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("That message isn't loaded here yet", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("hello from bus").assertIsDisplayed()
+    }
+
+    // ─── the profile sheet ─────────────────────────────────────────
+
+    private val sam: suspend AppDatabase.() -> Unit = {
+        contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam Bell", null, null)))
+        messages().upsert(msg("~sampel-palnet/170141184506", "~sampel-palnet", "hi from sam", 1_000))
+    }
+
+    private fun ComposeUiTest.addSam() {
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("SB").onFirst().performClick()
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Add to contacts").performClick()
+    }
+
+    @Test
+    fun `adding a contact the ship refuses says so`() = chat(seed = sam, prepare = { refuse = { if (it.app == "contacts") "nope" else null } }) { _, _ ->
+        addSam()
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("add contact failed: the ship refused it").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // Real time: the poke is held on the ship's side while the chat goes.
+    @Test
+    fun `a contact added just before leaving the chat is still added`() {
+        val host = Host("~bus")
+        chat(seed = sam, host = host, prepare = { holdPoke = 1_000 }) { ship, _ ->
+            addSam()
+            waitForIdle()
+            host.shown = false
+            waitForIdle()
+            val until = System.currentTimeMillis() + 10_000
+            while (ship.pokesTo("contacts").size < 2 && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertEquals(2, ship.pokesTo("contacts").size, "meet, then the book page")
+        }
+    }
+
+    // The desktop pane keeps this screen across a chat switch, and a
+    // dialog left open acted on the next chat.
+    @Test
+    fun `a dialog open in one chat is gone in the next`() {
+        val host = Host("~bus")
+        chat(seed = {
+            messages().upsert(msg("~zod/170141184507", "~zod", "mine", 2_000))
+        }, host = host) { _, _ ->
+            menuOf("mine")
+            onNodeWithText("Delete").performClick()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isNotEmpty() }
+            host.whom = "~nec"
+            waitForIdle()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isEmpty() }
+        }
     }
 }

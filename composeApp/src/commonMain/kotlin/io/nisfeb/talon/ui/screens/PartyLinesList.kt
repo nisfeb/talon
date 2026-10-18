@@ -32,7 +32,6 @@ import io.nisfeb.talon.ui.PartyLineRow
 import io.nisfeb.talon.ui.anyPartyLineOccupied
 import io.nisfeb.talon.ui.partyLineRows
 import io.nisfeb.talon.ui.partyRollCall
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -73,16 +72,17 @@ fun PartyLinesList(
     // Refresh counts and names while the list is on screen. Old hosts
     // answer the count only; older own-ships answer neither. A host seen
     // announcing its roster is asked once; only one too old to keeps the poll.
+    // Only while the window is in front (review B5-4): behind, nobody sees it.
+    val window = androidx.compose.ui.platform.LocalWindowInfo.current
     LaunchedEffect(rows.map { it.key }) {
         var first = true
-        while (true) {
+        io.nisfeb.talon.ui.askWhileInFront(androidx.compose.runtime.snapshotFlow { window.isWindowFocused }, 20_000) {
             for (r in rows) {
                 if (!first && callController?.announces(r.host) == true) continue
                 callController?.occupancyOf(r.host, r.name)
                 callController?.whoIsOn(r.host, r.name)
             }
             first = false
-            delay(20_000)
         }
     }
 

@@ -110,10 +110,10 @@ fun NotebookListScreen(
         onDispose { repo.setOpenChat(null) }
     }
     LaunchedEffect(whom) {
-        // Always scry newest on mount so we catch up on anything the
-        // SSE stream missed (and so first-open isn't empty). The
-        // subscription keeps us live after.
-        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshConversation(whom, count = 30) }.isFailure
+        // Read newest on the first open of a connect, so first-open isn't
+        // empty. The subscription keeps us live after; it read 30 posts on
+        // every open (review B5-12).
+        unread = io.nisfeb.talon.util.runSuspendCatching { repo.refreshOnOpen(whom) }.isFailure
         loading = false
     }
 
@@ -205,6 +205,9 @@ private fun NotebookCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // A post the ship refused, or one waiting for it, read as
+                // published: say which, as a chat's own post does.
+                SendStateNote(post.status)
                 Spacer(Modifier.height(10.dp))
                 val excerpt = remember(post.id, post.contentJson, post.searchText) {
                     excerptOf(post, limit = 240)
@@ -234,7 +237,9 @@ private fun excerptOf(post: io.nisfeb.talon.data.MessageEntity, limit: Int): Str
             if (p is io.nisfeb.talon.urbit.StoryPart.Text) p.text.text else ""
         }
     } else {
-        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { stored.removePrefix(it) } ?: stored
+        // The words as shown: the search text now ends in links' addresses and mentions' @ps.
+        val shown = io.nisfeb.talon.data.shownWordsOf(stored)
+        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { shown.removePrefix(it) } ?: shown
     }
     val text = words.replace(SPACES, " ").trim()
     return if (text.length <= limit) text else text.take(limit - 1) + "…"

@@ -31,6 +31,29 @@ class NativeCallsTest {
         assertFalse(RingIntents.isRing { it == "open_whom" })
     }
 
+    // B3-1: MainActivity is exported, and any app could have it place a
+    // call or answer a ring. The call extras count only through the alias.
+    @Test
+    fun callExtrasCountOnlyThroughTheNotificationAlias() {
+        assertTrue(RingIntents.trusted("io.nisfeb.talon.NotificationTap"))
+        assertEquals("io.nisfeb.talon.NotificationTap", RingIntents.TAP_ALIAS, "the manifest declares this name")
+        assertFalse(RingIntents.trusted("io.nisfeb.talon.MainActivity"), "the launcher's, exported")
+        assertFalse(RingIntents.trusted(null), "an intent with no component")
+        assertFalse(RingIntents.trusted("io.nisfeb.talon.HealthPermissionsRationale"), "another exported alias")
+        assertFalse(RingIntents.trusted("NotificationTap"))
+    }
+
+    // B3-5: only the rung ship's controller hears the ring.
+    @Test
+    fun aRingForAnotherSignedInShipGoesThereFirst() {
+        val ships = listOf("~zod", "~bus")
+        assertEquals("~bus", RingIntents.shipToSwitch("~bus", active = "~zod", ships = ships))
+        assertNull(RingIntents.shipToSwitch("~zod", active = "~zod", ships = ships), "already there")
+        assertNull(RingIntents.shipToSwitch("~nec", active = "~zod", ships = ships), "not signed in here")
+        assertNull(RingIntents.shipToSwitch(null, active = "~zod", ships = ships), "an older ring names no ship")
+        assertEquals("~bus", RingIntents.shipToSwitch("~bus", active = null, ships = ships), "from the login screen")
+    }
+
     @Test
     fun aRingAnsweredOnAnotherDeviceIsFiledSo() {
         val none = CallUiState.None
@@ -42,6 +65,21 @@ class NativeCallsTest {
         assertEquals(CallEnd.Remote, callEnd(incoming = true, answered = true, end = ended("ended")))
         assertEquals(CallEnd.Remote, callEnd(incoming = false, answered = false, end = ended("no answer")))
         assertEquals(CallEnd.Local, callEnd(incoming = false, answered = true, end = none))
+    }
+
+    // B3-12: a tap on a missed call's body dialled at once.
+    @Test
+    fun aMissedCallsBodyOpensTheDmAndOnlyCallBackCalls() {
+        val open = RingIntents.missedExtras(RingIntents.Missed.Open, "~bus", forShip = "~zod")
+        assertEquals(mapOf(RingIntents.OPEN_WHOM to "~bus", RingIntents.FOR_SHIP to "~zod"), open)
+        val callBack = RingIntents.missedExtras(RingIntents.Missed.CallBack, "~bus", forShip = "~zod")
+        assertEquals(mapOf(RingIntents.CALL_BACK to "~bus", RingIntents.FOR_SHIP to "~zod"), callBack)
+        assertEquals(mapOf(RingIntents.OPEN_WHOM to "~bus"), RingIntents.missedExtras(RingIntents.Missed.Open, "~bus", forShip = null))
+        assertFalse(RingIntents.isRing { it in open || it in callBack }, "neither shows a ring over the lock screen")
+        // What MainActivity and older notifications read.
+        assertEquals("open_whom", RingIntents.OPEN_WHOM)
+        assertEquals("call_back", RingIntents.CALL_BACK)
+        assertEquals("for_ship", RingIntents.FOR_SHIP)
     }
 
     @Test

@@ -126,6 +126,7 @@ class NoticeStoreTest {
             db().also { it.notices().put(n("x")); it.close() }
             BundledSQLiteDriver().open(path).also { c ->
                 c.execSQL("DROP TABLE notice")
+                c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 c.execSQL("PRAGMA user_version = 55")
                 c.close()
             }

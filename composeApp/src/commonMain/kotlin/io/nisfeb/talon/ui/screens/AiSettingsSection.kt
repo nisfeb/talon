@@ -392,6 +392,8 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     val refreshing by (repo?.refreshing ?: noBusy).collectAsState()
     val noPayment = remember { MutableStateFlow<Payment?>(null) }
     val payment by (repo?.payment ?: noPayment).collectAsState()
+    val noAsking = remember { MutableStateFlow<Long?>(null) }
+    val asking by (repo?.asking ?: noAsking).collectAsState()
     val noProblem = remember { MutableStateFlow<String?>(null) }
     val settingUp by (repo?.settingUp ?: noBusy).collectAsState()
     val keyProblem by (repo?.keyProblem ?: noProblem).collectAsState()
@@ -404,12 +406,6 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     var more by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var buying by remember { mutableStateOf(false) }
-    // A checkout is in flight. Following a slow one runs up to ~2 minutes
-    // (ArmillaryRepo.followCheckout), and the vendor already made the
-    // checkout on the first 202 — so a second order in that window is a
-    // real duplicate nobody is sent to. Hold the buy affordances closed
-    // until this one resolves.
-    var inFlight by remember { mutableStateOf(false) }
     var subscribing by remember { mutableStateOf<Plan?>(null) }
     var confirmCancel by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -432,17 +428,19 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     /** Open a checkout and send the person to it. */
     fun buy(rail: String, plan: String?, amountMicro: Long?) {
         val r = repo ?: return
-        if (inFlight) return
-        inFlight = true
-        note = "Asking ${account?.vendor?.ifBlank { null } ?: "the vendor"} for a checkout. From some ships this takes a minute." to false
-        // The repo carries the checkout and its watch; this only waits to
-        // open the page. With none yet, the payment line says so.
+        note = null
+        // The repo carries the checkout, says it is being asked for
+        // ([ArmillaryRepo.asking]) and watches it; this only opens the
+        // page. With none yet, the payment line says so. A browser that
+        // would not open it is said, with the page's button below.
         scope.launch {
             r.topUp(rail, plan, amountMicro)
-                .onSuccess { url -> inFlight = false; note = null; url?.let { runCatching { uri.openUri(it) } } }
-                .onFailure { inFlight = false; note = keyProblemLine(it) to true }
+                .onSuccess { url -> url?.let { runCatching { uri.openUri(it) }.onFailure { note = BROWSER_DID_NOT_OPEN to true } } }
+                .onFailure { note = keyProblemLine(it) to true }
         }
     }
+    val row = account?.checkouts?.firstOrNull { payment?.nonce?.isNotBlank() == true && it.nonce == payment?.nonce }
+    val ordering = orderingShut(asking, payment, row)
 
     // Said only when something is wrong: an app that answers needs no line.
     when (where) {
@@ -494,20 +492,42 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         if (a.hasView && !free) {
             balanceWarning(a, io.nisfeb.talon.ui.isArmillaryPurchaseSupported)?.let { Quiet(it, error = true) }
             Quiet(planLine(a))
-            val row = a.checkouts.firstOrNull { it.nonce == payment?.nonce }
-            paymentLine(payment, row)?.let { line ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (payment?.phase == Payment.Phase.WAITING) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Quiet(line, error = payment?.phase == Payment.Phase.ENDED)
-                }
-            }
-            // The page again: the browser closed, the screen left before
-            // it opened, or a checkout whose page the vendor sent late.
-            checkoutPage(payment, row)?.let { page ->
-                TextButton(onClick = { runCatching { uri.openUri(page) } }) { Text("Open the checkout") }
-            }
         } else if (a.vendor.isNotBlank()) {
             IntroducingLine()
+        }
+    }
+    // What this session's checkout is doing, in words the eye finds: it
+    // was a small grey line, gone when the answer came, and on an account
+    // whose view was not read yet the payment line and its page were not
+    // drawn at all, so a Continue looked like it did nothing.
+    if (!free) {
+        asking?.let { since ->
+            var now by remember { mutableStateOf(io.nisfeb.talon.util.nowMs()) }
+            LaunchedEffect(since) {
+                while (true) {
+                    now = io.nisfeb.talon.util.nowMs()
+                    kotlinx.coroutines.delay(1_000)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(askingLine(account?.vendor, now - since), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        if (asking == null) paymentLine(payment, row)?.let { line ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (payment?.phase == Payment.Phase.WAITING) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (payment?.phase == Payment.Phase.ENDED) MaterialTheme.colorScheme.error else androidx.compose.ui.graphics.Color.Unspecified,
+                )
+            }
+        }
+        // The page again: the browser closed or would not open it, the
+        // screen left before it opened, or a page the vendor sent late.
+        checkoutPage(payment, row)?.let { page ->
+            TextButton(onClick = { runCatching { uri.openUri(page) }.onFailure { note = BROWSER_DID_NOT_OPEN to true } }) { Text("Open the checkout") }
         }
     }
     // Whether this device can use it: a key from the ship, or why not.
@@ -537,9 +557,9 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         // carry. The balance, the warning, the history and the vendor
         // stand without it; see isArmillaryPurchaseSupported.
         if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported && !free) {
-            OutlinedButton(enabled = here && !inFlight, onClick = { buying = true }) { Text("Top up") }
+            OutlinedButton(enabled = here && !ordering, onClick = { buying = true }) { Text("Top up") }
             if (subscription != null && account?.subscriptionActive != true) {
-                TextButton(enabled = here && !inFlight, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
+                TextButton(enabled = here && !ordering, onClick = { subscribing = subscription; buying = true }) { Text(subscribeLabel(subscription)) }
             }
         }
         if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -846,6 +866,24 @@ internal fun planLine(a: Account): String = when {
     a.plan.isNotBlank() -> a.plan + "."
     else -> "Pay as you go."
 }
+
+/** The browser would not open the checkout's page. */
+internal const val BROWSER_DID_NOT_OPEN = "The checkout page did not open in your browser. Use Open the checkout."
+
+/** While a checkout is asked for: who is asked, how long it has been. */
+internal fun askingLine(vendor: String?, elapsedMs: Long): String =
+    "Asking ${vendor?.ifBlank { null } ?: "the vendor"} for a checkout, ${(elapsedMs / 1000).coerceAtLeast(0)} s. " +
+        "From some ships this takes a minute or two."
+
+/**
+ * Whether Top up and Subscribe stay shut: while a checkout is asked for,
+ * and while the one made has no page yet. The card says "Do not order
+ * again" then, and a second order is a real checkout nobody is sent to
+ * (A2-11). Open again once the page comes, or once the watch gave up.
+ */
+internal fun orderingShut(asking: Long?, p: Payment?, row: Checkout?): Boolean =
+    asking != null ||
+        (p?.phase == Payment.Phase.WAITING && checkoutPage(p, row) == null && (row == null || row.status == "pending"))
 
 /**
  * What the card says about the checkout this session opened, or null

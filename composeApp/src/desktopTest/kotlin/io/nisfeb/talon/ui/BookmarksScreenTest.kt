@@ -107,6 +107,16 @@ class BookmarksScreenTest {
         settled { shows("meeting notes") }
     }
 
+    // It said "a bookmark below" over an empty list: the way in is All.
+    @Test
+    fun `an empty folder says to file a bookmark from All`() = bookmarks { _, db ->
+        runBlocking { db.bookmarkFolders().upsert(BookmarkFolderEntity(id = 2, name = "Garden")) }
+        settled { shows("Garden") }
+        onNodeWithText("Garden").performClick()
+        settled { shows("No bookmarks in this folder yet.") }
+        assertTrue(shows("Open All and ${io.nisfeb.talon.ui.holdWord.lowercase()} a bookmark to add it here."))
+    }
+
     @Test
     fun `a new folder is kept here and sent`() = bookmarks { ship, db ->
         onNodeWithText("+ New").performClick()

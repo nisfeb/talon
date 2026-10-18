@@ -124,7 +124,9 @@ data class PendingAttachment(
  */
 @Stable
 class ComposerState(initialDraftText: String) {
-    var draft by mutableStateOf(TextFieldValue(initialDraftText))
+    // The caret after the words, where the writer left off: at the start,
+    // the next keystroke landed in front of a restored draft.
+    var draft by mutableStateOf(TextFieldValue(initialDraftText, TextRange(initialDraftText.length)))
     var pendingQuote by mutableStateOf<MessageEntity?>(null)
     var pendingVoice by mutableStateOf<PendingVoice?>(null)
     var pendingAttachment by mutableStateOf<PendingAttachment?>(null)
@@ -173,10 +175,15 @@ class ComposerState(initialDraftText: String) {
         "react" -> "reaction"
         "notify" -> "notification setting"
         "voice send" -> "voice message"
+        "add contact" -> "new contact"
+        "remove contact" -> "contact removal"
         else -> what
     }
 
     var uploading by mutableStateOf(false)
+
+    /** An edit on its way to the ship: the composer holds it, words and all, until the ship answers. */
+    var saving by mutableStateOf(false)
 
     /**
      * The post being edited, if any.
@@ -228,6 +235,48 @@ object PendingQuotes {
 }
 
 /**
+ * Files shared into a chat from another app, by whom, waiting for that
+ * chat's composer to stage them. Observable, so a chat already open takes
+ * one too. The composer takes it once and it then goes only on Send.
+ */
+object SharedAttachments {
+    private val byWhom = androidx.compose.runtime.mutableStateMapOf<String, PendingAttachment>()
+
+    fun put(whom: String, attachment: PendingAttachment) { byWhom[whom] = attachment }
+
+    fun peek(whom: String): PendingAttachment? = byWhom[whom]
+
+    fun take(whom: String): PendingAttachment? = byWhom.remove(whom)
+}
+
+/** What a share from another app does with the chat it is for ([shareStep]). */
+enum class ShareStep {
+    /** Its text goes into the chat's draft. */
+    Draft,
+    /** Its file waits in the chat's composer ([SharedAttachments]) for Send. */
+    Stage,
+    /** Posted now. */
+    Post,
+    /** Shown in Talon's picker, so the owner chooses. */
+    Pick,
+}
+
+/**
+ * [direct]: the share sheet named the chat (a Sharing Shortcut). Any app
+ * can send that, so a direct share never posts by itself (B3-2): its text
+ * goes into the draft and its file waits in the composer for the owner's
+ * Send. A gallery has no composer, so a direct share to one goes to the
+ * picker. A chat the owner picked in Talon takes a file or a gallery post
+ * at once, as before.
+ */
+fun shareStep(whom: String, text: Boolean, direct: Boolean): ShareStep = when {
+    whom.startsWith("heap/") -> if (direct) ShareStep.Pick else ShareStep.Post
+    text -> ShareStep.Draft
+    direct -> ShareStep.Stage
+    else -> ShareStep.Post
+}
+
+/**
  * A file's post: its name, linked. The upload's URL no longer carries the
  * name (uploadName), so a bare URL would leave nobody knowing what it is.
  */
@@ -255,6 +304,59 @@ internal suspend fun uploadDroppedFile(
         }
     }
 }
+
+/**
+ * Every file of a multi-file drop, one after another, all on the repo's
+ * scope. Only each file's own upload was carried: leaving the chat after
+ * the first had started dropped the rest of the batch. [failed] hears of
+ * each file that did not go, with a null error for one that came back
+ * empty.
+ */
+internal suspend fun uploadDroppedFiles(
+    files: List<DroppedFile>,
+    repo: TlonChatRepo,
+    strategy: ChatSendStrategy,
+    failed: (DroppedFile, Throwable?) -> Unit,
+) = repo.carry {
+    for (file in files) {
+        // The guard the staged paths have: a blank object, an empty post.
+        if (file.bytes.isEmpty()) failed(file, null)
+        else uploadDroppedFile(file, repo, strategy).onFailure { failed(file, it) }
+    }
+}
+
+/**
+ * Upload a recorded voice message and send it, on the repo's own scope.
+ * On the screen's, leaving the chat mid-upload cancelled the send, and
+ * the composer going then deleted the recording: the message was lost.
+ * The recording is deleted once sent, and on a failure only when [keep]
+ * says nobody is left to try it again.
+ */
+internal suspend fun sendVoice(
+    voice: PendingVoice,
+    repo: TlonChatRepo,
+    strategy: ChatSendStrategy,
+    keep: () -> Boolean,
+): Result<Unit> = repo.carry {
+    io.nisfeb.talon.util.runSuspendCatching {
+        val hostedUrl = repo.uploadImage(
+            bytes = readFileBytes(voice.path),
+            contentType = "audio/mp4",
+            fileName = fileName(voice.path),
+        )
+        val seconds = (voice.durationMs / 1000L).coerceAtLeast(1L)
+        strategy.sendText("[🎙 Voice ${seconds}s]($hostedUrl)")
+    }.also { if (it.isSuccess || !keep()) deleteFile(voice.path) }
+}
+
+/**
+ * What Ctrl+V takes: the clipboard's text where it has any, which the
+ * field then pastes, and its image only where it has none. An app that
+ * copies both had its image staged and the words lost. [hasText] is asked
+ * first, so an image is not decoded only to be put aside.
+ */
+internal fun ctrlVPaste(hasText: () -> Boolean, read: () -> DroppedFile?): ClipboardPaste =
+    if (hasText()) ClipboardPaste.None else clipboardPaste(read)
 
 /**
  * Re-keys on [whom] so switching conversations starts the composer
@@ -324,9 +426,10 @@ fun ChatComposer(
      *  keyboard would pop up over the conversation; a thread opened by
      *  Reply turns it on regardless, since typing is why it opened. */
     focusOnOpen: Boolean = !hasSoftKeyboard,
-    /** Commit an in-place edit. Default no-op so surfaces that don't
-     *  support editing need not pass one. */
-    onSaveEdit: (EditTarget, String) -> Unit = { _, _ -> },
+    /** Commit an in-place edit, on the repo's scope; throws when it did
+     *  not land. The composer keeps the edit until this returns. Default
+     *  no-op so surfaces that don't support editing need not pass one. */
+    onSaveEdit: suspend (EditTarget, String) -> Unit = { _, _ -> },
     placeholder: String = "Message",
     locationProvider: LocationProvider? = null,
     voiceComposer: (@Composable (
@@ -384,10 +487,11 @@ fun ChatComposer(
 
     // Clean up an orphaned voice recording when the surface unmounts
     // (back nav, ship switch, conversation switch). The DM screen
-    // used to do this manually; the composer owns it now.
+    // used to do this manually; the composer owns it now. One on its
+    // way is the send's to finish, file and all (see [sendVoice]).
     DisposableEffect(whom) {
         onDispose {
-            state.pendingVoice?.let { deleteFile(it.path) }
+            state.pendingVoice?.let { if (!state.uploading) deleteFile(it.path) }
             state.pendingVoice = null
         }
     }
@@ -503,56 +607,34 @@ fun ChatComposer(
         }
     }
 
-    // Common upload path used by drag-drop, clipboard paste, and the
-    // existing image / file picker buttons. Image-shaped MIME goes
-    // through strategy.sendImage so the recipient gets a structured
-    // image post (where the surface supports it); everything else
-    // posts the bare URL the way the file button does. The text in the
-    // box is not sent with these, so it stays there: clearing it threw
-    // away a message written before the drop.
-    // suspend, not fire-and-forget: a multi-file drop iterates files
-    // through one coroutine so `uploading` stays true until the LAST
-    // file lands — per-file coroutines re-enabled the composer (and
-    // retracted the uploading presence) as soon as the FIRST finished.
-    suspend fun uploadOne(file: DroppedFile) {
-            if (file.bytes.isEmpty()) {
-                // Same guard the staged paths get — a multi-file drop was the
-                // one path that could still upload a blank object and post an
-                // empty message.
-                state.sendError = EMPTY_ATTACHMENT_ERROR
-                return
-            }
-            state.uploading = true
-            uploadDroppedFile(file, repo, strategy)
-                .onFailure { err -> state.failed("upload", err) }
-            state.uploading = false
-    }
-
-    val uploadAndSend: (DroppedFile) -> Unit = { file ->
-        scope.launch {
-            state.sendError = null
-            uploadOne(file)
-        }
-    }
-
     // Stage a pasted / single-dropped file into the same review-before-send
     // preview the picker buttons use, so a paste doesn't fire off before the
-    // user can see what landed. Multi-file drops stay on [uploadAndSend]
-    // (the preview holds one item).
+    // user can see what landed. Multi-file drops send at once, through
+    // [uploadDroppedFiles] (the preview holds one item).
     val stageDropped: (DroppedFile) -> Unit = { file ->
         stage(file.bytes, file.mimeType, file.name, file.isImage)
+    }
+
+    // A file shared into this chat from another app: staged as a pick is,
+    // so nothing goes until the owner sends it.
+    val shared = SharedAttachments.peek(whom)
+    LaunchedEffect(shared) {
+        if (shared != null && SharedAttachments.take(whom) != null) {
+            stage(shared.bytes, shared.mimeType, shared.displayName, shared.isImage)
+        }
     }
 
     // The clipboard's image staged, or said to be too large. True when
     // there was one either way, so the field does not paste the
     // clipboard's text in its place.
-    val pasteClipboardImage: () -> Boolean = {
-        when (val found = clipboardPaste()) {
+    val takePaste: (ClipboardPaste) -> Boolean = { found ->
+        when (found) {
             is ClipboardPaste.Image -> { stageDropped(found.file); true }
             is ClipboardPaste.Problem -> { state.sendError = found.message; true }
             ClipboardPaste.None -> false
         }
     }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     // A mention reads in the box as it will once sent, by this device's
     // naming settings; a draft with no @p keeps the plain look (on iOS a
@@ -710,13 +792,18 @@ fun ChatComposer(
                 if (files.size == 1) {
                     stageDropped(files.first())
                 } else {
-                    // Sequential on purpose — see uploadOne. sendError
-                    // is cleared once for the whole batch: clearing
-                    // per-file erased file N's failure the moment file
-                    // N+1 started, and a missing message read as sent.
+                    // Sequential on purpose, in one coroutine, so
+                    // `uploading` stays true until the LAST file lands.
+                    // sendError is cleared once for the whole batch:
+                    // clearing per-file erased file N's failure the moment
+                    // file N+1 started, and a missing message read as sent.
                     scope.launch {
                         state.sendError = null
-                        files.forEach { uploadOne(it) }
+                        state.uploading = true
+                        uploadDroppedFiles(files, repo, strategy) { _, err ->
+                            if (err == null) state.sendError = EMPTY_ATTACHMENT_ERROR else state.failed("upload", err)
+                        }
+                        state.uploading = false
                     }
                 }
             },
@@ -781,13 +868,22 @@ fun ChatComposer(
             val edit = state.editing
             if (edit != null) {
                 val text = state.draft.text.trim()
-                if (text.isEmpty() || !canSend) return@doSend false
-                state.editing = null
-                state.draft = TextFieldValue(
-                    edit.priorDraftText,
-                    TextRange(edit.priorDraftText.length),
-                )
-                onSaveEdit(edit, text)
+                if (text.isEmpty() || !canSend || state.saving) return@doSend false
+                // The edit stays in the box until the ship has it: ended at
+                // once, a failed edit threw the changed words away.
+                state.saving = true
+                state.sendError = null
+                scope.launch {
+                    io.nisfeb.talon.util.runSuspendCatching { onSaveEdit(edit, text) }
+                        .onSuccess {
+                            if (state.editing == edit) {
+                                state.editing = null
+                                state.draft = TextFieldValue(edit.priorDraftText, TextRange(edit.priorDraftText.length))
+                            }
+                        }
+                        .onFailure { state.failed("edit", it) }
+                    state.saving = false
+                }
                 return@doSend true
             }
             // A staged attachment goes with whatever is written, as one
@@ -893,7 +989,7 @@ fun ChatComposer(
                         is CommandResult.Send -> strategy.sendText(cmd.body)
                         is CommandResult.Handled -> {}
                         is CommandResult.Error -> {
-                            state.sendError = cmd.message
+                            state.show(io.nisfeb.talon.util.Problem(cmd.message, cmd.details))
                             // Give the typed command back — commands have
                             // no optimistic echo, so the cleared draft
                             // meant retyping a long /poll to fix one
@@ -951,7 +1047,7 @@ fun ChatComposer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Editing message",
+                    if (state.saving) "Saving…" else "Editing message",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
@@ -983,29 +1079,16 @@ fun ChatComposer(
                     state.uploading = true
                     state.sendError = null
                     scope.launch {
-                        runCatching {
-                            val bytes = readFileBytes(pv.path)
-                            val hostedUrl = repo.uploadImage(
-                                bytes = bytes,
-                                contentType = "audio/mp4",
-                                fileName = fileName(pv.path),
-                            )
-                            val seconds = (pv.durationMs / 1000L).coerceAtLeast(1L)
-                            val label = "🎙 Voice ${seconds}s"
-                            strategy.sendText("[$label]($hostedUrl)")
-                            // Success only — mirrors sendAttachment: on
-                            // failure the recording stays staged (spinner
-                            // row and all) so the user can retry instead
-                            // of losing it, and the temp file survives
-                            // for the DisposableEffect to reap.
-                            state.pendingVoice = null
-                            state.draft = TextFieldValue("")
-                            store.clear(whom)
-                            deleteFile(pv.path)
-                        }.onFailure { err ->
-                            Log.e("ChatComposer", "voice send failed", err)
-                            state.failed("voice send", err)
-                        }
+                        // On the repo's scope, as an attachment is. On a
+                        // failure the recording stays staged so it can be
+                        // sent again. The words in the box are not part of
+                        // it and stay where they are.
+                        sendVoice(pv, repo, strategy, keep = { state.pendingVoice == pv })
+                            .onSuccess { if (state.pendingVoice == pv) state.pendingVoice = null }
+                            .onFailure { err ->
+                                Log.e("ChatComposer", "voice send failed", err)
+                                state.failed("voice send", err)
+                            }
                         state.uploading = false
                     }
                 },
@@ -1051,7 +1134,7 @@ fun ChatComposer(
                 }
                 if (hasImage) {
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
-                            pasteClipboardImage()
+                            takePaste(clipboardPaste())
                         },
                         modifier = Modifier.size(36.dp),
                     ) {
@@ -1198,15 +1281,18 @@ fun ChatComposer(
                             return@onPreviewKeyEvent true
                         }
                         // Ctrl+V (or Cmd+V on macOS) — if the
-                        // clipboard holds an image, intercept the
-                        // paste, stage it into the review preview, and
+                        // clipboard holds an image and no text, intercept
+                        // the paste, stage it into the review preview, and
                         // consume the event so the text field doesn't
                         // ALSO try to paste (which would insert garbage
-                        // like the file path or nothing). Plain text
-                        // paste falls through normally.
+                        // like the file path or nothing). Text pastes
+                        // normally, even beside an image (see [ctrlVPaste]);
+                        // the Paste image button takes that one.
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
-                        if (pasteCombo && canSend && !state.uploading && pasteClipboardImage()) {
+                        if (pasteCombo && canSend && !state.uploading &&
+                            takePaste(ctrlVPaste(clipboard::hasText, ::readClipboardImageOrNull))
+                        ) {
                             return@onPreviewKeyEvent true
                         }
                         if (e.key != Key.Enter) return@onPreviewKeyEvent false
@@ -1272,7 +1358,7 @@ fun ChatComposer(
             // bare-quote "react" gesture) — the button must agree, or on
             // touch, where hardware Enter doesn't exist, a bare quote is
             // unreachable.
-            val sendable = canSend &&
+            val sendable = canSend && !state.saving &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },

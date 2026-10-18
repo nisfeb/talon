@@ -80,6 +80,8 @@ fun NotebookPostScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    // The post as rows keep it: a notification's id is dotted.
+    val anchorId = remember(whom, postId) { io.nisfeb.talon.urbit.keptPostId(whom, postId) }
 
     // Keep this channel "focused" while the post is open. The notebook list
     // unmounts underneath (mutually-exclusive App.kt branches), so without
@@ -87,8 +89,8 @@ fun NotebookPostScreen(
     // clear on navigate-away. See GalleryPostScreen for the full rationale.
     // Comments are this post's thread: reading them here reads the
     // thread, locally and on the ship, the way the thread list does.
-    DisposableEffect(whom, postId) {
-        repo.setOpenThread(whom, postId)
+    DisposableEffect(whom, anchorId) {
+        repo.setOpenThread(whom, anchorId)
         onDispose { repo.setOpenThread(null, null) }
     }
 
@@ -100,12 +102,12 @@ fun NotebookPostScreen(
     // Suppress Room's invalidation-tracker re-emissions on unrelated
     // messages-table writes — without this the post body and replies
     // re-collect every time any other channel's SSE event lands.
-    val post by remember(whom, postId) {
-        db.messages().streamOne(whom, postId).distinctUntilChanged()
+    val post by remember(whom, anchorId) {
+        db.messages().streamOne(whom, anchorId).distinctUntilChanged()
     }.collectAsState(initial = null)
 
-    val replies by remember(whom, postId) {
-        db.messages().streamReplies(whom, postId).distinctUntilChanged()
+    val replies by remember(whom, anchorId) {
+        db.messages().streamReplies(whom, anchorId).distinctUntilChanged()
     }.collectAsState(initial = emptyList())
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
@@ -118,9 +120,9 @@ fun NotebookPostScreen(
      *  the tap silently is indistinguishable from success. */
     var actionError by remember { mutableStateOf<String?>(null) }
     /** False only while we're still waiting for the row to show up. */
-    var settled by remember(postId) { mutableStateOf(false) }
+    var settled by remember(anchorId) { mutableStateOf(false) }
 
-    LaunchedEffect(postId, post) {
+    LaunchedEffect(anchorId, post) {
         if (post != null) {
             settled = true
         } else {
@@ -251,6 +253,8 @@ fun NotebookPostScreen(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Refused or waiting, not published: as the notebook's card says.
+                    SendStateNote(p.status)
                 }
             }
 
@@ -310,7 +314,7 @@ fun NotebookPostScreen(
                         // repo.reply throws when offline / not connected —
                         // put the draft back so a failed send doesn't eat
                         // the comment.
-                        runCatching { repo.reply(whom, postId, text) }
+                        runCatching { repo.reply(whom, anchorId, text) }
                             .onFailure {
                                 replyText = text
                                 actionError = "Couldn't send — check your connection."
@@ -339,7 +343,7 @@ fun NotebookPostScreen(
                     confirmDelete = false
                     actionError = null
                     scope.launch {
-                        runCatching { repo.delete(whom, postId) }
+                        runCatching { repo.delete(whom, anchorId) }
                             .onSuccess { onBack() }
                             .onFailure {
                                 actionError = "Couldn't delete — check your connection."

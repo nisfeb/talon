@@ -33,6 +33,10 @@ class BriefingTest {
         assertEquals("No new messages.", Briefing.countsLine(null, 0, null))
         assertEquals("No new mail.", Briefing.countsLine(0, null, null))
         assertEquals("", Briefing.countsLine(null, null, null), "nothing known, nothing said: the model's part opens it")
+        // Mail that did not answer in time is said, not left out.
+        assertEquals("You have 3 chat messages. Your mail has not answered yet.", Briefing.countsLine(null, 3, 0, mailLate = true))
+        assertEquals("Your mail has not answered yet.", Briefing.countsLine(null, null, null, mailLate = true))
+        assertEquals("You have 2 new emails, and no new messages.", Briefing.countsLine(2, 0, 0, mailLate = true), "a count is never late")
     }
 
     @Test

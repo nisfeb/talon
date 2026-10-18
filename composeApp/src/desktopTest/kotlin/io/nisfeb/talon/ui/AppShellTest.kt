@@ -69,6 +69,10 @@ class AppShellTest {
         setup: FakeShip.() -> Unit = {},
         /** Media for 1:1 calls; null keeps calls dark, as on a platform without them. */
         calls: io.nisfeb.talon.call.CallEngineProvider? = null,
+        /** The saved ships; the fake ship's own, ~zod alone, by default. */
+        sessions: ((FakeShip) -> io.nisfeb.talon.urbit.SessionStore)? = null,
+        relay: io.nisfeb.talon.notify.RelaySettings = io.nisfeb.talon.notify.InMemoryRelaySettings(),
+        drafts: DraftStore = InMemoryDraftStore(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -86,13 +90,14 @@ class AppShellTest {
             setup()
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val store = sessions?.invoke(ship) ?: ship.session
         try {
             runComposeUiTest {
                 setContent {
                     Box(Modifier.size(width = width, height = 800.dp)) {
                         App(
                             http = ship.http,
-                            sessionStore = ship.session,
+                            sessionStore = store,
                             aiSettings = ai,
                             createDb = { key ->
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)
@@ -100,7 +105,8 @@ class AppShellTest {
                                     .fallbackToDestructiveMigration(dropAllTables = true)
                                     .build().also { runBlocking { it.seed() } }
                             },
-                            drafts = InMemoryDraftStore(),
+                            drafts = drafts,
+                            relaySettings = relay,
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             createUiSettings = { ui },
                             callEngineProvider = calls,
@@ -150,6 +156,22 @@ class AppShellTest {
 
     // "once you tap add ship there is no way to cancel and return to a
     // working ship".
+    // B1-4: a first read that failed said "No direct messages yet". No
+    // answer is not empty: it says so, and Try again reads them.
+    @Test
+    fun `a first load that fails says so and Try again reads the chats`() = app(setup = { failScry = { "init-posts" in it } }) { ship ->
+        waitUntil(timeoutMillis = 20_000) { showing("Couldn't load your chats") }
+        assertTrue(!showing("No direct messages yet"), "a failed read called empty")
+        ship.answerScry = { if ("init-posts" in it) """{"chat":{},"channels":{}}""" else null }
+        ship.failScry = { false }
+        val asked = ship.scried.count { "init-posts" in it }
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.scried.count { "init-posts" in it } > asked }
+        // Read, and empty: now it is said so.
+        waitUntil(timeoutMillis = 20_000) { !showing("Couldn't load your chats") }
+        assertTrue(showing("No direct messages yet") || showing("No groups yet"), "the empty line")
+    }
+
     @Test
     fun `Add ship can be cancelled, back to the ship that was open`() = app {
         onNodeWithContentDescription("Switch ship").performClick()
@@ -194,6 +216,24 @@ class AppShellTest {
         assertTrue(!showing("No bookmarks yet"), "one tab at a time")
         onNodeWithContentDescription("Chats").performClick()
         home()
+    }
+
+    // B1-5 through the shell: a group's activity row opens its page. It
+    // read "group/~bus/crew" and did nothing.
+    @Test
+    fun `a group's activity row opens the group`() = app(
+        seed = { groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null))) },
+        setup = {
+            scries["activity/v6/feed/init/30"] = """{"all":[{"source-key":"group/~bus/crew","events":[
+                {"time":"300","event":{"group-join":{"group":"~bus/crew","ship":"~nec"}}}
+            ]}]}"""
+        },
+    ) {
+        onNodeWithContentDescription("Activity").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Joined the group · The Crew") }
+        onNodeWithText("Joined the group", substring = true).performClick()
+        // The group's page: kept here, so as a member's, with no channels.
+        waitUntil(timeoutMillis = 5_000) { showing("No channels in this group yet.") }
     }
 
     @Test
@@ -312,6 +352,26 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { present("New message") }
             assertTrue(!showing("Mail runs in Grubbery"))
         }
+    }
+
+    // Review B1-2: below 840dp the More menu is the only navigation, and
+    // it had no Home. Orrery is offered there only while it is on.
+    @Test
+    fun `with no rail the More menu opens Home`() = app(width = 600.dp) {
+        onNodeWithContentDescription("More").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        assertTrue(!showing("Orrery"), "Orrery is off")
+        onNodeWithText("Home").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+        assertTrue(!present("New message"), "the home page, not the list")
+    }
+
+    // With a rail, Home is on it, so the overflow menu leaves it out.
+    @Test
+    fun `with the rail the More menu has no second Home`() = app {
+        onNodeWithContentDescription("More").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        assertTrue(onAllNodesWithText("Home").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -589,6 +649,52 @@ class AppShellTest {
         waitForIdle()
         onNodeWithContentDescription("Calendar").performClick()
         waitUntil(timeoutMillis = 10_000) { showing("\"Standup, moved\" was not saved: no repeating event has an occurrence there") }
+    }
+
+    /** A task typed into the calendar's task list and added. */
+    private fun ComposeUiTest.addTask(name: String) {
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Open") }
+        onNodeWithContentDescription("New task").performClick()
+        field("New task").performTextInput(name)
+        onNodeWithContentDescription("Add task").performClick()
+    }
+
+    // The task's refusal came back to the screen that added it, gone by
+    // then, and that screen's callback cleared it from what the calendar
+    // says on opening: never said at all.
+    @Test
+    fun `a task refused after the calendar was left is said when it opens again`() = app(
+        setup = withCalendar {
+            hold = kotlinx.coroutines.CompletableDeferred()
+            refuseLater = { if ("Buy bread" in it) "the task could not be read" else null }
+        },
+    ) { ship ->
+        val cal = ship.calendar!!
+        openCalendar()
+        addTask("Buy bread")
+        waitUntil(timeoutMillis = 5_000) { ship.requests.any { it.endsWith("/calendar.calendar") } }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        cal.hold!!.complete(Unit)
+        waitUntil(timeoutMillis = 10_000) { cal.outcomesRead.get() > 0 }
+        waitForIdle()
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("\"Buy bread\" was not added: the task could not be read") }
+    }
+
+    @Test
+    fun `a task refused while the calendar is open is said there once and not again`() = app(
+        setup = withCalendar { refuseLater = { if ("Buy bread" in it) "the task could not be read" else null } },
+    ) { ship ->
+        openCalendar()
+        addTask("Buy bread")
+        waitUntil(timeoutMillis = 10_000) { showing("\"Buy bread\" was not added: the task could not be read") }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+        openCalendar()
+        waitForIdle()
+        assertTrue(!showing("was not added"), "said once")
     }
 
     // A card for an event the calendar then refused pointed at nothing.
@@ -1069,6 +1175,17 @@ class AppShellTest {
         assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
     }
 
+    // Review B1-8: Remove was fire and forget, and a refusal said nothing.
+    @Test
+    fun `a remove the ship refuses says why and keeps the contact`() = app { ship ->
+        addOnContacts("~bus")
+        waitUntil(timeoutMillis = 10_000) { showing("Remove") }
+        ship.refuse = { if (it.app == "contacts") "not now" else null }
+        onNodeWithText("Remove").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't remove ~bus: the ship refused it (not now).") }
+        assertTrue(showing("Remove"), "still in the book, to try again")
+    }
+
     // Leaving Contacts mid-add does not stop it: it runs on the repo's scope.
     @Test
     fun `an add left midway still reaches the ship`() = app { ship ->
@@ -1091,5 +1208,230 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Edit profile").fetchSemanticsNodes().isNotEmpty() }
         }
     }
-}
 
+    /** ~zod, active, and ~bus, both at the fake ship, saved in a file as on desktop. */
+    private fun twoShips(): io.nisfeb.talon.urbit.SessionStore {
+        val store = io.nisfeb.talon.urbit.DesktopSessionStore(File(createTempDirectory("talon-ships-").toFile(), "sessions.json"))
+        store.save(io.nisfeb.talon.urbit.SavedSession("https://ship.test", "~bus", "test-session", "0v2", "ship.test"), makeActive = false)
+        store.save(io.nisfeb.talon.urbit.SavedSession("https://ship.test", "~zod", "test-session", "0v1", "ship.test"))
+        return store
+    }
+
+    // A5-4: the chat list's Sign out logged out with no push cleanup and
+    // landed on the login form, though another ship was saved.
+    @Test
+    fun `Sign out from the chat list stops the ship's pushes and opens the other saved ship`() {
+        val store = twoShips()
+        val relay = io.nisfeb.talon.notify.InMemoryRelaySettings().apply { setDeviceIdFor("~zod", "dev-zod") }
+        app(sessions = { store }, relay = relay) { ship ->
+            onAllNodesWithContentDescription("More").onFirst().performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+            onNodeWithText("Sign out").performClick()
+            waitUntil(timeoutMillis = 10_000) { store.activeShip() == "~bus" && present("New message") }
+            assertTrue(!showing("Connect"), "the other ship, not the login form")
+            assertEquals(listOf("~bus"), store.all().map { it.ship })
+            waitUntil(timeoutMillis = 5_000) { "DELETE /devices/dev-zod" in ship.requests }
+            waitUntil(timeoutMillis = 5_000) { relay.deviceIdFor("~zod").isBlank() }
+        }
+    }
+
+    // A5-7: Add ship restored the ship it left into the signed-out tree,
+    // which then polled that ship's mail and calendar into its database.
+    @Test
+    fun `Add ship asks nothing of the ship it left`() = app { ship ->
+        waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/auspex" in it } }
+        Thread.sleep(1_000)
+        waitForIdle()
+        onNodeWithContentDescription("Switch ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        val before = ship.requests.size
+        onNodeWithText("Add ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Connect") }
+        mainClock.advanceTimeBy(30_000)
+        Thread.sleep(3_000)
+        waitForIdle()
+        val after = ship.requests.drop(before)
+        assertTrue(after.none { "/apps/auspex" in it || "/apps/calendar" in it }, after.toString())
+        assertTrue(after.none { it.startsWith("GET /~/channel/") }, "no stream for a ship not open: $after")
+    }
+
+    // Picking the ship already open in the switcher closed the chat on screen.
+    @Test
+    fun `picking the ship already open keeps the chat`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat"))
+    }) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("hello there") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        onNodeWithContentDescription("Switch ship").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        onAllNodesWithText("~zod").onLast().performClick()
+        waitForIdle()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!showing("Select a chat to begin"), "the chat is still open")
+    }
+
+    // A5-18, the screens' half: a lapsed sign-in is said, calmly, on the
+    // login form, with the ship's address in it; the ship stays saved, and
+    // Cancel goes back to it.
+    @Test
+    fun `a lapsed sign-in opens the login form saying so and keeps the ship`() {
+        val store = twoShips()
+        app(sessions = { store }) {
+            io.nisfeb.talon.ui.screens.LoginLapses.lapsed("~zod")
+            waitUntil(timeoutMillis = 5_000) { showing("Connect") }
+            assertTrue(showing("You were signed out of ~zod. Sign in again"), "the login form says why")
+            assertTrue(showing("https://ship.test"), "the address is filled in")
+            assertEquals(setOf("~zod", "~bus"), store.all().map { it.ship }.toSet(), "nothing forgotten")
+            onNodeWithText("Cancel").performClick()
+            home()
+            assertTrue(!showing("Connect"))
+            assertTrue(io.nisfeb.talon.ui.screens.LoginLapses.ships.value.isEmpty(), "said once")
+        }
+    }
+
+    // A5-18 end to end: the ship refuses a lapsed login (every channel
+    // request a 403), the repo says signed out, and the shell opens the
+    // login form saying so, with the ship still saved.
+    @Test
+    fun `a login the ship refuses is said on the login form, the ship kept`() {
+        val store = twoShips()
+        app(sessions = { store }) { ship ->
+            // Signed in, then the login lapses and the stream drops: the
+            // reconnect's fresh channel is refused.
+            ship.signedOut = true
+            kotlinx.coroutines.runBlocking { ship.endStreams() }
+            waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
+            assertTrue(showing("https://ship.test"), "the address is filled in")
+            assertEquals(setOf("~zod", "~bus"), store.all().map { it.ship }.toSet(), "nothing forgotten")
+            // B6-2: Cancel goes back to the ship, still refused, and the
+            // form stays away. It came straight back: the ship's fresh
+            // repo was refused again and said so. Real time, since the
+            // refusal is a request.
+            val asked = ship.requests.size
+            onNodeWithText("Cancel").performClick()
+            home()
+            // The rebuilt ship asks again and is refused: what used to
+            // reopen the form.
+            waitUntil(timeoutMillis = 15_000) { ship.requests.drop(asked).any { "/~/channel/" in it } }
+            val until = System.currentTimeMillis() + 5_000
+            while (System.currentTimeMillis() < until) {
+                Thread.sleep(250)
+                waitForIdle()
+                assertTrue(!showing("Connect"), "the form came back after Cancel")
+            }
+        }
+    }
+
+    // A3-4: the list's "Draft:" previews were missing after a launch, until
+    // a chat had been opened.
+    @Test
+    fun `a draft kept from the last run shows in the list at launch`() {
+        val files = mutableMapOf(draftsFileName("~zod") to """{"~bus":"half a thought"}""")
+        app(
+            seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
+            drafts = FileDraftStore({ "~zod" }, read = { files[it] }, write = { name, text -> files[name] = text }),
+        ) {
+            onNodeWithText("DMs").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Draft: half a thought") }
+        }
+    }
+
+    // A4-20: "Hide composer buttons" hid them in the chat and not in its
+    // thread, in the side pane of a wide window and over the chat in a
+    // narrower one.
+    @Test
+    fun `hidden composer buttons stay hidden in a thread`() = threadWithButtonsHidden(1200.dp)
+
+    @Test
+    fun `hidden composer buttons stay hidden in a thread over the chat`() = threadWithButtonsHidden(900.dp)
+
+    private fun threadWithButtonsHidden(width: androidx.compose.ui.unit.Dp) = app(
+        width = width,
+        ui = InMemoryUiSettings(initialHide = true),
+        seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["shall we meet"]}]""", "/chat")) },
+    ) {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("shall we meet") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        val opened = { onAllNodesWithText("Reply in thread").fetchSemanticsNodes().isNotEmpty() }
+        for (attempt in 1..3) {
+            onAllNodesWithContentDescription("Message actions").onFirst().performClick()
+            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) break
+        }
+        onNodeWithText("Reply in thread").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Thread").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        assertTrue(!present("Attach file") && !present("Attach image"), "no composer shows them")
+    }
+
+    // ---- A share from another app (B3-2) ----
+
+    /** Uploads land, as AttachmentWithTextTest's ship has them. */
+    private val hostsUploads: FakeShip.() -> Unit = {
+        scries["genuine/secret"] = "\"tok-1\""
+        answerApi = { method, path, _ ->
+            when {
+                method == "PUT" && path == "/v1/zod/upload" ->
+                    """{"uploadUrl":"https://bucket.test/put-here?sig=1","hostedUrl":"https://cdn.test/zod/cat.png"}"""
+                method == "PUT" && path == "/put-here" -> ""
+                else -> null
+            }
+        }
+    }
+
+    private fun ComposeUiTest.openBusChat() {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { busChatShown() }
+    }
+
+    /** Nothing of [ship]'s says the file was uploaded or posted. */
+    private fun nothingSent(ship: FakeShip) =
+        ship.api.none { "/upload" in it || "/put-here" in it } && ship.pokesTo("chat").isEmpty()
+
+    // A forged direct share uploaded and posted as the owner. It waits in
+    // the chat's composer now, and goes on the owner's Send alone.
+    @Test
+    fun `a file shared into a chat waits in its composer and goes only on Send`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        // Shared before the chat opens, as the share sheet's shortcut does.
+        SharedAttachments.put("~bus", PendingAttachment(byteArrayOf(1, 2, 3, 4), "image/png", "cat.png", isImage = true))
+        openBusChat()
+        waitUntil(timeoutMillis = 5_000) { showing("Image, sent with your message") }
+        // Real time: an upload or a post would have gone by now.
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(nothingSent(ship), "sent before Send: ${ship.api} ${ship.pokesTo("chat")}")
+        onNodeWithContentDescription("Send").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("chat").any { "cdn.test/zod/cat.png" in it.json.toString() } }
+        assertTrue(ship.api.any { it.startsWith("PUT /v1/zod/upload") }, "uploaded on Send")
+        waitUntil(timeoutMillis = 5_000) { !showing("Image, sent with your message") }
+    }
+
+    @Test
+    fun `a file shared into the chat on screen is staged there too`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        openBusChat()
+        runOnIdle { SharedAttachments.put("~bus", PendingAttachment("x".encodeToByteArray(), "text/plain", "notes.txt", isImage = false)) }
+        waitUntil(timeoutMillis = 5_000) { showing("File, sent with your message") }
+        assertTrue(showing("notes.txt"))
+        Thread.sleep(1_000)
+        waitForIdle()
+        assertTrue(nothingSent(ship))
+        assertEquals(null, SharedAttachments.peek("~bus"), "taken once, by the composer")
+    }
+
+    // A cloud photo that never downloaded reads as no bytes: the composer
+    // says why, as it does for a pick, and nothing goes.
+    @Test
+    fun `an empty shared file says why and sends nothing`() = app(seed = busSaid, setup = hostsUploads) { ship ->
+        SharedAttachments.put("~bus", PendingAttachment(ByteArray(0), "image/png", "cloud.png", isImage = true))
+        openBusChat()
+        waitUntil(timeoutMillis = 5_000) { showing("came back empty") }
+        assertTrue(!showing("Image, sent with your message"), "staged with nothing in it")
+        assertTrue(nothingSent(ship))
+    }
+}

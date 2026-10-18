@@ -95,6 +95,18 @@ class UrbUnfurlKeptTest {
         assertTrue(asked.isEmpty())
     }
 
+    // B5-7: a failed card was asked again on every compose.
+    @Test
+    fun `a read that fails is not asked again for five minutes`() {
+        val url = "urb://~zod/kept-5"
+        val kept = Kept()
+        assertEquals(emptyList(), cards(url, null, kept, now = 1_000))
+        asked.clear()
+        assertEquals(emptyList(), cards(url, null, kept, now = 1_000 + UrbUnfurlCache.FAILED_RETRY_MS - 1))
+        assertTrue(asked.isEmpty(), "asked again within five minutes: $asked")
+        assertEquals(listOf("Back"), cards(url, """{"body":"# Back\nup","mark":"gmi"}""", kept, now = 1_000 + UrbUnfurlCache.FAILED_RETRY_MS).map { it.title })
+    }
+
     // No destructive fallback: a migration that does not match the entity fails here.
     @Test
     fun `the kept cards' table comes in by migration, with the rest of the database kept`() = runBlocking<Unit> {
@@ -106,6 +118,7 @@ class UrbUnfurlKeptTest {
         BundledSQLiteDriver().open(path).also { c ->
             c.execSQL("DROP TABLE urb_unfurls")
             c.execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+            c.execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
             c.execSQL("PRAGMA user_version = 49")
             c.close()
         }

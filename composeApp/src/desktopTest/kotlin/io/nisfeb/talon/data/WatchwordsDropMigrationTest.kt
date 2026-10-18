@@ -38,6 +38,7 @@ class WatchwordsDropMigrationTest {
                 execSQL("CREATE TABLE watchword_hits (id INTEGER PRIMARY KEY NOT NULL, term TEXT NOT NULL)")
                 execSQL("CREATE TABLE watchword_chat_excludes (whom TEXT PRIMARY KEY NOT NULL)")
                 execSQL("ALTER TABLE assistant_history DROP COLUMN log") // added at 53
+                execSQL("ALTER TABLE loop DROP COLUMN askBeforeSharing") // added at 58
                 execSQL("PRAGMA user_version = 51")
                 close()
             }

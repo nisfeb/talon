@@ -152,4 +152,42 @@ class NotebookDiaryScreensTest {
     }) { repo, _ ->
         NotebookComposeScreen(repo, whom, onBack = { did += "back" }, onPosted = {})
     }
+
+    // A refused post read as published on the notebook's list.
+    @Test
+    fun `a post the ship refused says so on its card`() = diary({ _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("Autumn") }
+        waitUntil(timeoutMillis = 5_000) { shows("Not sent") }
+        assertEquals(1, onAllNodesWithText("Not sent").fetchSemanticsNodes().size, "only the refused one")
+    }) { repo, db ->
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            db.messages().upsert(MessageEntity(whom, "local_170141184500300", "~zod", 300, """[{"inline":["fall words"]}]""", "/diary", title = "Autumn", status = "failed"))
+        }
+        NotebookListScreen(db, repo, whom, onBack = {}, onOpenPost = {}, onCompose = {})
+    }
+
+    // Review B5-12: it read 30 posts from the ship on every open.
+    @Test
+    fun `a notebook opened again in one connect does not read the ship again`() {
+        // Shown once the ship is set to answer: a read that failed is
+        // tried again on the next open, as it should be.
+        val shown = androidx.compose.runtime.mutableStateOf(false)
+        diary({ ship ->
+            ship.scries["channels/v4/$whom/posts/newest/50/post"] = """{"posts":{}}"""
+            val reads = { ship.requests.count { "/posts/newest/" in it && "blog" in it } }
+            shown.value = true
+            waitUntil(timeoutMillis = 5_000) { reads() >= 1 }
+            Thread.sleep(500)
+            waitForIdle()
+            val first = reads()
+            shown.value = false
+            waitForIdle()
+            shown.value = true
+            waitForIdle()
+            Thread.sleep(500)
+            assertEquals(first, reads(), ship.requests.toString())
+        }) { repo, db ->
+            if (shown.value) NotebookListScreen(db, repo, whom, onBack = {}, onOpenPost = {}, onCompose = {})
+        }
+    }
 }

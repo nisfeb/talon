@@ -11,6 +11,7 @@ import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
@@ -152,6 +153,95 @@ class TlonChatRepoSendTest {
         assertNotNull(db.groups().channelGroupFor(nest))
     }
 
+    // Silence was taken for a leave: the screen closed and the group stayed
+    // in the list. It is said now, calmly, as the ship being slow (review
+    // A5-19). A made channel is confirmed the same way. Real time: the
+    // ack's 15 s wait, the two at once.
+    @Test
+    fun `a leave or a new channel the ship never confirms is not taken as done`() = live {
+        seedChannel()
+        ship.silent = { it.app == "groups" || it.app == "channels" }
+        val leave = async { runCatching { repo.leaveGroup(flag) }.exceptionOrNull() }
+        val made = async { runCatching { repo.createChannel(flag, "chat", "News") }.exceptionOrNull() }
+        assertTrue(leave.await() is PokeUnacked, "${leave.await()}")
+        assertTrue(made.await() is PokeUnacked, "${made.await()}")
+        assertNotNull(db.groups().getGroup(flag), "still ours, as far as anyone knows")
+        assertTrue(io.nisfeb.talon.util.problemOf("Couldn't leave the group", leave.await()!!).calm)
+    }
+
+    // Wire: a %channels create, as the ship took it before this change;
+    // confirmed, and the group's channels read again after.
+    @Test
+    fun `a new channel is created on the ship and the groups are read again`() = live {
+        ship.scries["groups/v3/groups"] = """{"$flag":{"meta":{"title":"Bus"},"channels":{}}}"""
+        val made = repo.createChannel(flag, "chat", "News", "what is new")
+        val create = ship.pokesTo("channels").single()
+        assertEquals("channel-action-2", create.mark)
+        val slug = made.substringAfterLast('/')
+        assertEquals("chat/~zod/$slug", made)
+        assertEquals(
+            """{"create":{"kind":"chat","group":"$flag","name":"$slug","title":"News","description":"what is new","meta":null,"readers":[],"writers":[]}}""",
+            create.json.toString(),
+        )
+        kotlinx.coroutines.withTimeout(5_000) { while ("groups/v3/groups" !in ship.scried) delay(20) }
+    }
+
+    // Join, accept, decline, stop joining, leave and a new channel ran on
+    // the screen's scope: leaving the screen mid-poke cancelled them
+    // (review A5-19). Real time via holdPoke.
+    @Test
+    fun `group writes whose screen is left mid-poke still reach the ship`() = live {
+        seedChannel()
+        ship.holdPoke = 500
+        val writes: List<Pair<String, suspend () -> Unit>> = listOf(
+            "group-join" to suspend { repo.joinGroup("~nec/club") },
+            "group-join" to suspend { repo.acceptInvite("~nec/hall") },
+            "invite-decline" to suspend { repo.rejectInvite("~nec/den") },
+            "group-cancel" to suspend { repo.cancelJoin("~nec/yard") },
+            "channel-action-2" to suspend { repo.createChannel(flag, "chat", "News"); Unit },
+            "group-leave" to suspend { repo.leaveGroup(flag) },
+        )
+        for ((mark, write) in writes) {
+            val before = ship.pokes.size
+            val screen = CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            screen.launch { write() }
+            delay(150)
+            screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            kotlinx.coroutines.withTimeout(5_000) { while (ship.pokes.drop(before).none { it.mark == mark }) delay(20) }
+        }
+        kotlinx.coroutines.withTimeout(5_000) { while (db.groups().getGroup(flag) != null) delay(20) }
+        assertNull(db.groups().channelGroupFor(nest), "the leave finished here too")
+    }
+
+    // The screens hide these on a post the ship has not got; the repo
+    // refuses them too, so no poke names a stand-in id the ship never
+    // gave (coordinator, 2026-10-18: "local ids refused").
+    @Test
+    fun `an action on a post the ship has not got is refused before any poke`() = live {
+        seedChannel()
+        val local = "local_170141184506"
+        val refused = listOf<Pair<String, suspend () -> Unit>>(
+            "react" to suspend { repo.react(nest, local, "👍") },
+            "react on its reply" to suspend { repo.react(nest, "170141184507", "👍", parentId = local) },
+            "unreact" to suspend { repo.unreact(nest, local) },
+            "reply" to suspend { repo.reply(nest, local, "hi"); Unit },
+            "edit" to suspend { repo.edit(nest, local, "new", originalSentMs = 1); Unit },
+            "pin" to suspend { repo.pinPost(nest, local) },
+            "follow" to suspend { repo.setFollow(nest, local, true); Unit },
+            "quote" to suspend { repo.sendQuote(nest, "look", nest, local); Unit },
+            "quote with an image" to suspend { repo.sendImage(nest, "https://x.test/a.png", 1, 1, "a", quotedNest = nest, quotedPostId = local); Unit },
+        )
+        for ((what, act) in refused) {
+            val e = assertFailsWith<IllegalArgumentException>(what) { act() }
+            assertEquals("this message has not reached your ship yet.", e.message, what)
+        }
+        assertTrue(ship.attempted.isEmpty(), "${ship.attempted}")
+        assertTrue(db.messages().latestAnyFor(nest, 10).isEmpty(), "no reply or quote stored")
+        assertNull(db.reactions().get(nest, local, "~zod"))
+        assertNull(db.groups().pinnedPostIdFor(nest))
+        assertNull(db.followedThreads().get(nest, local))
+    }
+
     // ─── reactions, deletes, pins ─────────────────────────────────
 
     @Test
@@ -290,6 +380,26 @@ class TlonChatRepoSendTest {
         assertEquals("170141184506", db.groups().pinnedPostIdFor(nest), "the refused pin is undone")
         assertFailsWith<PokeNacked> { repo.unpinPost(nest) }
         assertEquals("170141184506", db.groups().pinnedPostIdFor(nest), "and so is a refused unpin")
+    }
+
+    // Pin ran on the chat's scope: leaving the chat mid-poke put the old
+    // pin back here and never told the ship (review A4-7). Real time.
+    @Test
+    fun `a pin or an unpin whose chat is left mid-poke still reaches the ship`() = live {
+        seedChannel()
+        ship.holdPoke = 600
+        for ((write, pinned) in listOf<Pair<suspend () -> Unit, String?>>(suspend { repo.pinPost(nest, "170141184506") } to "170141184506", suspend { repo.unpinPost(nest) } to null)) {
+            val before = ship.pokesTo("channels").size
+            val chat = CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            chat.launch { write() }
+            delay(200)
+            chat.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            kotlinx.coroutines.withTimeout(5_000) { while (ship.pokesTo("channels").size == before) delay(20) }
+            delay(100)
+            assertEquals(pinned, db.groups().pinnedPostIdFor(nest), "kept, not put back")
+        }
+        val orders = ship.pokesTo("channels").map { it.json.at("channel", "action", "order").jsonArray.map { e -> e.jsonPrimitive.content } }
+        assertEquals(listOf(listOf("170.141.184.506"), emptyList()), orders)
     }
 
     @Test

@@ -66,12 +66,19 @@ class ThreadListTest {
         try {
             runComposeUiTest {
                 setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalClipboardManager provides object : androidx.compose.ui.platform.ClipboardManager {
+                            override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+                            override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
+                        },
+                    ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
                             db = db, repo = repo, http = createAppHttpClient(), drafts = InMemoryDraftStore(),
                             ourPatp = "~zod", whom = whom, parentId = parentId, initialScrollReplyId = null,
                             onOpenConversation = {}, onOpenImage = {},
                         )
+                    }
                     }
                 }
                 waitForIdle()
@@ -83,6 +90,8 @@ class ThreadListTest {
             tmp.deleteRecursively()
         }
     }
+
+    private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun msg(id: String, author: String, text: String, sent: Long, parentId: String? = null, status: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", parentId = parentId, status = status)
@@ -168,6 +177,20 @@ class ThreadListTest {
     }
 
     // ─── a reply's menu ────────────────────────────────────────────
+
+    // B6-6's other half: a reply's Copy text gives a link its whole
+    // address, as the chat's does; the row still shows it cut short.
+    @Test
+    fun `copy text on a reply gives a link its whole address`() = thread(seed = {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(MessageEntity("~bus", "~bus/170141184507", "~bus", 2_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat", parentId = parent))
+    }) { _, _ ->
+        menuOf("see example.com/articles…")
+        onNodeWithText("Copy text").performClick()
+        waitForIdle()
+        assertEquals(listOf("see https://example.com/articles/2026/10/a-very-long-slug"), copied.toList())
+    }
 
     /** Opens [text]'s menu by the Message actions button beside it, clicking again if a cold first click is lost. */
     private fun ComposeUiTest.menuOf(text: String) {
@@ -259,5 +282,87 @@ class ThreadListTest {
         onAllNodesWithText("Report").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Reported to the group's admins", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(ship.pokesTo("groups").any { "~bus/crew" in it.json.toString() })
+    }
+
+    // Offered to everyone in a channel, the ship refused it and nothing said why.
+    @Test
+    fun `in a channel we do not host another's reply offers no delete`() = thread(whom = nest, parentId = "170141184506", seed = {
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest, "~bus/crew")))
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~nec", "their answer", 2_000, parentId = "170141184506"))
+    }) { _, _ ->
+        menuOf("their answer")
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("Delete (admin)").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `in a channel we host another's reply is deleted as an admin`() = thread(whom = "chat/~zod/general", parentId = "170141184506", seed = {
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~zod/general", "~zod/crew")))
+        messages().upsert(MessageEntity("chat/~zod/general", "170141184506", "~bus", 1_000, """[{"inline":["the question"]}]""", "/chat"))
+        messages().upsert(MessageEntity("chat/~zod/general", "170141184507", "~nec", 2_000, """[{"inline":["their answer"]}]""", "/chat", parentId = "170141184506"))
+    }) { ship, _ ->
+        menuOf("their answer")
+        onNodeWithText("Delete (admin)").performClick()
+        shows("Delete message?")
+        onAllNodesWithText("Delete (admin)").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        assertTrue("\"del\"" in ship.pokesTo("channels").single().json.toString())
+    }
+
+    // The repo edits a chat's posts only: Edit on a gallery comment always failed.
+    @Test
+    fun `our comment on a gallery post offers delete and no edit`() = thread(whom = "heap/~bus/pics", parentId = "170141184506", seed = {
+        messages().upsert(MessageEntity("heap/~bus/pics", "170141184506", "~bus", 1_000, """[{"inline":["a picture"]}]""", "/heap"))
+        messages().upsert(MessageEntity("heap/~bus/pics", "170141184507", "~zod", 2_000, """[{"inline":["my comment"]}]""", "/heap", parentId = "170141184506"))
+    }) { _, _ ->
+        menuOf("my comment")
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty())
+        onNodeWithText("Delete").assertExists()
+    }
+
+    @Test
+    fun `a reply the ship has not taken offers no reaction or edit`() = thread(whom = nest, parentId = "170141184506", seed = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(MessageEntity(nest, "local_170141184599", "~zod", 2_000, """[{"inline":["still going"]}]""", "/chat", parentId = "170141184506", status = "failed"))
+    }) { _, _ ->
+        menuOf("still going")
+        assertTrue(onAllNodesWithText("React").fetchSemanticsNodes().isEmpty())
+        assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty())
+        onNodeWithText("Delete").assertExists()
+    }
+
+    private fun ComposeUiTest.editReply(to: String) {
+        menuOf("first try")
+        onNodeWithText("Edit").performClick()
+        shows("Edit message")
+        onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.performTextReplacement(to)
+        onNodeWithText("Save").performClick()
+    }
+
+    private val ownReply: suspend AppDatabase.() -> Unit = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~zod", "first try", 2_000, parentId = "170141184506"))
+    }
+
+    // The dialog closed as Save was pressed, and a refused edit lost its words.
+    @Test
+    fun `an edit the ship refuses stays open with its words and says why`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
+        prepare = { refuse = { if (it.app == "channels") "nope" else null } }) { _, _ ->
+        editReply("second try")
+        shows("Couldn't save the edit: the ship refused it (nope).")
+        onNodeWithText("Edit message").assertExists()
+        val box = onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+        assertEquals("second try", box)
+    }
+
+    @Test
+    fun `an edit on its way says saving and closes once the ship has it`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
+        prepare = { holdPoke = 1_500 }) { ship, _ ->
+        editReply("second try")
+        shows("Saving…")
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("Edit message").fetchSemanticsNodes().isEmpty() }
+        assertTrue("second try" in ship.pokesTo("channels").single().json.toString())
     }
 }

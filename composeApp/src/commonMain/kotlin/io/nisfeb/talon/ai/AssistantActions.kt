@@ -646,7 +646,8 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 hits.isEmpty() -> "No ${if (reopen) "done" else "open"} task matches \"$q\"."
                 hits.size == 1 && hits[0].cal in cal.readOnly -> "That task is on a calendar shared with the user read-only; its host ticks it."
                 hits.size > 1 -> "Several match; which one?\n" + hits.joinToString("\n") { "task=${it.id} ${it.name}" }
-                else -> if (cal.setDone(hits[0].id, !reopen)) "${if (reopen) "Reopened" else "Done"}: ${hits[0].name}." else "The calendar did not take it."
+                // Through wrote(): setDone said "Done" of a tick the calendar took and then refused.
+                else -> cal.wrote(io.nisfeb.talon.calendar.doneBody(hits[0].id, !reopen)) ?: "${if (reopen) "Reopened" else "Done"}: ${hits[0].name}."
             }
         })
         add(Tool(
@@ -757,7 +758,10 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
                 ev.name, eventWhenLine(ev.l, ev.r, ev.all, zone), ev.location, ev.note, ev.tags, ev.l, ev.r,
             )
             runCatching { send(whom, card) }.fold(
-                { "Posted the event to ${a.contacts().conversationLabel(whom)} as a card." },
+                {
+                    val label = a.contacts().conversationLabel(whom)
+                    if (a.db.messages().queuedIn(whom) > 0) ToolCatalog.queued("the event for $label") else "Posted the event to $label as a card."
+                },
                 { "Error: the message did not go: ${it.message}" },
             )
         })
@@ -897,9 +901,14 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
  */
 private suspend fun CalendarRepo.wrote(body: JsonObject, readBack: Boolean = true): String? {
     val since = nowMs()
-    if (!writeEvent(body, readBack).ok) return "The calendar did not take it."
+    val w = writeEvent(body, readBack)
+    if (!w.ok) return "The calendar did not take it."
     // An add's refusal is recorded with the id "", having none of its own.
-    return refusal((body["id"] as? JsonPrimitive)?.contentOrNull.orEmpty(), since)?.let { "The calendar refused it: ${it.trimEnd('.')}." }
+    val why = refusal((body["id"] as? JsonPrimitive)?.contentOrNull.orEmpty(), since, w.action) ?: return null
+    // What the write put on show goes with it: the home page's today kept
+    // a refused edit until the reading back gave up.
+    w.undo()
+    return "The calendar refused it: ${why.trimEnd('.')}."
 }
 
 /** The occurrence of [id] on [on], or else its next one, reading past the widget's window when need be. */

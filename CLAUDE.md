@@ -183,9 +183,12 @@ output.
 
 ## Notification path (desktop)
 
-`SystemNotifier` (desktopMain) shells out to `notify-send` → `gdbus`
-on Linux, `osascript` on macOS, falls through to AWT tray on
-Windows (already native there) and as final fallback. The inline
+`SystemNotifier` (desktopMain) shells out to `notify-send`, then
+`gdbus`, on Linux; a backend that fails is demoted for the session,
+and the AWT tray is the final fallback. macOS and Windows use the AWT
+`TrayIcon` from the start: on macOS it is attributed to Talon.app
+(`osascript` showed Script Editor's icon), and on Windows it is a
+native toast. The inline
 `trayState.sendNotification(...)` lambda was replaced because AWT
 balloons on Linux don't go through libnotify and look out of place.
 Manual smoke: `./gradlew :composeApp:notifierSmoke`.

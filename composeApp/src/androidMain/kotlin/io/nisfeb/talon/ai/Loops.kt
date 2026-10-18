@@ -91,7 +91,7 @@ class Loops(
                     while (!sync.canCoordinate()) kotlinx.coroutines.delay(500)
                 }
             }
-            withTimeoutOrNull(RUN_BUDGET_MS) { withRunner { it.runDue() } }
+            withTimeoutOrNull(FIRE_BUDGET_MS) { withRunner { it.runDue(perLoopMs = RUN_BUDGET_MS) } }
         } finally {
             runCatching { rearm() }
         }
@@ -108,6 +108,16 @@ class Loops(
                 withRunner { it.runLoop(loop) }
             }.onFailure { if (it is CancellationException) throw it }
             runCatching { rearm() }
+        }
+    }
+
+    /** Allow, from the Loops screen: the held call, done as the loop's tool would ([LoopRunner.allow]). */
+    fun allowHeld(holdId: Long) {
+        scope.launch {
+            runCatching {
+                if (sessionStore.activeShip() == null) return@launch
+                withRunner { it.allow(holdId) }
+            }.onFailure { if (it is CancellationException) throw it }
         }
     }
 
@@ -245,15 +255,24 @@ class Loops(
         }
 
         /**
-         * Act on [transcript], autonomously (writes need no confirmation,
-         * see [DictationAgent]), and return the line for the notification.
+         * Act on [transcript], autonomously (writes need no confirmation
+         * but a send, which waits for [send], see [DictationAgent]), and
+         * return the line for the notification.
          * The loop's mail, calendar and message tools plus orrery's where
          * Orrery is on, [DictationAgent.TOOLS] of them; while [locked], only
-         * [DictationAgent.LOCKED_WRITES] among the writes. No write
+         * [DictationAgent.LOCKED_WRITES] among the writes. While [lockedNow],
+         * a read of messages or mail waits for [unlock]. No write
          * coordinator: a dictation runs only on the device it was spoken
          * into. Throws when the run fails.
          */
-        suspend fun dictate(transcript: String, locked: Boolean, earlier: List<DictationFlow.Earlier> = emptyList()): String {
+        suspend fun dictate(
+            transcript: String,
+            locked: Boolean,
+            earlier: List<DictationFlow.Earlier>,
+            send: suspend (CardProposal) -> Boolean?,
+            lockedNow: () -> Boolean,
+            unlock: suspend () -> Boolean,
+        ): String {
             started.await()
             val cfg = aiSettings.state.value
             val known = contacts.await()
@@ -292,6 +311,10 @@ class Loops(
                     completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                     tools = offered,
                     systemPrompt = DictationAgent.prompt,
+                    ownerSends = send,
+                    name = known::conversationLabel,
+                    locked = lockedNow,
+                    unlock = unlock,
                 ).run(transcript, earlier).also { card = seen.card(actions.zone(), known) }
             }
         }
@@ -331,7 +354,7 @@ class Loops(
         }
 
         /** The day as Archie opens with it ([day]). */
-        inner class Day(val mail: Int?, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
+        inner class Day(val mail: Int?, val mailLate: Boolean, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
 
         private fun zone() = io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value)
 
@@ -353,17 +376,20 @@ class Loops(
                 else runCatching { Briefing.questions(decider, owner, Briefing.unreadSaid(db, owner, io.nisfeb.talon.urbit.StoryCache::textFor)) }.getOrNull()
             }
             val chats = runCatching { Briefing.chatUnread(db) }.getOrNull()
-            read.await()
+            // Capped: a slow calendar or mail held the opener, with nothing said.
+            withTimeoutOrNull(OPENER_WAIT_MS) { read.await() }
             val zone = zone()
             val now = System.currentTimeMillis()
             val today = today()
             val twentyFour = android.text.format.DateFormat.is24HourFormat(context)
             val rows = calendar?.rows?.value.orEmpty()
             val next = rows.filter { !it.isTask && !it.all && it.l > now && kotlin.time.Instant.fromEpochMilliseconds(it.l).toLocalDateTime(zone).date == today }.minByOrNull { it.l }
-            val unreadMail = inbox.await()?.threads?.filter { it.unread }
+            val unreadMail = withTimeoutOrNull(OPENER_WAIT_MS) { inbox.await() }?.threads?.filter { it.unread }
+            val mailLate = mail != null && unreadMail == null
             val known = contacts.await()
             Day(
                 mail = unreadMail?.size,
+                mailLate = mailLate,
                 chats = chats,
                 questions = withTimeoutOrNull(Briefing.QUESTIONS_WAIT_MS) { questions.await() },
                 firstEvent = next?.let { "${it.name.ifBlank { "an event" }} at ${DictationCards.clock(it.l, zone, twentyFour)}, ${Briefing.soon(it.l - now)}" },
@@ -382,11 +408,13 @@ class Loops(
          * while [locked] only its locked writes, orrery's where it is on, and
          * orrery's proposals put to the owner by [decide] before they go ahead.
          * [locked] is read at each turn: the phone can lock mid-conversation.
+         * While it is, a read of messages or mail waits for [unlock].
          */
         suspend fun conversation(
             locked: () -> Boolean,
             orrery: io.nisfeb.talon.orrery.OrreryRepo?,
             decide: suspend (String, List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
+            unlock: suspend () -> Boolean,
         ): VoiceConversation {
             started.await()
             val known = contacts.await()
@@ -416,6 +444,7 @@ class Loops(
                 },
                 brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
                 locked = locked,
+                unlock = unlock,
             )
         }
 
@@ -454,8 +483,15 @@ class Loops(
          * Answer a question, looking things up only: where Orrery is on,
          * everything that is not a question is orrery's ([DictationFlow]).
          * [orrery] is the one the flow attached, read for what it holds.
+         * While [locked], a read of messages or mail waits for [unlock].
          */
-        suspend fun ask(question: String, earlier: List<DictationFlow.Earlier> = emptyList(), orrery: io.nisfeb.talon.orrery.OrreryRepo? = null): String {
+        suspend fun ask(
+            question: String,
+            earlier: List<DictationFlow.Earlier>,
+            orrery: io.nisfeb.talon.orrery.OrreryRepo?,
+            locked: () -> Boolean,
+            unlock: suspend () -> Boolean,
+        ): String {
             val cfg = aiSettings.state.value
             if (!cfg.loopsCanRun()) return DictationRun.NO_MODEL_FOR_QUESTIONS
             started.await()
@@ -473,6 +509,8 @@ class Loops(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                 tools = tools,
                 systemPrompt = DictationAgent.askPrompt,
+                locked = locked,
+                unlock = unlock,
             ).run(question, earlier).also { card = seen.card(actions.zone(), known) }
         }
 
@@ -553,6 +591,7 @@ class Loops(
         return LoopRunner(
             loops = db.loops(),
             runs = db.loopRuns(),
+            holds = db.loopHolds(),
             tools = tools + actionTools(actions),
             completer = { sys, msgs, t -> agentClient.completeWithTools(sys, msgs, t) },
             aiConfig = { aiSettings.state.value },
@@ -588,10 +627,15 @@ class Loops(
         // schedule (LoopRunner stamps lastRunAt up front), so the value is
         // a safety ceiling, not a correctness knob.
         private val RUN_BUDGET_MS = TimeUnit.SECONDS.toMillis(120)
+        // Every loop due in one fire, each with its own budget above, under
+        // WorkManager's ten minutes for a worker, with the connect wait.
+        private val FIRE_BUDGET_MS = TimeUnit.MINUTES.toMillis(8)
         private val WAKE_LOCK_MS = TimeUnit.SECONDS.toMillis(150)
         // Bounded wait for the %settings channel on a cold headless fire
         // with a write loop due — long enough for an SSE connect on mobile
         // data, short enough to leave the run budget intact.
         private val CONNECT_WAIT_MS = TimeUnit.SECONDS.toMillis(15)
+        // How long Archie's opener waits for the calendar read and the mail listing.
+        private const val OPENER_WAIT_MS = 5_000L
     }
 }

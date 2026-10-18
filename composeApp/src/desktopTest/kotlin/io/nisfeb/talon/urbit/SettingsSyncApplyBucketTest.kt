@@ -643,7 +643,7 @@ class SettingsSyncApplyBucketTest {
         db.loops().upsert(
             io.nisfeb.talon.data.LoopEntity(
                 gid = "g1", name = "old", prompt = "old prompt", intervalMinutes = 60,
-                enabled = false, writesAuthorized = true,
+                enabled = false, writesAuthorized = true, askBeforeSharing = true,
                 createdAt = 1, updatedAt = 1, lastRunAt = 12_345L,
             ),
         )
@@ -659,6 +659,7 @@ class SettingsSyncApplyBucketTest {
         // Invariants: device-local fields untouched by the wire.
         assertEquals(12_345L, row.lastRunAt)
         assertEquals(true, row.writesAuthorized)
+        assertEquals(true, row.askBeforeSharing, "the ask before sharing is this device's too")
     }
 
     @Test
@@ -687,6 +688,7 @@ class SettingsSyncApplyBucketTest {
             "a freshly-synced loop must not fire on the next tick",
         )
         assertEquals(false, row.writesAuthorized, "remote write-grant must not cross over to a new device")
+        assertEquals(false, row.askBeforeSharing)
         assertTrue(row.id != 0L, "insert assigns an autogen id")
     }
 

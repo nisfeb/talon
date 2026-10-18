@@ -10,9 +10,9 @@ import androidx.compose.runtime.Immutable
  * column-per-dim because dimensionality varies per model and SQLite
  * doesn't gain anything from columnar floats here.
  *
- * Keyed by (whom, id) to match `messages`. Cleared when the parent
- * row is hard-deleted; ride-along soft-deletes leave the embedding in
- * place since we still want the row searchable from history.
+ * Keyed by (whom, id) to match `messages`. The indexer drops the row
+ * once its message is deleted (soft or hard) or gone, so search never
+ * finds a deleted message by what it said.
  */
 @Immutable
 @Entity(tableName = "message_embeddings", primaryKeys = ["whom", "id"])
@@ -24,7 +24,8 @@ data class MessageEmbeddingEntity(
     /** The model's output dimensionality, captured here so a model
      *  swap can't silently mix vector shapes in the cosine kernel. */
     val dim: Int,
-    /** Hash of the source text — re-embed when contentJson changes. */
+    /** [io.nisfeb.talon.ai.embedHash] of the message it was made from:
+     *  re-embedded when the content or title changes. */
     val textHash: Long,
 ) {
     // ByteArray's auto-generated equals is referential. Override so

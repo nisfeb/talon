@@ -127,4 +127,14 @@ class KeyboardShortcutsTest {
     private fun ctrlShiftKeyDown(k: Key) = makeEvent(k, isCtrl = true, isShift = true)
     private fun metaKeyDown(k: Key) = makeEvent(k, isMeta = true)
     private fun plainKeyDown(k: Key) = makeEvent(k)
+
+    // Review B1-13: the settings named the areas by their enum, so Orrery
+    // read "Actions" and My profile read "Profile".
+    @Test
+    fun `an area's shortcut is named as the rail names it`() {
+        val label = { item: RailItem -> BINDABLE.single { it.id == "open:${item.name}" }.label }
+        assertEquals("Orrery", label(RailItem.Actions))
+        assertEquals("My profile", label(RailItem.Profile))
+        assertEquals("Messages", label(RailItem.Chats))
+    }
 }

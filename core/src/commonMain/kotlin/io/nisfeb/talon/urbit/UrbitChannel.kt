@@ -116,6 +116,10 @@ class UrbitChannel internal constructor(
         gone = true
     }
 
+    /** Eyre refused this channel to this login: said again by a stream asked for after. */
+    @Volatile
+    private var refused: Boolean = false
+
     /** The open stream's inbox, so a refused PUT can end the stream too. */
     @Volatile
     private var streamInbox: Channel<UrbitEvent>? = null
@@ -128,6 +132,7 @@ class UrbitChannel internal constructor(
      */
     private fun forbidden(): Nothing {
         gone = true
+        refused = true
         val e = ChannelGone(forbidden = true)
         streamInbox?.close(e)
         throw e
@@ -146,7 +151,9 @@ class UrbitChannel internal constructor(
      * rendezvous/buffered channel would shed events under load.
      */
     fun events(): Flow<UrbitEvent> = channelFlow {
-        if (gone) throw ChannelGone()
+        // Refused, it says so: as a plain "gone" the next pass came back
+        // at once, and on a lapsed login every two seconds, a whole pass each.
+        if (gone) throw ChannelGone(forbidden = refused)
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
         streamInbox = inbox
         // Drive the SSE session on its own coroutine. The sse{} block
@@ -256,16 +263,22 @@ class UrbitChannel internal constructor(
     @Volatile
     private var lastStreamMs: Long = 0L
 
-    suspend fun subscribe(app: String, path: String): Long = subscribeAll(listOf(app to path)).single()
+    suspend fun subscribe(app: String, path: String, registered: (Long) -> Unit = {}): Long =
+        subscribeAll(listOf(app to path)) { registered(it.single()) }.single()
 
     /**
      * Several subscriptions in one PUT, answering their request ids in the
      * order given. One PUT each, as it was, was an event on the ship for
      * every one of them, on every connect.
+     *
+     * [registered] gets the ids before the PUT goes: eyre may answer a
+     * watch down the stream before the PUT returns, and a refusal read
+     * then found nothing to fall back to.
      */
-    suspend fun subscribeAll(watches: List<Pair<String, String>>): List<Long> {
+    suspend fun subscribeAll(watches: List<Pair<String, String>>, registered: (List<Long>) -> Unit = {}): List<Long> {
         if (watches.isEmpty()) return emptyList()
         val ids = watches.map { nextRequestId() }
+        registered(ids)
         put(buildJsonArray {
             watches.forEachIndexed { i, (app, path) ->
                 add(buildJsonObject {
@@ -383,8 +396,13 @@ class UrbitChannel internal constructor(
         scope.launch { io.nisfeb.talon.util.runSuspendCatching { withTimeoutOrNull(timeoutMs) { delete() } } }
     }
 
+    /** The delete went to the ship, or is going. */
+    private val deleteSent = atomic(false)
+
     suspend fun delete() {
         retire()
+        // Once: a channel given up twice asked the ship twice.
+        if (!deleteSent.compareAndSet(false, true)) return
         val msg = buildJsonObject {
             put("id", nextRequestId())
             put("action", "delete")

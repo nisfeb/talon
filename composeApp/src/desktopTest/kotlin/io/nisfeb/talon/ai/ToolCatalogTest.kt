@@ -6,6 +6,7 @@ import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -108,6 +109,17 @@ class ToolCatalogTest {
     }
 
     @Test
+    fun `read_conversation gives the model a link's whole address`() {
+        // B6-6: the model reads links whole, not as the cut preview.
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        runBlocking {
+            db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat"))
+        }
+        val read = run("read_conversation", argsOf("whom" to "~bus"))
+        assertTrue("see $url" in read, read)
+    }
+
+    @Test
     fun `read_conversation with an empty db reports no messages`() {
         assertEquals("No messages found.", run("read_conversation", argsOf("whom" to "~bus")))
     }
@@ -122,5 +134,25 @@ class ToolCatalogTest {
                 .execute(argsOf("query" to "anything"))
         }
         assertEquals("No messages found.", out)
+    }
+
+    // A send behind a slow ship returns with the message in the queue:
+    // the tool said "Sent." of one still waiting, and dictation said it aloud.
+    @Test
+    fun `a message the ship has not taken is said to be queued`() = runBlocking<Unit> {
+        val ship = io.nisfeb.talon.urbit.FakeShip("~zod")
+        val live = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val events = ship.channel.events().launchIn(this)
+        try {
+            val send = ToolCatalog.default(live, db, embedder, conversationLabel = { if (it == "~bus") "Bus" else it }) { it }
+                .first { it.spec.name == "send_message" }
+            assertEquals("Sent to Bus.", send.execute(argsOf("whom" to "~bus", "text" to "hi")), "named as the chat list names it")
+            ship.lose = { if (it.app == "chat") java.io.IOException("The network connection was lost.") else null }
+            assertEquals("Queued for Bus: your ship is slow; it goes when it answers.", send.execute(argsOf("whom" to "~bus", "text" to "again")))
+            assertEquals(1, db.messages().queuedIn("~bus"))
+        } finally {
+            events.cancel()
+            live.stopAndJoinForTest()
+        }
     }
 }

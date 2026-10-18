@@ -35,7 +35,7 @@ class TalonSyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildOngoing()
+        val notification = buildOngoing(this)
         try {
             when {
                 // Android 14+ (API 34+): SPECIAL_USE has no timeout. dataSync
@@ -62,6 +62,7 @@ class TalonSyncService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        live = true
         // The stream this keeps, where no screen started it. Idempotent.
         (application as? TalonApplication)?.takeIf { it.activeShipFlow.value != null }?.let { app ->
             runCatching { app.repo.start(app.session) }.onFailure { Log.w(TAG, "could not start the stream", it) }
@@ -69,31 +70,54 @@ class TalonSyncService : Service() {
         return START_STICKY
     }
 
-    private fun buildOngoing(): Notification {
-        val tapIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pending = PendingIntent.getActivity(
-            this, 0, tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, Notifications.CHANNEL_SYNC)
-            .setSmallIcon(R.drawable.ic_stat_talon)
-            .setContentTitle("Talon")
-            // Unconditionally true: the service only pins the process —
-            // the SSE channel can be down while this row is showing, so
-            // it must not claim "Connected".
-            .setContentText("Listening for new messages")
-            .setContentIntent(pending)
-            .setOngoing(true)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .build()
+    override fun onDestroy() {
+        live = false
+        super.onDestroy()
     }
 
     companion object {
         private const val NOTIFICATION_ID = 100
         private const val TAG = "TalonSyncService"
+
+        /** True while the service runs, so [refresh] has a line to redraw. */
+        @Volatile
+        private var live = false
+
+        private fun buildOngoing(context: Context): Notification {
+            val tapIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pending = PendingIntent.getActivity(
+                context, 0, tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            // The active ship, while it refuses the saved login: "Listening
+            // for new messages" was up all the while and nothing came.
+            val app = context.applicationContext as? TalonApplication
+            val signedOutOf = app?.activeShipFlow?.value
+                ?.takeIf { runCatching { app.repo.signedOut.value }.getOrDefault(false) }
+            return NotificationCompat.Builder(context, Notifications.CHANNEL_SYNC)
+                .setSmallIcon(R.drawable.ic_stat_talon)
+                .setContentTitle("Talon")
+                // Unconditionally true: the service only pins the process —
+                // the SSE channel can be down while this row is showing, so
+                // it must not claim "Connected".
+                .setContentText(io.nisfeb.talon.ui.screens.syncNoticeLine(signedOutOf))
+                .setContentIntent(pending)
+                .setOngoing(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
+        }
+
+        /** Redraw the line, as the ship refuses or takes the login. */
+        fun refresh(context: Context) {
+            if (!live) return
+            runCatching {
+                androidx.core.content.ContextCompat.getSystemService(context, android.app.NotificationManager::class.java)
+                    ?.notify(NOTIFICATION_ID, buildOngoing(context))
+            }
+        }
 
         fun start(context: Context) {
             val intent = Intent(context, TalonSyncService::class.java)
@@ -115,16 +139,20 @@ class TalonSyncService : Service() {
          * until the mail app is asked, so it does not count here.
          */
         fun startIfNeeded(app: TalonApplication) {
-            val ship = app.activeShipFlow.value ?: return
+            if (streamNeeded(app)) runCatching { start(app) }.onFailure { Log.w(TAG, "could not start after boot: ${it.message}") }
+        }
+
+        /** No push reaches this phone for the active ship, so only a stream of its own tells it anything. */
+        fun streamNeeded(app: TalonApplication): Boolean {
+            val ship = app.activeShipFlow.value ?: return false
             // An endpoint with no distributor left to deliver to is none.
             val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(app)?.takeIf {
                 runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(app).isNotEmpty() }.getOrDefault(true)
             }
-            val needed = io.nisfeb.talon.notify.keepAliveNeeded(
+            return io.nisfeb.talon.notify.keepAliveNeeded(
                 app.relaySettings, ship, endpoint,
                 shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
             )
-            if (needed) runCatching { start(app) }.onFailure { Log.w(TAG, "could not start after boot: ${it.message}") }
         }
     }
 }

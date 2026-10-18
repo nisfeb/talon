@@ -60,6 +60,7 @@ class ActivityListTest {
                             onOpenReply = { w, p, r -> went += "reply $w $p $r" },
                             onOpenPost = { w, p -> went += "post $w $p" },
                             onOpenNotice = { went += "notice $it" },
+                            onOpenGroup = { went += "group $it" },
                         )
                     }
                 }
@@ -84,6 +85,25 @@ class ActivityListTest {
         tapRowOf("~nec")
         tapRowOf("~dev")
         assertEquals(listOf("chat ~bus", "post ~bus ~nec/1000", "reply ~bus ~dev/1000 ~dev/2000"), went.toList())
+    }
+
+    // B1-5: a group event read "group/~bus/crew" and opened nothing.
+    @Test
+    fun `a group event names its group and opens it, and an invite opens the invites`() = activity(prepare = {
+        scries["activity/v6/feed/init/30"] = """{"all":[{"source-key":"group/~bus/crew","events":[
+            {"time":"300","event":{"group-join":{"group":"~bus/crew","ship":"~nec"}}},
+            {"time":"200","event":{"group-invite":{"group":"~bus/crew","ship":"~bus"}}}
+        ]},{"source-key":"notebook/~bus/recipes","events":[
+            {"time":"100","event":{"note-create":{"author":"~bus"}}}
+        ]}]}"""
+    }) { _ ->
+        runBlocking { db.groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null))) }
+        waitUntil(timeoutMillis = 5_000) { shows("Joined the group · The Crew") }
+        assertTrue(!shows("group/~bus/crew"), "the source key is not shown")
+        assertTrue(shows("~bus · Added a note"), "a note event reads as one")
+        tap("Joined the group")
+        tap("Invited you to a group")
+        assertEquals(listOf("group ~bus/crew", "notice invite:~bus/crew"), went.toList())
     }
 
     @Test

@@ -718,19 +718,9 @@ private fun PollWidgetBlock(
     // Per-option tallies from the keycap-digit reactions. Any reaction
     // with a non-keycap emoji is ignored for vote counting but still
     // shows in the normal reaction bar.
-    val tallies = remember(reactions, options.size) {
-        IntArray(options.size).also { arr ->
-            for (r in reactions) {
-                val idx = VOTE_EMOJIS.indexOf(r.emoji)
-                if (idx in 0 until options.size) arr[idx] += 1
-            }
-        }
-    }
+    val tallies = remember(reactions, options.size) { pollTallies(reactions.map { it.emoji }, options.size) }
     val mineIndex = remember(reactions, ourPatp) {
-        if (ourPatp == null) -1
-        else VOTE_EMOJIS.indexOf(
-            reactions.firstOrNull { it.author == ourPatp }?.emoji
-        )
+        if (ourPatp == null) -1 else voteIndex(reactions.firstOrNull { it.author == ourPatp }?.emoji)
     }
     val totalVotes = tallies.sum()
     Surface(
@@ -927,11 +917,12 @@ private fun CalWidgetBlock(
                                 why = null
                                 addScope.launch {
                                     val cal = shipCalendar!!
-                                    val ok = cal.addShared(c.id, title, startEpochMs, endEpochMs)
-                                    addedDone = ok
-                                    added = if (ok) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
-                                    // The calendar's own refusal, said here and so not again on the calendar.
-                                    if (!ok) why = cal.unheard.value?.also { cal.heard() } ?: cal.failedLine("The calendar did not take it.")
+                                    // This add's own reason, never another write's.
+                                    val whyNot = cal.addSharedWhyNot(c.id, title, startEpochMs, endEpochMs)
+                                    addedDone = whyNot == null
+                                    added = if (whyNot == null) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                    // Said here, and so not again on the calendar.
+                                    if (whyNot != null) { why = whyNot; cal.heard(whyNot) }
                                 }
                             },
                         )

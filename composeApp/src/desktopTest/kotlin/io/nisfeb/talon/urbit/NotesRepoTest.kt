@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
 import kotlinx.coroutines.CoroutineScope
+import io.ktor.client.engine.mock.respond
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -260,6 +261,22 @@ class NotesRepoTest {
         assertEquals(false, row?.pending)
     }
 
+    // A proxy's 502 for a ship that is down read "Your ship couldn't take
+    // it (PUT /notes/~/v1/...: HTTP 502)": the internal path, and a refusal.
+    @Test
+    fun `a save or a new note behind a proxy's 502 says the ship is slow and not the path`() = live {
+        notes.bootstrap()
+        val proxy = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+            respond("<html><body>502 Bad Gateway</body></html>", io.ktor.http.HttpStatusCode.BadGateway)
+        })
+        val down = NotesRepo(db, CoroutineScope(SupervisorJob()))
+            .apply { attach(UrbitSession(proxy, ship.session).apply { tryRestore("~zod") }.openChannel()) }
+        val slow = "Your ship is slow, so it didn't go through. Try again when it's back."
+        assertEquals(slow, down.updateNote(book, 11, "not saved", expectedRevision = 3))
+        assertEquals(slow, down.createNote(book, 9, "Laksa", ""))
+        assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the host's copy, not the edit")
+    }
+
     @Test
     fun `a save each host refuses is said as what it is`() = live {
         notes.bootstrap()
@@ -286,6 +303,30 @@ class NotesRepoTest {
         assertTrue(notes.deleteNote(book, 11))
         delay(600)
         assertNull(db.notes().note(book.flagString, 11), "the host took it: it stays gone")
+    }
+
+    // Read again three seconds on, a busy host's notebook still had the
+    // note, and it came back before the host took it away: a delete that
+    // looked refused. Hidden until the settle is over, unless the host has
+    // let it go before then.
+    @Test
+    fun `a note deleted in a slow host's notebook stays hidden through a read before the settle`() = live {
+        val slow = NotesRepo(db, CoroutineScope(SupervisorJob()), deleteSettleMs = 1_500).apply { attach(ship.channel) }
+        slow.bootstrap()
+        assertTrue(slow.deleteNote(book, 11))
+        // Another change to the notebook is read while the host still has it.
+        slow.refreshNotebook(book)
+        assertNull(db.notes().note(book.flagString, 11), "still hidden: the host has not answered")
+        // The host kept it: back once the settle is over.
+        kotlinx.coroutines.withTimeout(5_000) { while (db.notes().note(book.flagString, 11) == null) delay(50) }
+        // Taken this time: a read without it ends the hiding, so a note of
+        // that id the host makes later is not hidden.
+        assertTrue(slow.deleteNote(book, 11))
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[]"
+        slow.refreshNotebook(book)
+        ship.scries["notes/v0/notes/~bus/recipes"] = "[${note(11, "Pho", "Again.")}]"
+        slow.refreshNotebook(book)
+        assertNotNull(db.notes().note(book.flagString, 11), "the host's own again")
     }
 
     // Made from a group's page, on that page's scope: leaving while the

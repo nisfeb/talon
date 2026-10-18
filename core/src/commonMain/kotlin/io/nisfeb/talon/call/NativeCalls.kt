@@ -38,6 +38,47 @@ object RingIntents {
 
     /** Whether an intent is about a ring, and so may show over the lock screen. */
     fun isRing(has: (String) -> Boolean): Boolean = has(ANSWER_FROM) || has(RINGING_FROM)
+
+    /**
+     * The activity-alias every notification opens Talon through. It is not
+     * exported, so only Talon can start it. MainActivity is exported, as
+     * the launcher's, and placed a call or answered a ring for any app.
+     */
+    const val TAP_ALIAS = "io.nisfeb.talon.NotificationTap"
+
+    /**
+     * Whether an intent's call extras (a ring, an answer, a call back) are
+     * Talon's own: they count only when it came through [TAP_ALIAS].
+     * [componentClass] is the class the intent was started for.
+     */
+    fun trusted(componentClass: String?): Boolean = componentClass == TAP_ALIAS
+
+    /**
+     * The ship to go to before a ring is shown or answered: only that
+     * ship's controller hears it. Null when it is the active one already,
+     * or is not signed in here (nowhere right to go).
+     */
+    fun shipToSwitch(forShip: String?, active: String?, ships: List<String>): String? =
+        forShip?.takeIf { it != active && it in ships }
+
+    /** A ship to call back, from a missed call's Call back. */
+    const val CALL_BACK = "call_back"
+    /** A conversation a notification's tap opens. */
+    const val OPEN_WHOM = "open_whom"
+    /** Which of the owner's ships a notification is for. */
+    const val FOR_SHIP = "for_ship"
+
+    /** A missed call's taps: the body and Message open the DM, Call back calls. */
+    enum class Missed { Open, CallBack }
+
+    /**
+     * What a missed call's tap carries. The body opens the DM with [from]
+     * (B3-12): it used to dial at once. Call back stays an action. Each
+     * carries [forShip], the ship that was rung, so the tap goes there.
+     */
+    fun missedExtras(tap: Missed, from: String, forShip: String?): Map<String, String> =
+        mapOf((if (tap == Missed.CallBack) CALL_BACK else OPEN_WHOM) to from) +
+            (forShip?.let { mapOf(FOR_SHIP to it) } ?: emptyMap())
 }
 
 /** How a call is filed in the system's call log. */

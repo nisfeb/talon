@@ -33,6 +33,9 @@ class Tool(
  */
 object ToolCatalog {
 
+    /** [what] waits in the queue for a slow ship, said calmly ([io.nisfeb.talon.urbit.TlonChatRepo.sendConfirmed]'s check). */
+    fun queued(what: String): String = "Queued $what: your ship is slow; it goes when it answers."
+
     fun default(
         repo: TlonChatRepo,
         db: AppDatabase,
@@ -156,7 +159,8 @@ object ToolCatalog {
             val text = args.str("text")?.takeIf { it.isNotBlank() }
                 ?: return@Tool "Error: text is required."
             repo.send(whom, text)
-            "Sent."
+            // A slow ship's send returns with the message queued: "Sent." was said of one still waiting.
+            if (db.messages().queuedIn(whom) > 0) queued("for ${conversationLabel(whom)}") else "Sent to ${conversationLabel(whom)}."
         },
         Tool(
             spec = ToolSpec(
@@ -317,7 +321,7 @@ object ToolCatalog {
     private fun format(messages: List<MessageEntity>, displayName: (String) -> String): String {
         if (messages.isEmpty()) return "No messages found."
         return messages.joinToString("\n") { m ->
-            val text = StoryCache.textFor(m.id, m.contentJson).replace('\n', ' ').take(300)
+            val text = StoryCache.copyTextFor(m.id, m.contentJson).replace('\n', ' ').take(300)
             "whom=${m.whom} post=${m.id} link=${io.nisfeb.talon.urbit.TalonLink.forMessage(m.whom, m.id, m.parentId)} from=${displayName(m.author)}: $text"
         }
     }

@@ -13,6 +13,7 @@ import io.nisfeb.talon.ai.without
 import io.nisfeb.talon.ui.platformLabel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.NoopNotifier
 import io.nisfeb.talon.util.Log
@@ -76,6 +77,16 @@ class ArmillaryRepo(
     /** The checkout this session opened last, while the card has something to say about it. */
     val payment: StateFlow<Payment?> = _payment.asStateFlow()
 
+    private val _asking = MutableStateFlow<Long?>(null)
+
+    /**
+     * When this session asked for the checkout whose answer is still to
+     * come, or null. On the repo, not a screen: the card says so and keeps
+     * Top up shut after it was left and opened again, and a second order
+     * in that time made a real checkout nobody was sent to.
+     */
+    val asking: StateFlow<Long?> = _asking.asStateFlow()
+
     private val _settingUp = MutableStateFlow(false)
 
     /** [setUpDevice] is waiting for this device's key. */
@@ -126,7 +137,7 @@ class ArmillaryRepo(
     @kotlin.concurrent.Volatile private var resumedAtMs = 0L
 
     /** The app is in front ([resumed]) or behind ([paused]); in front until told. */
-    @kotlin.concurrent.Volatile private var inFront = true
+    private val inFront = MutableStateFlow(true)
 
     // Coroutines alone touch the repo, so one lock is the whole of the
     // guard; commonMain has no synchronized, iOS being native.
@@ -153,7 +164,7 @@ class ArmillaryRepo(
         ticking = scope.launch {
             while (isActive) {
                 delay(picksEveryMs)
-                if (inFront && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
+                if (inFront.value && _availability.value == ArmillaryAvailability.PRESENT && aiSettings?.state?.value?.profile()?.armillary() != null) readPicks()
             }
         }
         // The ship already buys from a vendor, set up on some device: this
@@ -261,6 +272,9 @@ class ArmillaryRepo(
             var failures = 0
             while (_availability.value == ArmillaryAvailability.UNKNOWN && _error.value != null) {
                 delay(io.nisfeb.talon.urbit.jittered(io.nisfeb.talon.orrery.probeRetryMs(++failures, probeRetryFirstMs)))
+                // Not while the app is behind: every quarter hour, for nobody.
+                // A check due meanwhile goes as it comes back.
+                inFront.first { it }
                 refresh()
             }
         }
@@ -290,7 +304,7 @@ class ArmillaryRepo(
      * triggers.
      */
     fun resumed() {
-        inFront = true
+        inFront.value = true
         val at = now()
         if (api == null || at - resumedAtMs < RESUME_GAP_MS) return
         resumedAtMs = at
@@ -307,7 +321,7 @@ class ArmillaryRepo(
 
     /** The app went behind: the picks are not read again until it is back ([resumed] reads them then). */
     fun paused() {
-        inFront = false
+        inFront.value = false
     }
 
     /**
@@ -403,10 +417,17 @@ class ArmillaryRepo(
      */
     suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String?> = scope.async { runSuspendCatching {
         val a = api ?: error("Not attached to a ship.")
+        if (!_asking.compareAndSet(null, now())) error(CHECKOUT_ON_ITS_WAY)
+        try { checkout(a, rail, plan, amountMicro) } finally { _asking.value = null }
+    } }.await()
+
+    private suspend fun checkout(a: ArmillaryApi, rail: String, plan: String?, amountMicro: Long?): String? {
         val first = a.checkout(rail, plan, amountMicro)
         val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
-        val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
-        when (answer) {
+        // Unknown where the account could not be read: taken as 0, any
+        // balance read next settled the checkout as paid.
+        val start = _account.value?.takeIf { it.hasView }?.balanceMicro
+        return when (answer) {
             is CheckoutAnswer.Url -> {
                 watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING, url = answer.url))
                 answer.url
@@ -421,7 +442,7 @@ class ArmillaryRepo(
             }
             is CheckoutAnswer.Refused -> error(answer.reason)
         }
-    } }.await()
+    }
 
     /**
      * A checkout the ship answered 202 for. The order went out, and the
@@ -529,7 +550,13 @@ class ArmillaryRepo(
         val p = _payment.value ?: return false
         if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
         val row = acct.checkouts.firstOrNull { p.nonce.isNotBlank() && it.nonce == p.nonce }
-        val rose = if (acct.hasView) acct.balanceMicro - p.startMicro else 0L
+        // A start not known when the checkout opened is the first balance
+        // read after it: a rise is only a rise past what was there.
+        if (p.startMicro == null && acct.hasView && row == null) {
+            _payment.value = p.copy(startMicro = acct.balanceMicro)
+            return false
+        }
+        val rose = if (acct.hasView && p.startMicro != null) acct.balanceMicro - p.startMicro else 0L
         if (row?.status == "paid" || (row == null && rose > 0)) {
             val added = row?.amountMicro?.takeIf { it > 0 } ?: rose.coerceAtLeast(0L)
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
@@ -697,8 +724,8 @@ data class Payment(
     val nonce: String,
     /** `stripe` or `btcpay`. */
     val rail: String,
-    /** The balance when the checkout opened; anything above it is the payment. */
-    val startMicro: Long,
+    /** The balance when the checkout opened, anything above it the payment; null where it could not be read then. */
+    val startMicro: Long?,
     val phase: Phase,
     /** How much the balance rose, once it has. */
     val addedMicro: Long = 0L,
@@ -732,6 +759,9 @@ internal fun checkProblemLine(e: Throwable): String = when (e) {
 } + " Talon asks again by itself."
 
 /** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
+/** A second order while the first is on its way. */
+internal const val CHECKOUT_ON_ITS_WAY = "A checkout is already on its way. It opens from here when it comes."
+
 internal fun keyProblemLine(e: Throwable): String = when (e) {
     is ArmillaryError.Refused -> "Your ship refused: ${e.reason.ifBlank { "it gave no reason" }}."
     is ArmillaryError.Unreachable -> "Your ship did not answer. Try Refresh in a moment."

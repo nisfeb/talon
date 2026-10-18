@@ -82,6 +82,49 @@ class SettingsSyncImpl(
         internal fun bucketIsMissingOrEmpty(bucket: JsonObject?): Boolean =
             bucket == null || bucket.isEmpty()
 
+        /**
+         * Whether [bucket], a bucket as the ship holds it (null: none),
+         * already has what the settings write [poke] makes of it: taken,
+         * or made moot. A seen mark at or above the one written holds it,
+         * as the mark only rises: sent, a stale one lowered it.
+         */
+        internal fun holds(bucket: JsonObject?, poke: JsonObject): Boolean {
+            (poke["put-entry"] as? JsonObject)?.let { e ->
+                val have = unwrap(bucket?.get(e["entry-key"].asStr() ?: return false)) ?: return false
+                val want = unwrap(e["value"])
+                if (e["bucket-key"].asStr() == BUCKET_STATUS_SEEN) {
+                    val seen = (have as? JsonObject)?.get("ms").asLong() ?: return false
+                    return seen >= ((want as? JsonObject)?.get("ms").asLong() ?: return true)
+                }
+                return have == want
+            }
+            (poke["del-entry"] as? JsonObject)?.let { e ->
+                return bucket?.containsKey(e["entry-key"].asStr() ?: return false) != true
+            }
+            (poke["put-bucket"] as? JsonObject)?.let { e ->
+                fun JsonObject?.values() = orEmpty().mapValues { unwrap(it.value) }
+                return bucket.values() == (e["bucket"] as? JsonObject).values()
+            }
+            if (poke["del-bucket"] is JsonObject) return bucketIsMissingOrEmpty(bucket)
+            return false
+        }
+
+        /**
+         * %settings stores each entry's value as a cord; Tlon wraps
+         * structured values as JSON strings. Un-stringify so downstream
+         * handlers can use the normal `asJsonObject` path. Falls through
+         * for non-string values in case some ship version still serves
+         * raw JSON.
+         */
+        private fun unwrap(v: JsonElement?): JsonElement? {
+            if (v == null) return null
+            if (v is JsonPrimitive && v.isString) {
+                return runCatching { Json.parseToJsonElement(v.content) }.getOrNull()
+                    ?: v
+            }
+            return v
+        }
+
         const val DESK = "talon"
         const val BUCKET_GROUP_ORDERS = "group-orders"
         const val BUCKET_FOLDERS = "folders"
@@ -413,10 +456,13 @@ class SettingsSyncImpl(
             return
         }
         // While the desk is read and applied, a write made here is kept,
-        // not sent: one the ship took after the read but before the apply
-        // was applied away, and no longer kept to apply again. The lock
-        // first waits out a write already on the wire.
-        sending.withLock { holdingWrites = true }
+        // not sent, and one the ship answers meanwhile stays kept ([taken]):
+        // taken after the read but before the apply, it was applied away,
+        // and no longer kept to apply again. Kept, it is applied again over
+        // the desk and sent after, or dropped where the desk has it. A write
+        // already on the wire is not waited out: to a silent ship, it held
+        // every connect for its whole ack wait.
+        holdingWrites = true
         val read = try { readDesk(ch) } finally { holdingWrites = false }
         if (!read) return
         // Subscribe for live updates from other devices.
@@ -492,7 +538,7 @@ class SettingsSyncImpl(
             }
             // Before the orphan check, so a folder made here and not yet
             // sent still has its members.
-            runCatching { reapplyPending() }.onFailure { Log.w(TAG, "unsent settings not applied again", it) }
+            runCatching { reapplyPending(deskMap) }.onFailure { Log.w(TAG, "unsent settings not applied again", it) }
             runCatching { dropOrphanedMembers() }.onFailure { Log.w(TAG, "orphaned folder members", it) }
 
             // Per-bucket recovery for the Room-backed buckets: any the
@@ -785,6 +831,12 @@ class SettingsSyncImpl(
     override suspend fun applySettingsEvent(wrapper: JsonObject) {
         // %settings wraps the action; tolerate both shapes.
         val payload = (wrapper["settings-event"] as? JsonObject) ?: wrapper
+        applyFact(payload)
+        holdPending(payload)
+    }
+
+    /** One write, as the ship tells it: a fact, or a kept write applied again. */
+    private suspend fun applyFact(payload: JsonObject) {
         // Expected shapes (defensively handled):
         //   {put-entry: {desk, bucket-key, entry-key, value}}
         //   {del-entry: {desk, bucket-key, entry-key}}
@@ -1263,22 +1315,6 @@ class SettingsSyncImpl(
 
     // ───────── inbound appliers ─────────
 
-    /**
-     * %settings stores each entry's value as a cord; Tlon wraps
-     * structured values as JSON strings. Un-stringify so downstream
-     * handlers can use the normal `asJsonObject` path. Falls through
-     * for non-string values in case some ship version still serves
-     * raw JSON.
-     */
-    private fun unwrap(v: JsonElement?): JsonElement? {
-        if (v == null) return null
-        if (v is JsonPrimitive && v.isString) {
-            return runCatching { Json.parseToJsonElement(v.content) }.getOrNull()
-                ?: v
-        }
-        return v
-    }
-
     // `internal` so the desktopTest source set can drive applyBucket
     // directly without the full bootstrap+UrbitChannel scaffolding.
     // Kept in lockstep with production app/'s SettingsSync.kt — when
@@ -1633,6 +1669,8 @@ class SettingsSyncImpl(
                 intervalMinutes = obj["intervalMinutes"].asInt() ?: 60,
                 enabled = (obj["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
                 writesAuthorized = existing?.writesAuthorized ?: false,
+                // This device's too, as the write grant it tightens.
+                askBeforeSharing = existing?.askBeforeSharing ?: false,
                 createdAt = obj["createdAt"].asLong() ?: 0L,
                 updatedAt = obj["updatedAt"].asLong() ?: 0L,
                 // First arrival on this device: stamp lastRunAt=now so the
@@ -1748,10 +1786,11 @@ class SettingsSyncImpl(
     // ───────── poke helpers ─────────
 
     /**
-     * Sends one at a time: a kept write sent again must not land after a
-     * newer one to its slot ([flushPending] checks the row is still the
-     * newest, under this). Writes queue behind a slow poke, as they did
-     * behind the ship.
+     * Sends one at a time, the kept writes first, oldest first: a kept
+     * write sent after a newer one undid it (Clear all kept, then a new
+     * question; the clear went last and took the question with it).
+     * Writes queue behind a slow poke, as they did behind the ship; a
+     * bootstrap and a flush do not ([bootstrap], [flushPending]).
      */
     private val sending = Mutex()
 
@@ -1766,59 +1805,152 @@ class SettingsSyncImpl(
      * it (seeds, orphan cleanup), and leases; sent days later, a seed
      * would overwrite what other devices wrote since.
      */
-    private suspend fun send(slot: String, payload: JsonObject, keep: Boolean) = sending.withLock {
-        val id = if (keep) db.settingsOutbox().keep(SettingsOutboxEntity(slot = slot, payload = payload.toString())) else null
-        val ch = channel ?: return@withLock
-        // A bootstrap is reading the desk: this goes with its last step.
-        if (keep && holdingWrites) return@withLock
-        if (deliver(ch, slot, payload)) id?.let { db.settingsOutbox().done(it) }
+    private suspend fun send(slot: String, payload: JsonObject, keep: Boolean) {
+        sending.withLock {
+            val id = if (keep) db.settingsOutbox().keep(SettingsOutboxEntity(slot = slot, payload = payload.toString())) else null
+            val ch = channel ?: return@withLock
+            if (holdingWrites) {
+                // A bootstrap is reading the desk: a kept write goes with its
+                // last step; a seed or a cleanup, decided from that read, now.
+                if (!keep) deliver(ch, slot, payload)
+                return@withLock
+            }
+            // The kept writes before this one go first. One the ship still
+            // does not answer keeps this one waiting behind it; a write not
+            // kept then goes nowhere, as it would have failed the same way.
+            if (!sendKept(ch, before = id)) return@withLock
+            if (deliver(ch, slot, payload)) id?.let { taken(it) }
+        }
+        handOff()
+    }
+
+    /** Answered: no longer kept, unless a bootstrap began reading the desk since ([bootstrap]). */
+    private suspend fun taken(id: Long) {
+        if (!holdingWrites) db.settingsOutbox().done(id)
     }
 
     /**
      * True once the ship has answered: it took the write, or refused it,
-     * which sending again would not change. Silence is neither: a poke
-     * not acked inside the wait is kept, since it may not have landed.
+     * which sending again would not change. A PUT eyre took is taken, ack
+     * or none: %settings is on our own ship, and eyre hands it the poke in
+     * the event that answers the PUT. Kept as unanswered, a write acked
+     * late was sent and applied again at the next connect, over what
+     * another device had written since. Only a PUT that failed, or never
+     * went, leaves a write to send again.
      */
     private suspend fun deliver(ch: UrbitChannel, slot: String, payload: JsonObject): Boolean {
         val failed = runSuspendCatching {
-            ch.poke(app = "settings", mark = "settings-event", payload = payload, confirm = true)
+            ch.poke(app = "settings", mark = "settings-event", payload = payload)
         }.exceptionOrNull() ?: return true
         Log.w(TAG, if (failed is PokeNacked) "$slot refused" else "$slot not sent", failed)
         return failed is PokeNacked
     }
 
     /**
+     * The kept writes made before [before] (all of them when null),
+     * oldest first, under [sending]. False at the first the ship does not
+     * answer, or once a bootstrap reads the desk: the rest wait.
+     */
+    private suspend fun sendKept(ch: UrbitChannel, before: Long? = null): Boolean {
+        for (row in db.settingsOutbox().all()) {
+            if (before != null && row.id >= before) break
+            // A bootstrap is reading the desk; it sends these after.
+            if (holdingWrites) return false
+            // Dropped since the list was read: the ship has it.
+            if (!db.settingsOutbox().has(row.id)) continue
+            val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull()
+            if (payload != null && !deliver(ch, row.slot, payload)) return false
+            taken(row.id)
+        }
+        return true
+    }
+
+    /**
      * Send what was kept, oldest first. Stops at the first the ship does
-     * not answer: the rest go at the next connect, or with the next drain
-     * of the chat queue (TlonChatRepo.drainQueue).
+     * not answer: the rest go at the next connect, with the next write,
+     * or with the next drain of the chat queue (TlonChatRepo.drainQueue).
+     * Never waits on a write already on the wire: its sender sends these
+     * once it is done ([handOff]). A bootstrap runs this, and on a resumed
+     * channel that write's ack comes down a stream opened only after it,
+     * so the wait was always the write's whole 15 s.
      */
     override suspend fun flushPending() {
         val ch = channel ?: return
+        // Asked for before trying, so a sender letting go just after the
+        // try still sees it.
+        flushAsked = true
+        if (!sending.tryLock()) return
+        try {
+            flushAsked = false
+            sendKept(ch)
+        } finally {
+            sending.unlock()
+        }
+        handOff()
+    }
+
+    /** A flush found a write on the wire ([flushPending]). */
+    @Volatile private var flushAsked = false
+
+    /** After letting [sending] go: the flush asked for meanwhile. */
+    private suspend fun handOff() {
+        if (flushAsked && !holdingWrites) flushPending()
+    }
+
+    /**
+     * What was written here and not yet taken, over what the ship said in
+     * [desk]: dropped where the ship has it already ([holds]), else
+     * applied again over the ship's word, which is from before it. Applied
+     * as the fact its poke will bring back, so it lands the same way.
+     */
+    private suspend fun reapplyPending(desk: JsonObject) {
+        // Buckets a kept whole-bucket write still goes to: it will undo
+        // what the ship holds of them, so nothing after it there is held.
+        val reshaped = mutableSetOf<String>()
         for (row in db.settingsOutbox().all()) {
-            val answered = sending.withLock {
-                // A bootstrap is reading the desk; it sends these after.
-                if (holdingWrites) return@withLock false
-                // Replaced by a newer write since the list was read, which
-                // goes on its own.
-                if (!db.settingsOutbox().has(row.id)) return@withLock true
-                val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull()
-                if (payload != null && !deliver(ch, row.slot, payload)) return@withLock false
+            val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull() ?: continue
+            val (bucket, entry) = payload.target() ?: continue
+            if (bucket !in reshaped && holds(desk[bucket] as? JsonObject, payload)) {
                 db.settingsOutbox().done(row.id)
-                true
+                continue
             }
-            if (!answered) return
+            if (entry == null) reshaped += bucket
+            runSuspendCatching { applyFact(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
         }
     }
 
     /**
-     * What was written here and not yet taken, applied again over what
-     * the ship said, whose word is from before it. Applied as the fact
-     * its poke will bring back: the same path, so it lands the same way.
+     * After a fact from the ship, the kept writes to its bucket stand over
+     * it, as over a bootstrap's read: a peer's whole bucket took a change
+     * still waiting here off this device until the flush landed. One the
+     * fact shows taken (ours coming back, or the same value) is dropped.
+     * A fact for one entry says nothing of the bucket's others.
      */
-    private suspend fun reapplyPending() {
-        for (row in db.settingsOutbox().all()) {
+    private suspend fun holdPending(fact: JsonObject) {
+        val (bucket, entry) = fact.target() ?: return
+        val rows = db.settingsOutbox().all()
+        if (rows.isEmpty()) return
+        // What the ship now holds, of the bucket or of the one entry.
+        val known: JsonObject? = when {
+            fact["put-entry"] != null -> buildJsonObject { (fact["put-entry"] as JsonObject)["value"]?.let { put(entry!!, it) } }
+            fact["del-entry"] != null -> JsonObject(emptyMap())
+            else -> (fact["put-bucket"] as? JsonObject)?.get("bucket") as? JsonObject
+        }
+        // As in [reapplyPending]: after a kept whole-bucket write, nothing is held.
+        var reshaped = false
+        for (row in rows) {
             val payload = runCatching { Json.parseToJsonElement(row.payload) as JsonObject }.getOrNull() ?: continue
-            runSuspendCatching { applySettingsEvent(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
+            val (rowBucket, rowEntry) = payload.target() ?: continue
+            if (rowBucket != bucket) continue
+            if (entry != null && rowEntry != null && rowEntry != entry) continue
+            // A whole bucket kept here, after a fact for one of its entries,
+            // is applied again: it is what the ship will hold once it goes.
+            if (!reshaped && (entry == null || rowEntry == entry) && holds(known, payload)) {
+                db.settingsOutbox().done(row.id)
+                continue
+            }
+            if (rowEntry == null) reshaped = true
+            runSuspendCatching { applyFact(payload) }.onFailure { Log.w(TAG, "${row.slot} not applied again", it) }
         }
     }
 
@@ -1936,6 +2068,17 @@ class SettingsSyncImpl(
         this["bucket-key"].asStr()
     private fun JsonObject.entryKey(): String? =
         this["entry-key"].asStr()
+
+    /** The bucket of this desk a settings write or fact is for, and its entry (null: the whole bucket). */
+    private fun JsonObject.target(): Pair<String, String?>? {
+        for (shape in listOf("put-entry", "del-entry", "put-bucket", "del-bucket")) {
+            val e = this[shape] as? JsonObject ?: continue
+            if (e.desk() != DESK) return null
+            val bucket = e.bucketKey() ?: return null
+            return bucket to (if (shape.endsWith("entry")) e.entryKey() ?: return null else null)
+        }
+        return null
+    }
 
     private fun parseBookmarkFolderMemberKey(key: String): Triple<Long, String, String>? =
         io.nisfeb.talon.urbit.parseBookmarkFolderMemberKey(key)

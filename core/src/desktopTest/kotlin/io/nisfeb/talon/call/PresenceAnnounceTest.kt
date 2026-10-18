@@ -59,4 +59,38 @@ class PresenceAnnounceTest {
             c.stop()
         }
     }
+
+    private fun sent(h: TrunkHarness, kind: String, host: String) =
+        h.putsSnapshot().count { it.contains("\"$kind\":{\"host\":\"$host\",\"name\":\"lounge\"}") }
+
+    // Review B5-15: every 30 s beat also asked the occupancy, of a host
+    // that sends the count with each roster change. Asked on the first
+    // beat and on leave only there; a host that does not push is still
+    // asked every beat.
+    @Test
+    fun `a host that pushes its roster is asked the count on the first beat and on leave`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { error("no media") }, presenceHeartbeatMs = 100)
+        val line = kotlinx.coroutines.flow.MutableStateFlow<PartyState>(PartyState.Connecting("lounge"))
+        try {
+            c.start()
+            h.awaitConnected()
+            h.emitFact("""{"on-line":{"from":"~zod","name":"lounge","who":["~bud"]}}""")
+            h.await { c.announces("~zod") }
+            c.beginPresenceAnnounce("~zod", "lounge", line)
+            h.await { sent(h, "enter-room", "~zod") >= 4 }
+            assertEquals(1, sent(h, "occupancy-of", "~zod"), "the first beat only")
+            line.value = PartyState.Idle
+            h.await { sent(h, "leave-room", "~zod") == 1 }
+            h.await { sent(h, "occupancy-of", "~zod") == 2 }
+
+            // An older host, which never pushes, is asked every beat.
+            line.value = PartyState.Connecting("lounge")
+            c.beginPresenceAnnounce("~bus", "lounge", line)
+            h.await { sent(h, "enter-room", "~bus") >= 3 }
+            kotlin.test.assertTrue(sent(h, "occupancy-of", "~bus") >= 3)
+        } finally {
+            c.stop()
+        }
+    }
 }

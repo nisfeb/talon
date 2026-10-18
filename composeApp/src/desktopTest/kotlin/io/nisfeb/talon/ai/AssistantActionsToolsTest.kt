@@ -74,6 +74,7 @@ class AssistantActionsToolsTest {
     private class Harness(
         val tools: List<Tool>,
         val pokes: MutableList<JsonObject>,
+        val calendar: CalendarRepo? = null,
     ) {
         fun run(name: String, args: JsonObject): String = runBlocking {
             tools.first { it.spec.name == name }.execute(args)
@@ -172,7 +173,7 @@ class AssistantActionsToolsTest {
                 send = send,
                 locked = locked,
             )
-            block(Harness(actionTools(actions), pokes))
+            block(Harness(actionTools(actions), pokes, calendar))
         } finally {
             scope.cancel()
         }
@@ -391,8 +392,26 @@ class AssistantActionsToolsTest {
             val out = h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (moved)"))
             assertEquals("The calendar refused it: $noOccurrence.", out)
             assertEquals(listOf("edit-at"), h.pokes.map { it["action"]!!.jsonPrimitive.content }, "no fallback to add and skip")
+            // Undone with the refusal: the home page's today showed the
+            // refused name until the reading back gave up.
+            assertEquals(listOf("Standup"), h.calendar!!.rows.value.orEmpty().map { it.name })
             refusing = false
             assertEquals("Updated \"Standup (again)\" for that occurrence.", h.run("update_event", argsOf("event" to "r1", "occurrence" to "2026-09-21", "name" to "Standup (again)")))
+        }
+    }
+
+    // The tick was said "Done" when the calendar took it and then refused.
+    @Test
+    fun `a tick the calendar refuses after taking it is said`() {
+        var refusing = true
+        withHarness(
+            events = """[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"Buy milk"},"done":false}]""",
+            refuseLater = { b -> "the task is not there".takeIf { refusing && b["id"]?.jsonPrimitive?.content == "t1" } },
+        ) { h ->
+            assertEquals("The calendar refused it: the task is not there.", h.run("complete_task", argsOf("task" to "milk")))
+            assertEquals(listOf("""{"action":"done-event","id":"t1","done":true}"""), h.pokes.map { it.toString() }, "one tick, not retried")
+            refusing = false
+            assertEquals("Done: Buy milk.", h.run("complete_task", argsOf("task" to "t1")))
         }
     }
 
@@ -464,6 +483,15 @@ class AssistantActionsToolsTest {
         assertTrue("Dentist" in posted.single().second)
     }
 
+    // A card behind a slow ship waits in the queue: "Posted" was said of it.
+    @Test
+    fun `a card that waits for the ship is said to be queued`() = withHarness(send = { w, _ ->
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity(w, "local_1", "~zod", 1_000, "[]", "/chat", status = "queued"))
+    }) { h ->
+        val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))
+        assertEquals("Queued the event for ~bus: your ship is slow; it goes when it answers.", out)
+    }
+
     @Test
     fun `a card that does not go says so`() = withHarness(send = { _, _ -> error("the ship is away") }) { h ->
         val out = h.run("send_event", argsOf("whom" to "~bus", "name" to "Seed swap", "date" to "2026-10-03"))
@@ -517,6 +545,29 @@ class AssistantActionsToolsTest {
         val read = h.run("read_mail", argsOf("thread" to "0vt"))
         assertTrue("shall we plant garlic" in read && "message=0vm2 from=~zod" in read, read)
         assertTrue(h.run("read_mail", argsOf("thread" to "0vnope")).startsWith("No thread 0vnope"))
+    }
+
+    // A dictation sent mail with no word from the owner (B2-2): it goes now
+    // only on their yes, and then as the mail app's decoder takes it, every
+    // key present.
+    @Test
+    fun `a dictated mail reaches the ship only on the owner's word`() = withHarness(mail = answering) { h ->
+        fun dictate(word: Boolean?): String = runBlocking {
+            var turn = 0
+            DictationAgent(
+                completer = { _, _, _ ->
+                    if (turn++ == 0) AgentTurn.Calls(null, listOf(ToolCall("1", "send_mail", argsOf("to" to "~bus", "subject" to "Garlic", "body" to "Plant it Saturday?"))))
+                    else AgentTurn.Final("Not sent.")
+                },
+                tools = DictationAgent.toolsFor(h.tools, locked = false),
+                ownerSends = { word },
+            ).run("mail Andrea to plant the garlic on Saturday")
+        }
+        assertEquals("Not sent.", dictate(false))
+        assertEquals("Not sent.", dictate(null))
+        assertTrue(mailed.isEmpty(), "mail went without the owner's yes")
+        assertEquals("Mailed ~bus.", dictate(true))
+        assertEquals("""{"to":["~bus"],"subject":"Garlic","body":"Plant it Saturday?","prev":null,"attachments":[]}""", mailed.single().toString())
     }
 
     @Test

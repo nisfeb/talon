@@ -96,12 +96,16 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var holdPoke: Long = 0
     /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
     @Volatile var holdDelete: Long = 0
+    /** The login has lapsed (eyre forgot its cookie): every channel request and scry is a 403, a new channel's too. */
+    @Volatile var signedOut: Boolean = false
     /** While true the event stream is refused, as with no network yet. */
     @Volatile var refuseStream: Boolean = false
     /** A subscription refused, by `app/path` (e.g. "activity/v6"): an older ship without it. */
     @Volatile var refuseWatch: (String) -> String? = { null }
     /** A subscription whose PUT is lost on the way, by `app/path`: what the request fails with, or null to deliver it. */
     @Volatile var loseWatch: (String) -> Throwable? = { null }
+    /** How long a subscribe's PUT waits to return after its answer is on the stream: eyre's answer can come first. */
+    @Volatile var holdWatchAnswer: Long = 0
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
     val requests: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     /** Each event stream asked for: its channel, and the Last-Event-ID it carried. */
@@ -110,6 +114,12 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     // Channels a PUT made, and those reaped since: a stream on a reaped one is
     // a 404 until a PUT makes it again, as with eyre.
     private val known: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Channels whose first PUT was lost: eyre never made them, so a stream
+    // asked for on one is a 404 until a PUT gets through and makes it.
+    private val unmade: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Every channel a delete was sent for, in order. */
+    val deleted: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val reaped: MutableSet<String> = ConcurrentHashMap.newKeySet()
     // Channels refused to this login since [forbid]: a 403 on stream and PUT.
     private val forbidden: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -262,16 +272,22 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         val path = req.url.encodedPath
         requests += "${req.method.value} $path"
         when {
+            signedOut && (path.startsWith("/~/channel/") || path.startsWith("/~/scry/")) -> {
+                if (req.method == HttpMethod.Get && path.startsWith("/~/channel/")) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]
+                respond("", HttpStatusCode.Forbidden)
+            }
             (req.method == HttpMethod.Put || req.method == HttpMethod.Get) && path.startsWith("/~/channel/") &&
                 path.removePrefix("/~/channel/") in forbidden -> {
                 if (req.method == HttpMethod.Get) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]
                 respond("", HttpStatusCode.Forbidden)
             }
             req.method == HttpMethod.Put && path.startsWith("/~/channel/") -> {
-                path.removePrefix("/~/channel/").let { known += it; reaped -= it }
+                val cid = path.removePrefix("/~/channel/")
+                val first = cid !in known
+                known += cid; reaped -= cid
                 val batch = Json.parseToJsonElement(req.body.toByteArray().decodeToString()).jsonArray
                 batch.count { it.jsonObject["action"]?.jsonPrimitive?.content == "subscribe" }.takeIf { it > 0 }?.let { subscribePuts += it }
-                for (msg in batch) {
+                try { for (msg in batch) {
                     val o = msg.jsonObject
                     val id = o["id"]!!.jsonPrimitive.long
                     when (o["action"]?.jsonPrimitive?.content) {
@@ -306,14 +322,19 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                                 if (err == null) """{"id":$id,"response":"subscribe","ok":"ok"}"""
                                 else """{"id":$id,"response":"subscribe","err":${JsonPrimitive(err)}}""",
                             )
+                            if (holdWatchAnswer > 0) kotlinx.coroutines.delay(holdWatchAnswer)
                         }
-                        "delete" -> if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete)
+                        "delete" -> { deleted += cid; if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete) }
                     }
+                } } catch (t: Throwable) {
+                    if (first) { known -= cid; unmade += cid }
+                    throw t
                 }
+                unmade -= cid
                 respond("", HttpStatusCode.NoContent)
             }
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") &&
-                path.removePrefix("/~/channel/").also { streamsOpened += it to req.headers["Last-Event-ID"] } in reaped ->
+                path.removePrefix("/~/channel/").also { streamsOpened += it to req.headers["Last-Event-ID"] }.let { it in reaped || it in unmade } ->
                 respond("", HttpStatusCode.NotFound)
             req.method == HttpMethod.Get && path.startsWith("/~/channel/") && refuseStream ->
                 respond("", HttpStatusCode.ServiceUnavailable)

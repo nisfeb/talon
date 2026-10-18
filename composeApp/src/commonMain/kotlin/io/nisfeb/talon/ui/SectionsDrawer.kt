@@ -49,6 +49,9 @@ fun SectionsDrawer(
     /** Opens the screen that chooses and orders these. Offered here
      *  because here is where somebody notices a section missing. */
     onEditMenu: (() -> Unit)? = null,
+    /** Opens Contacts, which is not a section: desktop reaches it from
+     *  the chat list's More menu, which a phone does not have. */
+    onContacts: (() -> Unit)? = null,
     header: @Composable (() -> Unit)? = null,
 ) {
     Column(
@@ -76,10 +79,21 @@ fun SectionsDrawer(
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
         }
-        if (onEditMenu != null) {
+        if (onEditMenu != null || onContacts != null) {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             Spacer(Modifier.height(8.dp))
+        }
+        if (onContacts != null) {
+            NavigationDrawerItem(
+                selected = false,
+                label = { Text("Contacts") },
+                icon = { Icon(TalonIcons.People, contentDescription = null, modifier = Modifier.size(22.dp)) },
+                onClick = onContacts,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
+        }
+        if (onEditMenu != null) {
             NavigationDrawerItem(
                 selected = false,
                 label = { Text("Edit menu") },

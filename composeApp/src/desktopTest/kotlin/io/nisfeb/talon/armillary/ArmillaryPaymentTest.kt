@@ -27,6 +27,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.runComposeUiTest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.async
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -61,6 +64,10 @@ class ArmillaryPaymentTest {
     @Volatile private var phaseMissing = false
     /** The account view's checkout rows, keyed by nonce as the vendor writes them. */
     @Volatile private var checkouts = "{}"
+    /** The account's view has not reached the ship yet: no balance in it. */
+    @Volatile private var noView = false
+    /** The account cannot be read: the proxy in front of the ship answers its 502 page. */
+    @Volatile private var accountDown = false
     /** How long the ship takes over a checkout, a vendor change or a cancel. */
     @Volatile private var holdMs = 0L
     /** Writes the ship finished, which a request cancelled midway never does. */
@@ -108,6 +115,9 @@ class ArmillaryPaymentTest {
                 phaseRefused -> ok("""{"phase":"answered","status":"refused","url":"","note":"Your card was declined."}""")
                 else -> ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
             }
+            path.endsWith("/apps/armillary/api/account") && accountDown ->
+                respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
+            path.endsWith("/apps/armillary/api/account") && noView -> ok("""{"ship":"~zod","vendor":"~nisfeb","self":"~zod"}""")
             path.endsWith("/apps/armillary/api/account") -> ok(
                 """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":$checkouts,"vendor":"~nisfeb","self":"~zod","stale":3}""",
             )
@@ -248,6 +258,59 @@ class ArmillaryPaymentTest {
         }
     }
 
+    // A second order while the first was on its way made a real checkout
+    // nobody was sent to. The repo holds it now, so a card left and opened
+    // again cannot send one either.
+    @Test
+    fun `a second order while the first is on its way makes no second checkout`() = ship(setUp) { repo, _ ->
+        holdMs = 1_500
+        val first = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).async { repo.topUp("stripe", null, 5_000_000L) }
+        kotlinx.coroutines.withTimeout(5_000) { while (repo.asking.value == null) kotlinx.coroutines.delay(10) }
+        assertEquals(CHECKOUT_ON_ITS_WAY, repo.topUp("stripe", null, 5_000_000L).exceptionOrNull()?.message)
+        assertEquals("https://pay.example/c1", first.await().getOrThrow())
+        assertEquals(null, repo.asking.value, "asked no longer")
+        assertEquals(1, finished.count { it == "checkout" }, "one checkout made")
+    }
+
+    // "I got top up, choose a value, hit continue, and nothing happens"
+    // (sneagan, 2026-10-18). On an account whose view had not come yet,
+    // the card drew no payment line and no page; the wait was a small
+    // grey line; a browser that would not open was swallowed.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `continue says what it is doing, keeps top up shut, and says a page that did not open`() = Rig(setUp).use { r ->
+        noView = true
+        holdMs = 1_500
+        runBlocking { r.repo.refresh() }
+        val tried = CopyOnWriteArrayList<String>()
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalUriHandler provides object : androidx.compose.ui.platform.UriHandler {
+                            override fun openUri(uri: String) { tried += uri; error("no browser") }
+                        },
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(r.ai, orrery = null, armillary = r.repo) }
+                    }
+                }
+            }
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Top up").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Top up").performScrollTo().performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Another amount").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Another amount").performTextInput("10")
+            onNodeWithText("Continue").performClick()
+            waitUntil(timeoutMillis = 3_000) { onAllNodesWithText("Asking ~nisfeb for a checkout", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Top up").assertIsNotEnabled()
+            waitUntil(timeoutMillis = 10_000) { onAllNodesWithText(io.nisfeb.talon.ui.screens.BROWSER_DID_NOT_OPEN).fetchSemanticsNodes().isNotEmpty() }
+            assertEquals(listOf("https://pay.example/c1"), tried.toList())
+            assertTrue(onAllNodesWithText("Asking ~nisfeb", substring = true).fetchSemanticsNodes().isEmpty(), "asked no longer")
+            assertTrue(onAllNodesWithText("Waiting for your payment").fetchSemanticsNodes().isNotEmpty(), "the payment line, with no view")
+            onNodeWithText("Open the checkout").performScrollTo().performClick()
+            assertEquals(2, tried.size, "the page offered again")
+        }
+    }
+
     // Measured from a balance read before the checkout opened: spending
     // since made a $5 payment $4.97, and a credit from elsewhere read as
     // this checkout paid before anyone had paid it.
@@ -275,6 +338,10 @@ class ArmillaryPaymentTest {
             assertEquals(5_000_000L, repo.payment.value!!.addedMicro)
         }
         balance = 10_000_000
+        // The second checkout starts from no rows: the first half's paid
+        // row, read by the new repo's own background reads before the test
+        // swapped in its expired one, settled it as paid.
+        checkouts = "{}"
         ship(setUp) { repo, _ ->
             repo.topUp("stripe", "five", null).getOrThrow()
             checkouts = """{"n1":{"nonce":"n1","rail":"stripe","amount":5000000,"url":"https://pay.example/c1","status":"expired"}}"""
@@ -291,6 +358,24 @@ class ArmillaryPaymentTest {
             repo.refresh()
             assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase)
             assertEquals(emptyList(), told.toList())
+        }
+    }
+
+    // The balance before the checkout could not be read, and was taken as
+    // nothing: the next read of any balance at all settled it as paid.
+    @Test
+    fun `a checkout opened without the balance before it is not paid by the balance there was`() {
+        balance = 10_000_000
+        accountDown = true
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            accountDown = false
+            repo.refresh()
+            assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase, "the balance it had is not a payment")
+            assertEquals(emptyList(), told.toList())
+            balance = 15_000_000
+            repo.refresh()
+            assertEquals(Payment.Phase.PAID to 5_000_000L, repo.payment.value!!.let { it.phase to it.addedMicro }, "a rise from there is")
         }
     }
 

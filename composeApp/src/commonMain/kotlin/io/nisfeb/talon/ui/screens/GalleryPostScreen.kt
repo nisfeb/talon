@@ -68,6 +68,8 @@ fun GalleryPostScreen(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    // The post as rows keep it: a notification's id is dotted.
+    val anchorId = remember(whom, postId) { io.nisfeb.talon.urbit.keptPostId(whom, postId) }
 
     // Keep this channel "focused" while the post overlay is open. Opening a
     // post unmounts GalleryGridScreen (App.kt routes grid/post/compose as
@@ -78,8 +80,8 @@ fun GalleryPostScreen(
     // markRead — so the badge sticks until you back all the way out.
     // Comments are this post's thread: reading them here reads the
     // thread, locally and on the ship, the way the thread list does.
-    DisposableEffect(whom, postId) {
-        repo.setOpenThread(whom, postId)
+    DisposableEffect(whom, anchorId) {
+        repo.setOpenThread(whom, anchorId)
         onDispose { repo.setOpenThread(null, null) }
     }
 
@@ -91,19 +93,19 @@ fun GalleryPostScreen(
     // Suppress Room's invalidation-tracker re-emissions on unrelated
     // messages-table writes — without this the post body and replies
     // re-collect every time any other channel's SSE event lands.
-    val post by remember(whom, postId) {
-        db.messages().streamOne(whom, postId).distinctUntilChanged()
+    val post by remember(whom, anchorId) {
+        db.messages().streamOne(whom, anchorId).distinctUntilChanged()
     }.collectAsState(initial = null)
 
-    val replies by remember(whom, postId) {
-        db.messages().streamReplies(whom, postId).distinctUntilChanged()
+    val replies by remember(whom, anchorId) {
+        db.messages().streamReplies(whom, anchorId).distinctUntilChanged()
     }.collectAsState(initial = emptyList())
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
-    var replyText by remember(postId) { mutableStateOf("") }
-    var sending by remember(postId) { mutableStateOf(false) }
-    var actionError by remember(postId) { mutableStateOf<String?>(null) }
+    var replyText by remember(anchorId) { mutableStateOf("") }
+    var sending by remember(anchorId) { mutableStateOf(false) }
+    var actionError by remember(anchorId) { mutableStateOf<String?>(null) }
     // Deleted from another client while open: there is nothing left
     // to comment on, so leave rather than post into a tombstone.
     LaunchedEffect(post?.isDeleted) {
@@ -112,6 +114,14 @@ fun GalleryPostScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val isOurs = post?.author == ourPatp
+    /** False only while we're still waiting for the row to show up. */
+    var settled by remember(anchorId) { mutableStateOf(false) }
+    LaunchedEffect(anchorId, post) {
+        // Long enough for a sync on a slow ship, short enough that a
+        // deleted post does not read as a hang. As NotebookPostScreen.
+        if (post == null) kotlinx.coroutines.delay(6_000)
+        settled = true
+    }
 
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -156,7 +166,25 @@ fun GalleryPostScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val p = post ?: return@Column
+            // As the notebook's post: a bounded spinner, then say the post
+            // is gone. A blank body with a live comment box read as broken.
+            val p = post
+            if (p == null) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!settled) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    } else {
+                        Text(
+                            "This post isn't here — it may have been deleted.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                return@Column
+            }
             val parts = remember(p.id, p.contentJson) {
                 StoryCache.partsFor(p.id, p.contentJson)
             }
@@ -266,9 +294,10 @@ fun GalleryPostScreen(
                 onValueChange = { replyText = it },
                 placeholder = { Text("Write a comment") },
                 modifier = Modifier.weight(1f),
-                enabled = !sending,
+                // No post to comment on while its row is missing.
+                enabled = !sending && post != null,
             )
-            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending,
+            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending && post != null,
                 onClick = {
                     val text = replyText.trim()
                     replyText = ""
@@ -277,7 +306,7 @@ fun GalleryPostScreen(
                     scope.launch {
                         // A failed send restores the text — swallowing a
                         // typed comment is the one unforgivable outcome.
-                        runCatching { repo.reply(whom, postId, text) }
+                        runCatching { repo.reply(whom, anchorId, text) }
                             .onFailure {
                                 replyText = text
                                 actionError = "Couldn't send — check your connection."
@@ -305,7 +334,7 @@ fun GalleryPostScreen(
                 io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmDelete = false
                     scope.launch {
-                        runCatching { repo.delete(whom, postId) }
+                        runCatching { repo.delete(whom, anchorId) }
                             .onSuccess { onBack() }
                             .onFailure { actionError = "Couldn't delete — check your connection." }
                     }

@@ -105,9 +105,9 @@ class SettingsSyncPushTest {
     @Test
     fun `a loop goes up without this device's write grant, and deleting it drops its lease`() = live {
         val s = sync()
-        s.pushLoop(LoopEntity(gid = "l1", name = "Digest", prompt = "Sum up", intervalMinutes = 60, writesAuthorized = true, createdAt = 1, updatedAt = 2))
+        s.pushLoop(LoopEntity(gid = "l1", name = "Digest", prompt = "Sum up", intervalMinutes = 60, writesAuthorized = true, askBeforeSharing = true, createdAt = 1, updatedAt = 2))
         val loop = put("loops", "l1")!!
-        assertTrue("Sum up" in loop.toString() && "writesAuthorized" !in loop, loop.toString())
+        assertTrue("Sum up" in loop.toString() && "writesAuthorized" !in loop && "askBeforeSharing" !in loop, loop.toString())
         s.deleteLoop("l1")
         assertTrue(deleted().any { "loops" in it } && deleted().any { "automation-claims" in it }, deleted().toString())
     }

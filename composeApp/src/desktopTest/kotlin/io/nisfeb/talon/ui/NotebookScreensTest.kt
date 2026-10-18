@@ -253,6 +253,20 @@ class NotebookScreensTest {
         assertTrue(shows("Markdown"), "the edit is still there to keep or copy")
     }
 
+    // A save sent on to another ship's notebook, whose host had not answered
+    // yet, was handled as a failure: the editor stayed open over a red line,
+    // inviting the same save again.
+    @Test
+    fun `a save its host has not answered yet is taken and said calmly`() = note { ship, _ ->
+        ship.answerApi = { method, _, _ -> if (method == "PUT") """{"body":{"type":"pending"}}""" else null }
+        showing("rev 3")
+        onNodeWithContentDescription("Edit").performClick()
+        onNode(hasSetTextAction()).performTextInput(" more")
+        onNodeWithContentDescription("Save").performClick()
+        showing("The notebook's host hasn't answered yet")
+        assertTrue(!shows("Markdown"), "out of the editor, as a save that went")
+    }
+
     // Every failed save said the note had changed on the ship, a ship down
     // and a reader's save included.
     @Test

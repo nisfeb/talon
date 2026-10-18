@@ -50,14 +50,10 @@ import io.nisfeb.talon.ui.MediaKind
 import io.nisfeb.talon.ui.VoiceRecordButton
 import io.nisfeb.talon.ui.rememberAutofillModifier
 import io.nisfeb.talon.ui.rememberLocationProvider
-import io.nisfeb.talon.data.MessageEntity
-import io.nisfeb.talon.notify.isMentioned
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.JsonPrimitive
-import io.nisfeb.talon.data.NotifyLevel
-import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.ui.screens.ShareTargetScreen
 import io.nisfeb.talon.ui.screens.DmChatScreen
 import io.nisfeb.talon.ui.screens.DmListScreen
@@ -152,9 +148,9 @@ fun TalonApp(
     /** A tapped calendar reminder: open the Calendar on its occurrence (the push's tag). */
     initialOpenCalendarTag: String? = null,
     pendingShare: ShareIntent? = null,
-    /** When non-null, the user already picked the share target in
-     *  the system share sheet (Sharing Shortcut). Skip the in-app
-     *  picker and dispatch [pendingShare] straight to this whom. */
+    /** When non-null, the system share sheet named the share target
+     *  (Sharing Shortcut). Skip the in-app picker and open this whom
+     *  with [pendingShare] waiting in its composer (shareStep). */
     pendingShareTarget: String? = null,
     onShareConsumed: () -> Unit = {},
     /** Called once TalonApp has consumed an `initialOpen*` /
@@ -283,9 +279,24 @@ fun TalonApp(
     // nothing left to say.
     if (callController != null) {
         val callState by callController.state.collectAsState()
+        val ringLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         androidx.compose.runtime.LaunchedEffect(callState) {
-            if (callState !is io.nisfeb.talon.call.CallUiState.Incoming) {
+            val ring = callState as? io.nisfeb.talon.call.CallUiState.Incoming
+            if (ring == null) {
                 io.nisfeb.talon.Notifications.cancelIncomingCall(app)
+                return@LaunchedEffect
+            }
+            // Talon behind with no push: the ring came over the stream, and
+            // only the push posted its notification, so nothing showed it.
+            // Posted once Talon is not in front; a ring the push already
+            // posted is left (one id, one call).
+            ringLifecycle.currentStateFlow.first { !it.isAtLeast(Lifecycle.State.STARTED) }
+            val id = callController.currentCallId ?: return@LaunchedEffect
+            if (io.nisfeb.talon.Notifications.shownCall != id) {
+                io.nisfeb.talon.Notifications.showIncomingCall(
+                    app, ring.peer, id, io.nisfeb.talon.ui.LastContactMap.value.displayName(ring.peer),
+                    forShip = loggedInShip,
+                )
             }
         }
 
@@ -297,7 +308,9 @@ fun TalonApp(
         // arrived over SSE yet, so wait for it rather than firing once
         // and missing.
         if (initialAnswerFrom != null) {
-            androidx.compose.runtime.LaunchedEffect(initialAnswerFrom, initialAnswerCallId) {
+            // Keyed on the controller too: a ring for another ship switches
+            // first (MainActivity), and the wait must be on that ship's.
+            androidx.compose.runtime.LaunchedEffect(callController, initialAnswerFrom, initialAnswerCallId) {
                 // Matched to the ring timeout rather than picked: a
                 // cold start has to open the channel and run its
                 // scries before the ring can land, and giving up
@@ -457,6 +470,12 @@ fun TalonApp(
         if (orreryGate == true && mailShipUrl != null && loggedInShip != null) orreryRepo.attach(mailShipUrl, loggedInShip)
         else orreryRepo.detach()
     }
+    // The leave plan's poll follows the switch: on, it reads; off, it stops
+    // waking the phone, here or from another device.
+    LaunchedEffect(orreryGate == true) {
+        if (orreryGate == true) io.nisfeb.talon.orrery.LeaveAlarm.schedule(app)
+        else io.nisfeb.talon.orrery.LeaveAlarm.stop(app)
+    }
     LaunchedEffect(orreryRepo, mailShipUrl, loggedInShip, orreryGate) {
         val url = mailShipUrl ?: return@LaunchedEffect
         val ship = loggedInShip ?: return@LaunchedEffect
@@ -570,7 +589,7 @@ fun TalonApp(
                     val who = ringingFrom
                     ringingFrom = null
                     if (who != null && s.reason != "declined") {
-                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who))
+                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who), forShip = loggedInShip)
                     }
                     stopShowingOverLockScreen(context)
                 }
@@ -582,7 +601,11 @@ fun TalonApp(
             }
         }
         if (initialCallBack != null) {
-            androidx.compose.runtime.LaunchedEffect(initialCallBack) {
+            // Keyed on the controller: a call back for another ship switches
+            // first (MainActivity), and the call goes from that ship's
+            // controller once this screen has caught up with the switch.
+            androidx.compose.runtime.LaunchedEffect(callController, initialCallBack) {
+                if (loggedInShip != app.activeShipFlow.value) return@LaunchedEffect
                 callController.placeCall(initialCallBack)
                 onCallBackConsumed()
             }
@@ -590,6 +613,19 @@ fun TalonApp(
     }
 
     var addingAnotherShip by remember { mutableStateOf(false) }
+    // A lapsed sign-in (the ship refuses the saved cookie): the login form,
+    // saying so, over the ship as it is (App.kt does the same). The
+    // session stays; signing in again replaces its cookie.
+    var lapseNotice by remember { mutableStateOf<String?>(null) }
+    val lapsedShips by io.nisfeb.talon.ui.screens.LoginLapses.ships.collectAsState()
+    LaunchedEffect(lapsedShips, loggedInShip) {
+        val ship = loggedInShip ?: return@LaunchedEffect
+        if (!io.nisfeb.talon.ui.screens.LoginLapses.take(ship)) return@LaunchedEffect
+        app.sessionStore.all().firstOrNull { it.ship == ship }?.let { io.nisfeb.talon.ui.screens.LoginDraft.url.value = it.shipUrl }
+        lapseNotice = io.nisfeb.talon.ui.screens.lapsedLoginNotice(ship)
+        addingAnotherShip = true
+    }
+    LaunchedEffect(addingAnotherShip) { if (!addingAnotherShip) lapseNotice = null }
     // Locally-owned navigation state. Initial values from the
     // notification-tap intent (or null on a normal cold launch). The
     // LaunchedEffect below routes any LATER param updates from
@@ -597,10 +633,11 @@ fun TalonApp(
     // plain `remember { mutableStateOf(initialX) }` would silently
     // ignore — that was the rc23-era "tap a notification, nothing
     // happens" bug.
-    // A "group:~host/name" deep link (group-invite notification) opens
-    // the group, not a chat, so keep it out of openWhom.
+    // A "group:~host/name" deep link opens the group and an
+    // "invite:~host/name" one (a group-invite notification) the invites,
+    // not a chat, so keep both out of openWhom.
     var openWhom by remember {
-        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") })
+        mutableStateOf(initialOpenWhom?.takeUnless { it.startsWith("group:") || it.startsWith("invite:") })
     }
     // True exactly while the chat's partyLineBar slot is composing the
     // inline call/party surfaces (a DisposableEffect in that slot flips
@@ -657,6 +694,10 @@ fun TalonApp(
     // the back handlers below, which let the chat's back come first.
     val searchSection = remember { sections.flag() }
     var searchOpen by searchSection
+    // The query a result was opened from is for Search's next draw. Search
+    // stays open under that result; closed any other way (back, the
+    // drawer), the query must not fill a later, unrelated search.
+    LaunchedEffect(searchOpen) { if (!searchOpen) io.nisfeb.talon.ui.screens.SearchDraft.query = "" }
     var revealGroupRequest by remember { mutableStateOf<String?>(null) }
     val newDmSection = remember { sections.flag() }
     var newDmOpen by newDmSection
@@ -772,6 +813,11 @@ fun TalonApp(
         // chat and appeared to do nothing at all.
         openWhom = null
         openThread = null
+        // A profile or an image is drawn over everything, so a link or
+        // a notice opened from one landed under it (as App.kt's leaveAllFor).
+        profileSheetShip = null
+        viewerImageUrl = null
+        viewerImageList = null
     }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
@@ -917,10 +963,12 @@ fun TalonApp(
             initialScrollMessageId != null
         if (chatTargeted) closeSections()
         if (initialOpenWhom != null) {
-            // A group-invite notification deep-links as "group:~host/name"
-            // — route it to the group screen, not openWhom (which only
-            // understands channel nests and DM ships).
-            if (initialOpenWhom.startsWith("group:")) {
+            // A group deep link goes to the group screen, not openWhom
+            // (which only understands channel nests and DM ships), and a
+            // group invite to Invites, the one place it can be accepted.
+            if (initialOpenWhom.startsWith("invite:")) {
+                invitesOpen = true
+            } else if (initialOpenWhom.startsWith("group:")) {
                 openGroupFlag = initialOpenWhom.removePrefix("group:")
             } else {
                 openWhom = initialOpenWhom
@@ -1069,7 +1117,34 @@ fun TalonApp(
             ).show()
         }
     }
-    val dispatchShare: (ShareIntent, String) -> Unit = { share, whom ->
+    // A direct share's file waits in the chat's composer for Send. Its bytes
+    // are read now: the grant to read them came with the share.
+    val stageShare: (ShareIntent, String) -> Unit = { share, whom ->
+        appScope.launch {
+            runCatching {
+                val (uri, mime) = when (share) {
+                    is ShareIntent.Image -> share.uri to share.mimeType
+                    is ShareIntent.File -> share.uri to share.mimeType
+                    is ShareIntent.Text -> return@launch
+                }
+                val isImage = share is ShareIntent.Image
+                val resolver = context.contentResolver
+                val (name, bytes) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolveFileName(resolver, uri, default = if (isImage) "image" else "file") to
+                        (resolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot read shared bytes"))
+                }
+                io.nisfeb.talon.ui.SharedAttachments.put(whom, io.nisfeb.talon.ui.PendingAttachment(bytes, mime, name, isImage))
+            }.onFailure { shareFailedToast(it) }
+        }
+    }
+    // [direct]: the share sheet named the chat, and any app can do that,
+    // so nothing is posted until the owner sends it (shareStep).
+    val dispatchShare: (ShareIntent, String, Boolean) -> Unit = dispatch@{ share, whom, direct ->
+        when (io.nisfeb.talon.ui.shareStep(whom, share is ShareIntent.Text, direct)) {
+            io.nisfeb.talon.ui.ShareStep.Pick -> return@dispatch
+            io.nisfeb.talon.ui.ShareStep.Stage -> return@dispatch stageShare(share, whom)
+            else -> {}
+        }
         // A gallery is not a chat: its posts are gallery essays, and
         // there is no draft box to drop text into. Post directly.
         if (whom.startsWith("heap/")) {
@@ -1167,14 +1242,16 @@ fun TalonApp(
     // A share arriving puts the sections down: the picker is drawn
     // beneath them, so with one open it was hidden, and Back threw the
     // share away. A chat stays; the picker is drawn over it and its Back
-    // comes back to it. On the Sharing Shortcut path the user already
-    // chose the channel in the system share sheet, so the share goes at
-    // once and that conversation opens without the in-app picker.
+    // comes back to it. On the Sharing Shortcut path the share sheet named
+    // the channel, so that conversation opens without the in-app picker,
+    // the share waiting in its composer. A gallery has none: the picker.
     LaunchedEffect(pendingShare, pendingShareTarget) {
         val share = pendingShare ?: return@LaunchedEffect
         val target = pendingShareTarget
-        if (!target.isNullOrBlank()) {
-            dispatchShare(share, target)
+        if (!target.isNullOrBlank() &&
+            io.nisfeb.talon.ui.shareStep(target, share is ShareIntent.Text, direct = true) != io.nisfeb.talon.ui.ShareStep.Pick
+        ) {
+            dispatchShare(share, target, true)
             sections.leave { closeSections(); openWhom = target }
             onShareConsumed()
         } else {
@@ -1193,9 +1270,17 @@ fun TalonApp(
     // the ship finishing turns it off, "Use the relay" before registering
     // turns it back on.
     var keepAlive by remember { mutableStateOf(true) }
+    // No push reaches this phone for the ship, mail aside: calls ring only
+    // while Talon is open, and Settings says so.
+    var noPush by remember { mutableStateOf(false) }
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
-        val ship = loggedInShip ?: return@LaunchedEffect
+        // No ship left signed in: nothing to keep the stream for.
+        val ship = loggedInShip ?: run {
+            TalonSyncService.stop(context)
+            io.nisfeb.talon.CatchUpWorker.cancel(context)
+            return@LaunchedEffect
+        }
         kotlinx.coroutines.flow.merge(
             kotlinx.coroutines.flow.flowOf(Unit),
             app.relaySettings.changes,
@@ -1215,34 +1300,39 @@ fun TalonApp(
             val endpoint = io.nisfeb.talon.notify.TalonMessagingReceiver.cachedEndpoint(context)?.takeIf {
                 runCatching { org.unifiedpush.android.connector.UnifiedPush.getDistributors(context).isNotEmpty() }.getOrDefault(true)
             }
-            keepAlive = io.nisfeb.talon.notify.keepAliveNeeded(
+            noPush = io.nisfeb.talon.notify.keepAliveNeeded(
                 app.relaySettings, ship, endpoint,
-                mailNeedsProcess = mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT,
                 shipPushBroken = ship in io.nisfeb.talon.notify.ShipPushHealth.broken.value,
             )
+            keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT
             if (keepAlive) {
                 runCatching { TalonSyncService.start(context) }
             } else {
                 TalonSyncService.stop(context)
             }
+            // The backstop worker is for the stream alone, not for mail.
+            runCatching { io.nisfeb.talon.CatchUpWorker.follow(app) }
         }
+    }
+    // Mail polls only while this screen lives (mailRepo, on its scope).
+    // Gone, a service kept for mail alone kept the process for nothing:
+    // decided again without mail, only the stream may keep it.
+    DisposableEffect(Unit) {
+        onDispose { if (!TalonSyncService.streamNeeded(app)) TalonSyncService.stop(context) }
     }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {
             app.repo.start(app.session)
             app.shortcuts.start()
-            // Backfill semantic-search embeddings only when the user
-            // has opted in. Indexer is idempotent so it's safe to call
-            // every launch — but if the feature is off we skip the
-            // model download + CPU entirely.
-            if (app.aiSettings.state.value.smartFeaturesEnabled) {
-                app.embeddingIndexer.start()
-            }
         }
     }
-
-    // Latest-value refs so the callback below doesn't close over stale state.
-    val openWhomState = rememberUpdatedState(openWhom)
+    // The smart-search index follows the switch, mid-session too: on, a
+    // pass runs (a no-op if one is running); off, the pass stops, and the
+    // model and CPU are left alone.
+    LaunchedEffect(loggedInShip, aiState.smartFeaturesEnabled) {
+        if (loggedInShip == null) return@LaunchedEffect
+        if (aiState.smartFeaturesEnabled) app.embeddingIndexer.start() else app.embeddingIndexer.stop()
+    }
 
     // Keep the shared ship-profile cache in sync with the active
     // ship's self-contact nickname. Fires whenever %contacts pushes a
@@ -1254,99 +1344,9 @@ fun TalonApp(
         }
     }
 
-    // Register a single message listener with the repo for the lifetime
-    // of the composition. Each new non-self message fires a notification
-    // unless the user is currently viewing that exact conversation in the
-    // foreground. Keyed on the repo: a switch builds the next ship's, and
-    // listeners set once stayed on the old one, so the new ship notified
-    // nothing until Talon restarted.
-    val listenedRepo = app.repo
-    DisposableEffect(listenedRepo, noticeRepo) {
-        listenedRepo.messageListener = { m: MessageEntity, replyToUs: Boolean ->
-            val lifecycle = ProcessLifecycleOwner.get().lifecycle
-            val foreground = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            val focused = foreground && openWhomState.value == m.whom
-            if (!focused) {
-                // Per-whom preference filter. DB read is async; do the
-                // check + fire in a coroutine rather than blocking the
-                // repo's event pump.
-                appScope.launch {
-                    val level = app.db.notifyLevelOf(m.whom)
-                    val muted = level == NotifyLevel.NONE
-
-                    // ── existing notification path ─────────────────────
-                    val shouldFire = !muted && when (level) {
-                        NotifyLevel.MENTIONS ->
-                            replyToUs || isMentioned(m.contentJson, loggedInShip ?: "")
-                        else -> true
-                    }
-                    if (shouldFire) {
-                        val title = contactMap.conversationLabel(m.whom)
-                        val authorLabel = contactMap.displayName(m.author)
-                        val preview = StoryCache.previewFor(m)
-                            .replace('\n', ' ')
-                            .take(160)
-                        Notifications.showMessage(
-                            context = context,
-                            whom = m.whom,
-                            forShip = loggedInShip,
-                            postId = m.id,
-                            parentId = m.parentId,
-                            title = title,
-                            body = if (m.whom.startsWith("~")) preview else "$authorLabel: $preview",
-                            sentMs = m.sentMs,
-                        )
-                    }
-                }
-            }
-        }
-        // New pending DM request → notify. Always fires (there's no
-        // "open" state for an unaccepted request), so a brand-new DM no
-        // longer arrives silently.
-        listenedRepo.dmInviteListener = { ship ->
-            noticeRepo.record(
-                "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
-                contactMap.displayName(ship), "wants to message you", "dm:$ship",
-            )
-            appScope.launch {
-                Notifications.showMessage(
-                    context = context,
-                    whom = ship,
-                    forShip = loggedInShip,
-                    postId = ship,
-                    parentId = null,
-                    title = contactMap.displayName(ship),
-                    body = "wants to message you",
-                    sentMs = System.currentTimeMillis(),
-                )
-            }
-        }
-        // New group invite → notify, same as a DM request. Tapping opens
-        // the group (its flag doubles as the whom via the "group:" route).
-        listenedRepo.groupInviteListener = { invite ->
-            val from = invite.inviter?.let { " from " + contactMap.displayName(it) } ?: ""
-            noticeRepo.record(
-                "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
-                invite.title ?: invite.flag, "invited you to a group$from", "invite:${invite.flag}",
-            )
-            appScope.launch {
-                Notifications.showMessage(
-                    context = context,
-                    whom = "group:${invite.flag}",
-                    postId = invite.flag,
-                    parentId = null,
-                    title = invite.title ?: invite.flag,
-                    body = "invited you to a group$from",
-                    sentMs = System.currentTimeMillis(),
-                )
-            }
-        }
-        onDispose {
-            listenedRepo.messageListener = null
-            listenedRepo.dmInviteListener = null
-            listenedRepo.groupInviteListener = null
-        }
-    }
+    // The message, DM-request and invite notifications are set on each
+    // ship's repo in TalonApplication (listenForAlerts), for the process's
+    // life: set here, they went with the screen.
 
     // Foreground catch-up: when the app returns to the front, force a
     // fresh SSE reconnect (the channel may have been quietly killed by
@@ -1375,6 +1375,7 @@ fun TalonApp(
                     // cover the moment somebody actually looks at it.
                     mailRepo.setForeground(true)
                     calendarRepo.setForeground(true)
+                    orreryRepo.setForeground(true)
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
@@ -1382,6 +1383,7 @@ fun TalonApp(
                     app.repo.setForeground(false)
                     mailRepo.setForeground(false)
                     calendarRepo.setForeground(false)
+                    orreryRepo.setForeground(false)
                 }
                 else -> {}
             }
@@ -1394,6 +1396,10 @@ fun TalonApp(
     LaunchedEffect(openWhom) {
         openWhom?.let { Notifications.cancelAllForChat(context, it, forShip = loggedInShip) }
     }
+    // The chat open here is on screen however it is drawn, for the alerts
+    // TalonApplication decides by ShownConversation: on a phone its thread
+    // or a post replaces the chat screen, which alone said so.
+    openWhom?.let { io.nisfeb.talon.notify.ClearNotificationsWhileShown(it) }
 
     // Screens handle their own window insets via Modifier.windowInsetsPadding
     // so that composers can push up with the IME while everything else stays
@@ -1864,6 +1870,13 @@ fun TalonApp(
                             sidebarSettingsOpen = true
                         }
                     },
+                    onContacts = {
+                        close()
+                        sections.leave {
+                            closeSections()
+                            contactsOpen = true
+                        }
+                    },
                 )
             },
         ) {
@@ -1889,7 +1902,9 @@ fun TalonApp(
                         nicknames = shipNicknamesMap,
                         onPick = { picked ->
                             drawerScope.launch { drawerState.close() }
-                            if (picked != loggedInShip) {
+                            // Through the guard: unsaved profile edits ask
+                            // first rather than going with the old ship.
+                            if (picked != loggedInShip) sections.leave {
                                 // Every section, the old ship's group and
                                 // admin pages too, not the two that were listed.
                                 closeSections()
@@ -1998,6 +2013,7 @@ fun TalonApp(
                 },
                 // The ship open underneath was never left.
                 onCancel = { addingAnotherShip = false },
+                notice = lapseNotice,
                 usernameAutofill = { onFill ->
                     rememberAutofillModifier(
                         types = listOf(
@@ -2145,9 +2161,8 @@ fun TalonApp(
                 // On the repo's scope, awaited: Contacts keeps what was typed
                 // until the ship has it, and says why when not.
                 onAddContact = { patp, nickname -> app.repo.carry { app.repo.addContact(patp, nickname) } },
-                onRemoveContact = { patp ->
-                    appScope.launch { runCatching { app.repo.removeContact(patp) } }
-                },
+                // On the repo's scope, awaited, as an add is (see App.kt).
+                onRemoveContact = { patp -> app.repo.carry { app.repo.removeContact(patp) } },
                 onOpenContact = { patp -> profileSheetShip = patp },
                 onBack = { contactsOpen = false },
                 modifier = mod,
@@ -2175,6 +2190,7 @@ fun TalonApp(
                     pendingScrollMessageId = postId
                     openWhom = whom
                 },
+                onOpenGroup = { flag -> sections.leave { closeSections(); openGroupFlag = flag } },
                 onBack = { activityOpen = false },
                 modifier = mod,
             )
@@ -2374,6 +2390,7 @@ fun TalonApp(
                 db = app.db,
                 scheduler = app.loops,
                 onRunNow = { app.loops.runOneNow(it) },
+                onAllowHeld = { app.loops.allowHeld(it) },
                 onBack = { loopsOpen = false },
                 settingsSync = app.settingsSync,
                 modifier = mod,
@@ -2422,6 +2439,7 @@ fun TalonApp(
                     profileAccentPreview = profileAccentPreview,
                     notificationHealth = app.notificationHealth,
                     systemNotificationProbe = systemProbe,
+                    noPush = noPush,
                     relayConfig = io.nisfeb.talon.ui.screens.RelayPanelConfig(
                         client = relayClient,
                         settings = app.relaySettings,
@@ -2468,7 +2486,7 @@ fun TalonApp(
                 db = app.db,
                 share = pendingShare,
                 onPick = { whom ->
-                    dispatchShare(pendingShare, whom)
+                    dispatchShare(pendingShare, whom, false)
                     openWhom = whom
                     onShareConsumed()
                 },
@@ -2553,6 +2571,8 @@ fun TalonApp(
                         VoicePreviewPlayButton(path = path, enabled = !sending)
                     },
                     powerFeaturesEnabled = app.uiSettings.powerFeaturesEnabled.collectAsState().value,
+                    // A thread's composer follows the setting too; only the chat's did.
+                    hideComposerButtons = app.uiSettings.hideComposerButtons.collectAsState().value,
                     modifier = mod,
                 )
             }
@@ -2740,22 +2760,11 @@ fun TalonApp(
                         )
                 }
                 val partyStateNow by partyStateFlow.collectAsState()
-                val onThisLine = partyStateNow is io.nisfeb.talon.call.PartyState.Live
-                LaunchedEffect(partyRoomHere, onThisLine) {
-                    val (h, n) = partyRoomHere ?: return@LaunchedEffect
-                    val cc = callController ?: return@LaunchedEffect
-                    if (!onThisLine) return@LaunchedEffect
-                    try {
-                        while (true) {
-                            cc.enterRoom(h, n)
-                            kotlinx.coroutines.delay(30_000)
-                        }
-                    } finally {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                            cc.leaveRoom(h, n)
-                        }
-                    }
-                }
+                // Presence is announced by the controller from the join
+                // (beginPresenceAnnounce), not here: an effect keyed on the
+                // open chat beat twice, told a host we left on opening a DM,
+                // and entered another group's host's room.
+                val onThisLine = io.nisfeb.talon.ui.onThisLine(partyStateNow, partyRoomHere, callController?.lineKey)
                 // Why we couldn't find out, when we couldn't. Silence
                 // here is what turns "no line in this group" and "your
                 // ship can't ask" into the same thing.
@@ -2774,6 +2783,7 @@ fun TalonApp(
                     partyLine = partyLine,
                     partyRoomHere = partyRoomHere,
                     onThisLine = onThisLine,
+                    occupied = partyShown > 0 || onThisLine,
                     http = app.ktorHttp,
                     aiConfig = app.aiSettings.state.value,
                     ourShip = loggedInShip.orEmpty(),
@@ -3125,7 +3135,7 @@ fun TalonApp(
                 activeShip = loggedInShip,
                 shipNicknames = app.shipProfiles.nicknames.collectAsState().value,
                 onSwitchShip = { ship ->
-                    if (ship != loggedInShip) {
+                    if (ship != loggedInShip) sections.leave {
                         closeSections()
                         switchShipAction()
                         app.switchShip(ship)

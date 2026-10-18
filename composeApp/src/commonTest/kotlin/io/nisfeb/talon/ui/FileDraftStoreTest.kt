@@ -70,4 +70,69 @@ class FileDraftStoreTest {
         active = "~zod"
         assertEquals("", store().load("~bus"))
     }
+
+    // Desktop and iOS: the list's "Draft:" previews were empty after a
+    // launch and the last ship's after a switch, until a composer loaded.
+    @Test
+    fun `the previews are the active ship's from launch and after a switch`() {
+        files[draftsFileName("~zod")] = """{"~bus":"zod's"}"""
+        files[draftsFileName("~nec")] = """{"~dev":"nec's"}"""
+        val s = store()
+        assertEquals(emptyMap(), s.state.value)
+        s.showActiveShip()
+        assertEquals(mapOf("~bus" to "zod's"), s.state.value)
+        active = "~nec"
+        s.showActiveShip()
+        assertEquals(mapOf("~dev" to "nec's"), s.state.value)
+        active = null
+        s.showActiveShip()
+        assertEquals(emptyMap(), s.state.value)
+    }
+
+    // Erasing a ship deleted its file, but the store kept its drafts in
+    // memory, and they came back when the ship was added again.
+    @Test
+    fun `an erased ship's drafts do not come back in the same session`() {
+        val s = store()
+        val zod = s.bound()
+        zod.save("~bus", "half typed")
+        active = "~nec"
+        files.remove(draftsFileName("~zod"))
+        assertEquals("half typed", zod.load("~bus"), "held until the erase is done")
+        s.forget("~zod")
+        active = "~zod"
+        assertEquals("", s.load("~bus"))
+        assertEquals(emptyMap(), s.state.value)
+        s.save("~dev", "new")
+        s.forget("~zod")
+        assertEquals(emptyMap(), s.state.value, "the active ship forgotten shows none")
+    }
+
+    // iOS keeps the file locked while the device is. Built then (a call's
+    // push), the store read nothing and kept it as no drafts; the next save
+    // wrote that over every other chat's draft.
+    @Test
+    fun `a drafts file that cannot be read yet is not written over and is read once it can be`() {
+        files["drafts-zod.json"] = """{"~bus":"kept"}"""
+        var locked = true
+        val s = FileDraftStore({ active }, read = { if (locked) null else files[it] }, write = { name, text -> files[name] = text }, exists = { it in files })
+        s.showActiveShip()
+        assertEquals("", s.load("~bus"))
+        s.save("~nec", "typed while locked")
+        s.clear("~bus")
+        assertEquals("""{"~bus":"kept"}""", files["drafts-zod.json"])
+        locked = false
+        assertEquals("kept", s.load("~bus"))
+        s.save("~nec", "after")
+        assertEquals(mapOf("~bus" to "kept", "~nec" to "after"), s.state.value)
+        assertEquals("after", store().load("~nec"))
+        assertEquals("kept", store().load("~bus"))
+    }
+
+    @Test
+    fun `an absent drafts file is a fresh start and is written`() {
+        val s = FileDraftStore({ active }, read = { null }, write = { name, text -> files[name] = text }, exists = { false })
+        s.save("~bus", "first")
+        assertEquals("first", store().load("~bus"))
+    }
 }

@@ -323,6 +323,12 @@ tasks.withType<Test>().configureEach {
     val home = layout.buildDirectory.dir("test-home").get().asFile.absolutePath
     systemProperty("user.home", home)
     environment("XDG_CONFIG_HOME", "$home/.config")
+    // The tests' temp dirs (Room databases, files) go under the build and
+    // are emptied each run. In /tmp none was ever deleted: thousands of
+    // runs filled the 16 GB tmpfs on 2026-10-18 and broke builds and PIT.
+    val tmp = layout.buildDirectory.dir("test-tmp").get().asFile
+    systemProperty("java.io.tmpdir", tmp.absolutePath)
+    doFirst { tmp.deleteRecursively(); tmp.mkdirs() }
     // RuntimeClassVersionTest reads the release's JDK from here: a change
     // to it runs the tests again rather than reusing a cached pass.
     inputs.file(rootDir.resolve(".github/workflows/release.yml"))

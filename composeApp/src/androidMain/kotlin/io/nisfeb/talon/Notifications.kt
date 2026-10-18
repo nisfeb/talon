@@ -60,7 +60,7 @@ object Notifications {
     /** A ring to show, from the full-screen intent or a tap on the body: it never answers. */
     const val EXTRA_RINGING_FROM = io.nisfeb.talon.call.RingIntents.RINGING_FROM
     /** A ship to call back, from a missed-call notification. */
-    const val EXTRA_CALL_BACK = "call_back"
+    const val EXTRA_CALL_BACK = io.nisfeb.talon.call.RingIntents.CALL_BACK
 
     /** One notification id for calls: only one can ring at a time. */
     private const val CALL_NOTIFICATION_ID = 0x0CA11
@@ -73,8 +73,8 @@ object Notifications {
      * else's conversation or nothing at all. The relay has always sent
      * the ship; it was only ever used as the notification's title.
      */
-    const val EXTRA_FOR_SHIP = "for_ship"
-    const val EXTRA_OPEN_WHOM = "open_whom"
+    const val EXTRA_FOR_SHIP = io.nisfeb.talon.call.RingIntents.FOR_SHIP
+    const val EXTRA_OPEN_WHOM = io.nisfeb.talon.call.RingIntents.OPEN_WHOM
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
      *  TalonApp uses it to route into ThreadScreen rather than the
@@ -92,6 +92,16 @@ object Notifications {
     const val EXTRA_OPEN_ORRERY = "open_orrery"
     /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
     const val EXTRA_OPEN_CALENDAR = "open_calendar"
+    /** A tapped signed-out notice: the login form for this ship. */
+    const val EXTRA_SIGN_IN = "sign_in"
+
+    /**
+     * MainActivity, through the alias whose call extras count
+     * ([io.nisfeb.talon.call.RingIntents.TAP_ALIAS]). Every notification
+     * opens Talon with this.
+     */
+    fun tapIntent(context: Context): Intent =
+        Intent().setClassName(context, io.nisfeb.talon.call.RingIntents.TAP_ALIAS)
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -172,8 +182,11 @@ object Notifications {
             )
         }
         // Watchwords were taken out; their channel would stay in the
-        // phone's settings with nothing ever posted to it.
+        // phone's settings with nothing ever posted to it. The same for
+        // the first calls channel (now calls_v2) and the daily digest.
         mgr.deleteNotificationChannel("watchwords")
+        mgr.deleteNotificationChannel("calls")
+        mgr.deleteNotificationChannel("daily-digest")
         if (mgr.getNotificationChannel(CHANNEL_LOOPS) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(
@@ -257,7 +270,7 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
             context, tag.hashCode(),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
                 if (openCalendar != null) putExtra(EXTRA_OPEN_CALENDAR, openCalendar)
@@ -296,7 +309,11 @@ object Notifications {
      * showed the in-app ring and the user had to press Answer twice.
      * Declining works from here alone, being one poke and no media.
      */
-    fun showIncomingCall(context: Context, from: String, callId: String, name: String = from) {
+    fun showIncomingCall(
+        context: Context, from: String, callId: String, name: String = from,
+        /** The ship rung. Answer and Show go to it first: only its controller hears the ring. */
+        forShip: String? = null,
+    ) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
@@ -327,9 +344,10 @@ object Notifications {
 
         fun open(tap: io.nisfeb.talon.call.RingIntents.Tap) = PendingIntent.getActivity(
             context, io.nisfeb.talon.call.RingIntents.requestCode(tap, callId),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 io.nisfeb.talon.call.RingIntents.extras(tap, from, callId).forEach { (k, v) -> putExtra(k, v) }
+                if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -389,6 +407,7 @@ object Notifications {
         shownCallId = callId
         shownCallFrom = from
         shownCallName = name
+        shownCallForShip = forShip
         when {
             inAppRingExpected -> Unit // the in-app ring is already sounding
             // Notifications denied means notify() above was dropped on
@@ -420,6 +439,8 @@ object Notifications {
     private var shownCallFrom: String? = null
     @Volatile
     private var shownCallName: String? = null
+    @Volatile
+    private var shownCallForShip: String? = null
 
     /** True while TalonApp has a live CallController composed — the
      *  thing that actually plays the in-app ring. Set by TalonApp; the
@@ -447,25 +468,33 @@ object Notifications {
      * call never reaches the system call log (that needs the dialer
      * role), so this is where a missed call lives on Android: a notice
      * with Call back and Message, which is how every non-dialer app
-     * behaves. Silent: the ring already made its noise.
+     * behaves. Silent: the ring already made its noise. Its body opens
+     * the DM, as Message does (RingIntents.missedExtras). It used to
+     * dial at once.
      */
-    fun showMissedCall(context: Context, from: String, name: String) {
+    fun showMissedCall(
+        context: Context, from: String, name: String,
+        /** The ship rung. Each tap goes to it first. */
+        forShip: String?,
+    ) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
         val callBack = PendingIntent.getActivity(
             context, from.hashCode(),
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_CALL_BACK, from)
+                io.nisfeb.talon.call.RingIntents.missedExtras(io.nisfeb.talon.call.RingIntents.Missed.CallBack, from, forShip)
+                    .forEach { (k, v) -> putExtra(k, v) }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val message = PendingIntent.getActivity(
             context, from.hashCode() + 1,
-            Intent(context, MainActivity::class.java).apply {
+            tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_OPEN_WHOM, from)
+                io.nisfeb.talon.call.RingIntents.missedExtras(io.nisfeb.talon.call.RingIntents.Missed.Open, from, forShip)
+                    .forEach { (k, v) -> putExtra(k, v) }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -477,12 +506,52 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setSilent(true)
             .setAutoCancel(true)
-            .setContentIntent(callBack)
+            .setContentIntent(message)
             .addAction(android.R.drawable.sym_action_call, "Call back", callBack)
             .addAction(android.R.drawable.sym_action_chat, "Message", message)
             .build()
         mgr.notify(MISSED_CALL_NOTIFICATION_ID, n)
     }
+
+    /**
+     * The ship refused the saved login with Talon not in front (B3-16):
+     * nothing comes from it until the owner signs in again. A tap opens
+     * the login form for [ship]. When to post it is LapseNotices'.
+     */
+    fun showSignedOut(context: Context, ship: String) {
+        ensureChannel(context)
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?: return
+        val (title, body) = io.nisfeb.talon.ui.screens.signedOutNotice(ship)
+        val tap = PendingIntent.getActivity(
+            context, (SIGNED_OUT_TAG + ship).hashCode(),
+            tapIntent(context).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_SIGN_IN, ship)
+                putExtra(EXTRA_FOR_SHIP, ship)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        mgr.notify(SIGNED_OUT_TAG + ship, NOTIFICATION_ID, n)
+    }
+
+    /** [ship] took a login again: its signed-out notice goes. */
+    fun clearSignedOut(context: Context, ship: String) {
+        ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?.cancel(SIGNED_OUT_TAG + ship, NOTIFICATION_ID)
+    }
+
+    private const val SIGNED_OUT_TAG = "signed-out:"
 
     fun cancelIncomingCall(context: Context) {
         // Stop the noise first: the notification going away while the
@@ -510,9 +579,10 @@ object Notifications {
         if (shownCallId != callId) return
         val from = shownCallFrom
         val name = shownCallName ?: from
+        val forShip = shownCallForShip
         cancelIncomingCall(context)
         if (reason == "answered" || callControllerLive || from == null || name == null) return
-        showMissedCall(context, from, name)
+        showMissedCall(context, from, name, forShip)
     }
 
     fun showMessage(
@@ -528,11 +598,28 @@ object Notifications {
         title: String,
         body: String,
         sentMs: Long,
+        /** A relay's hint, which says only that something arrived. */
+        hint: Boolean = false,
     ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
+        // Tag = ship + whom, so new messages from the same conversation
+        // replace the previous notification rather than stacking, and
+        // the same whom on two ships keeps two rows, matching the
+        // request code below.
+        val tag = forShip.orEmpty() + whom
+        // The hint and the app's own notification for one message both
+        // alerted. What is showing under the tag decides (chatAlert).
+        val shown = runCatching { mgr.activeNotifications.firstOrNull { it.tag == tag && it.id == NOTIFICATION_ID } }.getOrNull()
+        val alert = io.nisfeb.talon.notify.chatAlert(
+            hint = hint,
+            shownAgoMs = shown?.let { System.currentTimeMillis() - it.postTime },
+            shownIsHint = shown?.notification?.extras?.getBoolean(EXTRA_HINT) == true,
+            samePost = io.nisfeb.talon.notify.samePostShown(whom, shown?.notification?.extras?.getString(EXTRA_POST), postId),
+        )
+        if (alert == io.nisfeb.talon.notify.ChatAlert.Skip) return
 
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_WHOM, whom)
             if (forShip != null) putExtra(EXTRA_FOR_SHIP, forShip)
@@ -564,14 +651,17 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setWhen(sentMs)
             .setShowWhen(true)
+            .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_HINT, hint); putString(EXTRA_POST, postId) })
+            .setOnlyAlertOnce(alert == io.nisfeb.talon.notify.ChatAlert.Quiet)
             .build()
 
-        // Tag = ship + whom so new messages from the same conversation
-        // replace the previous notification rather than stacking — and
-        // the same whom on two ships keeps two rows, matching the
-        // request code above.
-        mgr.notify(forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
+        mgr.notify(tag, NOTIFICATION_ID, notification)
     }
+
+    /** Set on a chat notification that is a relay's hint. */
+    private const val EXTRA_HINT = "talon.hint"
+    /** The post a chat notification is for. */
+    private const val EXTRA_POST = "talon.post"
 
     /**
      * New mail. Its own channel because mail is considered
@@ -586,7 +676,7 @@ object Notifications {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
         ensureChannel(context)
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_MAIL, true)
         }
@@ -619,7 +709,7 @@ object Notifications {
             ?: return
         ensureChannel(context)
         val tag = "action:" + actionId.ifBlank { "more" }
-        val tapIntent = Intent(context, MainActivity::class.java).apply {
+        val tapIntent = tapIntent(context).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_ACTIONS, true)
         }

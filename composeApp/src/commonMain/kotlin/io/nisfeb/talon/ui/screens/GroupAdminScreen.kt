@@ -62,6 +62,10 @@ import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ui.icons.TalonIcons
 
+/** Whether [me] hosts the group or is one of its admins. */
+private fun mayAdminister(me: String, flag: String, group: AdminGroup): Boolean =
+    me.isNotEmpty() && (me == flag.substringBefore('/') || group.members.any { it.ship == me && it.isAdmin })
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupAdminScreen(
@@ -126,10 +130,14 @@ fun GroupAdminScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
-                onClick = { newChannelOpen = true },
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "New channel")
+            // A member, or a group still loading, is not offered what only
+            // an admin may do: the ship would refuse the channel.
+            if (group?.let { mayAdminister(me, flag, it) } == true) {
+                io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
+                    onClick = { newChannelOpen = true },
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "New channel")
+                }
             }
         }
         HorizontalDivider()
@@ -182,7 +190,7 @@ fun GroupAdminScreen(
                     scope.launch {
                         runCatching { repo.inviteToGroup(flag, ship) }
                             .onSuccess { scope.launch { kotlinx.coroutines.delay(500); refresh() } }
-                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't invite $ship", it) }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't invite ${io.nisfeb.talon.ui.shipHandle(ship)}", it) }
                     }
                 },
                 onRevokeInvite = { ship ->
@@ -224,7 +232,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = io.nisfeb.talon.util.problemOf("Couldn't let $ship in", it)
+                                error = io.nisfeb.talon.util.problemOf("Couldn't let ${io.nisfeb.talon.ui.shipHandle(ship)} in", it)
                                 refresh()
                             }
                     }
@@ -239,7 +247,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = io.nisfeb.talon.util.problemOf("Couldn't turn $ship away", it)
+                                error = io.nisfeb.talon.util.problemOf("Couldn't turn ${io.nisfeb.talon.ui.shipHandle(ship)} away", it)
                                 refresh()
                             }
                     }
@@ -254,7 +262,7 @@ fun GroupAdminScreen(
                                 refresh()
                             }
                             .onFailure {
-                                error = io.nisfeb.talon.util.problemOf("Couldn't unban $ship", it)
+                                error = io.nisfeb.talon.util.problemOf("Couldn't unban ${io.nisfeb.talon.ui.shipHandle(ship)}", it)
                                 refresh()
                             }
                     }
@@ -275,7 +283,8 @@ fun GroupAdminScreen(
             title = { Text(contactMap.displayName(m.ship)) },
             text = {
                 Text(
-                    "Roles: ${if (m.sects.isEmpty()) "(none)" else m.sects.joinToString(", ")}",
+                    // Titles as the group names them; an id where it has none.
+                    "Roles: ${if (m.sects.isEmpty()) "(none)" else m.sects.joinToString(", ") { group?.roles?.get(it)?.takeIf(String::isNotBlank) ?: it }}",
                 )
             },
             confirmButton = {
@@ -288,7 +297,7 @@ fun GroupAdminScreen(
                                 runCatching {
                                     repo.setMemberRole(flag, target.ship, "admin", add = !hasAdminRole)
                                 }.onSuccess { refresh() }
-                                    .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't change ${target.ship}'s role", it) }
+                                    .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't change ${io.nisfeb.talon.ui.shipHandle(target.ship)}'s role", it) }
                             }
                         }) {
                             Text(if (hasAdminRole) "Revoke admin" else "Make admin")
@@ -319,7 +328,7 @@ fun GroupAdminScreen(
     pendingKick?.let { ship ->
         AlertDialog(
             onDismissRequest = { pendingKick = null },
-            title = { Text("Kick $ship?") },
+            title = { Text("Kick ${io.nisfeb.talon.ui.shipHandle(ship)}?") },
             text = { Text("They'll be removed from the group but can re-join.") },
             confirmButton = {
                 io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
@@ -328,7 +337,7 @@ fun GroupAdminScreen(
                     scope.launch {
                         runCatching { repo.kickFromGroup(flag, s) }
                             .onSuccess { refresh() }
-                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't kick $s", it) }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't kick ${io.nisfeb.talon.ui.shipHandle(s)}", it) }
                     }
                 }) { Text("Kick") }
             },
@@ -341,11 +350,11 @@ fun GroupAdminScreen(
     pendingBan?.let { ship ->
         AlertDialog(
             onDismissRequest = { pendingBan = null },
-            title = { Text("Ban $ship?") },
+            title = { Text("Ban ${io.nisfeb.talon.ui.shipHandle(ship)}?") },
             text = {
                 Text(
                     "They'll be prevented from joining or re-joining. " +
-                        "You can unban later via the ship's cordon list.",
+                        "You can unban them later under Banned, on this screen.",
                 )
             },
             confirmButton = {
@@ -355,7 +364,7 @@ fun GroupAdminScreen(
                     scope.launch {
                         runCatching { repo.banFromGroup(flag, s) }
                             .onSuccess { refresh() }
-                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't ban $s", it) }
+                            .onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't ban ${io.nisfeb.talon.ui.shipHandle(s)}", it) }
                     }
                 }) { Text("Ban") }
             },
@@ -384,6 +393,8 @@ fun GroupAdminScreen(
                     }.onSuccess {
                         creatingChannel = false
                         newChannelOpen = false
+                        // The ship confirmed it; read the channels again so it shows here.
+                        refresh()
                     }.onFailure {
                         creatingChannel = false
                         // Into the dialog, not the screen: the screen-level
@@ -549,9 +560,7 @@ private fun AdminBody(
     // so everything that changes the group has to be gated rather than
     // relying on the ship to refuse. Editing a field that silently
     // never persists is worse than not offering it.
-    val mayAdminister = me.isNotEmpty() &&
-        (me == flag.substringBefore('/') ||
-            group.members.any { it.ship == me && it.isAdmin })
+    val mayAdminister = mayAdminister(me, flag, group)
 
     val metaDirty = title != group.title.orEmpty() ||
         description != group.description.orEmpty() ||
@@ -632,7 +641,7 @@ private fun AdminBody(
         Button(
             onClick = { onSaveMeta(title, description, image, cover) },
             enabled = metaDirty && !uploading && !savingMeta,
-        ) { Text(if (savingMeta) "Saving…" else "Save metadata") }
+        ) { Text(if (savingMeta) "Saving…" else "Save") }
 
         HorizontalDivider()
         }
@@ -1220,7 +1229,7 @@ private fun RoomAccessControls(
     if (access == null) {
         Text(
             if (timedOut) {
-                "The line's host hasn't answered — it may be running an older %trunk."
+                "The line's host hasn't answered. Its calling app may be out of date."
             } else {
                 "Asking the host who may join and speak…"
             },

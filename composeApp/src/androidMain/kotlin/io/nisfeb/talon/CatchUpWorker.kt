@@ -28,7 +28,9 @@ import java.util.concurrent.TimeUnit
  *     re-runs us.
  *
  * The work is cheap: scry %activity, diff against local, post any
- * notifications the SSE / push relay missed. ConnectionPool worth
+ * notifications the SSE / push relay missed. Those are the repo's: what
+ * the read since the last one brings, new here and unread, one a chat
+ * (TlonChatRepo.announceCaughtUp). ConnectionPool worth
  * of work, but bounded — we delay() up to 8 seconds for an open
  * channel before giving up, so even a wedged ship doesn't burn
  * the worker's runtime budget.
@@ -47,6 +49,14 @@ class CatchUpWorker(
         // No active ship → nothing to catch up on. Don't retry —
         // WorkManager will run us again at the next 15-minute slot.
         if (app.activeShipFlow.value == null) return Result.success()
+        // A process this worker woke has a repo nobody started, and the
+        // wait below then never ended: retried every time, it caught up
+        // nothing. Started here only where no push reaches the phone,
+        // the backstop this is for: with push, a stream every fifteen
+        // minutes is a channel and a bootstrap for nothing. Idempotent
+        // where the screen or the service started it.
+        if (!app.notificationHealth.sseConnected.value && !TalonSyncService.streamNeeded(app)) return Result.success()
+        runCatching { app.repo.start(app.session) }.onFailure { Log.w(TAG, "could not start the stream: ${it.message}") }
 
         // Wait briefly for the channel + sync state to come up
         // (notificationHealth is a useful signal here). Caps at 8s
@@ -94,6 +104,15 @@ class CatchUpWorker(
                 ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )
+        }
+
+        /**
+         * Scheduled only while no push reaches the phone for the active
+         * ship ([TalonSyncService.streamNeeded]). With push, each run woke
+         * the process every fifteen minutes and returned at once.
+         */
+        fun follow(app: TalonApplication) {
+            if (TalonSyncService.streamNeeded(app)) schedule(app) else cancel(app)
         }
 
         fun cancel(context: Context) {

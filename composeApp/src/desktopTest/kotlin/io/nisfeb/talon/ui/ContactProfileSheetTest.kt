@@ -7,7 +7,9 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -84,6 +86,14 @@ class ContactProfileSheetTest {
         onNodeWithText("Remove").performClick()
         onNodeWithText("Mail").performClick()
         assertEquals(listOf("message", "remove", "close", "mail $ship"), did)
+    }
+
+    // A long bio pushed Message and Close off the sheet, with no way down.
+    @Test
+    fun `a long bio scrolls and the actions stay in reach`() = card(bio = (1..120).joinToString("\n") { "line $it of the bio" }) {
+        waitForIdle()
+        onNodeWithText("Message").performScrollTo().assertIsDisplayed().performClick()
+        assertTrue("message" in did, did.toString())
     }
 
     @Test

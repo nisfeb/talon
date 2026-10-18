@@ -15,6 +15,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextInput
@@ -49,6 +53,9 @@ import kotlin.test.assertTrue
 class LoginScreenTest {
     private val store = DesktopSessionStore(File(createTempDirectory("talon-login-").toFile(), "sessions.json"))
 
+    /** The ship and +code each sign-in handed the notifications offer. */
+    private val codes: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
+
     /** Each login asked for, as URL and form body. */
     private val asked: MutableList<Pair<String, String>> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -82,6 +89,7 @@ class LoginScreenTest {
                     LoginScreen(
                         session = UrbitSession(http, store),
                         onLoggedIn = { loggedIn += it },
+                        onLoginCode = { who, code -> codes += who to code },
                         notice = notice,
                         qrScanIntegration = if (qr != null || scanCancels) { onResult -> { onResult(qr) } } else null,
                         onRunLocalShip = onRunLocalShip,
@@ -99,6 +107,20 @@ class LoginScreenTest {
         onNodeWithText("Ship URL").performTextInput(url)
         onNodeWithText("+code").performTextInput(code)
         onNodeWithText("Connect").performClick()
+    }
+
+    // Review B1-3: the form did not scroll, so the keyboard or a landscape
+    // phone hid Connect and the error line under it.
+    @Test
+    fun `a short window scrolls the form to Connect`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(400.dp, 240.dp)) {
+                    LoginScreen(session = UrbitSession(HttpClient(MockEngine { respondOk() }), store), onLoggedIn = {})
+                }
+            }
+        }
+        onNodeWithText("Connect").performScrollTo().assertIsDisplayed()
     }
 
     // "backing out of the qr scanner should leave the fields populated. if
@@ -163,6 +185,9 @@ class LoginScreenTest {
         val (url, form) = asked.single()
         assertEquals("https://zod.example.com/~/login", url, "a bare host gets https")
         assertEquals("password=lidlut-tabwed", form, "trimmed, without the +")
+        // The draft is cleared on success: read after, the offer to turn
+        // notifications on enrolled with an empty code (iOS).
+        assertEquals(listOf("~zod" to "lidlut-tabwed"), codes.toList(), "the code as the ship took it")
         assertTrue(shows("Connected as ~zod"))
         assertEquals("~zod" to "https://zod.example.com", store.active()?.let { it.ship to it.shipUrl })
     }

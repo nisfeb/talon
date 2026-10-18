@@ -140,6 +140,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.map
@@ -272,7 +273,6 @@ fun DmChatScreen(
     /** Take in [id]'s post, if it is kept here and older than the window; whether it is kept. */
     suspend fun reach(id: String): Boolean = db.messages().getOne(whom, id)?.sentMs?.let { widenTo(it); true } ?: false
     LaunchedEffect(whom) { widenTo(db.messages().sentMsAfterNewest(whom, CHAT_WINDOW - 1) ?: Long.MIN_VALUE) }
-    LaunchedEffect(initialScrollMessageId) { initialScrollMessageId?.let { reach(it) } }
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
@@ -319,10 +319,10 @@ fun DmChatScreen(
                         StoryCache.partsFor(item.row.m.id, item.row.m.contentJson)
                     }
                 }
-                ChatRowsSnapshot.put(whom, items)
+                ChatRowsSnapshot.put(ourPatp, whom, items)
             }
             .flowOn(Dispatchers.Default)
-    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(whom))
+    }.collectAsStateWithLifecycle(initialValue = ChatRowsSnapshot.get(ourPatp, whom))
 
     // Unread COUNT — drives the catch-me-up banner only. Captured on
     // entry; not used for the divider anymore (see dividerAnchorId).
@@ -419,6 +419,10 @@ fun DmChatScreen(
     // for the chat they're already in (hasAnchored is already true from
     // the initial bottom-snap). Keyed on whom so a chat switch resets.
     var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
+    // The post to open at, as rows keep it: a notification's id is dotted.
+    val jumpId = remember(whom, initialScrollMessageId) {
+        initialScrollMessageId?.let { io.nisfeb.talon.urbit.keptPostId(whom, it) }
+    }
     val scope = rememberCoroutineScope()
     // A post jumped to (the pin, a topic) that the window is taking in.
     var pendingJump by remember(whom) { mutableStateOf<String?>(null) }
@@ -476,17 +480,17 @@ fun DmChatScreen(
             placeDivider(currentRows)
         }
     }
-    LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
+    LaunchedEffect(displayRows.size, jumpId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
-        if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
+        if (jumpId != null && jumpId != lastAppliedAnchor) {
             val originalIdx = displayRows.indexOfFirst { item ->
-                item is ChatListItem.Message && item.row.m.id == initialScrollMessageId
+                item is ChatListItem.Message && item.row.m.id == jumpId
             }
             if (originalIdx >= 0) {
                 listState.scrollToItem(displayRows.lastIndex - originalIdx)
                 hasAnchored = true
-                flashMessageId = initialScrollMessageId
-                lastAppliedAnchor = initialScrollMessageId
+                flashMessageId = jumpId
+                lastAppliedAnchor = jumpId
                 onScrollConsumed()
                 return@LaunchedEffect
             }
@@ -621,6 +625,21 @@ fun DmChatScreen(
         refreshing = false
     }
 
+    // A jump to a post not kept here: it may come with the refresh on
+    // opening (a notification tapped before its message landed), so that
+    // is waited for. Still not here, it is said, where the chat used to
+    // open at the bottom with no word. Not fetched alone: a lone old post
+    // stored here leaves a hole behind it that paging never fills.
+    LaunchedEffect(whom, jumpId) {
+        val id = jumpId ?: return@LaunchedEffect
+        if (reach(id)) return@LaunchedEffect
+        snapshotFlow { refreshing }.first { !it }
+        if (reach(id)) return@LaunchedEffect
+        lastAppliedAnchor = id
+        onScrollConsumed()
+        composerState.sendError = "That message isn't loaded here yet. Scroll up to load older messages."
+    }
+
     var paginating by remember(whom) { mutableStateOf(false) }
 
     var olderFailedAtMs by remember(whom) { mutableStateOf(0L) }
@@ -664,10 +683,12 @@ fun DmChatScreen(
 
 
     // ── message action sheet state ──
-    var actionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    // Each keyed on the chat: the desktop pane keeps this screen across a
+    // switch, and a dialog left open acted on the next chat's whom.
+    var actionTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     // The message whose full emoji browser is open, lifted out of the
     // per-row action menu so the sheet has the screen's whole height.
-    var emojiPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var emojiPickerTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     var partyNoteOpen by remember(whom) { mutableStateOf(false) }
     // Long-press / right-click on any reaction chip surfaces the
     // per-reactor breakdown. Set to the message's reactions list and
@@ -675,11 +696,11 @@ fun DmChatScreen(
     var reactionDetailsTarget by remember(whom) {
         mutableStateOf<List<ReactionEntity>?>(null)
     }
-    var confirmingDelete by remember { mutableStateOf<MessageEntity?>(null) }
-    var confirmingReport by remember { mutableStateOf<MessageEntity?>(null) }
-    var publishTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var confirmingDelete by remember(whom) { mutableStateOf<MessageEntity?>(null) }
+    var confirmingReport by remember(whom) { mutableStateOf<MessageEntity?>(null) }
+    var publishTarget by remember(whom) { mutableStateOf<MessageEntity?>(null) }
     // What was said, on its way to becoming an event or a task.
-    var calendarTarget by remember { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
+    var calendarTarget by remember(whom) { mutableStateOf<Pair<FromMessage, MessageEntity>?>(null) }
     // The repo is always handed in, so whether the ship has a calendar
     // is its availability, not whether there is a repo: without this
     // New event was offered on ships with no calendar and failed on Add.
@@ -693,7 +714,7 @@ fun DmChatScreen(
             MessageToCalendarDialog(
                 kind = kind,
                 initialTitle = titleFromMessage(StoryCache.textFor(target.id, target.contentJson)),
-                initialNote = StoryCache.textFor(target.id, target.contentJson).let { said ->
+                initialNote = StoryCache.copyTextFor(target.id, target.contentJson).let { said ->
                     descriptionFromMessage(said, titleFromMessage(said))
                 },
                 zone = runCatching { kotlinx.datetime.TimeZone.of(zoneId ?: "") }
@@ -707,11 +728,17 @@ fun DmChatScreen(
                     // task is on the list at once, and leaving the chat
                     // does not lose the write.
                     // Why it did not land, the calendar's own refusal after its
-                    // ack too, said here and so not again when it opens.
+                    // ack too, said here and so not again when it opens. Only
+                    // while this chat is still open: from a chat already left,
+                    // that cleared it unsaid. That refusal alone, not another.
+                    val said = { why: String ->
+                        composerState.sendError = why
+                        if (scope.coroutineContext[kotlinx.coroutines.Job]?.isActive != false) cal.heard(why)
+                    }
                     if (draft.cat == io.nisfeb.talon.calendar.EventCat.TODO) {
-                        cal.addTask(draft) { composerState.sendError = it; cal.heard() }
+                        cal.addTask(draft, said)
                     } else {
-                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = it; cal.heard() }
+                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft), said)
                     }
                 },
             )
@@ -776,7 +803,7 @@ fun DmChatScreen(
         }
     }
 
-    var profileSheetShip by remember { mutableStateOf<String?>(null) }
+    var profileSheetShip by remember(whom) { mutableStateOf<String?>(null) }
 
     val currentOnOpenThread by rememberUpdatedState(onOpenThread)
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
@@ -787,7 +814,9 @@ fun DmChatScreen(
     }
     val onSwipeMessage: (MessageEntity) -> Unit = remember(swipeQuotes, whom) {
         { m ->
-            if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
+            // Not yet on the ship: no post there to quote or answer.
+            if (isLocalOnly(m.id)) Unit
+            else if (shouldQuoteOnSwipe(swipeQuotes, whom, m.parentId)) {
                 composerState.pendingQuote = m
             } else {
                 io.nisfeb.talon.ui.screens.ThreadOpenIntent.reply(m.id)
@@ -1094,7 +1123,7 @@ fun DmChatScreen(
                 },
                 onCopy = {
                     actionTarget = null
-                    val text = StoryCache.textFor(target.id, target.contentJson)
+                    val text = StoryCache.copyTextFor(target.id, target.contentJson)
                     clipboardManager.setText(AnnotatedString(text))
                 },
                 onCopyMarkdown = {
@@ -1305,27 +1334,24 @@ fun DmChatScreen(
             // (mine, channel chat, top-level) so it can only open
             // an edit the action menu would also allow. Null on
             // non-channel chats — %chat DMs ignore edit pokes.
+            // Waited for by the composer, which keeps the edit until it lands;
+            // the write itself is on the repo's scope.
             onSaveEdit = { target, newText ->
-                scope.launch {
-                    runCatching {
-                        repo.edit(
-                            whom = whom,
-                            postId = target.postId,
-                            text = newText,
-                            originalSentMs = target.originalSentMs,
-                            originalContentJson = target.originalContentJson,
-                        )
-                    }.onFailure {
-                        composerState.failed("edit", it)
-                    }
-                }
+                repo.edit(
+                    whom = whom,
+                    postId = target.postId,
+                    text = newText,
+                    originalSentMs = target.originalSentMs,
+                    originalContentJson = target.originalContentJson,
+                )
             },
             onEditLast = if (whom.startsWith("chat/")) {
                 {
                     rows.asSequence()
                         .filterIsInstance<ChatListItem.Message>()
                         .map { it.row.m }
-                        .filter { it.author == ourPatp && it.parentId == null }
+                        // Not one the ship has yet: there is no post of that id to edit.
+                        .filter { it.author == ourPatp && it.parentId == null && !isLocalOnly(it.id) }
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
                             val prior = composerState.draft.text
@@ -1407,15 +1433,23 @@ fun DmChatScreen(
             self = ship == ourPatp,
             contact = freshContact,
             isInBook = ship in bookContacts,
+            // On the repo's scope, so leaving the chat keeps the write; and
+            // said when it does not land, where it used to go silently.
             onAddContact = {
                 val target = ship
                 profileSheetShip = null
-                scope.launch { runCatching { repo.addContact(target) } }
+                scope.launch {
+                    runCatching { repo.carry { repo.addContact(target) } }
+                        .onFailure { composerState.failed("add contact", it) }
+                }
             },
             onRemoveContact = {
                 val target = ship
                 profileSheetShip = null
-                scope.launch { runCatching { repo.removeContact(target) } }
+                scope.launch {
+                    runCatching { repo.carry { repo.removeContact(target) } }
+                        .onFailure { composerState.failed("remove contact", it) }
+                }
             },
             onMessage = {
                 profileSheetShip = null
@@ -1692,7 +1726,7 @@ private fun MessageRow(
     }
 
     val offsetX = remember { androidx.compose.runtime.mutableStateOf(0f) }
-    val isPending = remember(m.id) { m.id.startsWith("local_") }
+    val isPending = remember(m.id) { isLocalOnly(m.id) }
 
     val flashAlpha = remember(m.id) { Animatable(0f) }
     LaunchedEffect(flashAmber) {
@@ -1796,10 +1830,10 @@ private fun MessageRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Channel-chat send-state indicator. status is set
-                    // only on our own outgoing channel posts (see
-                    // TlonChatRepo.postContent / reply); DM rows leave
-                    // status null and render nothing here. "failed"
+                    // Send-state indicator. status is set only on our own
+                    // outgoing messages (see TlonChatRepo.postContent /
+                    // reply), DMs included: they are "pending" until the
+                    // ship acks them, so a send cut off is requeued. "failed"
                     // renders below the body instead — grouped rows
                     // (a burst of your own sends) have no header, and
                     // a failed send must never be invisible.
@@ -1815,7 +1849,8 @@ private fun MessageRow(
                 onImageTap = onImageTap,
                 reactions = row.reactions,
                 ourPatp = ourPatp,
-                onPollVote = { emoji -> onReactionTap(m, row.reactions, emoji) },
+                // A poll the ship has not taken yet has no post to vote on.
+                onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
                 // Touch only: tapping the message text (off any link) opens
                 // the action menu — same as tapping the row background. Null
                 // on desktop so a left-press-drag in text selects rather than
@@ -2156,8 +2191,10 @@ private data class DisplayRow(
 private object ChatRowsSnapshot {
     /** The last few chats shown: each kept all its rows for the life of the process. */
     private val recent = RecentByKey<List<ChatListItem>>(keep = 6)
-    fun get(whom: String): List<ChatListItem> = recent[whom].orEmpty()
-    fun put(whom: String, rows: List<ChatListItem>) = recent.put(whom, rows)
+    // By ship too: two ships share a channel's whom, and after a switch
+    // the other ship's rows showed for the first frames.
+    fun get(ship: String, whom: String): List<ChatListItem> = recent["$ship $whom"].orEmpty()
+    fun put(ship: String, whom: String, rows: List<ChatListItem>) = recent.put("$ship $whom", rows)
 }
 
 /** The last [keep] values put, by key; past that, the one put longest ago goes. */
@@ -2404,7 +2441,14 @@ private fun MessageActionMenu(
     onMakeTask: (() -> Unit)? = null,
 ) {
     val isMine = message.author == ourPatp
-    val canReply = message.parentId == null
+    // Ours, not yet taken by the ship: its id is only ours, so anything
+    // sent with it (a reaction, a reply, an edit, a pin, a link, a quote,
+    // a bookmark, a follow) names a post the ship has never seen. Delete
+    // stays, and takes it off this device, unless its poke is on the wire:
+    // then the ship takes it anyway and its echo brings it back.
+    val onShip = !isLocalOnly(message.id)
+    val sending = !onShip && message.status == "pending"
+    val canReply = message.parentId == null && onShip
     // Compact density tokens. The previous menu used Material's
     // default 8.dp spacedBy + full TextButton heights (~48.dp each)
     // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
@@ -2416,62 +2460,64 @@ private fun MessageActionMenu(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-            val topUsage by remember {
-                db.reactionUsage().streamTop(8)
-            }.collectAsState(initial = emptyList())
+            if (onShip) {
+                val topUsage by remember {
+                    db.reactionUsage().streamTop(8)
+                }.collectAsState(initial = emptyList())
 
-            // Merge usage-ranked reactions with the default palette so
-            // the row is always 8 wide even before the user has reacted
-            // much. De-dupe by canonical reaction (normalize) so a glyph
-            // already in history (❤️) and its palette code (:heart:) don't
-            // both show as separate-looking options. Usage rows rank
-            // first, then the palette fills the rest.
-            val suggested = remember(topUsage) {
-                val seen = mutableSetOf<String>()
-                val out = mutableListOf<String>()
-                (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                    .forEach { item ->
-                        if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                    }
-                out.take(8)
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "React",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 4.dp),
-                )
-                io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = "Browse emojis",
-                        modifier = Modifier.size(18.dp),
-                    )
+                // Merge usage-ranked reactions with the default palette so
+                // the row is always 8 wide even before the user has reacted
+                // much. De-dupe by canonical reaction (normalize) so a glyph
+                // already in history (❤️) and its palette code (:heart:) don't
+                // both show as separate-looking options. Usage rows rank
+                // first, then the palette fills the rest.
+                val suggested = remember(topUsage) {
+                    val seen = mutableSetOf<String>()
+                    val out = mutableListOf<String>()
+                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
+                        .forEach { item ->
+                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
+                        }
+                    out.take(8)
                 }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(horizontal = 4.dp),
-            ) {
-                suggested.forEach { code ->
-                    val glyph = ReactionPalette.display(code)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        glyph,
-                        fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                        style = MaterialTheme.typography.titleLarge,
+                        "React",
+                        style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPickReaction(code) }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .weight(1f)
+                            .padding(start = 4.dp),
                     )
+                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Browse emojis",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                ) {
+                    suggested.forEach { code ->
+                        val glyph = ReactionPalette.display(code)
+                        Text(
+                            glyph,
+                            fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onPickReaction(code) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             // Action rows — short, left-aligned, full-width so the
             // tap target spans the popover and reads like a menu
             // item instead of a centered button. minHeight 36 (vs
@@ -2501,8 +2547,8 @@ private fun MessageActionMenu(
             }
             ActionRow(onClick = onCopy, label = "Copy text")
             ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            ActionRow(onClick = onCopyLink, label = "Copy link")
-            if (canBookmark) {
+            if (onShip) ActionRow(onClick = onCopyLink, label = "Copy link")
+            if (canBookmark && onShip) {
                 ActionRow(
                     onClick = onToggleBookmark,
                     label = if (isBookmarked) "Remove bookmark" else "Bookmark",
@@ -2513,18 +2559,18 @@ private fun MessageActionMenu(
             }
             onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
             onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
-            if (canQuote) {
+            if (canQuote && onShip) {
                 ActionRow(onClick = onQuote, label = "Quote")
             }
             // Edit on channel chats only — %chat (DMs + clubs) silently
             // ignores edit pokes. Thread replies have their own Edit
             // affordance in ThreadActionSheet; top-level posts get it here.
-            if (isMine && isChannel && message.parentId == null) {
+            if (isMine && isChannel && message.parentId == null && onShip) {
                 ActionRow(onClick = onEdit, label = "Edit")
             }
-            followLabel?.let { ActionRow(onClick = onToggleFollow, label = it) }
+            followLabel?.takeIf { onShip }?.let { ActionRow(onClick = onToggleFollow, label = it) }
             // Pin / Unpin — chat channels only, top-level posts only.
-            if (canPin) {
+            if (canPin && onShip) {
                 ActionRow(
                     onClick = onTogglePin,
                     label = if (isPinned) "Unpin" else "Pin",
@@ -2550,7 +2596,7 @@ private fun MessageActionMenu(
             if (isChannel) {
                 ActionRow(onClick = onPublish, label = "Publish to Lattice")
             }
-            if (isMine || (isChannel && canModerate)) {
+            if ((isMine || (isChannel && canModerate)) && !sending) {
                 ActionRow(
                     onClick = onDelete,
                     label = if (isMine) "Delete" else "Delete (admin)",
@@ -2879,6 +2925,13 @@ private fun TypingIndicator(
  */
 internal fun shouldQuoteOnSwipe(setting: Boolean, whom: String, parentId: String?): Boolean =
     setting && whom.startsWith("chat/") && parentId == null
+
+/**
+ * Our own post or reply, made here and not yet taken by the ship: its id
+ * is the stand-in [TlonChatRepo] gave it ("local_..."), which the ship
+ * has never seen, so nothing can be asked of the ship about it.
+ */
+internal fun isLocalOnly(id: String): Boolean = id.startsWith("local_")
 
 /** Our own message on its way: the ship has not taken it yet. */
 @Composable

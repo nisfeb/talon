@@ -120,4 +120,22 @@ class LocalShipPartsTest {
         assertEquals("hello vere", dest.readText())
         assertFalse(Tarball.extractMember(ByteArrayInputStream(archive), "nope", dest))
     }
+
+    // A binary cut short was trusted on every start after: it was written
+    // in place, and only its size over 1 MB was checked.
+    @Test
+    fun `a member cut short leaves nothing at the destination`() {
+        val bytes = ByteArray(5000) { it.toByte() }
+        val archive = tar("vere-v4.6-linux-x86_64" to bytes)
+        val dir = File(System.getProperty("java.io.tmpdir"), "talon-tar-${System.nanoTime()}").apply { mkdirs() }
+        val dest = File(dir, "vere")
+        val cut = archive.copyOf(512 + 3000)
+        assertTrue(runCatching { Tarball.extractMember(ByteArrayInputStream(cut), "vere-v4.6-linux-x86_64", dest) }.isFailure)
+        assertFalse(dest.exists())
+        assertEquals(emptyList(), dir.list()!!.toList())
+        assertTrue(Tarball.extractMember(ByteArrayInputStream(archive), "vere-v4.6-linux-x86_64", dest))
+        assertTrue(bytes.contentEquals(dest.readBytes()))
+        assertEquals(listOf("vere"), dir.list()!!.toList())
+        dir.deleteRecursively()
+    }
 }

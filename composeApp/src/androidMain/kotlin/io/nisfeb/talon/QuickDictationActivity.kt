@@ -182,6 +182,7 @@ class QuickDictationActivity : ComponentActivity() {
     /**
      * Send: at once on an unlocked phone; on a locked one, for anything
      * that reaches another person, only once the fingerprint has unlocked it.
+     * The unlock card's Unlock, before messages or mail are read, goes so too.
      */
     private fun approve(unlock: Boolean) {
         val keyguard = getSystemService(KeyguardManager::class.java)
@@ -258,6 +259,11 @@ class QuickDictationActivity : ComponentActivity() {
                     began = true
                     if (s.unlockNow) approve(unlock = true)
                 }
+                // A read of messages or mail on a locked phone: the fingerprint at once.
+                is Stage.Unlock -> {
+                    began = true
+                    approve(unlock = true)
+                }
                 else -> began = true
             }
         }
@@ -279,6 +285,7 @@ class QuickDictationActivity : ComponentActivity() {
                         when (val s = stage) {
                             is Stage.Listening -> Listening(s.level)
                             is Stage.Approve -> Approve(s)
+                            is Stage.Unlock -> Unlock(s)
                             is Stage.Said -> Said(s)
                             is Stage.Working -> Working(s.label)
                             Stage.Idle -> Working("Starting…")
@@ -303,7 +310,7 @@ class QuickDictationActivity : ComponentActivity() {
                 style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.primary,
             )
-            if (stage is Stage.Approve && stage.unlock) {
+            if ((stage is Stage.Approve && stage.unlock) || stage is Stage.Unlock) {
                 Spacer(Modifier.weight(1f))
                 Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }
@@ -398,6 +405,14 @@ class QuickDictationActivity : ComponentActivity() {
         )
         BigButton(if (s.sending) "Send" else "Do it", if (s.sending) Icons.AutoMirrored.Filled.Send else Icons.Filled.Check) { approve(s.unlock) }
         QuietButton(if (s.sending) "Don't send" else "Don't", { QuickDictation.decide(false) })
+    }
+
+    /** Messages or mail asked for on a locked phone: read only once it is unlocked. */
+    @Composable
+    private fun Unlock(s: Stage.Unlock) {
+        Text(s.line, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold))
+        BigButton("Unlock", Icons.Filled.Lock) { approve(unlock = true) }
+        QuietButton("Not now", { QuickDictation.decide(false) })
     }
 
     /** One thing orrery would do, drawn as what it is. */

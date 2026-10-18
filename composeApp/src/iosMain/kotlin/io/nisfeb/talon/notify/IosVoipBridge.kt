@@ -159,7 +159,7 @@ class IosPushTokenProvider : PushTokenProvider {
     }
 
     override suspend fun missingTokenReason(): String =
-        "Apple has not given Talon a push token yet. Check this iPhone is online, open Talon again, and try once more."
+        "Apple has not given Talon a push token yet. Check this ${io.nisfeb.talon.ui.iosDeviceName} is online, open Talon again, and try once more."
 
     override fun alertsIn(endpoint: String): Boolean = endpoint.substringAfter('|', "").isNotBlank()
 

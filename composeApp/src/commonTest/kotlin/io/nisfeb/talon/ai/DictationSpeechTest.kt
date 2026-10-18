@@ -36,10 +36,50 @@ class DictationSpeechTest {
 
     @Test
     fun `what waits is asked aloud, ending in what to say back`() {
-        assertEquals("Send to you: Locked test? Say send, or cancel.", DictationSpeech.prompt("Text yourself.", sending = true, to = "You", text = "Locked test"))
-        assertEquals("Send to Andrea: **Running** late? Say send, or cancel.".replace("**", ""), DictationSpeech.prompt("r", true, "Andrea", "**Running** late"))
-        assertEquals("Add a todo to buy milk. Say yes, or cancel.", DictationSpeech.prompt("Add a todo to buy milk.", sending = false, to = null, text = null))
+        assertEquals("Send to you: Locked test? Say send, or cancel.", DictationSpeech.prompt("Text yourself.", sending = true, listOf(message("You", "Locked test"))))
+        assertEquals("Send to Andrea: Running late? Say send, or cancel.", DictationSpeech.prompt("r", true, listOf(message("Andrea", "**Running** late"))))
+        assertEquals("Add a todo to buy milk. Say yes, or cancel.", DictationSpeech.prompt("Add a todo to buy milk.", sending = false, listOf(CardProposal("task", "Buy milk"))))
+        assertEquals("Text her. Say send, or cancel.", DictationSpeech.prompt("Text her.", sending = true, listOf(CardProposal("message", "Text Andrea"))), "a message with no words to read")
         assertEquals("", DictationSpeech.spoken("   "))
+    }
+
+    // The confirmations read "2026-10-20" digit by digit.
+    @Test
+    fun `a tool's dates are said as dates`() {
+        assertEquals(
+            "Added \"Dentist\" on Tuesday, October 20 at 9 AM to the Home calendar.",
+            DictationSpeech.spoken("Added \"Dentist\" on 2026-10-20 at 09:00 to the Home calendar."),
+        )
+        assertEquals("Added task \"Buy milk\" due Saturday, October 17.", DictationSpeech.plain("Added task \"Buy milk\" due 2026-10-17."))
+        assertEquals("Version 2026-13-45 stays", DictationSpeech.plain("Version 2026-13-45 stays"), "not a date")
+    }
+
+    // A flat minute cut a long paragraph off, and the mic opened over it.
+    @Test
+    fun `the time to say something grows with its length`() {
+        assertEquals(10_000L, DictationSpeech.sayBudgetMs(""), "ten seconds for the engine to start")
+        val paragraph = DictationSpeech.sayBudgetMs("a".repeat(900))
+        assertTrue(paragraph in 109_000L..111_000L, "about nine characters a second at Archie's rate: $paragraph")
+        assertTrue(DictationSpeech.sayBudgetMs("a".repeat(901)) > paragraph)
+    }
+
+    private fun message(to: String, text: String) = CardProposal("message", "Text $to", to = to, text = text)
+
+    // One "send" approves all of them: the second message went unread.
+    @Test
+    fun `every waiting proposal is read before one answer approves them all`() {
+        assertEquals(
+            "2 things wait. Send to Andrea: Running late. Send to Nec: On my way. Say send, or cancel.",
+            DictationSpeech.prompt("Two texts.", sending = true, listOf(message("Andrea", "Running late."), message("Nec", "On my way"))),
+        )
+        assertEquals(
+            "2 things wait. Send to you: Milk. Add task: buy eggs. Say send, or cancel.",
+            DictationSpeech.prompt("r", sending = true, listOf(message("You", "Milk"), CardProposal("task", "Add task: buy **eggs**."))),
+        )
+        assertEquals(
+            "2 things wait. Buy milk. Call the vet. Say yes, or cancel.",
+            DictationSpeech.prompt("Two tasks.", sending = false, listOf(CardProposal("task", "Buy milk"), CardProposal("task", "Call the vet"))),
+        )
     }
 
     @Test
@@ -52,5 +92,17 @@ class DictationSpeechTest {
         assertEquals("Lunch at 12 30 PM, coffee at 6 10 AM, mail at 12 15 PM.", DictationSpeech.spoken("Lunch at 12:30, coffee at 6:10 AM, mail at 12:15 PM."))
         // Not a time: a ratio, a verse, a list label.
         assertEquals("The score was 3:1 and John 3:16 says.", DictationSpeech.spoken("The score was 3:1 and John 3:16 says."))
+    }
+
+    @Test
+    fun `a dictation's own send is asked aloud as orrery's are`() {
+        fun asked(tool: String, vararg args: Pair<String, String>): String {
+            val p = DictationAgent.outgoing(tool, kotlinx.serialization.json.buildJsonObject { args.forEach { (k, v) -> put(k, kotlinx.serialization.json.JsonPrimitive(v)) } }) {
+                mapOf("~bus" to "Andrea", "~zod" to "Zod")[it] ?: it
+            }!!
+            return DictationSpeech.prompt(p.title, sending = true, waiting = listOf(p))
+        }
+        assertEquals("Send to Andrea: Running late? Say send, or cancel.", asked("send_message", "whom" to "~bus", "text" to "Running late."))
+        assertEquals("Send to Andrea, Zod: Friday at 7? Say send, or cancel.", asked("send_mail", "to" to "~bus,~zod", "subject" to "Dinner", "body" to "Friday at 7?"))
     }
 }

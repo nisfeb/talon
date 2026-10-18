@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.runtime.mutableStateOf
+import io.nisfeb.talon.ui.screens.SearchDraft
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -62,27 +65,36 @@ class SearchScreenTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() { SearchDraft.query = ""; db.close() }
 
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
 
-    private class Embedder(private val meaning: List<MessageEntity>, private val highlights: List<MessageEntity>) : SearchEmbedderClient {
+    private class Embedder(@Volatile var meaning: List<MessageEntity>, private val highlights: List<MessageEntity>) : SearchEmbedderClient {
         override val progress = MutableStateFlow(IndexProgress(indexed = 3, total = 3))
-        override suspend fun start() = Unit
-        override suspend fun semanticSearch(query: String) = meaning
+        @Volatile var starts = 0
+        @Volatile var asked = 0
+        override suspend fun start() { starts++ }
+        override suspend fun semanticSearch(query: String) = meaning.also { asked++ }
         override suspend fun keywordSearch(terms: List<String>) = emptyList<MessageEntity>()
         override suspend fun embed(text: String): FloatArray? = null
         override suspend fun computeHighlights() = highlights
     }
 
+    /** Whether Search is on screen. Opening a message or a person takes
+     *  it off, as Android's chat does when it covers Search. */
+    private val shown = mutableStateOf(true)
+
     private fun search(embedder: SearchEmbedderClient? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        SearchDraft.query = ""
+        // A pass is run at most every ten minutes, process-wide: each test is a fresh start.
+        io.nisfeb.talon.ui.screens.lastSearchPassMs = Long.MIN_VALUE / 2
         setContent {
             TalonTheme(darkTheme = false) {
-                SearchScreen(
+                if (shown.value) SearchScreen(
                     db = db, aiSettings = FakeAiSettings(), uiSettings = ui,
                     onOpenConversation = { opened += "dm $it" },
-                    onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent" },
+                    onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent"; shown.value = false },
                     onOpenGroup = { opened += "group $it" },
                     onBack = {},
                     embedder = embedder,
@@ -125,6 +137,28 @@ class SearchScreenTest {
     }
 
     @Test
+    fun `back from a result comes back to the same search`() = search {
+        type("lunch", "lunch plans tomorrow")
+        onNodeWithText("lunch plans tomorrow").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("lunch plans tomorrow") }
+        onNode(hasSetTextAction()).assertTextContains("lunch")
+        assertEquals("", SearchDraft.query, "taken once: the next Search starts empty")
+    }
+
+    @Test
+    fun `search opened afresh starts empty`() = search {
+        type("lunch", "lunch at noon")
+        shown.value = false
+        waitForIdle()
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("Search tips") }
+        waitForIdle()
+        assertTrue(!shows("lunch at noon"))
+    }
+
+    @Test
     fun `operators narrow the search and say what they did`() = search {
         type("lunch from:~nec", "from ~nec")
         waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
@@ -152,6 +186,64 @@ class SearchScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("✨ Smart on") && shows("3 messages indexed") }
             assertTrue(ui.smartSearchPreferred.value, "the choice is kept")
             type("evening meal", "dinner later")
+        }
+    }
+
+    @Test
+    fun `smart search runs an index pass and searches again when it ends`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = Embedder(meaning = listOf(dinner), highlights = emptyList())
+        search(embedder) {
+            waitUntil(timeoutMillis = 5_000) { embedder.starts == 1 }
+            type("evening meal", "dinner later")
+            val asked = embedder.asked
+            embedder.progress.value = IndexProgress(running = true, indexed = 3, total = 4)
+            waitUntil(timeoutMillis = 5_000) { shows("Indexing 3 of 4") }
+            waitForIdle()
+            // B6-8: a pass starting does not ask the same query again.
+            assertEquals(asked, embedder.asked, "asked again as the pass began")
+            // The pass found a message that came in since, and ends.
+            embedder.meaning = listOf(dinner, noon)
+            embedder.progress.value = IndexProgress(running = false, indexed = 4, total = 4)
+            waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("4 messages indexed") }
+        }
+    }
+
+    // B6-8: every smart Search open ran a whole indexer pass.
+    @Test
+    fun `smart search opened again soon runs no second pass`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = Embedder(meaning = listOf(dinner), highlights = emptyList())
+        search(embedder) {
+            waitUntil(timeoutMillis = 5_000) { embedder.starts == 1 }
+            shown.value = false
+            waitForIdle()
+            shown.value = true
+            waitForIdle()
+            type("evening meal", "dinner later")
+            assertEquals(1, embedder.starts)
+        }
+    }
+
+    // B5-11: the results were a live query, scanned again on every write.
+    @Test
+    fun `results shown are not scanned again on a write`() = search {
+        type("lunch", "lunch at noon")
+        runBlocking { db.messages().upsert(msg("~bus", "9", "~bus", 3 * day, "lunch again friday")) }
+        waitForIdle()
+        assertTrue(!shows("lunch again friday"), "the scan ran again on a write")
+        // A new query reads afresh.
+        type("lunch again", "lunch again friday")
+    }
+
+    @Test
+    fun `literal search runs no index pass`() {
+        ui.setSmartSearchPreferred(false)
+        val embedder = Embedder(meaning = emptyList(), highlights = emptyList())
+        search(embedder) {
+            type("lunch", "lunch at noon")
+            waitForIdle()
+            assertEquals(0, embedder.starts)
         }
     }
 }

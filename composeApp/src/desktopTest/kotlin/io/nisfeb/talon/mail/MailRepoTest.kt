@@ -152,6 +152,54 @@ class MailRepoTest {
             assertEquals(MailFolder.View(MailView.INBOX), r.folder.value, "leaving a label clears the filter with it")
         }
 
+    // On a desktop every focus that came back was a read of the ship, and
+    // two with a folder other than the inbox open: the listing, and the
+    // inbox beside it, asked of a ship that had just not answered.
+    @Test
+    fun `coming back reads the mailbox at most once a minute and not the inbox beside a listing that failed`() = runBlocking {
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val down = java.util.concurrent.atomic.AtomicBoolean(false)
+        val scope = CoroutineScope(SupervisorJob())
+        fun mail(focusFreshMs: Long) = MailRepo(
+            HttpClient(MockEngine { req ->
+                // The listings alone: whoami is asked again on each read here.
+                if (!req.url.encodedPath.endsWith("/whoami")) asked += req.url.encodedPath + "?" + req.url.encodedQuery
+                if (down.get()) respondError(HttpStatusCode.BadGateway, "<html><body>502 Bad Gateway</body></html>")
+                else respond(ByteReadChannel(emptyPage), HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+            }),
+            scope, pollIntervalMs = 60 * 60 * 1000L, focusFreshMs = focusFreshMs,
+        ).also { it.attach("https://ship.example") }
+        try {
+            val r = mail(focusFreshMs = 60_000)
+            settle(r)
+            r.selectFolder(MailFolder.View(MailView.ARCHIVED))
+            kotlinx.coroutines.delay(300)
+            asked.clear()
+            r.setForeground(false)
+            r.setForeground(true)
+            kotlinx.coroutines.delay(300)
+            assertEquals(emptyList(), asked.toList(), "read a moment ago: nothing asked")
+
+            val again = mail(focusFreshMs = 0)
+            settle(again)
+            again.selectFolder(MailFolder.View(MailView.ARCHIVED))
+            kotlinx.coroutines.delay(300)
+            asked.clear()
+            again.setForeground(false)
+            again.setForeground(true)
+            kotlinx.coroutines.delay(300)
+            assertEquals(2, asked.size, "the listing and the inbox beside it: $asked")
+            down.set(true)
+            asked.clear()
+            again.setForeground(false)
+            again.setForeground(true)
+            kotlinx.coroutines.delay(300)
+            assertEquals(1, asked.size, "the listing alone, from a ship that did not answer it: $asked")
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test
     fun `detaching forgets the mailbox`() = withRepo({ 200 to emptyPage }) { r ->
         r.attach("https://ship.example")

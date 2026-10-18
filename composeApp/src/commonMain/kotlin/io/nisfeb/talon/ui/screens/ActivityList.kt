@@ -20,6 +20,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,10 +71,18 @@ fun ActivityList(
     /** Open what a non-chat notice is about, by its deep-link tag. The
      *  default hands the tag to the same router a tapped push uses. */
     onOpenNotice: (target: String) -> Unit = { OpenNoticeRequests.request(it) },
+    /** Open a group's own page, for a group event (a join, a kick, a
+     *  role, an ask). Null: those rows open nothing. An invite opens
+     *  the invites either way. */
+    onOpenGroup: ((flag: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
     val scope = rememberCoroutineScope()
+    // A group event names its group by flag; the row shows its title.
+    val groupTitles by remember(db) {
+        db.groups().streamGroups().map { gs -> gs.mapNotNull { g -> g.title?.takeIf { it.isNotBlank() }?.let { g.flag to it } }.toMap() }
+    }.collectAsState(initial = emptyMap())
 
     // Chat half: the ship's %activity feed, cached so a re-mount renders
     // last-known-good at once. Null = never loaded.
@@ -186,7 +195,12 @@ fun ActivityList(
                     key = { i, r -> "$i:${r.key}" },
                 ) { _, r ->
                     when (r) {
-                        is FeedRow.Chat -> ActivityRow(r.item, contactMap) {
+                        is FeedRow.Chat -> ActivityRow(r.item, contactMap, groupTitles) {
+                            r.item.groupFlag?.let { flag ->
+                                if (r.item.kind == GROUP_INVITE_KIND) onOpenNotice("invite:$flag")
+                                else onOpenGroup?.invoke(flag)
+                                return@ActivityRow
+                            }
                             val w = r.item.whom ?: return@ActivityRow
                             val parent = r.item.parentPostId
                             val post = r.item.postId
@@ -205,6 +219,9 @@ fun ActivityList(
         }
     }
 }
+
+/** [TlonChatRepo.ActivityFeedItem.kind] of a `group-invite` event. */
+private const val GROUP_INVITE_KIND = "Invited you to a group"
 
 private const val CHIP_ALL = "all"
 private const val DOMAIN_CHAT = "chat"
@@ -251,7 +268,11 @@ private fun NoticeRow(n: NoticeEntity, onClick: () -> Unit) {
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             if (n.body.isNotBlank()) {
-                Text(n.body, style = MaterialTheme.typography.bodyMedium, maxLines = 3, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    n.body, style = MaterialTheme.typography.bodyMedium, maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (timestamp.isNotEmpty()) {
                 Text(timestamp, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -264,6 +285,7 @@ private fun NoticeRow(n: NoticeEntity, onClick: () -> Unit) {
 private fun ActivityRow(
     item: TlonChatRepo.ActivityFeedItem,
     contactMap: ContactMap,
+    groupTitles: Map<String, String>,
     onClick: () -> Unit,
 ) {
     val authorLabel = item.author?.let { contactMap.displayName(it) }
@@ -295,8 +317,9 @@ private fun ActivityRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            val place = item.whom?.takeIf { it.contains('/') }
-                ?.let { contactMap.conversationLabel(it) } ?: item.title
+            val place = item.groupFlag?.let { groupTitles[it] ?: it }
+                ?: item.whom?.takeIf { it.contains('/') }?.let { contactMap.conversationLabel(it) }
+                ?: item.title
             val header = buildString {
                 append(authorLabel ?: item.author ?: "someone")
                 append(" · ")
@@ -310,7 +333,10 @@ private fun ActivityRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (!preview.isNullOrBlank()) {
-                Text(preview, style = MaterialTheme.typography.bodyMedium, maxLines = 3)
+                Text(
+                    preview, style = MaterialTheme.typography.bodyMedium, maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
             if (timestamp.isNotEmpty()) {
                 Text(

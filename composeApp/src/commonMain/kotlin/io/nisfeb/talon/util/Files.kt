@@ -24,14 +24,70 @@ fun readFileBytes(path: String): ByteArray =
 fun fileName(path: String): String = path.toPath().name
 
 /**
- * Write [content] to a uniquely-named file in the platform temp dir and
- * return its `file://` URI. Replaces `File.createTempFile(...).toURI()`.
+ * Where Talon keeps the files it makes to hand to another app (an
+ * event's .ics), under its own cache and not the shared temp directory,
+ * where other users could read them. The desktop link handler opens a
+ * `file:` address only from here.
+ */
+fun openedFilesDir(): String = (cacheDirPath.toPath() / "opened").toString()
+
+/** How long a handed-over file is kept: the other app reads it at once. */
+private const val OPENED_FILE_KEEP_MS = 24 * 60 * 60 * 1000L
+
+/**
+ * Write [content] to a uniquely-named file in [openedFilesDir] and
+ * return its `file://` URI, dropping the ones older than a day there.
  * ponytail: uniqueness rides on a wall-clock stamp; a collision would
- * just overwrite the prior temp file, which is harmless here (one-shot
+ * just overwrite the prior file, which is harmless here (one-shot
  * ICS/handoff files that the OS handler reads immediately).
  */
 fun createTempFileUri(prefix: String, suffix: String, content: String): String {
-    val path = tempDirPath.toPath() / "$prefix${nowMs()}$suffix"
+    val dir = openedFilesDir().toPath()
+    FileSystem.SYSTEM.createDirectories(dir)
+    pruneOlderThan(dir, nowMs() - OPENED_FILE_KEEP_MS)
+    val path = dir / "$prefix${nowMs()}$suffix"
     FileSystem.SYSTEM.sink(path).buffer().use { it.writeUtf8(content) }
     return "file://$path"
+}
+
+/** Delete the files in [dir] last changed before [cutoffMs]. */
+internal fun pruneOlderThan(dir: okio.Path, cutoffMs: Long) {
+    runCatching {
+        FileSystem.SYSTEM.list(dir).forEach { f ->
+            val changed = FileSystem.SYSTEM.metadataOrNull(f)?.lastModifiedAtMillis ?: return@forEach
+            if (changed < cutoffMs) FileSystem.SYSTEM.delete(f, mustExist = false)
+        }
+    }
+}
+
+/**
+ * A file that can be there but not readable for a while: iOS keeps
+ * Talon's files locked while the device is, and a store built then (a
+ * call's push waking the app) reads nothing. [text] marks the file known
+ * once a read works or it is absent, and [write] refuses a file that is
+ * there and not yet known, so a store that saw nothing never writes over
+ * what it could not see.
+ */
+class LockableFile(
+    private val name: String,
+    private val readText: () -> String?,
+    private val exists: () -> Boolean,
+    private val writeText: (String) -> Unit,
+) {
+    /** Whether the file was read, or was not there to read. */
+    var known: Boolean = false
+        private set
+
+    fun text(): String? = readText().also { if (it != null || !exists()) known = true }
+
+    /** Writes, unless the file is there and unread; [overUnread] is for replacing it whatever it holds. */
+    fun write(text: String, overUnread: Boolean = false): Boolean {
+        if (!known && !overUnread && exists()) {
+            Log.w("LockableFile", "not writing over $name, which could not be read")
+            return false
+        }
+        writeText(text)
+        known = true
+        return true
+    }
 }

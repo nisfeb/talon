@@ -23,8 +23,11 @@ class IosNotifier : Notifier {
         // thread, an orrery action proposal ("action:"), Armillary credit
         // ("armillary"). The old guard dropped every keyed non-mail alert, so
         // action and armillary alerts silently never showed.
+        // A DM request ("dm:") and a group invite ("invite:") have no push
+        // either, though "dm:" names a ship.
         val postsLocally = key == null ||
-            key.startsWith("mail:") || key.startsWith("action:") || key == "armillary"
+            key.startsWith("mail:") || key.startsWith("action:") || key == "armillary" ||
+            key.startsWith("dm:") || key.startsWith("invite:")
         if (!postsLocally) return
         val content = UNMutableNotificationContent()
         // The platform lib maps the properties read-only (the parent's
@@ -33,6 +36,9 @@ class IosNotifier : Notifier {
         content.setTitle(title)
         content.setBody(body)
         if (key != null) content.setThreadIdentifier(key)
+        // A tap on one with a place to open goes there: CallPush.swift
+        // routes a "notice" event's whom to openNotice, as for a ship's push.
+        if (key != null && noticeLanding(key) != null) content.setUserInfo(mapOf<Any?, Any?>("event" to "notice", "whom" to key))
         // A stable identifier per key replaces a still-pending repeat
         // rather than stacking duplicates.
         val request = UNNotificationRequest.requestWithIdentifier(

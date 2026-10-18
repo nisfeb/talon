@@ -39,7 +39,7 @@ fun NotificationSetupDialog(
     var on by remember { mutableStateOf<Enrollment.On?>(null) }
     AlertDialog(
         onDismissRequest = { if (!busy) { if (on != null) onDone() else onNotNow() } },
-        title = { Text(if (on != null) "Notifications are on" else "Get notifications on this iPhone?") },
+        title = { Text(if (on != null) "Notifications are on" else "Get notifications on this ${io.nisfeb.talon.ui.iosDeviceName}?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val done = on
@@ -50,8 +50,8 @@ fun NotificationSetupDialog(
                     )
                 } else {
                     Text(
-                        "With the app closed, an iPhone hears nothing from your ship on its own. Talon's relay watches " +
-                            "your ship and sends this iPhone a notification when something arrives. It signs in to your " +
+                        "With the app closed, an ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your ship on its own. Talon's relay watches " +
+                            "your ship and sends this ${io.nisfeb.talon.ui.iosDeviceName} a notification when something arrives. It signs in to your " +
                             "ship once with your +code, keeps an encrypted session, and forgets the code.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -79,7 +79,7 @@ fun NotificationSetupDialog(
                         busy = true
                         why = null
                         scope.launch {
-                            when (val r = enroll(code ?: typed.trim())) {
+                            when (val r = enroll(code ?: typed.trim().removePrefix("+"))) {
                                 is Enrollment.On -> on = r
                                 is Enrollment.NoToken -> why = r.why
                                 is Enrollment.Refused -> why = r.why

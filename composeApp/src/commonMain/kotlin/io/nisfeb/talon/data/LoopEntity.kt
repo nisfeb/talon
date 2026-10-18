@@ -22,6 +22,12 @@ import androidx.room.PrimaryKey
  * across devices. Granting a loop unattended write access is a decision
  * the user must make on each device; a synced definition always arrives
  * read-only (see SettingsSyncImpl.upsertLoop).
+ *
+ * [askBeforeSharing] holds a write-authorized loop's calendar shares and
+ * offer answers for the owner ([io.nisfeb.talon.ai.LoopRunner.ASK_FIRST_TOOLS]).
+ * Off by default. Device-local for the same reason as [writesAuthorized]:
+ * a permission is decided on each device, and a synced definition
+ * arrives without it.
  */
 @Immutable
 @Entity(tableName = "loop")
@@ -49,4 +55,5 @@ data class LoopEntity(
     /** For `"weekly"`: bitmask of active weekdays, bit = DayOfWeek.ordinal
      *  (Mon=0 … Sun=6). 0 means every day at [atMinuteOfDay]. */
     val daysMask: Int = 0,
+    val askBeforeSharing: Boolean = false,
 )

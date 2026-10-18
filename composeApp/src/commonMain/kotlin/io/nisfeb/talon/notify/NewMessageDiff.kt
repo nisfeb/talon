@@ -1,7 +1,9 @@
 package io.nisfeb.talon.notify
 
+import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
+import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.shipHandle
 
@@ -22,7 +24,7 @@ data class NotificationCandidate(
  * same message id repeatedly.
  */
 data class NewMessageDiff(
-    val newLastSeen: Map<String, String>,
+    val newLastSeen: Map<String, MessageEntity>,
     val notifications: List<NotificationCandidate>,
 )
 
@@ -32,8 +34,8 @@ data class NewMessageDiff(
  * notification spam for every existing chat. Subsequent emissions go
  * through [diffNewMessageNotifications].
  */
-fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
-    rows.associate { it.whom to it.id }
+fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, MessageEntity> =
+    rows.associateBy { it.whom }
 
 /**
  * Pure decision function: given the latest message per conversation
@@ -41,7 +43,9 @@ fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
  * plus the updated baseline.
  *
  * A row triggers a notification when ALL of:
- *   1. Its id changed since the prior baseline (or it's a new whom).
+ *   1. Its id changed since the prior baseline (or it's a new whom),
+ *      and it is not older than the row it replaces: the newest
+ *      message deleted brings back the one before it, which is old news.
  *   2. Its author is not the local user (no self-notify).
  *   3. Its whom is not the currently-open chat (the user is already
  *      looking at it).
@@ -54,7 +58,7 @@ fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
  */
 fun diffNewMessageNotifications(
     rows: List<MessageEntity>,
-    lastSeen: Map<String, String>,
+    lastSeen: Map<String, MessageEntity>,
     ourPatp: String?,
     openChat: String?,
     /** whom → stored level ("all" / "mentions" / "none"). A whom with
@@ -85,8 +89,8 @@ fun diffNewMessageNotifications(
     val notifications = mutableListOf<NotificationCandidate>()
     for (row in rows) {
         val prior = newLastSeen[row.whom]
-        newLastSeen[row.whom] = row.id
-        if (prior == row.id) continue
+        newLastSeen[row.whom] = row
+        if (prior?.id == row.id || (prior != null && row.sentMs < prior.sentMs)) continue
         if (row.author == ourPatp) continue
         if (row.whom == openChat) continue
         val level = levels[row.whom] ?: NotifyLevel.DEFAULT
@@ -172,4 +176,89 @@ fun notifyAllowed(whom: String, level: String?, mention: Boolean): Boolean = whe
     NotifyLevel.NONE -> false
     NotifyLevel.MENTIONS -> mention || !whom.contains('/')
     else -> true
+}
+
+/**
+ * Whether a message the repo hands on alerts (Android's in-process path).
+ * [replyToUs] is a reply in a thread that counts, which passes a
+ * "mentions" level: following is asking. Anything else takes the chat's
+ * level as [notifyAllowed] reads it, so a DM or club at the default
+ * level alerts, as on desktop and through push. Not for a chat on
+ * screen ([onScreen]), one this device had before ([heard]: it alerted
+ * then, or held it back), or one read already ([read]). Age is no test:
+ * eyre hands back what came during an outage with its old time, and
+ * without push that is the only way it arrives.
+ */
+fun liveMessageAlerts(
+    whom: String,
+    level: String?,
+    mention: Boolean,
+    replyToUs: Boolean,
+    heard: Boolean,
+    read: Boolean,
+    onScreen: Boolean,
+): Boolean {
+    if (onScreen || heard || read) return false
+    return if (replyToUs) level != NotifyLevel.NONE else notifyAllowed(whom, level, mention)
+}
+
+/**
+ * Whether a chat or thread is read past a message sent at [sentMs]: none
+ * unread in it ([count]), as of activity at or after the message
+ * ([recencyMs]). No row is unread. The two clocks differ, so a doubt is
+ * unread: a wrong "read" loses the alert, a wrong "unread" only alerts.
+ */
+fun readPast(count: Int?, recencyMs: Long?, sentMs: Long): Boolean =
+    count == 0 && recencyMs != null && recencyMs >= sentMs
+
+/** [liveMessageAlerts] for [m], with its chat's level and read state from [this] database. */
+suspend fun AppDatabase.messageAlerts(m: MessageEntity, replyToUs: Boolean, heard: Boolean, ourShip: String, onScreen: Boolean): Boolean {
+    val read = if (m.parentId == null) unreads().getOne(m.whom).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
+    else threadUnreads().getOne(m.whom, m.parentId).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
+    return liveMessageAlerts(m.whom, notifyLevelOf(m.whom), isMentioned(m.contentJson, ourShip), replyToUs, heard, read, onScreen)
+}
+
+/**
+ * What a catch-up alerts for, of the messages it brought that are new
+ * here, each with whether it is a reply that counts: one a chat, so many
+ * go up as that chat's one notification. The newest that names us or is
+ * such a reply, else the newest: in a chat at "mentions only", the newest
+ * plain message would hide the mention before it.
+ */
+fun catchUpAlerts(fresh: List<Pair<MessageEntity, Boolean>>, ourPatp: String?): List<Pair<MessageEntity, Boolean>> =
+    fresh.groupBy { it.first.whom }.values.map { msgs ->
+        msgs.filter { (m, toUs) -> toUs || isMentioned(m.contentJson, ourPatp) }.maxByOrNull { it.first.sentMs }
+            ?: msgs.maxBy { it.first.sentMs }
+    }
+
+/** How a chat notification goes up over the one showing under its tag. */
+enum class ChatAlert { Post, Quiet, Skip }
+
+/**
+ * A relay hint and the app's own notification for one message: both
+ * alerted. A hint says only "new activity", so over a notification shown
+ * a moment ago it is dropped; the message itself replacing a hint shown a
+ * moment ago replaces it without a second alert. Anything shown longer
+ * ago than [windowMs], or none ([shownAgoMs] null), alerts as new; but
+ * the very message showing ([samePost]), which eyre replays after a
+ * resume, is left alone however long ago it went up. A hint showing for
+ * that very message is filled in with it, quietly, however long ago.
+ */
+/**
+ * Whether the post a notification shows ([shownPostId]) is [postId]. A
+ * relay's hint carries the %activity id, `~author/<dotted ud>`; the app's
+ * own notification carries the id as kept, undotted (and bare in a
+ * channel). Compared as raw strings they never matched, so a message
+ * arriving after its hint alerted a second time.
+ */
+fun samePostShown(whom: String, shownPostId: String?, postId: String?): Boolean =
+    shownPostId != null && postId != null &&
+        io.nisfeb.talon.urbit.keptPostId(whom, shownPostId) == io.nisfeb.talon.urbit.keptPostId(whom, postId)
+
+fun chatAlert(hint: Boolean, shownAgoMs: Long?, shownIsHint: Boolean, samePost: Boolean = false, windowMs: Long = 60_000L): ChatAlert = when {
+    shownAgoMs != null && samePost -> if (shownIsHint && !hint) ChatAlert.Quiet else ChatAlert.Skip
+    shownAgoMs == null || shownAgoMs > windowMs -> ChatAlert.Post
+    hint -> ChatAlert.Skip
+    shownIsHint -> ChatAlert.Quiet
+    else -> ChatAlert.Post
 }

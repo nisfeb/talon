@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.io.IOException
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -326,6 +327,111 @@ class TlonChatRepoQueueTest {
         val second = repo.send("~bus", "second") // behind the first, still going
         draining.join()
         assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
+    }
+
+    // A DM in flight had no state: it looked sent, and one cut off by the
+    // app being killed was never sent again (review A1-6).
+    @Test
+    fun `a DM or a DM reply is sending until the ship takes it`() = live {
+        ship.holdPoke = 600
+        val sending = async(kotlinx.coroutines.Dispatchers.Default) { repo.send("~bus", "on its way") to repo.reply("0v4.abcde", "~bus/170141184506", "in the thread") }
+        delay(250)
+        val first = db.messages().latestAnyFor("~bus", 5).single()
+        assertEquals("pending", first.status, "on the wire")
+        val (dm, reply) = sending.await()
+        assertNull(db.messages().getOne("~bus", stored(dm))?.status, "taken")
+        assertNull(db.messages().getOne("0v4.abcde", stored(reply))!!.status)
+        assertEquals(2, ship.pokesTo("chat").size)
+    }
+
+    // What the last run left queued said "Your ship is slow. 1 queued"
+    // from launch, before anyone had asked the ship (review A1-9).
+    @Test
+    fun `what the last run left queued is not called slow until the ship is asked`() = live {
+        db.messages().upsert(MessageEntity("~bus", "~zod/170141184506", "~zod", 1_000, """[{"inline":["left over"]}]""", "/chat", status = "queued"))
+        assertNull(repo.shipSlow.first(), "nobody has asked the ship yet")
+        ship.lose = { lost }
+        repo.drainQueue()
+        assertEquals(1, repo.shipSlow.first { it != null }!!.queued, "asked, and it did not answer")
+        ship.lose = { null }
+        repo.drainQueue()
+        assertNull(repo.shipSlow.first())
+        assertEquals(1, ship.pokesTo("chat").size)
+    }
+
+    // ─── deleting what the ship never took (review A4-1) ─────────────
+    // A queued DM deleted here was hidden, and the drain sent it anyway
+    // when the ship came back; with the ship out of reach the delete
+    // threw, so it could not be withdrawn at all.
+
+    @Test
+    fun `a queued DM deleted while the ship is away is never sent`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "take this back")
+        assertEquals("queued", db.messages().getOne("~bus", stored(id))?.status)
+        repo.delete("~bus", stored(id))
+        assertNull(db.messages().getOne("~bus", stored(id)), "gone here")
+        assertEquals(0, db.messages().queuedCount().first())
+        ship.lose = { null }
+        repo.drainQueue()
+        delay(300)
+        assertTrue(ship.pokesTo("chat").isEmpty(), "nothing sent: ${ship.pokesTo("chat")}")
+        assertEquals(1, ship.attempted.count { it.app == "chat" }, "the first try only")
+        assertNull(repo.shipSlow.first())
+    }
+
+    @Test
+    fun `a queued message is deleted with no connection to the ship at all`() = runBlocking<Unit> {
+        val offline = TlonChatRepo(db)
+        try {
+            db.messages().upsert(MessageEntity("~bus", "~zod/170141184506", "~zod", 1_000, "[]", "/chat", status = "queued"))
+            offline.delete("~bus", "~zod/170141184506")
+            assertNull(db.messages().getOne("~bus", "~zod/170141184506"))
+        } finally {
+            offline.stopAndJoinForTest()
+        }
+    }
+
+    // A refused post said "Not sent" for good: its delete sent the ship
+    // its stand-in id, which the ship refused in turn (review A4-3, A5-13).
+    @Test
+    fun `a refused channel post or notebook entry is deleted here and nothing goes to the ship`() = live {
+        ship.refuse = { if (it.app == "channels") "no" else null }
+        assertFailsWith<PokeNacked> { repo.send(nest, "refused") }
+        assertFailsWith<PokeNacked> { repo.sendNotebookPost("diary/~bus/notes", "Title", "", "body") }
+        val refused = db.messages().latestAnyFor(nest, 5).single() to db.messages().latestAnyFor("diary/~bus/notes", 5).single()
+        ship.refuse = { null }
+        repo.delete(nest, refused.first.id)
+        repo.delete("diary/~bus/notes", refused.second.id)
+        assertNull(db.messages().getOne(nest, refused.first.id))
+        assertNull(db.messages().getOne("diary/~bus/notes", refused.second.id))
+        assertEquals(2, ship.pokesTo("channels").size, "the two refused posts, and no delete")
+    }
+
+    @Test
+    fun `a channel post still sending is deleted here and its stand-in id never reaches the ship`() = live {
+        db.messages().upsert(MessageEntity(nest, "local_170141184506", "~zod", 1_000, "[]", "/chat", status = "pending"))
+        repo.delete(nest, "local_170141184506")
+        assertNull(db.messages().getOne(nest, "local_170141184506"))
+        assertTrue(ship.attempted.isEmpty(), "${ship.attempted}")
+    }
+
+    // The drain re-reads it as it goes: one deleted while its send was on
+    // the wire is taken back, a DM naming itself.
+    @Test
+    fun `a queued DM deleted while it goes out is taken back on the ship`() = live {
+        ship.lose = { lost }
+        val id = repo.send("~bus", "too late")
+        ship.lose = { null }
+        ship.holdPoke = 600
+        val draining = launch(kotlinx.coroutines.Dispatchers.Default) { repo.drainQueue() }
+        delay(200)
+        repo.delete("~bus", stored(id))
+        draining.join()
+        val sent = ship.pokesTo("chat").map { it.json.toString() }
+        assertEquals(2, sent.size, "$sent")
+        assertTrue("too late" in sent[0])
+        assertTrue("\"del\":null" in sent[1] && stored(id).substringAfter('/') in sent[1].replace(".", ""), sent[1])
     }
 
     // ─── what the queue may cost a slow ship (rc9 felt slower) ───────

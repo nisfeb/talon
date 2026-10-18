@@ -138,6 +138,7 @@ class RelayEnrollmentTest {
         assertNull(heldCodeFor(held, "~bus"), "not another ship's")
         assertNull(heldCodeFor(held, null))
         assertNull(heldCodeFor(null, "~zod"))
+        assertNull(heldCodeFor("~zod" to " ", "~zod"), "a blank code is none: the offer asks for it")
         val s = InMemoryRelaySettings()
         s.setDeclinedFor("~bus", true)
         assertFalse(

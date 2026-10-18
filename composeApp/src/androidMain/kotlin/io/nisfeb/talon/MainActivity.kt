@@ -60,7 +60,8 @@ class MainActivity : ComponentActivity() {
      *  Shortcut (one of the per-channel shortcuts ShortcutsPublisher
      *  emits), Android adds [Intent.EXTRA_SHORTCUT_ID] alongside
      *  ACTION_SEND. The id is the channel's `whom`, so we use it to
-     *  bypass the picker and deliver the share directly. */
+     *  bypass the picker and open that chat with the share waiting in
+     *  its composer. Any app can send one, so nothing posts by itself. */
     private val pendingShareTarget = mutableStateOf<String?>(null)
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -241,21 +242,46 @@ class MainActivity : ComponentActivity() {
      * doesn't stay visible over the lock screen afterwards.
      */
     private fun showOverLockScreenIfRinging(intent: Intent?) {
-        if (intent == null || !io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)) return
+        if (intent == null || !callsTrusted(intent) || !io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         }
     }
 
+    /**
+     * Whether this intent's call extras count: it came from Talon's own
+     * notification, through the alias no other app can start. This
+     * activity is exported, and any app could have it place a call or
+     * answer a ring.
+     */
+    private fun callsTrusted(intent: Intent): Boolean =
+        io.nisfeb.talon.call.RingIntents.trusted(intent.component?.className)
+
     private fun consumeIntent(intent: Intent?) {
         if (intent == null) return
         var consumedDeepLink = false
+        val trusted = callsTrusted(intent)
+        val ring = trusted && io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)
+        // A call back or a sign-in acts on its ship, as a ring does.
+        val actsOnShip = ring || trusted &&
+            (intent.hasExtra(Notifications.EXTRA_CALL_BACK) || intent.hasExtra(Notifications.EXTRA_SIGN_IN))
         // Read before the target, though order does not matter here:
         // what matters is that TalonApp switches ships before it acts
         // on any of the rest.
         intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
-            deepLinkForShip.value = it
+            if (actsOnShip) {
+                // A ring, call back or sign-in for another of the owner's
+                // ships: only that ship's controller or login acts on it, so
+                // go there now. Not as a deep link, which with nothing else
+                // in it TalonApp never consumes: the next switch away would
+                // have come straight back.
+                val app = applicationContext as TalonApplication
+                io.nisfeb.talon.call.RingIntents.shipToSwitch(it, app.activeShipFlow.value, app.allShipsFlow.value)
+                    ?.let(app::switchShip)
+            } else {
+                deepLinkForShip.value = it
+            }
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_OPEN_WHOM)?.let {
@@ -291,9 +317,11 @@ class MainActivity : ComponentActivity() {
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_ANSWER_FROM)?.let {
-            pendingAnswerFrom.value = it
-            pendingAnswerCallId.value =
-                intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            if (trusted) {
+                pendingAnswerFrom.value = it
+                pendingAnswerCallId.value =
+                    intent.getStringExtra(Notifications.EXTRA_ANSWER_CALL_ID)
+            }
             // Cleared here as well as in the block below: a retained
             // answer extra would re-accept on the next cold launch.
             intent.removeExtra(Notifications.EXTRA_ANSWER_FROM)
@@ -309,8 +337,16 @@ class MainActivity : ComponentActivity() {
             consumedDeepLink = true
         }
         intent.getStringExtra(Notifications.EXTRA_CALL_BACK)?.let {
-            pendingCallBack.value = it
+            if (trusted) pendingCallBack.value = it
             intent.removeExtra(Notifications.EXTRA_CALL_BACK)
+            consumedDeepLink = true
+        }
+        // The signed-out notice: the login form for its ship, held again
+        // (LoginLapses) in case it was shown and put away.
+        intent.getStringExtra(Notifications.EXTRA_SIGN_IN)?.let {
+            val app = applicationContext as TalonApplication
+            if (trusted && it in app.allShipsFlow.value) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(it)
+            intent.removeExtra(Notifications.EXTRA_SIGN_IN)
             consumedDeepLink = true
         }
         // The Phone app's integrated call log (16.1+) calling one of our
@@ -349,8 +385,8 @@ class MainActivity : ComponentActivity() {
             // Sharing Shortcut routing: Android attaches the picked
             // shortcut id to the ACTION_SEND intent. We publish one
             // per channel keyed on `whom`, so this is the conversation
-            // the user already chose in the system share sheet — skip
-            // the in-app picker and deliver straight there.
+            // the share sheet named. The in-app picker is skipped and the
+            // share waits in that chat's composer for Send.
             intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)?.let { id ->
                 pendingShareTarget.value = id
             }

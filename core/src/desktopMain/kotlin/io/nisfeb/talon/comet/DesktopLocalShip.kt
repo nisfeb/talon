@@ -15,7 +15,11 @@ import io.ktor.http.parameters
 import io.ktor.utils.io.readAvailable
 import io.nisfeb.talon.util.AppDirs
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +81,10 @@ class DesktopLocalShip(
     private val shipFile: File get() = File(dir, "ship")
     private val versionFile: File get() = File(dir, "runtime-version")
     private val mutex = Mutex()
+    // Start, stop and an upgrade run here, and the caller only waits:
+    // leaving Settings cancelled a start mid-boot, the boot's catch
+    // destroyed the comet it had started, and Start stayed greyed out.
+    private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: PtyProcess? = null
     private val transcript = StringBuilder()
     private val transcriptLock = Any()
@@ -92,7 +100,10 @@ class DesktopLocalShip(
         boot(bin, firstBoot = true)
     }
 
-    override suspend fun start(): LocalShipState.Ready = mutex.withLock { startLocked() }
+    override suspend fun start(): LocalShipState.Ready = owned { startLocked() }
+
+    /** Runs [block] under the lock on [work], whoever is waiting for it. */
+    private suspend fun <T> owned(block: suspend () -> T): T = work.async { mutex.withLock { block() } }.await()
 
     private suspend fun startLocked(): LocalShipState.Ready {
         val current = _state.value
@@ -104,7 +115,7 @@ class DesktopLocalShip(
         return boot(bin, firstBoot = false)
     }
 
-    override suspend fun stop() = mutex.withLock { stopLocked() }
+    override suspend fun stop() = owned { stopLocked() }
 
     private suspend fun stopLocked() {
         val p = process ?: return
@@ -176,7 +187,7 @@ class DesktopLocalShip(
         if (VereRelease.isNewer(latest, installed)) RuntimeUpdate(installed, latest) else null
     }
 
-    override suspend fun upgradeRuntime(version: String) = mutex.withLock {
+    override suspend fun upgradeRuntime(version: String) = owned {
         val wasRunning = process?.isAlive == true
         // Fetch first: a failed download leaves the old runtime in charge.
         val bin = ensureRuntime(version)
@@ -325,6 +336,12 @@ class DesktopLocalShip(
         } catch (t: Throwable) {
             if (p.isAlive) runCatching { p.destroy() }
             process = null
+            // A boot that ended without saying why stayed Booting, and
+            // Start stayed greyed out.
+            if (_state.value !is LocalShipState.Failed) {
+                _state.value = if (t is CancellationException) LocalShipState.Stopped
+                else LocalShipState.Failed(t.message ?: "The ship stopped during boot.")
+            }
             throw t
         }
     }
@@ -340,13 +357,19 @@ class DesktopLocalShip(
     private fun keepSecret(file: File, text: String) {
         runCatching {
             file.writeText(text)
-            runCatching {
-                java.nio.file.Files.setPosixFilePermissions(
-                    file.toPath(),
-                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"),
-                )
-            }
+            ownerOnly(file)
         }.onFailure { Log.w(TAG, "could not keep ${file.name}", it) }
+    }
+
+    /** Readable by the owner alone, made empty when absent. Windows has no POSIX modes. */
+    private fun ownerOnly(file: File) {
+        runCatching {
+            file.createNewFile()
+            java.nio.file.Files.setPosixFilePermissions(
+                file.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"),
+            )
+        }
     }
 
     /** The ship named by the auth cookie a successful login sets, or
@@ -396,7 +419,10 @@ class DesktopLocalShip(
             // Everything the terminal prints also lands in terminal.log
             // under the comet directory: the one place to look when a
             // boot stalls, for the user and for us.
-            val log = runCatching { File(dir, "terminal.log").outputStream().buffered() }.getOrNull()
+            // It records the +code answer, so it is the owner's alone.
+            val log = runCatching {
+                File(dir, "terminal.log").also { ownerOnly(it) }.outputStream().buffered()
+            }.getOrNull()
             try {
                 while (true) {
                     val n = input.read(buf)

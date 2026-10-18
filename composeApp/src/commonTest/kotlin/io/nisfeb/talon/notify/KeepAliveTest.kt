@@ -46,5 +46,17 @@ class KeepAliveTest {
         assertTrue(keepAliveNeeded(s, "~zod", endpoint, mailNeedsProcess = true))
         assertFalse(keepAliveNeeded(s, "~zod", endpoint, mailNeedsProcess = false))
     }
+
+    // B3-6 and B3-15: mail polls only while the screen lives. Gone, the
+    // service is decided again without mail (TalonSyncService.streamNeeded),
+    // and the catch-up worker is scheduled on that alone.
+    @Test
+    fun the_screen_gone_mail_keeps_nothing_and_only_the_stream_decides() {
+        val pushed = InMemoryRelaySettings().apply { setViaShipPush("~zod", true) }
+        assertTrue(keepAliveNeeded(pushed, "~zod", endpoint, mailNeedsProcess = true), "while the screen polls mail")
+        assertFalse(keepAliveNeeded(pushed, "~zod", endpoint), "the screen gone, with push: stopped, no worker")
+        assertTrue(keepAliveNeeded(InMemoryRelaySettings(), "~zod", endpoint), "no push: the stream and its worker stay")
+        assertTrue(keepAliveNeeded(pushed, "~zod", endpoint, shipPushBroken = true), "the ship's push broken: they stay")
+    }
 }
 

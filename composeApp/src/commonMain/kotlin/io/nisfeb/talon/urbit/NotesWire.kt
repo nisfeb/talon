@@ -313,9 +313,7 @@ object NotesParser {
     fun saveRefusal(el: JsonElement?): String? {
         if (isWriteOk(el)) return null
         val body = (el as? JsonObject)?.get("body") as? JsonObject
-        if (body?.get("type").asStr() == "pending") {
-            return "Sent. The notebook's host hasn't answered yet, so your change may show in a moment."
-        }
+        if (body?.get("type").asStr() == "pending") return NotesRepo.SAVE_SENT
         return when (writeErrorType(el)) {
             "not-authorized" -> "You can't edit this notebook. Its owner can make you an editor."
             "not-found" -> "That note isn't there any more."

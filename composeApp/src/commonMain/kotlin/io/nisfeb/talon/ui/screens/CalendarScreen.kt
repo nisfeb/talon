@@ -252,8 +252,16 @@ fun CalendarScreen(
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
-    // A save's refusal found after this screen had gone: said now.
-    LaunchedEffect(repo) { repo.unheard.value?.let { status = it; repo.heard() } }
+    // A save's refusal found after this screen had gone, or while it is
+    // open (a task's, a chat's, a busy ship's late one): said now. Said
+    // from the repo's callback instead, a screen already gone cleared it
+    // unsaid. Taken only if still there: a save that says its own refusal
+    // here (the editor back with why) has heard it first.
+    val unheard by repo.unheard.collectAsState()
+    LaunchedEffect(unheard) {
+        val line = unheard ?: return@LaunchedEffect
+        if (repo.unheard.value == line) { status = line; repo.heard(line) }
+    }
 
     val grid = remember(year, month) { monthGrid(year, month) }
     // The page is read again on opening: ten minutes is a long time
@@ -464,7 +472,7 @@ fun CalendarScreen(
             val since = nowMs()
             val (ok, check) = repo.carry {
                 val ok = repo.writeEvent(rsvpBody(r.id, r.cal, st)).ok
-                ok to if (!ok) null else repo.behind { repo.refusalOfSave(r.id, since) { "Your answer to \"${r.name}\" was not taken: $it" } }
+                ok to if (!ok) null else repo.behind { repo.refusalOfSave(r.id, since, "rsvp") { "Your answer to \"${r.name}\" was not taken: $it" } }
             }
             check?.await()?.let { repo.heard(); status = "Not answered: $it" }
             ok
@@ -530,8 +538,9 @@ fun CalendarScreen(
     // leaving this screen does not lose it.
     val pendingTasks by repo.pendingTasks.collectAsState()
     fun addTask(name: String, due: LocalDate?, cal: String?, note: String = "") {
-        // Said here, so not again when the calendar next opens.
-        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it; repo.heard() }
+        // A refusal is said by [unheard] while this screen is open, and
+        // kept for its next opening if it has gone.
+        repo.addTask(EventDraft(name = name, note = note, cat = EventCat.TODO, date = due ?: today, due = due, cal = cal, tags = tagFilter.toList())) { status = it }
     }
 
     // A title and nine controls do not fit a phone. The title was left a
@@ -884,10 +893,15 @@ fun CalendarScreen(
         var moreOpen by remember(r.id) { mutableStateOf(false) }
         val calName = calendars.firstOrNull { it.id == r.cal }?.let { it.name.ifBlank { it.id } }
         val readOnlyHere = r.cal in readOnly
+        // The dialog is a window of its own, handed the platform's link
+        // handler again: urb:// and talon:// links in the place or the note
+        // went to the system instead of to Talon. The app's goes in with it.
+        val links = androidx.compose.ui.platform.LocalUriHandler.current
         AlertDialog(
             onDismissRequest = { viewing = null },
             title = { Text(r.name.ifBlank { "(untitled)" }) },
             text = {
+              androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides links) {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val whenText = when {
                         r.isTask -> (r.dueLabel() ?: "No due date") + (if (r.done) " · done" else "") +
@@ -1059,6 +1073,7 @@ fun CalendarScreen(
                         }
                     }
                 }
+              }
             },
             // Filled, like Save in the editor: it is the one thing this
             // window is for, and it read as another of the eight text
@@ -1128,7 +1143,7 @@ fun CalendarScreen(
                 // A new task goes on the list at once and is written behind it.
                 if (id == null && d.cat == EventCat.TODO && postTo == null) {
                     editing = null
-                    repo.addTask(d) { status = it; repo.heard() }
+                    repo.addTask(d) { status = it }
                     return@onSave
                 }
                 val idx = editingIdx
@@ -1181,20 +1196,23 @@ fun CalendarScreen(
                             // Add, then skip the old, once the add is known
                             // kept: skipping first, or on the ship's ack alone,
                             // lost the occurrence whenever the add was refused.
-                            else ->
-                                if (!repo.pokeEvent(onlyBody(d), readBack = false)) null
+                            else -> {
+                                val one = repo.writeEvent(onlyBody(d), readBack = false)
+                                if (!one.ok) null
                                 else {
-                                    refused = repo.refusalOfSave("", savedAt) { "\"${d.name.trim()}\" was not saved: $it" }
-                                    if (refused != null) null
+                                    refused = repo.refusalOfSave("", savedAt, "add-event") { "\"${d.name.trim()}\" was not saved: $it" }
+                                    // Its stand-in goes with it: nothing reads it back.
+                                    if (refused != null) run { one.undo(); null }
                                     else repo.writeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                                         .also { halfDone = !it.ok; skipped = true }
                                 }
+                            }
                         }
                         // Taken, then perhaps refused: looked for here, on the
                         // repo's scope, so leaving the calendar mid-save loses
                         // neither the refusal nor the card.
                         w to if (w?.ok != true || halfDone) null else repo.behind {
-                            val why = repo.refusalOfSave(lookFor, savedAt) { if (skipped) bothKept else "\"${d.name.trim()}\" was not saved: $it" }
+                            val why = repo.refusalOfSave(lookFor, savedAt, w?.action) { if (skipped) bothKept else "\"${d.name.trim()}\" was not saved: $it" }
                             // Here, not on this screen's scope: left, the refused
                             // edit stayed on the home page until the reading gave up.
                             if (why != null) w?.undo()
@@ -1217,8 +1235,9 @@ fun CalendarScreen(
                     }
                     if (ok) {
                         // Saved, and said so now; shown as saved until the
-                        // ship's own copy comes back in.
-                        val kept = ghost?.copy(id = "saved-" + ghost.id)
+                        // ship's own copy comes back in. A one-off the repo
+                        // has put in its lists itself, for every screen.
+                        val kept = ghost?.takeIf { written?.placed != true }?.copy(id = "saved-" + ghost.id)
                         if (kept != null) savedRows = savedRows + kept
                         if (id != null) savedEdits = savedEdits + (id to d)
                         scope.launch {
@@ -1239,7 +1258,11 @@ fun CalendarScreen(
                             if (id != null) savedEdits = savedEdits - id
                             when {
                                 skipped -> status = bothKept
-                                editing == null -> { editFailed = "Not saved: $why"; editing = id to d; if (target != null) postTo = target }
+                                editing == null -> {
+                                    editFailed = "Not saved: $why"; editing = id to d; if (target != null) postTo = target
+                                    // The editor says it: not under it as well.
+                                    if (status == "\"${d.name.trim()}\" was not saved: $why") status = null
+                                }
                                 else -> status = "Not saved: $why"
                             }
                         }

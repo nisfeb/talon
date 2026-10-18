@@ -17,7 +17,6 @@ import android.telecom.DisconnectCause
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
-import io.nisfeb.talon.MainActivity
 import io.nisfeb.talon.Notifications
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.CompletableDeferred
@@ -95,7 +94,8 @@ class TalonConnectionService : ConnectionService() {
         } else {
             runCatching {
                 startActivity(
-                    Intent(this, MainActivity::class.java).apply {
+                    // Through the alias: a call back counts only from there.
+                    Notifications.tapIntent(this).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                         putExtra(Notifications.EXTRA_CALL_BACK, ship)
                     },

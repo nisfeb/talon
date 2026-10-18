@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -304,8 +305,19 @@ class GroupAdminScreenTest {
             waitForIdle()
             assertTrue(shows("Make admin"))
             assertTrue(!shows(comet), "no @p on screen")
+            onNodeWithText("Kick").performClick()
+            waitUntil(timeoutMillis = 5_000) { says("kazoo?") }
+            assertTrue(!says(comet), "nor in the question")
         }
     }
+
+    // The member's menu listed role ids where the group has titles for them.
+    @Test
+    fun `a member's roles are named by their titles`() =
+        admin(group = withChannels.replace("\"~nec\":{\"roles\":[]", "\"~nec\":{\"roles\":[\"gardener\"]")) {
+            onAllNodesWithText("~nec", substring = true)[0].performScrollTo().performTouchInput { longClick() }
+            waitUntil(timeoutMillis = 5_000) { shows("Roles: Gardeners") }
+        }
 
     @Test
     fun `tapping a member opens the same actions`() = admin {
@@ -382,7 +394,7 @@ class GroupAdminScreenTest {
     @Test
     fun `saving the metadata sends the new title`() = admin { ship ->
         onNode(hasSetTextAction() and hasText("The Garden")).performTextReplacement("The Orchard")
-        val meta = pressFor(ship, "Save metadata")
+        val meta = pressFor(ship, "Save")
         assertTrue("The Orchard" in meta && "growing things" in meta, meta)
     }
 
@@ -436,6 +448,20 @@ class GroupAdminScreenTest {
     }
 
     // ─── new channels ─────────────────────────────────────────────
+
+    private fun ComposeUiTest.offersNewChannel() =
+        onAllNodesWithContentDescription("New channel").fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun `a member who is no admin is offered no new channel`() = admin(me = "~nec") {
+        assertTrue(!offersNewChannel())
+    }
+
+    @Test
+    fun `an admin who does not host is offered a new channel`() =
+        admin(me = "~nec", group = record.replace(""""~nec":{"roles":[]""", """"~nec":{"roles":["admin"]""")) {
+            assertTrue(offersNewChannel())
+        }
 
     private fun ComposeUiTest.newChannel(kind: String?, title: String, description: String = "") {
         onNodeWithContentDescription("New channel").performClick()
@@ -575,6 +601,7 @@ class GroupAdminScreenTest {
     @Test
     fun `a group the ship will not give says so, and Try again asks again`() = admin(group = null) { ship ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Couldn't load the group", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(!offersNewChannel(), "not until the group says who may")
         ship.scries["groups/v2/groups/$flag"] = record
         onNodeWithText("Try again").performClick()
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The Garden", substring = true).fetchSemanticsNodes().isNotEmpty() }

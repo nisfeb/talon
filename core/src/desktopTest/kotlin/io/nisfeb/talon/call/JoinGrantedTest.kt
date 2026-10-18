@@ -53,6 +53,8 @@ class JoinGrantedTest {
             c.joinGranted(line, "~zod", TrunkTicket("lounge", "http://sfu.test/a/", "tok"), "~nec")
             h.await { presence(h, "enter-room", "~zod", "lounge") > 0 }
             assertEquals(PartyState.Connecting("lounge"), line.state.value)
+            // Which host a chat's Record tells (review B5-1): the line's own.
+            assertEquals("~zod/lounge", c.lineKey)
 
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
             h.await { presence(h, "leave-room", "~zod", "lounge") > 0 }
@@ -66,12 +68,40 @@ class JoinGrantedTest {
                 ) as kotlinx.serialization.json.JsonObject,
             )
             assertEquals("Bus lounge", (line.state.value as PartyState.Live).topic)
+            assertEquals("~bus/lounge", c.lineKey, "the slug is the same, the host is not")
 
             // Asked again for the line we are on: nothing to leave.
             c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
             delay(300)
             assertEquals(0, presence(h, "leave-room", "~bus", "lounge"), "left the line it was asked to join")
             assertTrue(line.state.value is PartyState.Live)
+        } finally {
+            line.leave()
+            c.stop()
+        }
+    }
+
+    // The line left kept a recording's badge: its announce ran on until
+    // the result dialog closed (review A1-8, 2026-10-17).
+    @Test
+    fun `a grant for another line ends the recording badge of the line left`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val c = CallController(h.session, CallEngineProvider { HangingCallEngine() })
+        val line = PartyLine(
+            HttpClient(MockEngine { awaitCancellation() }),
+            links = { _, _ -> Link() },
+        )
+        try {
+            c.start()
+            h.awaitConnected()
+            c.joinGranted(line, "~zod", TrunkTicket("lounge", "http://sfu.test/a/", "tok"), "~nec")
+            h.await { presence(h, "enter-room", "~zod", "lounge") > 0 }
+            line.startRecording("~nec")
+            c.beginRecordingAnnounce("~zod", "lounge", line.recording)
+            h.await { presence(h, "start-recording", "~zod", "lounge") > 0 }
+            c.joinGranted(line, "~bus", TrunkTicket("lounge", "http://sfu.test/b/", "tok"), "~nec")
+            h.await { presence(h, "stop-recording", "~zod", "lounge") > 0 }
+            assertTrue(!line.recording.value)
         } finally {
             line.leave()
             c.stop()

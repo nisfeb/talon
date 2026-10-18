@@ -33,6 +33,16 @@ internal suspend fun askWhileInFront(front: Flow<Boolean>, everyMs: Long, ask: s
     }
 }
 
+/**
+ * Who is recording a line: polled while [occupied] (someone is on it,
+ * or we are), asked once otherwise. A recorder is on the line, so an
+ * empty line has nobody to find, and a focused chat asked its host
+ * every 15 s for nothing (review B5-3).
+ */
+internal suspend fun askRecorders(occupied: Boolean, front: Flow<Boolean>, everyMs: Long, ask: suspend () -> Unit) {
+    if (occupied) askWhileInFront(front, everyMs, ask) else ask()
+}
+
 /** The recording controls a party bar needs: our state, who's recording
  *  (the room-wide badge), and the toggle (null when unsupported). */
 data class PartyRecordingControls(
@@ -58,6 +68,8 @@ fun rememberPartyRecording(
     partyLine: PartyLine?,
     partyRoomHere: Pair<String, String>?,
     onThisLine: Boolean,
+    /** Whether anyone is on this chat's line, us included. */
+    occupied: Boolean,
     http: HttpClient,
     aiConfig: AiSettings.Config,
     ourShip: String,
@@ -77,11 +89,12 @@ fun rememberPartyRecording(
     // recorder. Trunk only answers an ask, so nothing else would tell.
     // Only while the window is in front: in the background it asked the
     // host every 15 s for a badge nobody saw. Back in front asks at once.
+    // And only while someone is on the line; see askRecorders.
     val window = androidx.compose.ui.platform.LocalWindowInfo.current
-    LaunchedEffect(partyRoomHere) {
+    LaunchedEffect(partyRoomHere, occupied) {
         val (h, n) = partyRoomHere ?: return@LaunchedEffect
         val cc = callController ?: return@LaunchedEffect
-        askWhileInFront(androidx.compose.runtime.snapshotFlow { window.isWindowFocused }, 15_000) {
+        askRecorders(occupied, androidx.compose.runtime.snapshotFlow { window.isWindowFocused }, 15_000) {
             cc.recordersOf(h, n)
         }
     }
@@ -115,10 +128,10 @@ fun rememberPartyRecording(
     fun beginRecording() {
         val line = partyLine ?: return
         line.startRecording(ourShip)
-        // Announce to the line we are actually on, captured now. The
-        // heartbeat runs on the controller's scope so navigating away
-        // no longer retracts it.
-        partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n) }
+        // Announce to the line we are actually on, captured now, for as
+        // long as it records. The heartbeat runs on the controller's
+        // scope so navigating away no longer retracts it.
+        partyRoomHere?.let { (h, n) -> callController?.beginRecordingAnnounce(h, n, line.recording) }
     }
 
     // Only admins record: the SFU grants operator rights to the host
@@ -182,17 +195,26 @@ fun rememberPartyRecording(
             ourShip = ourShip,
             title = conversationTitle,
             nameFor = nameFor,
-            onClose = {
-                partyLine?.clearLastRecording()
-                // A recording finalized by teardown (leaving the line)
-                // never went through the toggle, so retract the badge here.
-                callController?.endRecordingAnnounce()
-            },
+            // The badge went with the recording ([CallController.beginRecordingAnnounce]):
+            // retracted here too, it ended a newer recording's on another line.
+            onClose = { partyLine?.clearLastRecording() },
         )
     }
 
     return PartyRecordingControls(recordingNow, recordedBy, onToggleRecord)
 }
+
+/**
+ * Whether we are live on this chat's own line, [here] as (host, room).
+ * A room is a slug, the same on two hosts, so the room alone is not
+ * enough: [lineKey] is the line we were granted
+ * ([io.nisfeb.talon.call.CallController.lineKey]). Live anywhere let
+ * Record in another group's chat record the line we were on and tell
+ * this chat's host about it.
+ */
+fun onThisLine(state: io.nisfeb.talon.call.PartyState, here: Pair<String, String>?, lineKey: String?): Boolean =
+    state is io.nisfeb.talon.call.PartyState.Live && here != null && state.room == here.second &&
+        lineKey == "${here.first}/${here.second}"
 
 /** The record button shows only for an admin on a line that supports it. */
 fun recordingAllowed(

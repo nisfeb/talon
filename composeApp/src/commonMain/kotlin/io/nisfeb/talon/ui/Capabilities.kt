@@ -21,6 +21,7 @@ package io.nisfeb.talon.ui
  *  - isCallRecordingSupported — A, D (party lines and 1:1 calls); i: the Swift bridge exposes no PCM tap.
  *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
  *  - isBackgroundCallRingSupported — A (UnifiedPush), i (PushKit + CallKit). D: closing the window quits, so a ring lands only while Talon is open.
+ *  - needsPushForBackgroundRing: A (without push only the open activity hears a ring, not after a reboot or a swipe). D: the calls line covers it. i: PushKit rings through the relay, set up at sign-in.
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
  *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
  *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
@@ -43,6 +44,8 @@ package io.nisfeb.talon.ui
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
+ * So is [iosDeviceName]: "iPhone" or "iPad" on iOS, for the words only
+ * iOS shows.
  */
 expect val isVoiceMessagesSupported: Boolean
 
@@ -185,6 +188,13 @@ expect val isTapToOpenMenuSupported: Boolean
 expect val platformLabel: String
 
 /**
+ * What iOS text calls this device: "iPhone", or "iPad" on an iPad, which
+ * was told about "this iPhone". "iPhone" elsewhere: those words only show
+ * on iOS, and desktop tests draw them.
+ */
+expect val iosDeviceName: String
+
+/**
  * Per-feature supported predicate. The [isOnDeviceAiSupported] flag
  * gates whether the on-device-AI section of SettingsScreen renders
  * at all; this finer predicate then hides individual toggles whose
@@ -235,6 +245,14 @@ expect val isWindowFullScreenSupported: Boolean
  * section; nothing is greyed out.
  */
 expect val isBackgroundCallRingSupported: Boolean
+
+/**
+ * Whether a ring with Talon not open needs a push set up. Android: true.
+ * Without UnifiedPush, the call controller lives in the activity, so a
+ * ring after a reboot or a swipe from recents goes unheard. Settings
+ * says so while no push reaches the device (B3-3).
+ */
+expect val needsPushForBackgroundRing: Boolean
 
 /**
  * Camera on a 1:1 call.

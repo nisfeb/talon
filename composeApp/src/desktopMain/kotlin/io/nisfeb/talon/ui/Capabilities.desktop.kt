@@ -29,6 +29,8 @@ actual val platformLabel: String = run {
     val ver = System.getProperty("os.version") ?: ""
     if (ver.isBlank()) "Desktop ($os)" else "Desktop ($os $ver)"
 }
+
+actual val iosDeviceName: String = "iPhone"
 // On-device embedder, probe-gated on desktop. The HuggingFace Rust
 // tokenizers JNI native lib (pulled in by DJL's OnnxRuntime engine)
 // SIGSEGVs in libstdc++ codecvt on SOME Linux ABIs — one confirmed
@@ -66,6 +68,7 @@ actual val isWindowFullScreenSupported: Boolean = true
 // ring lands only while it is open, minimised or unfocused included.
 // Settings says so.
 actual val isBackgroundCallRingSupported: Boolean = false
+actual val needsPushForBackgroundRing: Boolean = false
 
 actual val isVideoCallsSupported: Boolean = true
 actual val isPartyVideoSupported: Boolean = true

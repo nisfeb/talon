@@ -32,9 +32,11 @@ class TlonChatRepoIngestTest {
     }
     private val repo = TlonChatRepo(db).apply { attachForTest(FakeShip().channel, "~zod") }
     private val heard = mutableListOf<Pair<MessageEntity, Boolean>>()
+    /** Each announcement's `heard`: the row was here before it came. */
+    private val before = mutableListOf<Boolean>()
 
     init {
-        repo.messageListener = { m, toUs -> heard += m to toUs }
+        repo.messageListener = { m, toUs, had -> heard += m to toUs; before += had }
     }
 
     @AfterTest
@@ -100,6 +102,22 @@ class TlonChatRepoIngestTest {
         val reply = assertNotNull(db.messages().getOne("~bus", "~bus/170141184507"))
         assertEquals(parent, reply.parentId)
         assertEquals(listOf(true), heard.map { it.second }, "a reply to our message is flagged as one")
+    }
+
+    // B6-3: what a device had already is not news again, by whichever
+    // path it comes back: a DM, a reply, a channel post or its reply.
+    @Test
+    fun `a message that comes again is announced as heard before`() = runBlocking<Unit> {
+        val dmAdd = dm("~bus/170141184506", """{"add":{"essay":${essay("~bus", "hi", 1_000)},"time":null}}""")
+        val dmReply = dm("~zod/170141184505", """{"reply":{"id":"~bus/170141184507","meta":null,"delta":{"add":{"reply-essay":${essay("~bus", "r", 2_000)},"time":null}}}}""")
+        val post = channel(nest, "170141184508", """{"set":{"seal":{"id":"170141184508","reacts":{},"replies":{},"meta":{"replyCount":0,"lastReply":null,"lastRepliers":[]}},"essay":${essay("~bus", "p", 3_000)}}}""")
+        // A mention of us makes the reply count.
+        val mention = """{"content":[{"inline":[{"ship":"~zod"}," look"]}],"author":"~bus","sent":4000,"kind":"/chat","blob":null,"meta":null}"""
+        val postReply = channel(nest, "170141184508", """{"reply":{"id":"170141184509","meta":null,"r-reply":{"set":{"seal":{"id":"170141184509","parent-id":"170141184508","reacts":{}},"reply-essay":$mention}}}}""")
+        for (f in listOf(dmAdd, dmReply, post, postReply)) fact(f)
+        assertEquals(listOf(false, false, false, false), before, "new here: ${heard.map { it.first.id }}")
+        for (f in listOf(dmAdd, dmReply, post, postReply)) fact(f)
+        assertEquals(listOf(false, false, false, false, true, true, true, true), before)
     }
 
     @Test
@@ -230,6 +248,23 @@ class TlonChatRepoIngestTest {
         assertEquals("170141184506", db.groups().pinnedPostIdFor(nest), "renaming keeps the pin")
         fact("""{"flag":"$owner","r-group":{"channel":{"nest":"$nest","r-channel":{"del":null}}}}""")
         assertNull(db.groups().channelGroupFor(nest))
+    }
+
+    // Written with ordinal 0, a live rename took a channel to the top of
+    // its group's host order, and a live add put the new one there too
+    // (review Low, TlonChatRepo.kt:3995-4012).
+    @Test
+    fun `a channel renamed live keeps its place and one added live goes last`() = runBlocking<Unit> {
+        db.groups().upsertChannelGroups(listOf(
+            ChannelGroupEntity("chat/~bus/general", flag, title = "general", ordinal = 0),
+            ChannelGroupEntity("chat/~bus/beds", flag, title = "beds", ordinal = 7),
+        ))
+        fact(group("""{"channel":{"nest":"chat/~bus/beds","r-channel":{"edit":{"meta":{"title":"Beds"}}}}}"""))
+        assertEquals("Beds" to 7, db.groups().channelGroupFor("chat/~bus/beds")?.let { it.title to it.ordinal })
+        fact(group("""{"channel":{"nest":"chat/~bus/shed","r-channel":{"add":{"meta":{"title":"shed"}}}}}"""))
+        assertEquals(8, db.groups().channelGroupFor("chat/~bus/shed")?.ordinal)
+        fact("""{"flag":"~nec/new","r-group":{"channel":{"nest":"chat/~nec/first","r-channel":{"add":{"meta":{"title":"first"}}}}}}""")
+        assertEquals(0, db.groups().channelGroupFor("chat/~nec/first")?.ordinal, "the first of its group")
     }
 
     @Test
