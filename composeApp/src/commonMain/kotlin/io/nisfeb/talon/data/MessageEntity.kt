@@ -49,8 +49,10 @@ data class MessageEntity(
     val image: String? = null,
     /**
      * Send-state for our own outgoing messages:
-     *  - null: not tracked (server-echoed rows, and DMs in flight).
-     *  - "pending": an optimistic channel post; the poke is in flight.
+     *  - null: not tracked (server-echoed rows, and our DMs once sent).
+     *  - "pending": the poke is in flight. A channel post stays so until
+     *    its echo; a DM or club message until the ship acks it. Still
+     *    pending at the next start, it is queued (requeueStalePending).
      *  - "queued": the ship was slow or out of reach, not refusing; the
      *    message waits and goes when it answers again
      *    (TlonChatRepo.drainQueue). Kept across restarts.

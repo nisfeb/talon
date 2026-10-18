@@ -1220,14 +1220,14 @@ class TlonChatRepo(
         else UrbitTime.formatPostId(ourPatp, da)
         val essay = buildEssay(content, sent, kind = kind, meta = meta)
         val out = postPoke(whom, id, essay)
-        // Channel-chat posts get a status="pending" optimistic insert;
-        // DMs and clubs leave status null. A refusal marks the row
-        // failed, a ship out of reach queues it; an accepted post stays
-        // until its echo replaces it.
-        val initialStatus = if (isChannelNest(whom)) "pending" else null
+        // Pending while the poke is out: a refusal marks the row failed, a
+        // ship out of reach queues it. A channel post stays pending until
+        // its echo replaces it, a DM or club message until the ship acks
+        // it. A DM left with no state looked sent, and one cut off by the
+        // app being killed was never sent again.
         db.messages().upsertWithMedia(
             db.messageMedia(),
-            toEntity(whom, id, essay).copy(status = initialStatus),
+            toEntity(whom, id, essay).copy(status = "pending"),
         )
         sendOrQueue(whom, id, out)
         return id
@@ -1333,6 +1333,8 @@ class TlonChatRepo(
             // slow number here is the ship's compute, not our wire.
             val putMs = nowMs() - start
             if (putMs > 1_000) Log.w(TAG, "slow poke PUT whom=$whom putMs=$putMs (ship busy)")
+            // Taken: a DM or club message carries its own id, so it is sent.
+            if (!isChannelNest(whom)) db.messages().setStatus(whom, id, null)
             shipAnswered()
         } catch (c: kotlinx.coroutines.CancellationException) {
             throw c
@@ -1413,12 +1415,14 @@ class TlonChatRepo(
     /**
      * Whether writes are waiting for the ship, for the calm line in a
      * chat: messages queued there and reactions queued here. Null while
-     * the ship is keeping up.
+     * the ship is keeping up, and until a write this run has found it
+     * slow ([slowDetails]): what was queued, or left in flight, by the
+     * last run said "Your ship is slow" from launch, before anyone asked.
      */
     val shipSlow: Flow<ShipSlow?> = combine(db.messages().queuedCount(), queuedReacts, slowDetails, slowHealth) { messages, reacts, details, health ->
         val queued = messages + reacts.size
-        if (queued == 0) null
-        else ShipSlow(queued, (details ?: "Waiting for the ship.") + (health?.let { "\nhealthz: $it" } ?: ""), health)
+        if (queued == 0 || details == null) null
+        else ShipSlow(queued, details + (health?.let { "\nhealthz: $it" } ?: ""), health)
     }
 
     private val drainLock = Mutex()
@@ -3422,12 +3426,11 @@ class TlonChatRepo(
         // In the thread now, and the ship told after: the poke waits for
         // the ship's ack, and the reply used to wait with it. A channel
         // reply is pending until its echo, which replaces it; a DM or
-        // club reply's echo carries the same id. A refusal marks it
-        // failed, a ship out of reach queues it.
+        // club reply until the ship acks it. A refusal marks it failed,
+        // a ship out of reach queues it.
         db.messages().upsertWithMedia(
             db.messageMedia(),
-            toReplyEntity(whom, parentId, replyId, replyEssay)
-                .let { if (isChannelNest(whom)) it.copy(status = "pending") else it },
+            toReplyEntity(whom, parentId, replyId, replyEssay).copy(status = "pending"),
         )
         sendOrQueue(whom, replyId, out)
         joinedThread(whom, parentId)

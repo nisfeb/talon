@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.io.IOException
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -326,6 +327,36 @@ class TlonChatRepoQueueTest {
         val second = repo.send("~bus", "second") // behind the first, still going
         draining.join()
         assertEquals(listOf(null, null), listOf(first, second).map { db.messages().getOne("~bus", stored(it))?.status })
+    }
+
+    // A DM in flight had no state: it looked sent, and one cut off by the
+    // app being killed was never sent again (review A1-6).
+    @Test
+    fun `a DM or a DM reply is sending until the ship takes it`() = live {
+        ship.holdPoke = 600
+        val sending = async(kotlinx.coroutines.Dispatchers.Default) { repo.send("~bus", "on its way") to repo.reply("0v4.abcde", "~bus/170141184506", "in the thread") }
+        delay(250)
+        val first = db.messages().latestAnyFor("~bus", 5).single()
+        assertEquals("pending", first.status, "on the wire")
+        val (dm, reply) = sending.await()
+        assertNull(db.messages().getOne("~bus", stored(dm))?.status, "taken")
+        assertNull(db.messages().getOne("0v4.abcde", stored(reply))!!.status)
+        assertEquals(2, ship.pokesTo("chat").size)
+    }
+
+    // What the last run left queued said "Your ship is slow. 1 queued"
+    // from launch, before anyone had asked the ship (review A1-9).
+    @Test
+    fun `what the last run left queued is not called slow until the ship is asked`() = live {
+        db.messages().upsert(MessageEntity("~bus", "~zod/170141184506", "~zod", 1_000, """[{"inline":["left over"]}]""", "/chat", status = "queued"))
+        assertNull(repo.shipSlow.first(), "nobody has asked the ship yet")
+        ship.lose = { lost }
+        repo.drainQueue()
+        assertEquals(1, repo.shipSlow.first { it != null }!!.queued, "asked, and it did not answer")
+        ship.lose = { null }
+        repo.drainQueue()
+        assertNull(repo.shipSlow.first())
+        assertEquals(1, ship.pokesTo("chat").size)
     }
 
     // ─── deleting what the ship never took (review A4-1) ─────────────

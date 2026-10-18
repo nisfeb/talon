@@ -693,6 +693,30 @@ class TlonChatRepoStartupTest {
         }
     }
 
+    // A DM in flight was stored as sent, so the next run never sent it
+    // (review A1-6). Its id is its own: sent again, the ship takes it once.
+    @Test
+    fun `a DM left in flight by the last run goes with the queue`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~zod/170141184506", "~zod", 5_000, """[{"inline":["cut off"]}]""", "/chat", status = "pending"))
+        started(prepare = { scries[init] = initPosts }) { _ ->
+            until("sent again") { ship.pokesTo("chat").any { "cut off" in it.json.toString() } }
+            until("sent") { db.messages().getOne("~bus", "~zod/170141184506")?.status == null }
+            assertEquals(1, ship.pokesTo("chat").count { "cut off" in it.json.toString() })
+        }
+    }
+
+    // Requeued at launch, it read "Your ship is slow. 1 queued" for the
+    // whole first pass, which on a busy ship is minutes (review A1-9).
+    @Test
+    fun `a post requeued at launch is not called slow while the first pass reads`() = runBlocking<Unit> {
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("chat/~bus/general", "local_1", "~zod", 5_000, """[{"inline":["mid-send"]}]""", "/chat", status = "pending"))
+        started(prepare = { holdScry = { if (it == init) 3_000 else 0 } }) { repo ->
+            until("requeued") { db.messages().getOne("chat/~bus/general", "local_1")?.status == "queued" }
+            until("the first pass reading") { init in ship.scried }
+            assertNull(repo.shipSlow.first(), "the ship has not been asked")
+        }
+    }
+
     // A settings change the ship did not answer went only with a new
     // channel's settings bootstrap: a resumed channel never sent it, and
     // the next bootstrap's ship-wins apply then wiped it (review H7).
