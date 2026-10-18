@@ -164,6 +164,7 @@ fun NoteScreen(
                         val body = draft
                         saving = true
                         saveProblem = null
+                        actionError = null
                         scope.launch {
                             val said = repo.notes.updateNote(flag, noteId, body, baseRevision)
                             saving = false
@@ -172,6 +173,8 @@ fun NoteScreen(
                             when (said) {
                                 null -> editing = false
                                 io.nisfeb.talon.urbit.NotesRepo.NOTE_CHANGED -> conflict = true
+                                // Gone to a host still to answer: taken, and said calmly.
+                                io.nisfeb.talon.urbit.NotesRepo.SAVE_SENT -> { editing = false; actionError = said }
                                 else -> saveProblem = said
                             }
                         }
@@ -245,7 +248,7 @@ fun NoteScreen(
         (saveProblem.takeIf { editing } ?: actionError)?.let {
             Text(
                 it,
-                color = MaterialTheme.colorScheme.error,
+                color = if (it == io.nisfeb.talon.urbit.NotesRepo.SAVE_SENT) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )

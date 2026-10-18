@@ -328,7 +328,8 @@ class NotesRepo(
      * concurrent edit surfaces as a failure instead of silently winning.
      * The row is marked pending and the host echo clears it. Null when
      * the host took it, otherwise what to say: [NOTE_CHANGED] when the
-     * note moved on, and the rest ([NotesParser.saveRefusal], no answer)
+     * note moved on, [SAVE_SENT] when it went to a host that has not
+     * answered yet, and the rest ([NotesParser.saveRefusal], no answer)
      * as what they are. Every failure was called a conflict.
      */
     suspend fun updateNote(
@@ -379,7 +380,8 @@ class NotesRepo(
         // make every later scry restore it and pin the note as saving
         // forever.
         db.notes().setPending(key, noteId, false)
-        if (said != null) hosts?.let { db.notes().upsertNotes(listOf(it.copy(pending = false))) }
+        // Sent to a host still to answer is not refused: nothing to put back.
+        if (said != null && said != SAVE_SENT) hosts?.let { db.notes().upsertNotes(listOf(it.copy(pending = false))) }
         // Re-read either way. On success it picks up the host's new
         // revision, which the next edit must send back as
         // expectedRevision; on failure the host's own, where it answers.
@@ -558,6 +560,13 @@ class NotesRepo(
 
     companion object {
         private const val TAG = "NotesRepo"
+
+        /**
+         * What a save says when it went to the notebook's host, which has
+         * not answered yet: taken, not refused, said calmly. The host's
+         * answer comes down the notebook's stream.
+         */
+        const val SAVE_SENT = "Sent. The notebook's host hasn't answered yet, so your change may show in a moment."
 
         /** What a save says when the note moved on since the editor opened. */
         const val NOTE_CHANGED =
