@@ -576,6 +576,34 @@ class TlonChatRepoStartupTest {
         }
     }
 
+    // A lapsed login (eyre forgot its cookie, as on a restart) has every
+    // channel refused, a new one too. Chat said nothing, and the refusal
+    // came back as a plain "gone": a new channel and a whole pass every
+    // two seconds, for good (review A5-18).
+    @Test
+    fun `a lapsed login says it is signed out and stops asking until told to`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        connected(repo)
+        assertTrue(!repo.signedOut.value)
+        ship.signedOut = true
+        ship.endStreams()
+        until("signed out") { repo.signedOut.value }
+        val asked = ship.requests.size
+        delay(3_500)
+        assertEquals(emptyList(), ship.requests.drop(asked), "nothing asked of the ship meanwhile")
+        repo.forceReconnect()
+        until("asked once more") { ship.requests.size > asked }
+        delay(1_000)
+        assertEquals(listOf("PUT"), ship.requests.drop(asked).map { it.substringBefore(' ') }, "a new channel's subscribe, and no pass")
+        // The ship takes the login again: one more try brings chat back.
+        ship.signedOut = false
+        delay(3_100) // forceReconnect's debounce
+        repo.forceReconnect()
+        until("no longer signed out") { !repo.signedOut.value }
+        until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
+    }
+
     // Each invite heard read the whole foreigns list again. The fact is
     // the one group that moved, in the shape the scry gives.
     @Test

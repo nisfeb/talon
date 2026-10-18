@@ -116,6 +116,10 @@ class UrbitChannel internal constructor(
         gone = true
     }
 
+    /** Eyre refused this channel to this login: said again by a stream asked for after. */
+    @Volatile
+    private var refused: Boolean = false
+
     /** The open stream's inbox, so a refused PUT can end the stream too. */
     @Volatile
     private var streamInbox: Channel<UrbitEvent>? = null
@@ -128,6 +132,7 @@ class UrbitChannel internal constructor(
      */
     private fun forbidden(): Nothing {
         gone = true
+        refused = true
         val e = ChannelGone(forbidden = true)
         streamInbox?.close(e)
         throw e
@@ -146,7 +151,9 @@ class UrbitChannel internal constructor(
      * rendezvous/buffered channel would shed events under load.
      */
     fun events(): Flow<UrbitEvent> = channelFlow {
-        if (gone) throw ChannelGone()
+        // Refused, it says so: as a plain "gone" the next pass came back
+        // at once, and on a lapsed login every two seconds, a whole pass each.
+        if (gone) throw ChannelGone(forbidden = refused)
         val inbox = Channel<UrbitEvent>(Channel.UNLIMITED)
         streamInbox = inbox
         // Drive the SSE session on its own coroutine. The sse{} block

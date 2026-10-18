@@ -96,6 +96,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var holdPoke: Long = 0
     /** How long a channel's delete waits for an answer: a dead socket, as an iOS app finds coming back. */
     @Volatile var holdDelete: Long = 0
+    /** The login has lapsed (eyre forgot its cookie): every channel request and scry is a 403, a new channel's too. */
+    @Volatile var signedOut: Boolean = false
     /** While true the event stream is refused, as with no network yet. */
     @Volatile var refuseStream: Boolean = false
     /** A subscription refused, by `app/path` (e.g. "activity/v6"): an older ship without it. */
@@ -264,6 +266,10 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         val path = req.url.encodedPath
         requests += "${req.method.value} $path"
         when {
+            signedOut && (path.startsWith("/~/channel/") || path.startsWith("/~/scry/")) -> {
+                if (req.method == HttpMethod.Get && path.startsWith("/~/channel/")) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]
+                respond("", HttpStatusCode.Forbidden)
+            }
             (req.method == HttpMethod.Put || req.method == HttpMethod.Get) && path.startsWith("/~/channel/") &&
                 path.removePrefix("/~/channel/") in forbidden -> {
                 if (req.method == HttpMethod.Get) streamsOpened += path.removePrefix("/~/channel/") to req.headers["Last-Event-ID"]

@@ -513,10 +513,27 @@ class TlonChatRepo(
             // to the app is not a fleet. On iOS the stream is often already
             // dead by then, the loop sitting in a backoff of up to a
             // minute, and the new messages waited for all of it.
-            val woken = withTimeoutOrNull(jittered(backoffMs)) { reconnectWake.receive() } != null
+            // Signed out, nothing here brings the login back: no timer asks
+            // again, an event on the ship each time. A return to the app
+            // ([forceReconnect]) tries once.
+            val woken = if (_signedOut.value) {
+                reconnectWake.receive()
+                true
+            } else withTimeoutOrNull(jittered(backoffMs)) { reconnectWake.receive() } != null
             if (woken) backoffMs = 2_000L
         }
     }
+
+    private val _signedOut = MutableStateFlow(false)
+
+    /**
+     * The ship refused a channel made just now for this login: the login
+     * itself has lapsed (eyre forgot it, as a ship restart can), and only
+     * signing in again brings chat back. Until then the session asks
+     * again only when [forceReconnect] says to. False again once a
+     * channel is taken.
+     */
+    val signedOut: StateFlow<Boolean> = _signedOut.asStateFlow()
 
     /** Set by [forceReconnect]; wakes the loop out of its backoff. */
     private val reconnectWake = Channel<Unit>(Channel.CONFLATED)
@@ -686,7 +703,17 @@ class TlonChatRepo(
                             if (rest.isNotEmpty()) subFallbacks[id] = spec.app to rest
                         }
                     }
-                }.onFailure { Log.e(TAG, "subscribe failed", it) }
+                }.onSuccess { _signedOut.value = false }
+                    .onFailure {
+                        // Refused a channel made just now: not another
+                        // login's channel, this login's own, lapsed. No
+                        // pass: every read in it would be refused too.
+                        if (it is ChannelGone && it.forbidden) {
+                            _signedOut.value = true
+                            throw it
+                        }
+                        Log.e(TAG, "subscribe failed", it)
+                    }
             }
             streaming = stream()
 

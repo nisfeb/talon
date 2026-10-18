@@ -102,6 +102,23 @@ class UrbitChannelResumeTest {
         assertTrue(ended is ChannelGone && ended.forbidden, "the stream ended with it: $ended")
     }
 
+    // A stream asked for after the refusal said only "gone", and the
+    // session took that as a channel reaped: a new one at once, and on a
+    // lapsed login every two seconds (review A5-18).
+    @Test
+    fun `a stream asked for after a refused PUT says it was refused`() = runBlocking<Unit> {
+        var gets = 0
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "GET") gets++
+            respond("", HttpStatusCode.Forbidden)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        assertFailsWith<ChannelGone> { ch.subscribe("chat", "/v4") }
+        val e = assertFailsWith<ChannelGone> { ch.events().toList() }
+        assertTrue(e.forbidden, "refused, not reaped")
+        assertEquals(0, gets, "not asked: it is gone")
+    }
+
     // Vere answers /~_~/healthz itself, no login and no event on the ship.
     @Test
     fun `health asks vere at its own path and reads the answer`() = runBlocking<Unit> {
