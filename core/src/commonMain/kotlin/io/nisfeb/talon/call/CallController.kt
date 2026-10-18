@@ -1831,7 +1831,19 @@ class CallController(
                 // so Active alone is not a restart; an offer after the
                 // first one is. A quick answer's offer taken for a
                 // restart was dropped, and the call died of "no offer".
-                if (_state.value is CallUiState.Active && pendingOffer.isCompleted) {
+                val cur = _state.value
+                if (cur is CallUiState.Active && pendingOffer.isCompleted) {
+                    // Media that never came up here lost the race to answer:
+                    // another of our devices answered too, and the caller
+                    // took its accept. Answering the restart gave the caller
+                    // this device's answer over the one it was talking to.
+                    // ponytail: a restart before even the winner's media is
+                    // up goes unanswered too, and the call rests on its first
+                    // negotiation. A wire that says whose accept won is the fix.
+                    if (cur.connectedAtMs == 0L) {
+                        Log.i(TAG, "restart offer for ${sig.id} ignored: its media never came up here")
+                        return
+                    }
                     // The caller restarted ICE after a network change:
                     // answer in place on the live engine.
                     if (sdpFingerprint(sig.sdp) != sig.fpr) {

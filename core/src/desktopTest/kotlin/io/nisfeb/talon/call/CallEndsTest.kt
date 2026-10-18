@@ -138,6 +138,8 @@ class CallEndsTest {
         assertTrue(puts.drop(reject + 1).any { it.contains("\"action\":\"delete\"") }, "the channel is ended on the ship")
     }
 
+    private fun accepts(h: TrunkHarness, id: String) = h.putsSnapshot().count { TrunkHarness.sigIdIn(it, "accept") == id }
+
     // A Decline from this phone's notification went out on a channel of
     // its own, and the ship's "handled" then ended the ring here as
     // answered elsewhere: the call log said another device took it.
@@ -177,6 +179,39 @@ class CallEndsTest {
             assertEquals(CallUiState.None, c.state.value, "rang for a call declined already")
             h.emitFact(ring("d3"))
             withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+        } finally {
+            c.stop()
+        }
+    }
+
+    // The device that lost the race to answer sat connecting until its
+    // watchdog, and answered each restart offer the caller sent the
+    // device that won: the caller took its answer over the winner's.
+    @Test
+    fun `a device whose media never came up does not answer a restart`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val eng = ScriptedCallEngine()
+        val c = CallController(h.session, CallEngineProvider { eng })
+        try {
+            c.start()
+            h.awaitConnected()
+            h.emitFact(ring("r1"))
+            withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+            h.emitFact(offer("r1"))
+            c.accept()
+            h.awaitPut { TrunkHarness.sigIdIn(it, "accept") == "r1" }
+            h.emitFact(offer("r1"))
+            h.emitFact("""{"policy":{"mode":"allow"}}""")
+            withTimeout(10_000) { c.policy.first { it?.mode == CallPolicy.Mode.Allow } }
+            delay(300)
+            assertEquals(1, accepts(h, "r1"), "answered a restart meant for the device that won")
+            assertTrue(c.state.value is CallUiState.Active)
+
+            // Its media up, a restart is its own.
+            eng.stateFlow.value = MediaState.Live
+            withTimeout(10_000) { c.state.first { (it as? CallUiState.Active)?.media == MediaState.Live } }
+            h.emitFact(offer("r1"))
+            h.await { accepts(h, "r1") == 2 }
         } finally {
             c.stop()
         }
