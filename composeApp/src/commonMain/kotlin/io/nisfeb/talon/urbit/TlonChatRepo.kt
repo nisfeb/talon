@@ -2471,11 +2471,11 @@ class TlonChatRepo(
     }
 
     /**
-     * Fire markRead for every whom in [whoms] in parallel. Used by
-     * the long-press "Mark all read" affordance — bulk-clearing a
-     * backlog (typical right after a fresh-install pulls the ship's
-     * stale activity state) sequentially would take ~retry_budget × N
-     * seconds; parallel batches them under one second.
+     * markRead for every whom in [whoms], in turn. Used by "Mark all
+     * read" and a group's Mark read. Each is told the ship only where
+     * [markRead] would tell it: unread here, not yet read this
+     * connection, or owed. Forced and all at once, a group's Mark read
+     * poked %activity once per channel together, read or not.
      *
      * markRead itself swallows transient errors and retries; this
      * helper only ensures each whom gets its own attempt.
@@ -2486,10 +2486,8 @@ class TlonChatRepo(
      */
     fun markAllRead(whoms: Collection<String>) {
         if (whoms.isEmpty()) return
-        whoms.forEach { whom ->
-            // Asked for: told whatever the local count says.
-            pushScope.launch { runCatching { markRead(whom, force = true) } }
-        }
+        val all = whoms.toList()
+        pushScope.launch { all.forEach { whom -> runCatching { markRead(whom) } } }
     }
 
     /** Reads waiting for the chat or thread in view, by whom or whom#parent. */

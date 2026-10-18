@@ -1726,8 +1726,8 @@ fun DmListScreen(
             },
             onDismiss = { folderSheetGroup = null },
             onMarkGroupRead = {
-                // Resolve the group's channels to whoms and mark all
-                // read in parallel. We pull from contactMap (which
+                // Resolve the group's channels to whoms and mark them
+                // read in turn. We pull from contactMap (which
                 // already has the channel list per group) so we don't
                 // need an extra DAO round-trip.
                 val whoms = contactMap.channelGroups
