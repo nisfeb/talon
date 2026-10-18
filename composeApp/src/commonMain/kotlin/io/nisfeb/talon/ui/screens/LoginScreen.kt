@@ -251,6 +251,10 @@ fun LoginScreen(
                         status = "Connecting…"
                         statusIsError = false
                         connecting = true
+                        // Read before the draft is cleared, which empties
+                        // `code`: the notifications offer enrolled with "".
+                        // As login() sends it: trimmed, no leading +.
+                        val typedCode = code.trim().removePrefix("+")
                         scope.launch {
                             session.login(shipUrl, code)
                                 .onSuccess { ship ->
@@ -258,7 +262,7 @@ fun LoginScreen(
                                     // ship name — don't prepend another.
                                     status = "Connected as $ship"
                                     LoginDraft.clear()
-                                    onLoginCode(ship, code)
+                                    onLoginCode(ship, typedCode)
                                     onLoggedIn(ship)
                                 }
                                 .onFailure { err ->
