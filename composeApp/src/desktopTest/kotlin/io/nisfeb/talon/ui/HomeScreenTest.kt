@@ -441,7 +441,8 @@ class HomeScreenTest {
         val cal = calendar(writeTakesMs = 1_000)
         home(calendar = cal) {
             waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
-            val at = now + 30 * 60_000L
+            // Inside today's UTC day, or after 23:30 UTC it lands tomorrow.
+            val at = minOf(now + 30 * 60_000L, todayUtc + 86_400_000L - 31 * 60_000L)
             val tea = io.nisfeb.talon.calendar.eventBody(
                 io.nisfeb.talon.calendar.sharedDraft("Tea with Ana", at, at + 30 * 60_000L, "default", kotlinx.datetime.TimeZone.UTC, "UTC"),
             )
