@@ -1245,9 +1245,13 @@ class AppShellTest {
             // form stays away. It came straight back: the ship's fresh
             // repo was refused again and said so. Real time, since the
             // refusal is a request.
+            val asked = ship.requests.size
             onNodeWithText("Cancel").performClick()
             home()
-            val until = System.currentTimeMillis() + 8_000
+            // The rebuilt ship asks again and is refused: what used to
+            // reopen the form.
+            waitUntil(timeoutMillis = 15_000) { ship.requests.drop(asked).any { "/~/channel/" in it } }
+            val until = System.currentTimeMillis() + 5_000
             while (System.currentTimeMillis() < until) {
                 Thread.sleep(250)
                 waitForIdle()
