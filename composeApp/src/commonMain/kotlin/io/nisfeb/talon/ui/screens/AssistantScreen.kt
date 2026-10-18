@@ -170,6 +170,24 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
     internal var resumed = false
     /** Whether the Assistant is on screen now. */
     internal var shown = false
+    /** The run going now. Kept here, so Stop reaches it after the screen is left and opened again. */
+    internal var run: kotlinx.coroutines.Job? = null
+    /** The run Stop ended, so its cancellation is told from the host's going. */
+    internal var stopped: kotlinx.coroutines.Job? = null
+
+    /**
+     * End the run now. The box is free at once; the run, cancelled, says
+     * "Stopped." and keeps what it must ([AssistantScreen]'s submit).
+     */
+    internal fun stop() {
+        val r = run ?: return
+        stopped = r
+        run = null
+        busy = false
+        pending = null
+        allowAll = false
+        r.cancel()
+    }
 
     private val _news = kotlinx.coroutines.flow.MutableStateFlow(false)
     /**
@@ -192,6 +210,10 @@ private const val CONV_KEEP = io.nisfeb.talon.data.ASSISTANT_CONV_KEEP
 
 /** Max chars of the first question used as a conversation's title. */
 private const val CONV_TITLE_CHARS = 60
+
+/** A run stopped after a write: asked again, it would do the write twice. */
+internal const val STOPPED_AFTER_WRITE =
+    "Stopped. It may have done part of it before it stopped, so check before asking again."
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -480,11 +502,105 @@ fun AssistantScreen(
         var snapCentroid = currentCentroid
         val snapTurnCount = currentTurnCount
         val snapExplicit = explicitConv
+        // A write was let through in this run: a stopped run says it may
+        // have done part of it, and keeps the turn rather than the question.
+        var wrote = false
         // The host's scope, not this screen's: the run goes on when the
         // screen is left, and its dot says so when it is done.
-        session.scope.launch {
+        // Lazy, so the session holds the run before any of it goes.
+        val job = session.scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val self = coroutineContext[kotlinx.coroutines.Job]
+            var qVec: FloatArray? = null
+            var continuing = false
+
+            // The turn into history, and the conversation it belongs to.
+            suspend fun keep(answer: String) {
+                val now = nowMs()
+                val vec = qVec ?: FloatArray(0)
+                val convEntity: AssistantConversationEntity = if (continuing) {
+                    val gid = snapConvGid ?: newGid().also { snapConvGid = it }
+                    val merged = snapCentroid
+                        ?.let { ConversationGrouper.updateCentroid(it, snapTurnCount, vec) }
+                        ?: vec
+                    val base = snapConvId?.let { convDao.get(it) }
+                    if (base != null) {
+                        val updated = base.copy(
+                            gid = gid,
+                            updatedAt = now,
+                            turnCount = snapTurnCount + 1,
+                            centroid = packEmbedding(merged),
+                            dim = merged.size,
+                        )
+                        convDao.update(updated)
+                        updated
+                    } else {
+                        // The conversation row was trimmed away under us;
+                        // recreate it (same gid) so the turn isn't orphaned.
+                        val row = AssistantConversationEntity(
+                            gid = gid, title = q.take(CONV_TITLE_CHARS).trim(),
+                            createdAt = now, updatedAt = now,
+                            centroid = packEmbedding(merged), dim = merged.size,
+                            turnCount = snapTurnCount + 1,
+                        )
+                        row.copy(id = convDao.insert(row))
+                    }
+                } else {
+                    val row = AssistantConversationEntity(
+                        gid = newGid(),
+                        title = q.take(CONV_TITLE_CHARS).trim(),
+                        createdAt = now,
+                        updatedAt = now,
+                        centroid = packEmbedding(vec),
+                        dim = vec.size,
+                        turnCount = 1,
+                    )
+                    row.copy(id = convDao.insert(row))
+                }
+                convDao.trim(CONV_KEEP)
+
+                // Only adopt this run's conversation as the active one if
+                // the user hasn't moved on to another since we started.
+                if (convGeneration == gen) {
+                    currentConvId = convEntity.id
+                    currentConvGid = convEntity.gid
+                    currentCentroid = if (convEntity.dim > 0) {
+                        unpackEmbedding(convEntity.centroid, convEntity.dim)
+                    } else {
+                        null
+                    }
+                    currentTurnCount = convEntity.turnCount
+                    explicitConv = true
+                }
+
+                val turnEntity = AssistantHistoryEntity(
+                    gid = newGid(),
+                    mode = "Assistant",
+                    question = q,
+                    answer = answer,
+                    createdAt = now,
+                    conversationId = convEntity.id,
+                    convGid = convEntity.gid,
+                    log = turnLog.toString(),
+                )
+                historyDao.insert(turnEntity)
+                historyDao.trim(HISTORY_KEEP)
+
+                // Replicate to the user's other devices. No-op without a
+                // synced ship session; embeddings stay local (not pushed).
+                runCatching { repo?.settingsSync?.pushAssistantTurn(convEntity, turnEntity) }
+            }
+
+            fun putBack() {
+                // Restore the question so a network timeout doesn't cost
+                // the user their typed text — unless they've started
+                // typing something new while the run was in flight.
+                if (questionField.text.isBlank()) {
+                    questionField = TextFieldValue(q, TextRange(q.length))
+                }
+            }
+
             runCatching {
-                val qVec = embedder?.embed(q)
+                qVec = embedder?.embed(q)
                 // Lazily rebuild a synced conversation's centroid. A
                 // conversation pulled from another device has no local
                 // centroid (embeddings are device-local), so without this
@@ -507,7 +623,7 @@ fun AssistantScreen(
                 // single question), or when the heuristic says it's on-topic.
                 // Otherwise start fresh, which also resets the model's context.
                 val canJudge = qVec != null && snapCentroid != null
-                val continuing = snapConvId != null &&
+                continuing = snapConvId != null &&
                     (snapExplicit || !canJudge || ConversationGrouper.continues(qVec, snapCentroid))
                 val priorTurns = if (continuing) {
                     historyDao.forConversation(snapConvId!!)
@@ -528,6 +644,7 @@ fun AssistantScreen(
                     confirm = { call, tool ->
                         if (session.allowAll && call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {
                             transcript.add(Line.Note("✓ ${describe(call, contactMap, calendar)} (allowed with Allow all)"))
+                            wrote = true
                             true
                         } else {
                             val gate = CompletableDeferred<Boolean>()
@@ -536,6 +653,7 @@ fun AssistantScreen(
                             session.tell()
                             val ok = gate.await()
                             pending = null
+                            if (ok) wrote = true
                             ok
                         }
                     },
@@ -545,100 +663,42 @@ fun AssistantScreen(
                         turnLog.append(ev.toLogLine()).append('\n')
                     },
                 )
-
+            }.onSuccess {
                 // Persist uncancellably: by here any confirmed write has
                 // already executed on the ship, so letting a navigation-away
                 // cancel us would lose the record of what the assistant did
-                // (the ship-side effect persists regardless).
-                withContext(NonCancellable) {
-                    val now = nowMs()
-                    val vec = qVec ?: FloatArray(0)
-                    val convEntity: AssistantConversationEntity = if (continuing) {
-                        val gid = snapConvGid ?: newGid().also { snapConvGid = it }
-                        val merged = snapCentroid
-                            ?.let { ConversationGrouper.updateCentroid(it, snapTurnCount, vec) }
-                            ?: vec
-                        val base = snapConvId?.let { convDao.get(it) }
-                        if (base != null) {
-                            val updated = base.copy(
-                                gid = gid,
-                                updatedAt = now,
-                                turnCount = snapTurnCount + 1,
-                                centroid = packEmbedding(merged),
-                                dim = merged.size,
-                            )
-                            convDao.update(updated)
-                            updated
-                        } else {
-                            // The conversation row was trimmed away under us;
-                            // recreate it (same gid) so the turn isn't orphaned.
-                            val row = AssistantConversationEntity(
-                                gid = gid, title = q.take(CONV_TITLE_CHARS).trim(),
-                                createdAt = now, updatedAt = now,
-                                centroid = packEmbedding(merged), dim = merged.size,
-                                turnCount = snapTurnCount + 1,
-                            )
-                            row.copy(id = convDao.insert(row))
-                        }
-                    } else {
-                        val row = AssistantConversationEntity(
-                            gid = newGid(),
-                            title = q.take(CONV_TITLE_CHARS).trim(),
-                            createdAt = now,
-                            updatedAt = now,
-                            centroid = packEmbedding(vec),
-                            dim = vec.size,
-                            turnCount = 1,
-                        )
-                        row.copy(id = convDao.insert(row))
-                    }
-                    convDao.trim(CONV_KEEP)
-
-                    // Only adopt this run's conversation as the active one if
-                    // the user hasn't moved on to another since we started.
-                    if (convGeneration == gen) {
-                        currentConvId = convEntity.id
-                        currentConvGid = convEntity.gid
-                        currentCentroid = if (convEntity.dim > 0) {
-                            unpackEmbedding(convEntity.centroid, convEntity.dim)
-                        } else {
-                            null
-                        }
-                        currentTurnCount = convEntity.turnCount
-                        explicitConv = true
-                    }
-
-                    val turnEntity = AssistantHistoryEntity(
-                        gid = newGid(),
-                        mode = "Assistant",
-                        question = q,
-                        answer = finalAnswer.ifBlank { "(no reply)" },
-                        createdAt = now,
-                        conversationId = convEntity.id,
-                        convGid = convEntity.gid,
-                        log = turnLog.toString(),
-                    )
-                    historyDao.insert(turnEntity)
-                    historyDao.trim(HISTORY_KEEP)
-
-                    // Replicate to the user's other devices. No-op without a
-                    // synced ship session; embeddings stay local (not pushed).
-                    runCatching { repo?.settingsSync?.pushAssistantTurn(convEntity, turnEntity) }
-                }
+                // (the ship-side effect persists regardless). Out of the
+                // runCatching, so a Stop during it cannot keep the turn twice.
+                withContext(NonCancellable) { keep(finalAnswer.ifBlank { "(no reply)" }) }
             }.onFailure {
-                if (it is CancellationException) throw it
-                error = io.nisfeb.talon.ai.modelProblem("Couldn't complete", it)
-                // Restore the question so a network timeout doesn't cost
-                // the user their typed text — unless they've started
-                // typing something new while the run was in flight.
-                if (questionField.text.isBlank()) {
-                    questionField = TextFieldValue(q, TextRange(q.length))
+                if (it is CancellationException) {
+                    // Not Stop: the host is going, and the run with it.
+                    if (session.stopped !== self) throw it
+                    withContext(NonCancellable) {
+                        if (wrote) {
+                            transcript.add(Line.Said(STOPPED_AFTER_WRITE))
+                            turnLog.append("stopped by the owner\n")
+                            keep(STOPPED_AFTER_WRITE)
+                        } else {
+                            transcript.add(Line.Said("Stopped."))
+                            putBack()
+                        }
+                    }
+                    return@onFailure
                 }
+                error = io.nisfeb.talon.ai.modelProblem("Couldn't complete", it)
+                putBack()
             }
-            busy = false
-            session.allowAll = false
+            // Stop has freed the box already, and a newer run may hold it.
+            if (session.run === self) {
+                session.run = null
+                busy = false
+                session.allowAll = false
+            }
             session.tell()
         }
+        session.run = job
+        job.start()
     }
 
     fun newConversation() {
@@ -802,8 +862,12 @@ fun AssistantScreen(
                     color = MaterialTheme.colorScheme.error,
                 )
             } else {
-                Button(onClick = { submit() }, enabled = !busy && questionField.text.isNotBlank()) {
-                    Text(if (busy) "Working…" else "Send")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { submit() }, enabled = !busy && questionField.text.isNotBlank()) {
+                        Text(if (busy) "Working…" else "Send")
+                    }
+                    // A stalled model call held the run for minutes a step.
+                    if (busy) OutlinedButton(onClick = { session.stop() }) { Text("Stop") }
                 }
             }
 
