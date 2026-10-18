@@ -626,7 +626,7 @@ fun DmChatScreen(
     // is waited for. Still not here, it is said, where the chat used to
     // open at the bottom with no word. Not fetched alone: a lone old post
     // stored here leaves a hole behind it that paging never fills.
-    LaunchedEffect(initialScrollMessageId) {
+    LaunchedEffect(whom, initialScrollMessageId) {
         val id = initialScrollMessageId ?: return@LaunchedEffect
         if (reach(id)) return@LaunchedEffect
         snapshotFlow { refreshing }.first { !it }
