@@ -47,6 +47,10 @@ class CatchUpWorker(
         // No active ship → nothing to catch up on. Don't retry —
         // WorkManager will run us again at the next 15-minute slot.
         if (app.activeShipFlow.value == null) return Result.success()
+        // A process this worker woke has a repo nobody started, and the
+        // wait below then never ended: retried every time, it caught up
+        // nothing. Idempotent where the screen or the service started it.
+        runCatching { app.repo.start(app.session) }.onFailure { Log.w(TAG, "could not start the stream: ${it.message}") }
 
         // Wait briefly for the channel + sync state to come up
         // (notificationHealth is a useful signal here). Caps at 8s

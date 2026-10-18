@@ -1194,7 +1194,8 @@ fun TalonApp(
     var keepAlive by remember { mutableStateOf(true) }
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
-        val ship = loggedInShip ?: return@LaunchedEffect
+        // No ship left signed in: nothing to keep the stream for.
+        val ship = loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }
         kotlinx.coroutines.flow.merge(
             kotlinx.coroutines.flow.flowOf(Unit),
             app.relaySettings.changes,
