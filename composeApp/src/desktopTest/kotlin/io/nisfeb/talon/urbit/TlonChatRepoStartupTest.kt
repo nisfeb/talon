@@ -625,6 +625,27 @@ class TlonChatRepoStartupTest {
         until("no longer signed out") { !repo.signedOut.value }
         until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
     }
+    // B3-4: the stream flag is the app's. An old repo stopped again after a
+    // ship switch marked the new repo's stream down, and the catch-up
+    // worker, seeing no stream, retried for good.
+    @Test
+    fun `an old repo stopped again leaves the new repo's stream marked up`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        val health = io.nisfeb.talon.notify.NotificationHealth()
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val old = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        old.stop()
+        val new = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        try {
+            withTimeout(60_000) { until("the new stream") { health.sseConnected.value } }
+            old.stop()
+            assertTrue(health.sseConnected.value, "the old repo marked the new stream down")
+        } finally {
+            new.stop()
+        }
+        assertTrue(!health.sseConnected.value, "a started repo stopped marks it down")
+    }
+
 
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
         """"$f":{"invites":[{"flag":"$f","time":1,"from":"~bus","token":null,"note":null,"preview":null,"valid":true}],"lookup":null,""" +

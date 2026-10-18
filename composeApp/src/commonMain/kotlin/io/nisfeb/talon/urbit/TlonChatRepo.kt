@@ -1037,12 +1037,15 @@ class TlonChatRepo(
     }
 
     fun stop() {
+        val was = started
         started = false
         // Closing the channel is a request to the ship that waits on it,
         // so it does not go on the pool the screens share.
         channel?.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher), timeoutMs = 3_000)
         channel = null
-        notificationHealth.markSseConnected(false)
+        // The flag is the app's, not this repo's: an old repo stopped again
+        // after a ship switch marked the new repo's stream down.
+        if (was) notificationHealth.markSseConnected(false)
         scope.cancel()
         // Clear pagination markers so a future repo instance for the
         // same ship doesn't inherit stale "history exhausted" state.
