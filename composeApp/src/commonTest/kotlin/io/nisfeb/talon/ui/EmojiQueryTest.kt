@@ -22,6 +22,14 @@ class EmojiQueryTest {
         assertNull(detectEmojiQuery("", 0))
     }
 
+    // ":D" then Enter put an emoji in place of the smiley.
+    @Test
+    fun oneCharacterAfterAColonIsASmileyNotAQuery() {
+        assertNull(detectEmojiQuery(":D", 2))
+        assertNull(detectEmojiQuery("ok :p", 5))
+        assertEquals("Dx" to 0, detectEmojiQuery(":Dx", 3), "two is a name begun")
+    }
+
     @Test
     fun theCaretDecidesNotTheEndOfTheText() {
         assertEquals("ta" to 0, detectEmojiQuery(":taco and more", 3))

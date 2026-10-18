@@ -701,4 +701,11 @@ class DmChatScreenTest {
         waitForIdle()
         assertEquals(listOf("see https://example.com/articles/2026/10/a-very-long-slug"), copied.toList())
     }
+
+    @Test
+    fun `a colon and one letter is a smiley and enter sends it`() = chat { ship, _ ->
+        send("nice :D")
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertTrue("nice :D" in ship.pokesTo("chat").single().json.toString())
+    }
 }
