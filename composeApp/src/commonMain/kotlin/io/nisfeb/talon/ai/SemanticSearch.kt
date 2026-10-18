@@ -2,6 +2,7 @@ package io.nisfeb.talon.ai
 
 import io.nisfeb.talon.data.EmbeddingDao
 import io.nisfeb.talon.data.MessageEmbeddingEntity
+import io.nisfeb.talon.data.MessageEntity
 import kotlin.math.sqrt
 
 /**
@@ -46,6 +47,14 @@ internal suspend fun semanticSearch(
     }
     return top
 }
+
+/** The messages behind [hits], in their order, without any [lookup] no
+ *  longer has or that is deleted: a deleted message keeps its old text
+ *  on the row, and search must not bring it back. */
+internal suspend fun hydrateHits(
+    hits: List<SemanticHit>,
+    lookup: suspend (whom: String, id: String) -> MessageEntity?,
+): List<MessageEntity> = hits.mapNotNull { lookup(it.whom, it.id) }.filterNot { it.isDeleted }
 
 /** Cosine similarity. Assumes both vectors are L2-normalized to length
  *  1 (we set L2Normalize=true on the embedder), in which case cosine

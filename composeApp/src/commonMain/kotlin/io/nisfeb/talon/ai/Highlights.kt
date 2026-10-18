@@ -47,7 +47,5 @@ internal suspend fun computeHighlights(
         k = k * 2,
         minScore = minScore,
     ).filter { "${it.whom}:${it.id}" !in excludeKeys }
-    return hits.take(k)
-        .mapNotNull { db.messages().getOne(it.whom, it.id) }
-        .filterNot { it.isDeleted }
+    return hydrateHits(hits.take(k), db.messages()::getOne)
 }

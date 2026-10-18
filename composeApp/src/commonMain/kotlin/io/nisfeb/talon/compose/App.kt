@@ -1401,9 +1401,10 @@ fun App(
         // state until the user happened to open Search. start() is a
         // no-op if already running, so flipping any toggle (or cold-
         // launching with one already on) just wakes the indexer once.
+        // Off stops it, mid-session too.
         LaunchedEffect(searchEmbedderClient, aiState.smartFeaturesEnabled) {
             val client = searchEmbedderClient ?: return@LaunchedEffect
-            if (aiState.smartFeaturesEnabled) runCatching { client.start() }
+            if (aiState.smartFeaturesEnabled) runCatching { client.start() } else runCatching { client.stop() }
         }
 
         // Populate message_media for messages that pre-date Task 2.3's

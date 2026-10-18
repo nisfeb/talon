@@ -62,6 +62,10 @@ import io.nisfeb.talon.util.rememberImagePicker
 import kotlinx.coroutines.launch
 import io.nisfeb.talon.ui.icons.TalonIcons
 
+/** Whether [me] hosts the group or is one of its admins. */
+private fun mayAdminister(me: String, flag: String, group: AdminGroup): Boolean =
+    me.isNotEmpty() && (me == flag.substringBefore('/') || group.members.any { it.ship == me && it.isAdmin })
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupAdminScreen(
@@ -126,10 +130,14 @@ fun GroupAdminScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
                 maxLines = 1,
             )
-            io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
-                onClick = { newChannelOpen = true },
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "New channel")
+            // A member, or a group still loading, is not offered what only
+            // an admin may do: the ship would refuse the channel.
+            if (group?.let { mayAdminister(me, flag, it) } == true) {
+                io.nisfeb.talon.ui.IconButton(tip = "New channel", enabled = !creatingChannel,
+                    onClick = { newChannelOpen = true },
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "New channel")
+                }
             }
         }
         HorizontalDivider()
@@ -549,9 +557,7 @@ private fun AdminBody(
     // so everything that changes the group has to be gated rather than
     // relying on the ship to refuse. Editing a field that silently
     // never persists is worse than not offering it.
-    val mayAdminister = me.isNotEmpty() &&
-        (me == flag.substringBefore('/') ||
-            group.members.any { it.ship == me && it.isAdmin })
+    val mayAdminister = mayAdminister(me, flag, group)
 
     val metaDirty = title != group.title.orEmpty() ||
         description != group.description.orEmpty() ||

@@ -19,10 +19,12 @@ interface SearchEmbedderClient {
     /** Background-indexing progress for the status line. */
     val progress: StateFlow<IndexProgress>
 
-    /** Kick off catch-up indexing. No-op if already running. */
+    /** Run a pass over the messages kept here: new and edited ones are
+     *  embedded, deleted ones dropped. No-op if one is already running. */
     suspend fun start()
 
-    /** Stop indexing and wait until it has: the ship's database closes next. */
+    /** Stop indexing and wait until it has: the smart switch went off, or
+     *  the ship's database closes next. [start] runs a new pass after. */
     suspend fun stop() {}
 
     /** Embed the query, run cosine-sim search, return hit messages
