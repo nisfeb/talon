@@ -1403,15 +1403,23 @@ fun DmChatScreen(
             self = ship == ourPatp,
             contact = freshContact,
             isInBook = ship in bookContacts,
+            // On the repo's scope, so leaving the chat keeps the write; and
+            // said when it does not land, where it used to go silently.
             onAddContact = {
                 val target = ship
                 profileSheetShip = null
-                scope.launch { runCatching { repo.addContact(target) } }
+                scope.launch {
+                    runCatching { repo.carry { repo.addContact(target) } }
+                        .onFailure { composerState.failed("add contact", it) }
+                }
             },
             onRemoveContact = {
                 val target = ship
                 profileSheetShip = null
-                scope.launch { runCatching { repo.removeContact(target) } }
+                scope.launch {
+                    runCatching { repo.carry { repo.removeContact(target) } }
+                        .onFailure { composerState.failed("remove contact", it) }
+                }
             },
             onMessage = {
                 profileSheetShip = null

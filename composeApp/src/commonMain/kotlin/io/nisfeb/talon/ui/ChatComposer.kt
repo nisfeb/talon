@@ -175,6 +175,8 @@ class ComposerState(initialDraftText: String) {
         "react" -> "reaction"
         "notify" -> "notification setting"
         "voice send" -> "voice message"
+        "add contact" -> "new contact"
+        "remove contact" -> "contact removal"
         else -> what
     }
 

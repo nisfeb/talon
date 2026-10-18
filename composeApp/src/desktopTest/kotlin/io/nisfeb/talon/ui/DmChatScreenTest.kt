@@ -756,4 +756,39 @@ class DmChatScreenTest {
         onNode(hasSetTextAction()).performTextInput(" there")
         waitUntil(timeoutMillis = 20_000) { draft() == "hello there" }
     }
+
+    // ─── the profile sheet ─────────────────────────────────────────
+
+    private val sam: suspend AppDatabase.() -> Unit = {
+        contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam Bell", null, null)))
+        messages().upsert(msg("~sampel-palnet/170141184506", "~sampel-palnet", "hi from sam", 1_000))
+    }
+
+    private fun ComposeUiTest.addSam() {
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("SB").onFirst().performClick()
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Add to contacts").performClick()
+    }
+
+    @Test
+    fun `adding a contact the ship refuses says so`() = chat(seed = sam, prepare = { refuse = { if (it.app == "contacts") "nope" else null } }) { _, _ ->
+        addSam()
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("add contact failed: the ship refused it").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // Real time: the poke is held on the ship's side while the chat goes.
+    @Test
+    fun `a contact added just before leaving the chat is still added`() {
+        val host = Host("~bus")
+        chat(seed = sam, host = host, prepare = { holdPoke = 1_000 }) { ship, _ ->
+            addSam()
+            waitForIdle()
+            host.shown = false
+            waitForIdle()
+            val until = System.currentTimeMillis() + 10_000
+            while (ship.pokesTo("contacts").size < 2 && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertEquals(2, ship.pokesTo("contacts").size, "meet, then the book page")
+        }
+    }
 }
