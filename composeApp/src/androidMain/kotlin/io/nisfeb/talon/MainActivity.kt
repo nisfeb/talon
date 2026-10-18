@@ -263,15 +263,17 @@ class MainActivity : ComponentActivity() {
         var consumedDeepLink = false
         val trusted = callsTrusted(intent)
         val ring = trusted && io.nisfeb.talon.call.RingIntents.isRing(intent::hasExtra)
+        // A call back acts on its ship, as a ring does.
+        val actsOnShip = ring || trusted && intent.hasExtra(Notifications.EXTRA_CALL_BACK)
         // Read before the target, though order does not matter here:
         // what matters is that TalonApp switches ships before it acts
         // on any of the rest.
         intent.getStringExtra(Notifications.EXTRA_FOR_SHIP)?.let {
-            if (ring) {
-                // A ring for another of the owner's ships: only that ship's
-                // controller hears it, so go there now. Not as a deep link,
-                // which with nothing else in it TalonApp never consumes: the
-                // next switch away would have come straight back.
+            if (actsOnShip) {
+                // A ring or call back for another of the owner's ships: only
+                // that ship's controller acts on it, so go there now. Not as
+                // a deep link, which with nothing else in it TalonApp never
+                // consumes: the next switch away would have come straight back.
                 val app = applicationContext as TalonApplication
                 io.nisfeb.talon.call.RingIntents.shipToSwitch(it, app.activeShipFlow.value, app.allShipsFlow.value)
                     ?.let(app::switchShip)

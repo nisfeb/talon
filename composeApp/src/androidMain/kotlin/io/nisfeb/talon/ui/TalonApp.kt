@@ -589,7 +589,7 @@ fun TalonApp(
                     val who = ringingFrom
                     ringingFrom = null
                     if (who != null && s.reason != "declined") {
-                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who))
+                        io.nisfeb.talon.Notifications.showMissedCall(app, who, contactMap.displayName(who), forShip = loggedInShip)
                     }
                     stopShowingOverLockScreen(context)
                 }
@@ -601,7 +601,11 @@ fun TalonApp(
             }
         }
         if (initialCallBack != null) {
-            androidx.compose.runtime.LaunchedEffect(initialCallBack) {
+            // Keyed on the controller: a call back for another ship switches
+            // first (MainActivity), and the call goes from that ship's
+            // controller once this screen has caught up with the switch.
+            androidx.compose.runtime.LaunchedEffect(callController, initialCallBack) {
+                if (loggedInShip != app.activeShipFlow.value) return@LaunchedEffect
                 callController.placeCall(initialCallBack)
                 onCallBackConsumed()
             }

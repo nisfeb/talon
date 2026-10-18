@@ -144,4 +144,21 @@ class AndroidLifecycleGuardTest {
         assertTrue("shareStep(target, share is ShareIntent.Text, direct = true) != io.nisfeb.talon.ui.ShareStep.Pick" in talonApp)
         assertTrue("dispatchShare(pendingShare, whom, false)" in talonApp, "the in-app pick is marked direct")
     }
+
+    // B3-12: RingIntents.missedExtras (NativeCallsTest).
+    @Test
+    fun `a missed call's body opens the DM on its ship and Call back calls from there`() {
+        val missed = notifications.substringAfter("fun showMissedCall(").substringBefore("\n    }\n")
+        assertTrue(".setContentIntent(message)" in missed && ".setContentIntent(callBack)" !in missed, missed)
+        assertTrue("missedExtras(io.nisfeb.talon.call.RingIntents.Missed.CallBack, from, forShip)" in missed, missed)
+        assertTrue("missedExtras(io.nisfeb.talon.call.RingIntents.Missed.Open, from, forShip)" in missed, missed)
+        assertTrue("putExtra(EXTRA_CALL_BACK" !in missed && "putExtra(EXTRA_OPEN_WHOM" !in missed, "a tap without its ship")
+        assertTrue("showMissedCall(context, from, name, forShip)" in notifications && "shownCallForShip = forShip" in notifications)
+        assertTrue("showMissedCall(app, who, contactMap.displayName(who), forShip = loggedInShip)" in talonApp)
+        val consume = activity.substringAfter("private fun consumeIntent(").substringBefore("\n    }\n")
+        assertTrue("val actsOnShip = ring || trusted &&" in consume && "if (actsOnShip) {" in consume, consume)
+        assertTrue("intent.hasExtra(Notifications.EXTRA_CALL_BACK)" in consume)
+        val callBack = talonApp.substringAfter("LaunchedEffect(callController, initialCallBack) {").substringBefore("\n            }\n")
+        assertTrue("if (loggedInShip != app.activeShipFlow.value) return@LaunchedEffect" in callBack, "the old ship's controller calls back")
+    }
 }

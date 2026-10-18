@@ -60,7 +60,7 @@ object Notifications {
     /** A ring to show, from the full-screen intent or a tap on the body: it never answers. */
     const val EXTRA_RINGING_FROM = io.nisfeb.talon.call.RingIntents.RINGING_FROM
     /** A ship to call back, from a missed-call notification. */
-    const val EXTRA_CALL_BACK = "call_back"
+    const val EXTRA_CALL_BACK = io.nisfeb.talon.call.RingIntents.CALL_BACK
 
     /** One notification id for calls: only one can ring at a time. */
     private const val CALL_NOTIFICATION_ID = 0x0CA11
@@ -73,8 +73,8 @@ object Notifications {
      * else's conversation or nothing at all. The relay has always sent
      * the ship; it was only ever used as the notification's title.
      */
-    const val EXTRA_FOR_SHIP = "for_ship"
-    const val EXTRA_OPEN_WHOM = "open_whom"
+    const val EXTRA_FOR_SHIP = io.nisfeb.talon.call.RingIntents.FOR_SHIP
+    const val EXTRA_OPEN_WHOM = io.nisfeb.talon.call.RingIntents.OPEN_WHOM
     const val EXTRA_SCROLL_TO_MESSAGE = "scroll_to_message"
     /** When the notification is for a reply, the parent post id —
      *  TalonApp uses it to route into ThreadScreen rather than the
@@ -405,6 +405,7 @@ object Notifications {
         shownCallId = callId
         shownCallFrom = from
         shownCallName = name
+        shownCallForShip = forShip
         when {
             inAppRingExpected -> Unit // the in-app ring is already sounding
             // Notifications denied means notify() above was dropped on
@@ -436,6 +437,8 @@ object Notifications {
     private var shownCallFrom: String? = null
     @Volatile
     private var shownCallName: String? = null
+    @Volatile
+    private var shownCallForShip: String? = null
 
     /** True while TalonApp has a live CallController composed — the
      *  thing that actually plays the in-app ring. Set by TalonApp; the
@@ -463,9 +466,15 @@ object Notifications {
      * call never reaches the system call log (that needs the dialer
      * role), so this is where a missed call lives on Android: a notice
      * with Call back and Message, which is how every non-dialer app
-     * behaves. Silent: the ring already made its noise.
+     * behaves. Silent: the ring already made its noise. Its body opens
+     * the DM, as Message does (RingIntents.missedExtras). It used to
+     * dial at once.
      */
-    fun showMissedCall(context: Context, from: String, name: String) {
+    fun showMissedCall(
+        context: Context, from: String, name: String,
+        /** The ship rung. Each tap goes to it first. */
+        forShip: String?,
+    ) {
         ensureChannel(context)
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
@@ -473,7 +482,8 @@ object Notifications {
             context, from.hashCode(),
             tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_CALL_BACK, from)
+                io.nisfeb.talon.call.RingIntents.missedExtras(io.nisfeb.talon.call.RingIntents.Missed.CallBack, from, forShip)
+                    .forEach { (k, v) -> putExtra(k, v) }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -481,7 +491,8 @@ object Notifications {
             context, from.hashCode() + 1,
             tapIntent(context).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_OPEN_WHOM, from)
+                io.nisfeb.talon.call.RingIntents.missedExtras(io.nisfeb.talon.call.RingIntents.Missed.Open, from, forShip)
+                    .forEach { (k, v) -> putExtra(k, v) }
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -493,7 +504,7 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setSilent(true)
             .setAutoCancel(true)
-            .setContentIntent(callBack)
+            .setContentIntent(message)
             .addAction(android.R.drawable.sym_action_call, "Call back", callBack)
             .addAction(android.R.drawable.sym_action_chat, "Message", message)
             .build()
@@ -526,9 +537,10 @@ object Notifications {
         if (shownCallId != callId) return
         val from = shownCallFrom
         val name = shownCallName ?: from
+        val forShip = shownCallForShip
         cancelIncomingCall(context)
         if (reason == "answered" || callControllerLive || from == null || name == null) return
-        showMissedCall(context, from, name)
+        showMissedCall(context, from, name, forShip)
     }
 
     fun showMessage(

@@ -67,6 +67,21 @@ class NativeCallsTest {
         assertEquals(CallEnd.Local, callEnd(incoming = false, answered = true, end = none))
     }
 
+    // B3-12: a tap on a missed call's body dialled at once.
+    @Test
+    fun aMissedCallsBodyOpensTheDmAndOnlyCallBackCalls() {
+        val open = RingIntents.missedExtras(RingIntents.Missed.Open, "~bus", forShip = "~zod")
+        assertEquals(mapOf(RingIntents.OPEN_WHOM to "~bus", RingIntents.FOR_SHIP to "~zod"), open)
+        val callBack = RingIntents.missedExtras(RingIntents.Missed.CallBack, "~bus", forShip = "~zod")
+        assertEquals(mapOf(RingIntents.CALL_BACK to "~bus", RingIntents.FOR_SHIP to "~zod"), callBack)
+        assertEquals(mapOf(RingIntents.OPEN_WHOM to "~bus"), RingIntents.missedExtras(RingIntents.Missed.Open, "~bus", forShip = null))
+        assertFalse(RingIntents.isRing { it in open || it in callBack }, "neither shows a ring over the lock screen")
+        // What MainActivity and older notifications read.
+        assertEquals("open_whom", RingIntents.OPEN_WHOM)
+        assertEquals("call_back", RingIntents.CALL_BACK)
+        assertEquals("for_ship", RingIntents.FOR_SHIP)
+    }
+
     @Test
     fun glareEndsTheOutgoingCallItReplaced() {
         assertEquals("ours", abandonedOutgoing(reported = "ours", outgoing = true, ringing = "theirs"))
