@@ -35,7 +35,6 @@ import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.TlonChatRepo
-import io.nisfeb.talon.util.createAppHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +46,9 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import io.ktor.client.engine.mock.respond
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 /**
  * The conversation screen end to end: what it shows from the database,
@@ -58,11 +60,19 @@ import kotlin.test.assertTrue
 class DmChatScreenTest {
     private val threads = mutableListOf<String>()
 
+    /** What a test changes under the screen: the chat it shows, and whether it is there at all. */
+    private class Host(whom: String) {
+        var whom by androidx.compose.runtime.mutableStateOf(whom)
+        var shown by androidx.compose.runtime.mutableStateOf(true)
+    }
+
     private fun chat(
         seed: suspend AppDatabase.() -> Unit = {},
         whom: String = "~bus",
         prepare: FakeShip.() -> Unit = {},
         jumpTo: String? = null,
+        host: Host = Host(whom),
+        drafts: DraftStore = InMemoryDraftStore(),
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -84,10 +94,10 @@ class DmChatScreenTest {
                         },
                     ) {
                     TalonTheme(darkTheme = false) {
-                        DmChatScreen(
-                            db = db, repo = repo, drafts = InMemoryDraftStore(), http = createAppHttpClient(),
+                        if (host.shown) DmChatScreen(
+                            db = db, repo = repo, drafts = drafts, http = offline,
                             aiSettings = FakeAiSettings(), uiSettings = InMemoryUiSettings(),
-                            ourPatp = "~zod", whom = whom,
+                            ourPatp = "~zod", whom = host.whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
@@ -105,6 +115,11 @@ class DmChatScreenTest {
             tmp.deleteRecursively()
         }
     }
+
+    /** The web, as far as these tests go: nothing there. A link's preview is not fetched from the real one. */
+    private val offline = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+        respond("", io.ktor.http.HttpStatusCode.NotFound)
+    })
 
     /** What the screen put on the clipboard. */
     private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -672,5 +687,18 @@ class DmChatScreenTest {
             "\"cite\":{\"chan\":{\"nest\":\"chat/~darduc-mitfen/v3l8bgc0\",\"where\":\"/msg/170.141.184.508.207.337.420.778.996.591.277.113.344\"}}" in sent,
             sent,
         )
+    }
+
+    // ─── words as they were written ────────────────────────────────
+
+    @Test
+    fun `copy text gives a link its whole address`() = chat(seed = {
+        val url = "https://example.com/articles/2026/10/a-very-long-slug"
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["see ",{"link":{"href":"$url","content":"$url"}}]}]""", "/chat"))
+    }) { _, _ ->
+        menuOf("see example.com/articles…")
+        onNodeWithText("Copy text").performClick()
+        waitForIdle()
+        assertEquals(listOf("see https://example.com/articles/2026/10/a-very-long-slug"), copied.toList())
     }
 }

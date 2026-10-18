@@ -121,7 +121,7 @@ object StoryCache {
         val partsForId = partsFor(id, contentJson)
         val text = partsForId.joinToString("\n") { part ->
             when (part) {
-                is StoryPart.Text -> part.text.text
+                is StoryPart.Text -> withAddresses(part.text)
                 is StoryPart.Image -> part.alt?.takeIf { it.isNotBlank() } ?: "[image]"
                 is StoryPart.Code -> "```\n${part.code}\n```"
                 is StoryPart.Table -> (listOf(part.header) + part.rows)
@@ -139,4 +139,26 @@ object StoryCache {
         }
         return text
     }
+}
+
+/**
+ * [text] with each link drawn as its address cut short given the whole
+ * address back. The cut is for the screen only: Copy text, a new event's
+ * notes and the assistant's reads all got "example.com/a/long/p…" in
+ * place of the link. A link its author named keeps the name.
+ */
+internal fun withAddresses(text: androidx.compose.ui.text.AnnotatedString): String {
+    val links = text.getStringAnnotations(URL_TAG, 0, text.length).sortedBy { it.start }
+    if (links.isEmpty()) return text.text
+    val out = StringBuilder()
+    var at = 0
+    for (link in links) {
+        if (link.start < at) continue
+        val shown = text.text.substring(link.start, link.end)
+        out.append(text.text, at, link.start)
+        out.append(if (shown != link.item && shown == shortLinkLabel(link.item)) link.item else shown)
+        at = link.end
+    }
+    out.append(text.text, at, text.length)
+    return out.toString()
 }
