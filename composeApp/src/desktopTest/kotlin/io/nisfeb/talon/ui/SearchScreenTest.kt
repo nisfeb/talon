@@ -73,8 +73,9 @@ class SearchScreenTest {
     private class Embedder(@Volatile var meaning: List<MessageEntity>, private val highlights: List<MessageEntity>) : SearchEmbedderClient {
         override val progress = MutableStateFlow(IndexProgress(indexed = 3, total = 3))
         @Volatile var starts = 0
+        @Volatile var asked = 0
         override suspend fun start() { starts++ }
-        override suspend fun semanticSearch(query: String) = meaning
+        override suspend fun semanticSearch(query: String) = meaning.also { asked++ }
         override suspend fun keywordSearch(terms: List<String>) = emptyList<MessageEntity>()
         override suspend fun embed(text: String): FloatArray? = null
         override suspend fun computeHighlights() = highlights
@@ -86,6 +87,8 @@ class SearchScreenTest {
 
     private fun search(embedder: SearchEmbedderClient? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         SearchDraft.query = ""
+        // A pass is run at most every ten minutes, process-wide: each test is a fresh start.
+        io.nisfeb.talon.ui.screens.lastSearchPassMs = Long.MIN_VALUE / 2
         setContent {
             TalonTheme(darkTheme = false) {
                 if (shown.value) SearchScreen(
@@ -193,13 +196,44 @@ class SearchScreenTest {
         search(embedder) {
             waitUntil(timeoutMillis = 5_000) { embedder.starts == 1 }
             type("evening meal", "dinner later")
+            val asked = embedder.asked
             embedder.progress.value = IndexProgress(running = true, indexed = 3, total = 4)
             waitUntil(timeoutMillis = 5_000) { shows("Indexing 3 of 4") }
+            waitForIdle()
+            // B6-8: a pass starting does not ask the same query again.
+            assertEquals(asked, embedder.asked, "asked again as the pass began")
             // The pass found a message that came in since, and ends.
             embedder.meaning = listOf(dinner, noon)
             embedder.progress.value = IndexProgress(running = false, indexed = 4, total = 4)
             waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("4 messages indexed") }
         }
+    }
+
+    // B6-8: every smart Search open ran a whole indexer pass.
+    @Test
+    fun `smart search opened again soon runs no second pass`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = Embedder(meaning = listOf(dinner), highlights = emptyList())
+        search(embedder) {
+            waitUntil(timeoutMillis = 5_000) { embedder.starts == 1 }
+            shown.value = false
+            waitForIdle()
+            shown.value = true
+            waitForIdle()
+            type("evening meal", "dinner later")
+            assertEquals(1, embedder.starts)
+        }
+    }
+
+    // B5-11: the results were a live query, scanned again on every write.
+    @Test
+    fun `results shown are not scanned again on a write`() = search {
+        type("lunch", "lunch at noon")
+        runBlocking { db.messages().upsert(msg("~bus", "9", "~bus", 3 * day, "lunch again friday")) }
+        waitForIdle()
+        assertTrue(!shows("lunch again friday"), "the scan ran again on a write")
+        // A new query reads afresh.
+        type("lunch again", "lunch again friday")
     }
 
     @Test
