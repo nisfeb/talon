@@ -238,6 +238,15 @@ class ArmillaryApiTest {
         assertEquals(CheckoutAnswer.Refused("amount: below the minimum"), refused.checkout("stripe", null, 1L))
     }
 
+    // A 2xx with no page in it opened "", which failed without a word.
+    @Test
+    fun `a checkout answered with no page is followed by its name, or said`() = runTest {
+        val named = api { HttpStatusCode.OK to """{"nonce":"n9","url":""}""" }
+        assertEquals(CheckoutAnswer.Pending("n9"), named.checkout("stripe", null, 5_000_000L))
+        val bare = api { HttpStatusCode.OK to "{}" }
+        assertEquals(CheckoutAnswer.Refused(NO_CHECKOUT_PAGE), bare.checkout("stripe", null, 5_000_000L))
+    }
+
     // nginx's page for a ship that is down was read as the ship refusing,
     // and a checkout as the vendor refusing it.
     @Test

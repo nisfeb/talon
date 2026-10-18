@@ -119,7 +119,16 @@ class ArmillaryApi(
                 CheckoutAnswer.Pending(reading { Json.parseToJsonElement(text).jsonObject }.str("nonce").orEmpty())
             resp.status.isSuccess() -> {
                 val o = reading { Json.parseToJsonElement(text).jsonObject }
-                CheckoutAnswer.Url(o.str("url").orEmpty(), o.str("nonce").orEmpty())
+                val url = o.str("url").orEmpty()
+                val nonce = o.str("nonce").orEmpty()
+                when {
+                    url.isNotBlank() -> CheckoutAnswer.Url(url, nonce)
+                    // An answer with no page in it: followed as a 202 is,
+                    // where it names the checkout. It opened "" before,
+                    // which failed without a word.
+                    nonce.isNotBlank() -> CheckoutAnswer.Pending(nonce)
+                    else -> CheckoutAnswer.Refused(NO_CHECKOUT_PAGE)
+                }
             }
             resp.status.value == BAD_GATEWAY -> CheckoutAnswer.Refused(armillaryReason(text))
             else -> throw ArmillaryError.Refused(resp.status.value, armillaryReason(text))
@@ -554,3 +563,6 @@ fun money(micro: Long): String {
     val cents = (micro + 5_000L) / 10_000L
     return "$" + (cents / 100) + "." + (cents % 100).toString().padStart(2, '0')
 }
+
+/** A checkout answered with neither a page nor the checkout's name. */
+internal const val NO_CHECKOUT_PAGE = "Your ship answered without a checkout page. Refresh, then try again."
