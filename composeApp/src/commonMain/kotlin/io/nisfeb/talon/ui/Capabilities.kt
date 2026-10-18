@@ -43,6 +43,8 @@ package io.nisfeb.talon.ui
  *
  * [platformLabel] and [isOnDeviceAiFeatureSupported] are declared
  * below too — a display name and a per-feature predicate, not flags.
+ * So is [iosDeviceName]: "iPhone" or "iPad" on iOS, for the words only
+ * iOS shows.
  */
 expect val isVoiceMessagesSupported: Boolean
 
@@ -183,6 +185,13 @@ expect val isTapToOpenMenuSupported: Boolean
  * "Mac OS X", "Windows 11").
  */
 expect val platformLabel: String
+
+/**
+ * What iOS text calls this device: "iPhone", or "iPad" on an iPad, which
+ * was told about "this iPhone". "iPhone" elsewhere: those words only show
+ * on iOS, and desktop tests draw them.
+ */
+expect val iosDeviceName: String
 
 /**
  * Per-feature supported predicate. The [isOnDeviceAiSupported] flag

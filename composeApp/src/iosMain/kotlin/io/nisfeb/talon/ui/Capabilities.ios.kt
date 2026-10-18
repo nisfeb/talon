@@ -28,6 +28,9 @@ actual val isTapToOpenMenuSupported: Boolean = true
 
 actual val platformLabel: String = "iOS ${UIDevice.currentDevice.systemVersion}"
 
+actual val iosDeviceName: String =
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone) "iPhone" else "iPad"
+
 actual fun isOnDeviceAiFeatureSupported(
     @Suppress("UNUSED_PARAMETER") feature: io.nisfeb.talon.ai.AiSettings.Feature,
 ): Boolean = false
