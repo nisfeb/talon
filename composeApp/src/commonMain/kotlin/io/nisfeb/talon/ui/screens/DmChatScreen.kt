@@ -419,6 +419,10 @@ fun DmChatScreen(
     // for the chat they're already in (hasAnchored is already true from
     // the initial bottom-snap). Keyed on whom so a chat switch resets.
     var lastAppliedAnchor by remember(whom) { mutableStateOf<String?>(null) }
+    // The post to open at, as rows keep it: a notification's id is dotted.
+    val jumpId = remember(whom, initialScrollMessageId) {
+        initialScrollMessageId?.let { io.nisfeb.talon.urbit.keptPostId(whom, it) }
+    }
     val scope = rememberCoroutineScope()
     // A post jumped to (the pin, a topic) that the window is taking in.
     var pendingJump by remember(whom) { mutableStateOf<String?>(null) }
@@ -476,17 +480,17 @@ fun DmChatScreen(
             placeDivider(currentRows)
         }
     }
-    LaunchedEffect(displayRows.size, initialScrollMessageId, dividerResolved) {
+    LaunchedEffect(displayRows.size, jumpId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
-        if (initialScrollMessageId != null && initialScrollMessageId != lastAppliedAnchor) {
+        if (jumpId != null && jumpId != lastAppliedAnchor) {
             val originalIdx = displayRows.indexOfFirst { item ->
-                item is ChatListItem.Message && item.row.m.id == initialScrollMessageId
+                item is ChatListItem.Message && item.row.m.id == jumpId
             }
             if (originalIdx >= 0) {
                 listState.scrollToItem(displayRows.lastIndex - originalIdx)
                 hasAnchored = true
-                flashMessageId = initialScrollMessageId
-                lastAppliedAnchor = initialScrollMessageId
+                flashMessageId = jumpId
+                lastAppliedAnchor = jumpId
                 onScrollConsumed()
                 return@LaunchedEffect
             }
@@ -626,8 +630,8 @@ fun DmChatScreen(
     // is waited for. Still not here, it is said, where the chat used to
     // open at the bottom with no word. Not fetched alone: a lone old post
     // stored here leaves a hole behind it that paging never fills.
-    LaunchedEffect(whom, initialScrollMessageId) {
-        val id = initialScrollMessageId ?: return@LaunchedEffect
+    LaunchedEffect(whom, jumpId) {
+        val id = jumpId ?: return@LaunchedEffect
         if (reach(id)) return@LaunchedEffect
         snapshotFlow { refreshing }.first { !it }
         if (reach(id)) return@LaunchedEffect

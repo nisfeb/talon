@@ -402,6 +402,15 @@ internal fun canonicalPostIdForWhom(whom: String?, rawId: String?): String? {
     return if (isChannel) rawId.substringAfterLast('/') else rawId
 }
 
+/**
+ * A post id from a notification, a hint or a link, in the form kept here
+ * for [whom]: channel posts by their bare id, and never dot-grouped. The
+ * %activity id is `~author/<dotted ud>`; rows keep `~author/<ud>` for DMs
+ * and clubs and `<ud>` for channels.
+ */
+internal fun keptPostId(whom: String, rawId: String): String =
+    undotAtom(canonicalPostIdForWhom(whom, rawId) ?: rawId)
+
 internal fun parseActivityEventTarget(tag: String, eventObj: JsonObject): ActivityEventTarget {
     val keyId = (eventObj["key"] as? JsonObject)?.get("id").asStr()
         ?: eventObj["id"].asStr()
