@@ -22,7 +22,7 @@ data class NotificationCandidate(
  * same message id repeatedly.
  */
 data class NewMessageDiff(
-    val newLastSeen: Map<String, String>,
+    val newLastSeen: Map<String, MessageEntity>,
     val notifications: List<NotificationCandidate>,
 )
 
@@ -32,8 +32,8 @@ data class NewMessageDiff(
  * notification spam for every existing chat. Subsequent emissions go
  * through [diffNewMessageNotifications].
  */
-fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
-    rows.associate { it.whom to it.id }
+fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, MessageEntity> =
+    rows.associateBy { it.whom }
 
 /**
  * Pure decision function: given the latest message per conversation
@@ -41,7 +41,9 @@ fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
  * plus the updated baseline.
  *
  * A row triggers a notification when ALL of:
- *   1. Its id changed since the prior baseline (or it's a new whom).
+ *   1. Its id changed since the prior baseline (or it's a new whom),
+ *      and it is not older than the row it replaces: the newest
+ *      message deleted brings back the one before it, which is old news.
  *   2. Its author is not the local user (no self-notify).
  *   3. Its whom is not the currently-open chat (the user is already
  *      looking at it).
@@ -54,7 +56,7 @@ fun seedNewMessageBaseline(rows: List<MessageEntity>): Map<String, String> =
  */
 fun diffNewMessageNotifications(
     rows: List<MessageEntity>,
-    lastSeen: Map<String, String>,
+    lastSeen: Map<String, MessageEntity>,
     ourPatp: String?,
     openChat: String?,
     /** whom → stored level ("all" / "mentions" / "none"). A whom with
@@ -85,8 +87,8 @@ fun diffNewMessageNotifications(
     val notifications = mutableListOf<NotificationCandidate>()
     for (row in rows) {
         val prior = newLastSeen[row.whom]
-        newLastSeen[row.whom] = row.id
-        if (prior == row.id) continue
+        newLastSeen[row.whom] = row
+        if (prior?.id == row.id || (prior != null && row.sentMs < prior.sentMs)) continue
         if (row.author == ourPatp) continue
         if (row.whom == openChat) continue
         val level = levels[row.whom] ?: NotifyLevel.DEFAULT

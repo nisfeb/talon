@@ -1350,7 +1350,12 @@ fun App(
         // no reason to inherit that.
         LaunchedEffect(mailRepo, notifier) {
             mailRepo.onNewMail = { news ->
-                news.forEach { notifier.notify(it.title, it.body, "mail:" + it.threadId.ifBlank { "more" }) }
+                news.forEach {
+                    // Not for the thread or the list on screen, which
+                    // already say it (as on Android).
+                    val key = "mail:" + it.threadId.ifBlank { "more" }
+                    if (key !in io.nisfeb.talon.notify.ShownConversation.keys) notifier.notify(it.title, it.body, key)
+                }
             }
         }
         // New orrery proposals notify; one answered anywhere is taken back.
@@ -1567,7 +1572,7 @@ fun App(
             // during bootstrap so the next post-bootstrap emission
             // diffs against the loaded snapshot, not against empty.
             LaunchedEffect(notifier, loggedInShip) {
-                var lastSeenIds: Map<String, String> = emptyMap()
+                var lastSeenIds: Map<String, io.nisfeb.talon.data.MessageEntity> = emptyMap()
                 var seeded = false
                 kotlinx.coroutines.flow.combine(
                     db.latestPerConversation(),
