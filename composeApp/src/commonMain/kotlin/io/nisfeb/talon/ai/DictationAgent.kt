@@ -243,7 +243,7 @@ class DictationRun(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            return DictationOutcome.TranscribeFailed(why(e), io.nisfeb.talon.util.errorDetailsOf(e))
+            return DictationOutcome.TranscribeFailed(if (tookTooLong(e)) SPEECH_TOO_SLOW else why(e), io.nisfeb.talon.util.errorDetailsOf(e))
         }
         return if (text.isEmpty()) DictationOutcome.NothingHeard else fromText(text)
     }
@@ -287,6 +287,18 @@ class DictationRun(
             hearing(cfg) == null -> NO_SPEECH_TO_TEXT
             !cfg.loopsCanRun() && !cfg.orreryOn() -> NO_MODEL
             else -> null
+        }
+
+        /** A transcription out of time ([ArmillaryTranscribe.SPOKEN_WAIT_MS]), said calmly. */
+        const val SPEECH_TOO_SLOW = "The speech service took too long"
+
+        /**
+         * Whether [e] is a request that ran out of time. Only a
+         * transcription's says [SPEECH_TOO_SLOW]: [why] serves the model's
+         * calls too, and one of those is no speech service.
+         */
+        fun tookTooLong(e: Throwable): Boolean = generateSequence(e) { it.cause }.take(5).any {
+            it is io.ktor.client.plugins.HttpRequestTimeoutException || it is io.ktor.client.network.sockets.SocketTimeoutException
         }
 
         /** Where a dictation is heard: the Armillary vendor's transcription model ([armillaryHearing]), else nowhere. */

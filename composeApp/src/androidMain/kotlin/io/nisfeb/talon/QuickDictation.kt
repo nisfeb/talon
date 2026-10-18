@@ -514,8 +514,8 @@ class DictationService : Service() {
 
     /**
      * One thing the owner says in a conversation, as text: null when they
-     * said nothing for eight seconds, cancelled, or hung up; "" when it
-     * could not be made out.
+     * said nothing for eight seconds, cancelled, hung up, or the speech
+     * service took too long (said here); "" when it could not be made out.
      */
     private suspend fun hearOnce(transcribe: suspend (ByteArray) -> String): String? {
         // An answer to "send?" leaves the recording marked cancelled.
@@ -537,7 +537,12 @@ class DictationService : Service() {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "could not transcribe a turn: ${e.message}")
-            ""
+            // Minutes with no words back is not "didn't catch that": said, and the conversation ends.
+            if (!DictationRun.tookTooLong(e)) return ""
+            val line = DictationRun.SPEECH_TOO_SLOW + ". Try again."
+            QuickDictation.show(QuickDictation.Stage.Said(line))
+            say(line)
+            null
         }
     }
 
@@ -606,6 +611,7 @@ class DictationService : Service() {
                 io.nisfeb.talon.ai.ArmillaryTranscribe.transcribe(
                     app.ktorHttp, hearing, m4a ?: wav, if (m4a != null) "m4a" else "wav",
                     java.util.Locale.getDefault().language,
+                    timeoutMs = io.nisfeb.talon.ai.ArmillaryTranscribe.SPOKEN_WAIT_MS,
                 ).also {
                     Log.i(TAG, "transcribed through Armillary (${hearing.model} at ${android.net.Uri.parse(hearing.baseUrl).host}), ${if (m4a != null) "m4a ${m4a.size}" else "wav ${wav.size}"} bytes of ${wav.size} in ${System.currentTimeMillis() - t0} ms")
                 }
@@ -927,9 +933,11 @@ class DictationService : Service() {
         private const val ONGOING_ID = 7705
         private const val RESULT_ID = 7706
         private const val TAG = "Dictation"
-        // A dictation's agent run: several model calls, each allowed 120 s by AgentClient.
+        // A dictation's agent run: several model calls. Through Armillary
+        // each may wait 11 minutes (ARMILLARY_WAIT_MS), so this bounds the run.
         private const val RUN_BUDGET_MS = 4L * 60 * 1000
-        // The run, the transcription (up to 180 s) and two minutes of talking.
+        // Up to two minutes of talking (EndOfSpeech), the transcription (up
+        // to 3 minutes, SPOKEN_WAIT_MS), the run (4) and the answer said.
         private const val WAKE_LOCK_MS = 10L * 60 * 1000
     }
 }

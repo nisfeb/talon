@@ -35,11 +35,11 @@ object ArmillaryTranscribe {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
-     * The proxy waits up to ten minutes on an upstream (armillary 33), and
-     * a self-vendor's own speech server is decoded on the ship first,
-     * about 11 s per 3.6 MB: [ARMILLARY_WAIT_MS] covers both.
+     * How long a dictation's or an Archie turn's words may take: the owner
+     * is waiting on them, and eleven minutes was no answer at all. A call
+     * recording keeps [ARMILLARY_WAIT_MS], since nobody waits on it.
      */
-    private const val TIMEOUT_MS = ARMILLARY_WAIT_MS
+    const val SPOKEN_WAIT_MS = 3 * 60_000L
 
     /** The request body: the audio as base64, kept to endpoints that keep nothing. */
     @OptIn(ExperimentalEncodingApi::class)
@@ -59,7 +59,10 @@ object ArmillaryTranscribe {
      * [audio] ([format]: "m4a", "wav", ...) as text. Throws
      * [ModelHttpError] with the status for a refusal, so the line said
      * about it is in words ([DictationRun.why]); an empty balance in the
-     * words every other Armillary feature uses.
+     * words every other Armillary feature uses. [timeoutMs] by default
+     * covers the proxy's ten minutes on an upstream (armillary 33) and a
+     * self-vendor's speech server, decoded on the ship first at about
+     * 11 s per 3.6 MB; one the owner waits on passes [SPOKEN_WAIT_MS].
      */
     suspend fun transcribe(
         http: HttpClient,
@@ -67,6 +70,7 @@ object ArmillaryTranscribe {
         audio: ByteArray,
         format: String,
         language: String? = null,
+        timeoutMs: Long = ARMILLARY_WAIT_MS,
     ): String = withContext(ioDispatcher) {
         val url = hearing.baseUrl.trim().trimEnd('/') + "/audio/transcriptions"
         val res = http.post(url) {
@@ -74,8 +78,8 @@ object ArmillaryTranscribe {
             contentType(ContentType.Application.Json)
             setBody(body(hearing.model, audio, format, language).toString())
             timeout {
-                requestTimeoutMillis = TIMEOUT_MS
-                socketTimeoutMillis = TIMEOUT_MS
+                requestTimeoutMillis = timeoutMs
+                socketTimeoutMillis = timeoutMs
             }
         }
         val text = res.bodyAsText()
