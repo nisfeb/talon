@@ -64,7 +64,7 @@ object UrbUnfurlCache {
         val old = row?.let { Unfurl(urbUrl, it.title, it.snippet) }
         if (old != null && (old.title != null || old.snippet != null)) emit(old)
         if (row != null && now() - row.fetchedAtMs < KEEP_MS) return@flow
-        val fresh = await(http, shipUrl, cookie, urbUrl)
+        val fresh = await(http, shipUrl, cookie, urbUrl, now)
         // Only an answer is kept: a fetch that failed is not "no card".
         val answered = fresh != null || lock.withLock { results[urbUrl] == Entry.None }
         if (answered) {
@@ -73,19 +73,34 @@ object UrbUnfurlCache {
         if (fresh != null && fresh != old) emit(fresh)
     }
 
+    /** A failed card is not asked again on every compose, only this long after. */
+    const val FAILED_RETRY_MS = 5 * 60_000L
+    /** A fetch that failed, by when. */
+    private val failedAt = HashMap<String, Long>()
+    /** One fetch per address at a time: a second card for it waits for the first's answer. */
+    private val fetching = HashMap<String, Mutex>()
+
     suspend fun await(
         http: HttpClient,
         shipUrl: String,
         cookie: String,
         urbUrl: String,
-    ): Unfurl? {
-        lock.withLock { (results[urbUrl] as? Entry.Some)?.let { return it.unfurl } }
-        lock.withLock { if (results.containsKey(urbUrl)) return null } // cached "None"
-        return withContext(ioDispatcher) {
+        now: () -> Long = { io.nisfeb.talon.util.nowMs() },
+    ): Unfurl? = lock.withLock { fetching.getOrPut(urbUrl) { Mutex() } }.withLock {
+        lock.withLock {
+            (results[urbUrl] as? Entry.Some)?.let { return it.unfurl }
+            if (results.containsKey(urbUrl)) return null // cached "None"
+            failedAt[urbUrl]?.let { if (now() - it < FAILED_RETRY_MS) return null }
+        }
+        withContext(ioDispatcher) {
             // Only an answer is remembered: a failed or cancelled fetch
             // (its card scrolled away) is not "nothing to show" for the run.
+            // A failed one waits [FAILED_RETRY_MS]; a cancelled one does not.
             val fetched = io.nisfeb.talon.util.runSuspendCatching { fetch(http, shipUrl, cookie, urbUrl) }
-                .getOrElse { return@withContext null }
+                .getOrElse {
+                    lock.withLock { failedAt[urbUrl] = now() }
+                    return@withContext null
+                }
             lock.withLock {
                 results[urbUrl] = if (fetched != null) Entry.Some(fetched) else Entry.None
             }

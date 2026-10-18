@@ -123,6 +123,15 @@ class GalleryScreensTest {
         GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500200", onBack = {})
     }
 
+    // B6-1: a notification's id is %activity's, dotted and with its author.
+    @Test
+    fun `a post opened from a notification's dotted id shows`() = gallery({ _ ->
+        showing("Comments · 1")
+        assertTrue(!shows("may have been deleted"))
+    }) { repo, db ->
+        GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "~zod/170.141.184.500.200", onBack = {})
+    }
+
     @Test
     fun `a refused comment is marked not sent, and its text kept`() = gallery({ ship ->
         ship.refuse = { if (it.app == "channels") "no" else null }

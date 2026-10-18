@@ -156,6 +156,22 @@ class AppShellTest {
 
     // "once you tap add ship there is no way to cancel and return to a
     // working ship".
+    // B1-4: a first read that failed said "No direct messages yet". No
+    // answer is not empty: it says so, and Try again reads them.
+    @Test
+    fun `a first load that fails says so and Try again reads the chats`() = app(setup = { failScry = { "init-posts" in it } }) { ship ->
+        waitUntil(timeoutMillis = 20_000) { showing("Couldn't load your chats") }
+        assertTrue(!showing("No direct messages yet"), "a failed read called empty")
+        ship.answerScry = { if ("init-posts" in it) """{"chat":{},"channels":{}}""" else null }
+        ship.failScry = { false }
+        val asked = ship.scried.count { "init-posts" in it }
+        onNodeWithText("Try again").performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.scried.count { "init-posts" in it } > asked }
+        // Read, and empty: now it is said so.
+        waitUntil(timeoutMillis = 20_000) { !showing("Couldn't load your chats") }
+        assertTrue(showing("No direct messages yet") || showing("No groups yet"), "the empty line")
+    }
+
     @Test
     fun `Add ship can be cancelled, back to the ship that was open`() = app {
         onNodeWithContentDescription("Switch ship").performClick()

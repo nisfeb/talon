@@ -614,6 +614,32 @@ class DmChatScreenTest {
         onNodeWithText("post 005").assertIsDisplayed()
     }
 
+    // B6-1: a notification names its post as %activity does, dotted, and
+    // in a channel with its author. Rows keep it undotted and bare. Each
+    // in a chat no other test opens: the first frame's rows are kept per
+    // chat for the process, and another test's broke the composition.
+    @Test
+    fun `a notification's dotted id lands on its post in a DM`() = chat(
+        whom = "~nec",
+        seed = { messages().upsertAll((0 until 260).map { i -> MessageEntity("~nec", "~nec/1701411845%03d".format(i), "~nec", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat") }) },
+        jumpTo = "~nec/1.701.411.845.005",
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+        assertTrue(onAllNodesWithText("isn't loaded", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a notification's dotted id lands on its post in a channel`() = chat(
+        whom = "chat/~bus/dotted",
+        seed = { messages().upsertAll((0 until 260).map { i -> MessageEntity("chat/~bus/dotted", "1701411845%03d".format(i), "~bus", 1_000L * (i + 1), """[{"inline":["post %03d"]}]""".format(i), "/chat") }) },
+        jumpTo = "~bus/1.701.411.845.005",
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("post 005").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("post 005").assertIsDisplayed()
+        assertTrue(onAllNodesWithText("isn't loaded", substring = true).fetchSemanticsNodes().isEmpty())
+    }
+
     @Test
     fun `a pinned post older than the window is gone to from the banner`() = chat(
         whom = "chat/~bus/general",
@@ -709,6 +735,17 @@ class DmChatScreenTest {
         onNode(hasSetTextAction()).performClick()
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.DirectionUp) }
         waitUntil(timeoutMillis = 20_000) { draft() == "landed earlier" }
+    }
+
+    // B6-4: a post on its way, its poke on the wire, offers no Delete:
+    // the ship takes it anyway, and its echo brought it back.
+    @Test
+    fun `a post still sending offers no delete`() = chat(whom = ours, seed = ourChannel(
+        MessageEntity(ours, "local_170141184599", "~zod", 2_000, """[{"inline":["on its way"]}]""", "/chat", status = "pending"),
+    )) { _, _ ->
+        menuOf("on its way")
+        onNodeWithText("Copy text").assertExists()
+        assertTrue(onAllNodesWithText("Delete").fetchSemanticsNodes().isEmpty(), "offered Delete")
     }
 
     // ─── an edit, until the ship has it ────────────────────────────

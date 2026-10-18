@@ -6,12 +6,24 @@ import kotlin.test.assertEquals
 /**
  * A link written as its own address is drawn cut short, and that cut
  * reached Copy text, a new event's notes and the assistant's reads in
- * place of the address. [StoryCache.textFor] gives the whole of it back.
+ * place of the address. [StoryCache.copyTextFor] gives the whole of it
+ * back. [StoryCache.textFor] is the preview and keeps the cut (B6-6).
  */
 class TextForLinksTest {
     private val long = "https://example.com/articles/2026/10/a-very-long-slug"
 
-    private fun said(id: String, inline: String) = StoryCache.textFor("textfor-$id", """[{"inline":[$inline]}]""")
+    private fun said(id: String, inline: String) = StoryCache.copyTextFor("textfor-$id", """[{"inline":[$inline]}]""")
+
+    @Test
+    fun `a preview keeps a long address cut and a named link its name`() {
+        val json = """[{"inline":["see ",{"link":{"href":"$long","content":"$long"}}]}]"""
+        assertEquals("see ${shortLinkLabel(long)}", StoryCache.textFor("preview-link", json))
+        // The copy of the same post, read after, is not the cached preview.
+        assertEquals("see $long", StoryCache.copyTextFor("preview-link", json))
+        assertEquals("see ${shortLinkLabel(long)}", StoryCache.textFor("preview-link", json))
+        val named = """[{"inline":[{"link":{"href":"$long","content":"the article"}}]}]"""
+        assertEquals("the article", StoryCache.textFor("preview-named", named))
+    }
 
     @Test
     fun `a link shown as its cut address reads as the whole address`() {
@@ -42,8 +54,7 @@ class TextForLinksTest {
         )
     }
 
-    // Straight to the function: textFor keeps what it said for an id, so
-    // a second reading of the same post never reaches it again.
+    // Straight to the function.
     @Test
     fun `words with no link come back as they are`() {
         assertEquals("plain words", withAddresses(androidx.compose.ui.text.AnnotatedString("plain words")))

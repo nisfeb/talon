@@ -40,7 +40,7 @@ class NotebookPostScreenTest {
     private val whom = "diary/~bus/blog"
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
-    private fun post(author: String, commenter: String = "~nec", status: String? = null, block: ComposeUiTest.(FakeShip) -> Unit) {
+    private fun post(author: String, commenter: String = "~nec", status: String? = null, postId: String = "170141184500100", block: ComposeUiTest.(FakeShip) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-diary-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -60,7 +60,7 @@ class NotebookPostScreenTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
                         NotebookPostScreen(
-                            db = db, repo = repo, ourPatp = "~zod", whom = whom, postId = "170141184500100",
+                            db = db, repo = repo, ourPatp = "~zod", whom = whom, postId = postId,
                             onBack = { did += "back" },
                             onEdit = { title, image, body, sent -> did += "edit $title $image $body $sent" },
                         )
@@ -97,6 +97,12 @@ class NotebookPostScreenTest {
             assertEquals(2, onAllNodesWithText("bespoke...kazoo", substring = true).fetchSemanticsNodes().size)
             assertTrue(!shows(comet), "no @p on screen")
         }
+    }
+
+    // B6-1: a notification's id is %activity's, dotted and with its author.
+    @Test
+    fun `a post opened from a notification's dotted id shows`() = post("~bus", postId = "~bus/170.141.184.500.100") { _ ->
+        assertTrue(shows("Spring") && shows("lovely"))
     }
 
     @Test

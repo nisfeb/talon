@@ -44,6 +44,7 @@ import io.nisfeb.talon.ui.Avatar
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.urbit.StoryCache
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.take
 
 /**
  * The query a result was opened from. Android keeps Search open under the
@@ -53,6 +54,12 @@ import kotlinx.coroutines.flow.flowOf
 internal object SearchDraft {
     var query = ""
 }
+
+
+/** When Search last ran an indexer pass, for the life of the process. */
+internal var lastSearchPassMs = Long.MIN_VALUE / 2
+/** Search runs a pass on opening at most this often. */
+private const val SEARCH_PASS_EVERY_MS = 10 * 60_000L
 
 @Composable
 fun SearchScreen(
@@ -103,6 +110,8 @@ fun SearchScreen(
         else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
 
+    // Read once a query: as a live flow the LIKE scan ran again on every
+    // write to messages while the results showed.
     val substringResults by remember(filter, escapedNeedle) {
         if (filter.isTrivial) flowOf(emptyList())
         else db.messages().searchFiltered(
@@ -112,7 +121,7 @@ fun SearchScreen(
             sinceMs = filter.sinceMs,
             hasImage = if (filter.hasImage) 1 else 0,
             hasLink = if (filter.hasLink) 1 else 0,
-        )
+        ).take(1)
     }.collectAsState(initial = emptyList<MessageEntity>())
 
     // People search runs against the keyword text only — operators
@@ -169,15 +178,20 @@ fun SearchScreen(
 
     val semanticResults = remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
     var semanticBusy by remember { mutableStateOf(false) }
-    // Again when a pass ends, so a search typed while it ran sees what it added.
+    var searchedFor by remember { mutableStateOf<String?>(null) }
+    // Again when a pass ends, so a search typed while it ran sees what it
+    // added. Not when one starts: that asked the same query again.
     androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder, indexProgress.running) {
         if (!smartMode || debouncedTrimmed.length < 2 || embedder == null) {
             semanticResults.value = emptyList()
+            searchedFor = null
             return@LaunchedEffect
         }
+        if (indexProgress.running && searchedFor == debouncedTrimmed) return@LaunchedEffect
         semanticBusy = true
         semanticResults.value = runCatching { embedder.semanticSearch(debouncedTrimmed) }
             .getOrElse { emptyList() }
+        searchedFor = debouncedTrimmed
         semanticBusy = false
     }
 
@@ -190,8 +204,12 @@ fun SearchScreen(
     // The shells run a pass when the ship opens with smart features on;
     // using smart search runs another, so messages that came in since,
     // edits and deletions reach it. A no-op while one is running.
+    // Not on every open, though: a pass reads and hashes every message.
     LaunchedEffect(smartMode, embedder) {
-        if (smartMode) runCatching { embedder?.start() }
+        if (smartMode && nowMs() - lastSearchPassMs >= SEARCH_PASS_EVERY_MS) {
+            lastSearchPassMs = nowMs()
+            runCatching { embedder?.start() }
+        }
     }
 
     val results = if (smartMode) semanticResults.value else substringResults

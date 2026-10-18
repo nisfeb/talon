@@ -5,6 +5,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -86,14 +87,41 @@ class FurumPreviewTest {
         assertEquals(1, asked.size)
     }
 
+    // B5-7: a failed card was asked again on every compose. It waits five
+    // minutes now, and is asked again after that.
     @Test
-    fun `a ship that did not answer is not an answer, and is asked again next time`() = runTest {
+    fun `a ship that did not answer is not an answer, and is asked again five minutes on`() = runTest {
         FurumPreview.clear()
         val asked = mutableListOf<String>()
         val http = ship(asked, HttpStatusCode.BadGateway to "", HttpStatusCode.Accepted to "{}")
         val ref = FurumRef("~zod", "flaky")
-        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref))
-        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref, wait = {}))
+        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref, now = { 1_000 }))
+        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref, now = { 1_000 + FurumPreview.FAILED_RETRY_MS - 1 }))
+        assertEquals(1, asked.size, "asked again within five minutes")
+        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref, wait = {}, now = { 1_000 + FurumPreview.FAILED_RETRY_MS }))
         assertEquals(3, asked.size, "a 502, then a 202 asked twice")
+        // Still waiting on the host twice is no answer either.
+        assertNull(FurumPreview.await(http, "https://me.example", "c=1", ref, now = { 1_000 + FurumPreview.FAILED_RETRY_MS + 1 }))
+        assertEquals(3, asked.size)
+    }
+
+    @Test
+    fun `two cards for one post ask the ship once`() = runTest {
+        FurumPreview.clear()
+        val asked = mutableListOf<String>()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val http = HttpClient(MockEngine { req ->
+            asked += req.url.encodedPathAndQuery
+            gate.await()
+            respond(postAnswer, HttpStatusCode.OK, json)
+        })
+        val ref = FurumRef("~zod", "cats", 44)
+        val one = async { FurumPreview.await(http, "https://me.example", "c=1", ref) }
+        val two = async { FurumPreview.await(http, "https://me.example", "c=1", ref) }
+        testScheduler.advanceUntilIdle()
+        gate.complete(Unit)
+        assertEquals("A cat sat", one.await()?.title)
+        assertEquals("A cat sat", two.await()?.title)
+        assertEquals(1, asked.size)
     }
 }

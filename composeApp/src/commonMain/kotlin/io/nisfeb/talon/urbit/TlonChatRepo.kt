@@ -429,7 +429,12 @@ class TlonChatRepo(
                     db.messages().forgetLinkSearchText()
                     db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, nowMs()))
                 }
-                while (db.messages().fillSearchText(500) > 0) yield()
+                // Once filled, every write fills its own: no launch after
+                // scans the whole table again for one (no index to use).
+                if (db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) == null) {
+                    while (db.messages().fillSearchText(500) > 0) yield()
+                    db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK, nowMs()))
+                }
             }.onFailure { Log.w(TAG, "search text fill failed", it) }
         }
     }
@@ -509,6 +514,7 @@ class TlonChatRepo(
             val gone = ended.exceptionOrNull() as? ChannelGone
             if (gone != null) lastBootstrapMs = 0L
             val ok = endedWell(ended.exceptionOrNull())
+            if (!ok && !chatsRead) _loadFailed.value = true
             if (!scope.isActive || !started) break
             firstRun = false
             // Back off exponentially after failures; reset on a normal
@@ -530,6 +536,37 @@ class TlonChatRepo(
             } else withTimeoutOrNull(jittered(backoffMs)) { reconnectWake.receive() } != null
             if (woken) backoffMs = 2_000L
         }
+    }
+
+    private val _loadFailed = MutableStateFlow(false)
+
+    /**
+     * The chats could not be read: their read failed, or no pass got that
+     * far. No answer is not empty, so the list says so, with Try again
+     * ([retryChats]), where it said "No direct messages yet". False
+     * again once a read lands.
+     */
+    val loadFailed: StateFlow<Boolean> = _loadFailed.asStateFlow()
+    @Volatile private var chatsRead = false
+
+    /**
+     * Try again after [loadFailed]: on a live stream, read the chats again
+     * on it; with none, connect again ([forceReconnect]).
+     */
+    fun retryChats() {
+        val ch = channel
+        if (ch == null || ch.streamIdleMs >= STREAM_FRESH_MS) return forceReconnect()
+        scope.launch {
+            io.nisfeb.talon.util.runSuspendCatching { catchUpPosts(ch) }
+                .onFailure { Log.w(TAG, "chats read again failed", it) }
+                .also(::chatsReadAs)
+        }
+    }
+
+    /** Note how a read of the chats went, for [loadFailed]. */
+    private fun chatsReadAs(result: Result<Unit>) {
+        if (result.isSuccess) chatsRead = true
+        _loadFailed.value = result.isFailure
     }
 
     private val _signedOut = MutableStateFlow(false)
@@ -795,6 +832,7 @@ class TlonChatRepo(
                     val initJob = async {
                         runCatching { catchUpPosts(ch) }
                             .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                            .also(::chatsReadAs)
                     }
                     val activityJob = async {
                         runCatching { bootstrapActivity(ch) }
@@ -849,6 +887,7 @@ class TlonChatRepo(
                         async {
                             runCatching { catchUpPosts(ch) }
                                 .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                                .also(::chatsReadAs)
                         },
                         async {
                             runCatching { bootstrapActivity(ch) }
@@ -975,11 +1014,13 @@ class TlonChatRepo(
      * channel's bootstrap scries were torn down by the second
      * reconnect before they completed. Coalesce repeats inside a
      * 3-second window — well under the 90s watchdog interval, so
-     * legitimate doze-recovery reconnects still go through.
+     * legitimate doze-recovery reconnects still go through. Not while
+     * signed out: the loop then waits on this alone, and a sign-in just
+     * after a refused try was dropped, leaving chat asleep.
      */
     fun forceReconnect() {
         val now = nowMs()
-        if (now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
+        if (!_signedOut.value && now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
             Log.i(TAG, "forceReconnect skipped (recent)")
             return
         }
@@ -1035,12 +1076,15 @@ class TlonChatRepo(
     }
 
     fun stop() {
+        val was = started
         started = false
         // Closing the channel is a request to the ship that waits on it,
         // so it does not go on the pool the screens share.
         channel?.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher), timeoutMs = 3_000)
         channel = null
-        notificationHealth.markSseConnected(false)
+        // The flag is the app's, not this repo's: an old repo stopped again
+        // after a ship switch marked the new repo's stream down.
+        if (was) notificationHealth.markSseConnected(false)
         scope.cancel()
         // Clear pagination markers so a future repo instance for the
         // same ship doesn't inherit stale "history exhausted" state.
@@ -2466,11 +2510,11 @@ class TlonChatRepo(
     }
 
     /**
-     * Fire markRead for every whom in [whoms] in parallel. Used by
-     * the long-press "Mark all read" affordance — bulk-clearing a
-     * backlog (typical right after a fresh-install pulls the ship's
-     * stale activity state) sequentially would take ~retry_budget × N
-     * seconds; parallel batches them under one second.
+     * markRead for every whom in [whoms], in turn. Used by "Mark all
+     * read" and a group's Mark read. Each is told the ship only where
+     * [markRead] would tell it: unread here, not yet read this
+     * connection, or owed. Forced and all at once, a group's Mark read
+     * poked %activity once per channel together, read or not.
      *
      * markRead itself swallows transient errors and retries; this
      * helper only ensures each whom gets its own attempt.
@@ -2481,10 +2525,8 @@ class TlonChatRepo(
      */
     fun markAllRead(whoms: Collection<String>) {
         if (whoms.isEmpty()) return
-        whoms.forEach { whom ->
-            // Asked for: told whatever the local count says.
-            pushScope.launch { runCatching { markRead(whom, force = true) } }
-        }
+        val all = whoms.toList()
+        pushScope.launch { all.forEach { whom -> runCatching { markRead(whom) } } }
     }
 
     /** Reads waiting for the chat or thread in view, by whom or whom#parent. */
@@ -2684,6 +2726,10 @@ class TlonChatRepo(
         /** When the event is about a reply, the parent post id.
          *  Tap routes into ThreadScreen anchored on [postId]. */
         val parentPostId: String? = null,
+        /** The group a group event (an ask, a join, a kick, a role, an
+         *  invite) is about, from a `group/<flag>` source. Not a [whom]:
+         *  that feeds unread counts, and a group has none of its own. */
+        val groupFlag: String? = null,
     )
 
     /**
@@ -5852,6 +5898,8 @@ class TlonChatRepo(
                         "group-kick" -> "Removed from group"
                         "group-join" -> "Joined the group"
                         "group-role" -> "Role changed"
+                        "note-create" -> "Added a note"
+                        "note-edit" -> "Edited a note"
                         // Unknown wire tags: humanize rather than leaking
                         // a raw hyphenated key into the row header.
                         else -> tag.replace('-', ' ')
@@ -5875,6 +5923,7 @@ class TlonChatRepo(
                             title = title,
                             postId = canonicalPostIdForWhom(sourceWhom, target.postId),
                             parentPostId = canonicalPostIdForWhom(sourceWhom, target.parentPostId),
+                            groupFlag = sourceKey?.takeIf { it.startsWith("group/") }?.removePrefix("group/"),
                         )
                     )
                 }

@@ -616,12 +616,58 @@ class TlonChatRepoStartupTest {
         until("asked once more") { ship.requests.size > asked }
         delay(1_000)
         assertEquals(listOf("PUT"), ship.requests.drop(asked).map { it.substringBefore(' ') }, "a new channel's subscribe, and no pass")
-        // The ship takes the login again: one more try brings chat back.
+        // The ship takes the login again: one more try brings chat back,
+        // at once. Signed out, the debounce dropped a sign-in made within
+        // 3 s of the refused try, and chat slept (B6-5).
         ship.signedOut = false
-        delay(3_100) // forceReconnect's debounce
         repo.forceReconnect()
         until("no longer signed out") { !repo.signedOut.value }
         until("a stream on the new channel") { ship.streamsOpened.lastOrNull()?.first == channelsPut().last() && ship.subscribed.isNotEmpty() }
+    }
+
+    // B3-4: the stream flag is the app's. An old repo stopped again after a
+    // ship switch marked the new repo's stream down, and the catch-up
+    // worker, seeing no stream, retried for good.
+    @Test
+    fun `an old repo stopped again leaves the new repo's stream marked up`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        val health = io.nisfeb.talon.notify.NotificationHealth()
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val old = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        old.stop()
+        val new = TlonChatRepo(db, notificationHealth = health).apply { start(session()) }
+        try {
+            withTimeout(60_000) { until("the new stream") { health.sseConnected.value } }
+            old.stop()
+            assertTrue(health.sseConnected.value, "the old repo marked the new stream down")
+        } finally {
+            new.stop()
+        }
+        assertTrue(!health.sseConnected.value, "a started repo stopped marks it down")
+    }
+
+    // B5-5: every launch scanned the whole messages table for rows with
+    // no search text, though writes fill their own. Once filled, it is
+    // marked and not looked for again.
+    @Test
+    fun `rows with no search text are filled once and later launches do not look`() = runBlocking<Unit> {
+        ship.scries[init] = initPosts
+        db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "~bus/170141184501", "~bus", 1, """[{"inline":["hi ~zod"]}]""", "/chat"))
+        db.marks().put(io.nisfeb.talon.data.MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_EXTRAS_MARK, 1))
+        db.messages().forgetLinkSearchText()
+        suspend fun text() = db.messages().getOne("~bus", "~bus/170141184501")!!.searchText
+        fun session() = UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }
+        val first = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
+        } finally { first.stop() }
+        db.messages().forgetLinkSearchText()
+        val next = TlonChatRepo(db).apply { start(session()) }
+        try {
+            until("the second stream") { streams() >= 2 }
+            delay(500)
+            assertNull(text(), "a later launch scanned for rows to fill")
+        } finally { next.stop() }
     }
 
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
