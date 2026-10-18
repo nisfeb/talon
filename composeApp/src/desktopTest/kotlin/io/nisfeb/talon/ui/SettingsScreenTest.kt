@@ -401,7 +401,7 @@ class SettingsScreenTest {
     @Test
     fun `without calling, About leaves the desk out`() = settings {
         tap("About")
-        assertTrue(shows("github.com/nisfeb/talon") && !shows("Calling (%trunk)"))
+        assertTrue(shows("github.com/nisfeb/talon") && !shows("Your ship's calling app"))
         tap("Copy version info")
         assertTrue("%trunk" !in did.single())
     }

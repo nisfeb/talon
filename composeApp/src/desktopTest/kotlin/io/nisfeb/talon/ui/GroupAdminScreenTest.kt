@@ -305,8 +305,19 @@ class GroupAdminScreenTest {
             waitForIdle()
             assertTrue(shows("Make admin"))
             assertTrue(!shows(comet), "no @p on screen")
+            onNodeWithText("Kick").performClick()
+            waitUntil(timeoutMillis = 5_000) { says("kazoo?") }
+            assertTrue(!says(comet), "nor in the question")
         }
     }
+
+    // The member's menu listed role ids where the group has titles for them.
+    @Test
+    fun `a member's roles are named by their titles`() =
+        admin(group = withChannels.replace("\"~nec\":{\"roles\":[]", "\"~nec\":{\"roles\":[\"gardener\"]")) {
+            onAllNodesWithText("~nec", substring = true)[0].performScrollTo().performTouchInput { longClick() }
+            waitUntil(timeoutMillis = 5_000) { shows("Roles: Gardeners") }
+        }
 
     @Test
     fun `tapping a member opens the same actions`() = admin {
@@ -383,7 +394,7 @@ class GroupAdminScreenTest {
     @Test
     fun `saving the metadata sends the new title`() = admin { ship ->
         onNode(hasSetTextAction() and hasText("The Garden")).performTextReplacement("The Orchard")
-        val meta = pressFor(ship, "Save metadata")
+        val meta = pressFor(ship, "Save")
         assertTrue("The Orchard" in meta && "growing things" in meta, meta)
     }
 

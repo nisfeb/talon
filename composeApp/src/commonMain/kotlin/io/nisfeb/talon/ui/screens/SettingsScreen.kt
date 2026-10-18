@@ -1020,7 +1020,7 @@ private fun AboutSection(
         ).collectAsState()
     if (callController != null) {
         AboutRow(
-            label = "Calling (%trunk)",
+            label = "Your ship's calling app",
             value = when {
                 shipWire <= 0 -> "not installed on your ship"
                 shipWire < io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
@@ -1714,7 +1714,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                 diagnoseReport = config.pushTokens.diagnose()
             }
         },
-    ) { Text("Diagnose distributor") }
+    ) { Text("Check notification delivery") }
 
     diagnoseReport?.let { report ->
         Column(
@@ -1800,7 +1800,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
             TextButton(
                 enabled = !working,
                 onClick = { codePrompt = true; code = "" },
-            ) { Text("Re-register (rotate token)") }
+            ) { Text("Register again") }
             TextButton(
                 enabled = !working,
                 onClick = {
@@ -2472,18 +2472,19 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     var declined by remember(ship) { mutableStateOf(config.settings.shipPushDeclined(ship)) }
     var backToShip by remember(ship) { mutableStateOf(false) }
     val device = if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) "this iPhone" else "this device"
+    val name = io.nisfeb.talon.ui.shipHandle(ship)
     val (title, body) = when {
-        via -> "Notifications come from $ship" to (
+        via -> "Notifications come from $name" to (
             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                "Your ship sends them to $device itself, through its %trunk. The Talon relay only hands them to Apple."
+                "Your ship sends them to $device itself, through its calling app. The Talon relay only hands them to Apple."
             } else {
-                "Your ship sends them to $device itself, through its %trunk. The Talon relay is not used."
+                "Your ship sends them to $device itself, through its calling app. The Talon relay is not used."
             }
             )
         declined -> "Notifications come from the Talon relay" to
-            "You chose the relay over $ship's own notifications. Register $device with the relay below to get them from it."
-        backToShip -> "Moving to $ship's notifications" to
-            "Talon moves $device the next time it starts, once a test notification from $ship arrives."
+            "You chose the relay over $name's own notifications. Register $device with the relay below to get them from it."
+        backToShip -> "Moving to $name's notifications" to
+            "Talon moves $device the next time it starts, once a test notification from $name arrives."
         else -> return
     }
     val status by produceState<String?>(null, ship, via) {

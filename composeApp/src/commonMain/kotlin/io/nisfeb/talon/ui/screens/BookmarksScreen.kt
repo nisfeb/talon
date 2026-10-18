@@ -259,6 +259,7 @@ internal fun BookmarkRow(
                     body,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
         }

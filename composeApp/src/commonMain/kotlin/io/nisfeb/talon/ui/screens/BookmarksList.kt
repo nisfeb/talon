@@ -153,7 +153,7 @@ fun BookmarksList(
                 if (bookmarks.isEmpty())
                     "No bookmarks yet. ${io.nisfeb.talon.ui.holdWord} a message to bookmark it."
                 else
-                    "No bookmarks in this folder yet. ${io.nisfeb.talon.ui.holdWord} a bookmark below to add it.",
+                    "No bookmarks in this folder yet. Open All and ${io.nisfeb.talon.ui.holdWord.lowercase()} a bookmark to add it here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
