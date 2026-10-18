@@ -299,8 +299,9 @@ class TalonApplication : Application() {
         // minutes. Survives force-stop and Doze, which the
         // foreground service doesn't. Idempotent (KEEP policy);
         // calling on every cold start doesn't reset the schedule.
-        // The worker itself no-ops when no ship is bound.
-        CatchUpWorker.schedule(this)
+        // Only while no push reaches the phone; TalonApp re-decides
+        // when the relay settings or the endpoint change.
+        runCatching { CatchUpWorker.follow(this) }
         // The orrery pass while charging and idle; a no-op until the pipe is on.
         OrreryWorker.schedule(this)
         // Where the owner is, on a move: a registration a reboot or an

@@ -1234,7 +1234,11 @@ fun TalonApp(
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         // No ship left signed in: nothing to keep the stream for.
-        val ship = loggedInShip ?: run { TalonSyncService.stop(context); return@LaunchedEffect }
+        val ship = loggedInShip ?: run {
+            TalonSyncService.stop(context)
+            io.nisfeb.talon.CatchUpWorker.cancel(context)
+            return@LaunchedEffect
+        }
         kotlinx.coroutines.flow.merge(
             kotlinx.coroutines.flow.flowOf(Unit),
             app.relaySettings.changes,
@@ -1264,7 +1268,15 @@ fun TalonApp(
             } else {
                 TalonSyncService.stop(context)
             }
+            // The backstop worker is for the stream alone, not for mail.
+            runCatching { io.nisfeb.talon.CatchUpWorker.follow(app) }
         }
+    }
+    // Mail polls only while this screen lives (mailRepo, on its scope).
+    // Gone, a service kept for mail alone kept the process for nothing:
+    // decided again without mail, only the stream may keep it.
+    DisposableEffect(Unit) {
+        onDispose { if (!TalonSyncService.streamNeeded(app)) TalonSyncService.stop(context) }
     }
     LaunchedEffect(loggedInShip) {
         if (loggedInShip != null) {
