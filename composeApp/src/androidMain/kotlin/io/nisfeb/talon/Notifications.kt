@@ -528,9 +528,25 @@ object Notifications {
         title: String,
         body: String,
         sentMs: Long,
+        /** A relay's hint, which says only that something arrived. */
+        hint: Boolean = false,
     ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java)
             ?: return
+        // Tag = ship + whom, so new messages from the same conversation
+        // replace the previous notification rather than stacking, and
+        // the same whom on two ships keeps two rows, matching the
+        // request code below.
+        val tag = forShip.orEmpty() + whom
+        // The hint and the app's own notification for one message both
+        // alerted. What is showing under the tag decides (chatAlert).
+        val shown = runCatching { mgr.activeNotifications.firstOrNull { it.tag == tag && it.id == NOTIFICATION_ID } }.getOrNull()
+        val alert = io.nisfeb.talon.notify.chatAlert(
+            hint = hint,
+            shownAgoMs = shown?.let { System.currentTimeMillis() - it.postTime },
+            shownIsHint = shown?.notification?.extras?.getBoolean(EXTRA_HINT) == true,
+        )
+        if (alert == io.nisfeb.talon.notify.ChatAlert.Skip) return
 
         val tapIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -564,14 +580,15 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setWhen(sentMs)
             .setShowWhen(true)
+            .addExtras(android.os.Bundle().apply { putBoolean(EXTRA_HINT, hint) })
+            .setOnlyAlertOnce(alert == io.nisfeb.talon.notify.ChatAlert.Quiet)
             .build()
 
-        // Tag = ship + whom so new messages from the same conversation
-        // replace the previous notification rather than stacking — and
-        // the same whom on two ships keeps two rows, matching the
-        // request code above.
-        mgr.notify(forShip.orEmpty() + whom, NOTIFICATION_ID, notification)
+        mgr.notify(tag, NOTIFICATION_ID, notification)
     }
+
+    /** Set on a chat notification that is a relay's hint. */
+    private const val EXTRA_HINT = "talon.hint"
 
     /**
      * New mail. Its own channel because mail is considered

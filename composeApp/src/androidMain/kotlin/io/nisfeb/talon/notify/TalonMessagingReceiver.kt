@@ -177,6 +177,25 @@ class TalonMessagingReceiver : MessagingReceiver() {
         }
 
         if (whom.isNullOrBlank()) return
+        // A ship no longer signed in here has nowhere right to land. Its
+        // relay registration outlived the sign-out (the relay could not
+        // be reached then), so it is asked to forget this device again.
+        val app = context.applicationContext as? io.nisfeb.talon.TalonApplication
+        if (app != null && patp != null && patp !in app.allShipsFlow.value) {
+            Log.w(TAG, "dropping a push for a ship not signed in here: $patp")
+            val stale = app.relaySettings.deviceIdFor(patp).takeIf { it.isNotBlank() } ?: return
+            val pending = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val gone = RelayClient(http = app.ktorHttp, endpoint = { app.relaySettings.endpoint.value })
+                        .unregister(stale, RelayClient.REASON_FORGOTTEN)
+                    if (gone) app.relaySettings.clearDeviceIdFor(patp)
+                } finally {
+                    pending.finish()
+                }
+            }
+            return
+        }
         // Read to the end on some client: its notifications go, as Tlon's
         // %notify dismisses them. Only that ship's: the same whom on
         // another is another conversation. A forged one clears a
@@ -191,7 +210,6 @@ class TalonMessagingReceiver : MessagingReceiver() {
         // for the ship actually signed in, though — the same whom open
         // on ship A says nothing about ship B's conversation of that
         // name. A missing patp (older relay) keeps the old behaviour.
-        val app = context.applicationContext as? io.nisfeb.talon.TalonApplication
         val currentShip = app?.activeShipFlow?.value
         if ((patp == null || patp == currentShip) &&
             whom in io.nisfeb.talon.notify.ShownConversation.keys
@@ -229,6 +247,7 @@ class TalonMessagingReceiver : MessagingReceiver() {
                     title = n.title,
                     body = n.body,
                     sentMs = System.currentTimeMillis(),
+                    hint = true,
                 )
                 // A read that came while this waited, or as it posted: the
                 // chat is read, so its notification goes.
