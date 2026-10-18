@@ -707,11 +707,17 @@ fun DmChatScreen(
                     // task is on the list at once, and leaving the chat
                     // does not lose the write.
                     // Why it did not land, the calendar's own refusal after its
-                    // ack too, said here and so not again when it opens.
+                    // ack too, said here and so not again when it opens. Only
+                    // while this chat is still open: from a chat already left,
+                    // that cleared it unsaid. That refusal alone, not another.
+                    val said = { why: String ->
+                        composerState.sendError = why
+                        if (scope.coroutineContext[kotlinx.coroutines.Job]?.isActive != false) cal.heard(why)
+                    }
                     if (draft.cat == io.nisfeb.talon.calendar.EventCat.TODO) {
-                        cal.addTask(draft) { composerState.sendError = it; cal.heard() }
+                        cal.addTask(draft, said)
                     } else {
-                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft)) { composerState.sendError = it; cal.heard() }
+                        cal.writeInBackground(io.nisfeb.talon.calendar.eventBody(draft), said)
                     }
                 },
             )

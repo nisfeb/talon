@@ -427,6 +427,27 @@ class HomeScreenTest {
         }
     }
 
+    // Added on the calendar screen or from a chat, a new event reached the
+    // home page's today only on the reading back, a minute and more on a
+    // busy ship. Here once the ship has taken it, before any reading.
+    @Test
+    fun `a new event added elsewhere is on today here once the ship takes it`() {
+        val cal = calendar(writeTakesMs = 1_000)
+        home(calendar = cal) {
+            waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
+            val at = now + 30 * 60_000L
+            val tea = io.nisfeb.talon.calendar.eventBody(
+                io.nisfeb.talon.calendar.sharedDraft("Tea with Ana", at, at + 30 * 60_000L, "default", kotlinx.datetime.TimeZone.UTC, "UTC"),
+            )
+            val adding = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()).launch { cal.writeEvent(tea, readBack = false) }
+            waitForIdle()
+            assertTrue(!shows("Tea with Ana"), "not before the ship has it")
+            runBlocking { adding.join() }
+            // The window the ship answers never has it: what shows is the repo's own.
+            waitUntil(timeoutMillis = 2_000) { shows("Tea with Ana") }
+        }
+    }
+
     // A task due today in a calendar in New York, renamed on the calendar
     // screen, was written as due the day before, and the home page called
     // it overdue.

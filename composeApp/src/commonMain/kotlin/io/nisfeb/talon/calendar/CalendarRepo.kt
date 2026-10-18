@@ -45,6 +45,8 @@ class CalendarRepo(
     private val pollIntervalMs: Long = 10 * 60 * 1000L,
     /** This ship's last answer, kept across restarts. Null keeps none. */
     private val cache: io.nisfeb.talon.data.CalendarCacheDao? = null,
+    /** The first pause between the reads back after a write; each doubles it. */
+    private val readBackPauseMs: Long = 500L,
 ) {
     private var api: CalendarApi? = null
     private var poller: Job? = null
@@ -266,17 +268,24 @@ class CalendarRepo(
     /**
      * Why the calendar refused a write it had taken, as its own page
      * asks: it answers a poke before reading it, and keeps what it
-     * refused, with why, in outcomes.json. After [REFUSAL_WAIT_MS], the
-     * newest refusal of [id] (the poke's, "" for an add) since [sinceMs],
-     * less a minute's slack for the ship's clock, each said once. Null for
-     * none, or for a calendar that keeps no record.
+     * refused, with why, in outcomes.json. After [waitMs], the newest
+     * refusal of [id] (the poke's, "" for an add) and [action] (the
+     * poke's) since [sinceMs], less a minute's slack for the ship's clock,
+     * each said once. Null for none, or for a calendar that keeps no record.
      */
-    suspend fun refusal(id: String, sinceMs: Long): String? = carry {
-        delay(REFUSAL_WAIT_MS)
+    suspend fun refusal(id: String, sinceMs: Long, action: String? = null, waitMs: Long = REFUSAL_WAIT_MS): String? = carry {
+        delay(waitMs)
         val a = api ?: return@carry null
         val got = runSuspendCatching { a.outcomes() }.getOrNull() ?: return@carry null
-        val r = got.refusals.lastOrNull { it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && it.id == id }
-            ?: return@carry null
+        // The action too: a poke with no id of its own (an add, a zone
+        // change) is kept under the id "", and an add took a zone change's
+        // refusal for its own. A record that names no action is matched by
+        // its id alone.
+        // ponytail: two adds of one action at once can still swap; a nonce in the poke would end it
+        val r = got.refusals.lastOrNull {
+            it.atMs > saidRefusalMs && it.atMs >= sinceMs - 60_000 && it.id == id &&
+                (action == null || it.action.isEmpty() || it.action == action)
+        } ?: return@carry null
         saidRefusalMs = r.atMs
         r.why.ifBlank { "the calendar refused it" }
     }
@@ -290,12 +299,23 @@ class CalendarRepo(
     val unheard: StateFlow<String?> = _unheard.asStateFlow()
 
     /** [refusal] of a save on the calendar screen, kept in [unheard] as [line] words it until [heard]. */
-    suspend fun refusalOfSave(id: String, sinceMs: Long, line: (String) -> String): String? = carry {
-        refusal(id, sinceMs)?.also { _unheard.value = line(it) }
+    suspend fun refusalOfSave(
+        id: String,
+        sinceMs: Long,
+        action: String? = null,
+        waitMs: Long = REFUSAL_WAIT_MS,
+        line: (String) -> String,
+    ): String? = carry {
+        refusal(id, sinceMs, action, waitMs)?.also { _unheard.value = line(it) }
     }
 
-    /** The calendar screen has said what [unheard] held. */
-    fun heard() { _unheard.value = null }
+    /**
+     * What [unheard] held has been said: [line], where only that is, so a
+     * write that failed some other way does not wipe another's refusal.
+     */
+    fun heard(line: String? = null) {
+        if (line == null) _unheard.value = null else _unheard.compareAndSet(line, null)
+    }
 
     /**
      * [block] on this repo's scope, not awaited: what a screen started
@@ -470,12 +490,12 @@ class CalendarRepo(
         val w = writeEvent(eventBody(sharedDraft(title, startMs, endMs, calId ?: writableDefault(), zone, zoneId)))
         if (!w.ok) return@carry false
         // Before the reading back, which a refused add waits out in full.
-        if (refusalOfSave("", since) { "\"$title\" was not added: $it" } != null) {
+        if (refusalOfSave("", since, "add-event") { "\"$title\" was not added: $it" } != null) {
             w.undo()
             return@carry false
         }
-        w.shown.join()
-        true
+        // A busy ship's refusal after that look, found behind the reading.
+        w.shown.await() == null
     }
 
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
@@ -537,13 +557,16 @@ class CalendarRepo(
             val ok = write(body)
             // Taken is not kept: the calendar answers before it reads, and
             // a task it then refused stood on the list as added.
-            val said = { why: String -> "\"${d.name.trim()}\" was not added: $why" }
-            val refused = if (ok) refusalOfSave("", since, said) else null
+            val said = { why: String -> notLanded(body, why) }
+            var refused = if (ok) refusalOfSave("", since, "add-event", line = said) else null
             if (ok && refused == null) {
-                afterItemWrite(reach)
+                // A busy ship can refuse it after that look: looked for
+                // again once the reading has seen nothing come, before the
+                // stand-in goes as added.
+                if (!afterItemWrite(reach)) refused = refusalOfSave("", since, "add-event", waitMs = 0, line = said)
                 // A tag the calendar has not seen before joins the list
                 // the editor offers; one it has is already there.
-                if (d.tags.any { it !in _tags.value }) api?.let { a -> runSuspendCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
+                if (refused == null && d.tags.any { it !in _tags.value }) api?.let { a -> runSuspendCatching { a.tags() }.getOrNull()?.let { _tags.value = it.map { t -> t.tag } } }
             }
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
@@ -563,12 +586,22 @@ class CalendarRepo(
         scope.launch {
             fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
             val name = ((body["meta"] as? JsonObject)?.get("name") as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
-            val said = { why: String -> "\"$name\" was not ${if (str("action") == "add-event") "added" else "saved"}: $why" }
+            val said = { why: String -> notLanded(body, why) }
             val since = nowMs()
             val w = writeEvent(body)
             if (!w.ok) return@launch onFailed(failedLine("The calendar did not take \"$name\"."))
-            refusalOfSave(str("id").orEmpty(), since, said)?.let { w.undo(); onFailed(said(it)) }
+            val refused = refusalOfSave(str("id").orEmpty(), since, w.action, line = said)
+            // Else a busy ship's later one, found behind the reading back.
+            if (refused != null) { w.undo(); onFailed(said(refused)) } else w.shown.await()?.let { onFailed(said(it)) }
         }
+    }
+
+    /** What is said of a write of [body] the calendar refused, [why]: "\"Picnic\" was not added: no such calendar". */
+    private fun notLanded(body: JsonObject, why: String): String {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val name = ((body["meta"] as? JsonObject)?.get("name") as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty().trim()
+        val done = if (str("action") == "add-event") "added" else "saved"
+        return if (name.isNotEmpty()) "\"$name\" was not $done: $why" else if (done == "added") "The event was not added: $why" else "A change was not saved: $why"
     }
 
     /**
@@ -627,11 +660,20 @@ class CalendarRepo(
 
     /**
      * A write the ship has taken or refused ([ok]), and [shown]: done once
-     * it has been read back into the lists, or the reading has given up.
-     * [undo] takes back what was shown of a write the ship took and the
-     * calendar then refused, where no read has put the ship's copy in since.
+     * it has been read back into the lists, or the reading has given up,
+     * with why the calendar refused it where it said so only after the
+     * reading saw nothing come (else null). [undo] takes back what was
+     * shown of a write the ship took and the calendar then refused, where
+     * no read has put the ship's copy in since. [action] is the poke's;
+     * [placed], that a new event stands in the lists until it is read back.
      */
-    class Written(val ok: Boolean, val shown: Job, val undo: () -> Unit = {})
+    class Written(
+        val ok: Boolean,
+        val shown: kotlinx.coroutines.Deferred<String?>,
+        val undo: () -> Unit = {},
+        val action: String? = null,
+        val placed: Boolean = false,
+    )
 
     /**
      * [pokeEvent] that answers as soon as the ship has taken the write, the
@@ -641,6 +683,8 @@ class CalendarRepo(
      * A task is changed in the task list at once, and put back if refused.
      */
     suspend fun writeEvent(body: JsonObject, readBack: Boolean = true): Written = carry {
+        val since = nowMs()
+        val action = (body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content
         val reach = reachOf(body)
         val putBack = dropDeleted(body)
         // An edit is in the task list at Save, everywhere it shows, and
@@ -648,14 +692,58 @@ class CalendarRepo(
         // it looked unsaved for as long as a busy ship took ("saving a todo
         // edit takes way too long"). A tick or a delete still waits for the
         // ship: a ticked task stays, ticked, until the ship has it done.
-        val editing = (body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "edit-event"
+        val editing = action == "edit-event"
         val unassume = if (editing) assumeTask(body) else ({})
         val unmove = assumeEvent(body)
         val ok = write(body)
         val untick = if (ok && !editing) assumeTask(body) else ({})
+        val unadd = if (ok) assumeAdd(body) else null
         if (!ok) { putBack(); unassume(); unmove() }
-        val shown = if (ok && readBack) scope.launch { afterItemWrite(reach) } else Job().also { it.complete() }
-        Written(ok, shown, undo = if (ok) ({ putBack(); unassume(); unmove(); untick() }) else ({}))
+        val undo: () -> Unit = if (ok) ({ putBack(); unassume(); unmove(); untick(); unadd?.invoke() }) else ({})
+        val shown = if (ok && readBack) {
+            scope.async {
+                // One look at outcomes.json misses a busy ship that refuses
+                // later: a reading that saw nothing come looks again, and
+                // the refusal is kept in [unheard] for whoever was told saved.
+                if (afterItemWrite(reach)) return@async null
+                val id = (body["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+                refusal(id, since, action, waitMs = 0)?.also { why -> undo(); _unheard.value = notLanded(body, why) }
+            }
+        } else {
+            // Done at once. Not CompletableDeferred<String?>(null): that is
+            // the overload taking a parent job, and is never done.
+            kotlinx.coroutines.CompletableDeferred<String?>().also { it.complete(null) }
+        }
+        Written(ok, shown, undo, action, placed = unadd != null)
+    }
+
+    /**
+     * A new one-off event the ship has taken, in the window and the month
+     * as it will have it, under a "saved-" id until the reading back puts
+     * the calendar's own copy in; returns what takes it out again. Only the
+     * calendar screen showed it, and the home page's today had it only once
+     * the reading came in. Null for a series, a date each year or a task,
+     * which wait for the reading.
+     */
+    private fun assumeAdd(body: JsonObject): (() -> Unit)? {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        if (str("action") != "add-event" || str("cat") == "todo") return null
+        val (l, r, all) = spanOf(body) ?: return null
+        val row = CalendarRow(
+            id = "saved-${nowMs()}-${ghosts++}",
+            cal = str("cal") ?: writableDefault() ?: "default",
+            cat = str("cat") ?: "timed",
+            all = all, l = l, r = r,
+            meta = body["meta"] as? JsonObject ?: JsonObject(emptyMap()),
+            alarms = body["alarms"] as? kotlinx.serialization.json.JsonArray,
+        )
+        val now = nowMs()
+        val month = range
+        fun put(rows: List<CalendarRow>?, from: Long, to: Long) =
+            if (rows == null || r <= from || l >= to) rows else (rows + row).sortedWith(compareBy({ it.l }, { it.r }))
+        _rows.update { put(it, now - BEHIND_MS, now + AHEAD_MS) }
+        if (month != null) _rangeRows.update { put(it, month.first, month.second) }
+        return { _rows.update { it?.filterNot { x -> x === row } }; _rangeRows.update { it?.filterNot { x -> x === row } } }
     }
 
     /**
@@ -871,17 +959,19 @@ class CalendarRepo(
     }
 
     /**
-     * What an event or task write can have changed, read back ([reachOf]):
+     * What an event or task write can have changed, read back ([reachOf]),
+     * and whether the reading saw it come (true where it had nothing to
+     * read, or read nothing):
      * the task listing for a task, the window (the home screen's agenda
      * reads it) and the month on screen for anything with a day. Not the
      * nine reads a full refresh makes: every
      * request into a grubbery app is about a second of its single
      * thread, one behind another, and a tick went through all nine.
      */
-    private suspend fun afterItemWrite(reach: Reach) {
+    private suspend fun afterItemWrite(reach: Reach): Boolean {
         // A task listing nothing has read has nothing to bring up to date.
         val tasks = reach.tasks && reach.before.first != null
-        if (!tasks && !reach.rows) { keep(); return }
+        if (!tasks && !reach.rows) { keep(); return true }
         // The nexus applies a poke after it answers; give it a beat.
         delay(APPLY_BEAT_MS)
         // The ship answers a write before it applies it, and a busy one
@@ -889,7 +979,7 @@ class CalendarRepo(
         // the edit's stand-in went, and the change was not shown until
         // the next poll, ten minutes on. So read until something moved,
         // a few times at most, waiting longer each time.
-        var pause = 500L
+        var pause = readBackPauseMs
         // Every list is read aside and put in place once it has moved, or
         // at the end: put in on every read, the old copy of a late ship
         // would undo the change assumeTask and dropDeleted showed.
@@ -903,6 +993,7 @@ class CalendarRepo(
         var got: List<CalendarTask>? = null
         var window: List<CalendarRow>? = null
         var month: List<CalendarRow>? = null
+        var moved = false
         for (attempt in 1..AFTER_WRITE_READS) {
             if (tasks) got = readTasks() ?: got
             if (reach.rows) {
@@ -915,6 +1006,7 @@ class CalendarRepo(
             val windowMoved = reach.rows && window != null && window != reach.before.second
             val monthMoved = reach.rows && month != null && month != reach.before.third
             if (tasksMoved || windowMoved || monthMoved) {
+                moved = true
                 // It can land between two reads of one pass: the list read
                 // first is then the old copy. The home screen's tasks kept a
                 // moved one on today while the month showed it on Monday.
@@ -934,6 +1026,9 @@ class CalendarRepo(
         if (range == span) month?.let { _rangeRows.value = it }
         // So a phone closed straight after a tick opens on the tick.
         keep()
+        // Nothing read at all says nothing either way: a ship that is down
+        // is not asked for its refusals as well.
+        return moved || (got == null && window == null && month == null)
     }
 
     private fun lists(): Triple<Any?, Any?, Any?> = Triple(_tasks.value, _rows.value, _rangeRows.value)
