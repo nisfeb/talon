@@ -206,6 +206,59 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/orrery/api/state" in it } }
     }
 
+    // Orrery 110's late nags, the whole way through the app: a late high
+    // task leads Orrery's Actions in red, Snooze 1 h reaches the ship as
+    // orrery's serve-mark reads it, and Late empties. The app holds no key
+    // here, so every orrery request is the owner's, through this ship.
+    private fun FakeShip.orrery(version: Int) {
+        val due = kotlin.time.Instant.fromEpochMilliseconds(System.currentTimeMillis() - 2 * 3_600_000).toString()
+        answerApi = { method, path, _ ->
+            when {
+                path == "/apps/orrery/api/state" -> "{}"
+                path == "/apps/orrery/api/version" -> """{"version":$version}"""
+                path == "/apps/orrery/api/actions" ->
+                    """[{"id":"a1","kind":"task","title":"Check in for DL 2627","payload":{"priority":"high"},"due":"$due","status":"approved"}]"""
+                method == "POST" && path == "/apps/orrery/api/actions/a1/snooze" ->
+                    """{"ok":true,"id":"a1","snooze_until":"${kotlin.time.Instant.fromEpochMilliseconds(System.currentTimeMillis() + 3_600_000)}"}"""
+                else -> null
+            }
+        }
+    }
+
+    private val orreryOn get() = FakeAiSettings().apply {
+        applyRemote(io.nisfeb.talon.ai.AiSettings.Config(
+            provider = io.nisfeb.talon.ai.AiSettings.Provider.Anthropic, apiKey = "", model = null,
+            savedProfile = io.nisfeb.talon.ai.AiProfile(orrery = true),
+        ))
+    }
+
+    private fun ComposeUiTest.openOrrery() {
+        waitUntil(timeoutMillis = 10_000) { present("Orrery") }
+        onNodeWithContentDescription("Orrery").performClick()
+    }
+
+    @Test
+    fun `a late high action leads Orrery and Snooze 1 h reaches the ship and empties Late`() = app(ai = orreryOn, setup = { orrery(110) }) { ship ->
+        openOrrery()
+        waitUntil(timeoutMillis = 10_000) { showing("Late · 1") }
+        assertTrue(showing("Check in for DL 2627") && showing("2 h") && showing("late"))
+        onNodeWithText("Snooze 1 h").performClick()
+        waitUntil(timeoutMillis = 10_000) { !showing("Late ·") }
+        waitUntil(timeoutMillis = 10_000) { ship.api.any { "/snooze" in it } }
+        assertEquals(listOf("POST /apps/orrery/api/actions/a1/snooze {\"minutes\":60}"), ship.api.filter { "/snooze" in it })
+        assertTrue(showing("Check in for DL 2627"), "still listed, to be done")
+    }
+
+    @Test
+    fun `an orrery older than 110 shows no Late section`() = app(ai = orreryOn, setup = { orrery(109) }) { ship ->
+        openOrrery()
+        waitUntil(timeoutMillis = 10_000) { showing("Check in for DL 2627") }
+        waitUntil(timeoutMillis = 10_000) { ship.api.any { "/api/version" in it } }
+        mainClock.advanceTimeBy(1_000)
+        waitForIdle()
+        assertTrue(!showing("Late") && !showing("Snooze 1 h") && !showing("Not high"))
+    }
+
     @Test
     fun `the rail's tabs switch the list pane and Chats brings the list back`() = app {
         onNodeWithContentDescription("Bookmarks").performClick()
