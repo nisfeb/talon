@@ -16,9 +16,9 @@ import kotlinx.coroutines.launch
  * common decides. The nag is taken back when it went through, and posted
  * again over itself, quietly, with what failed when it did not.
  *
- * Android-only: desktop gets no ship pushes, so it has no nag to answer.
- * iOS port pending: buttons on a pushed notice need a UNNotificationCategory
- * registered in Swift.
+ * Android's: desktop gets no ship pushes, so it has no nag to answer.
+ * iOS has the same buttons through the relay's category, CallPush.swift
+ * and IosLateMoves.
  *
  * ponytail: goAsync gives a receiver about ten seconds, and Done on a
  * proposal on a busy ship (approve, read back up to six seconds, done)
