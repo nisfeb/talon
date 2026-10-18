@@ -51,6 +51,38 @@ data class CardEvent(val time: String, val name: String, val place: String, val 
 /** An open task, with when it is due ("Today", "Oct 20") and whether that has passed. */
 data class CardTask(val name: String, val due: String?, val overdue: Boolean)
 
+/**
+ * What the tools showed during one run, for its card: fed by
+ * [AssistantActions]' onEvents, onTasks, onPeople and onMail and by
+ * [ToolCatalog]'s onMessages. A dictation's and the Assistant's both.
+ */
+class CardSeen {
+    private var events: Triple<List<CalendarRow>, LocalDate, LocalDate>? = null
+    private var tasks: List<CalendarTask>? = null
+    private val people = mutableListOf<PersonMatch>()
+    private var messages: List<io.nisfeb.talon.data.MessageEntity>? = null
+    private var mail: List<io.nisfeb.talon.mail.InboxEntry>? = null
+    fun people(found: List<PersonMatch>) { people += found }
+    fun messages(m: List<io.nisfeb.talon.data.MessageEntity>) { messages = m }
+    fun mail(m: List<io.nisfeb.talon.mail.InboxEntry>) { mail = m }
+    fun events(rows: List<CalendarRow>, from: LocalDate, to: LocalDate) { events = Triple(rows, from, to) }
+    fun tasks(t: List<CalendarTask>) { tasks = t }
+
+    /** Forget what was seen, for the next run or the next of a conversation's turns. */
+    fun reset() { events = null; tasks = null; people.clear(); messages = null; mail = null }
+
+    /** The card of what was seen, each ship by [name], times on a 24-hour clock where [twentyFour]. */
+    fun card(zone: TimeZone, name: (String) -> String, twentyFour: Boolean, nowMs: Long = io.nisfeb.talon.util.nowMs()): DictationCard = DictationCard(
+        days = events?.let { (r, f, t) -> DictationCards.days(r, f, t, zone, nowMs, twentyFour) }.orEmpty(),
+        tasks = tasks?.let { DictationCards.tasks(it, zone, nowMs) }.orEmpty(),
+        people = DictationCards.people(people),
+        messages = messages?.let { m ->
+            DictationCards.messages(m, name, { io.nisfeb.talon.urbit.StoryCache.textFor(it.id, it.contentJson) }, zone, nowMs, twentyFour)
+        }.orEmpty(),
+        mail = mail?.let { DictationCards.mail(it, name, zone, nowMs, twentyFour) }.orEmpty(),
+    )
+}
+
 object DictationCards {
     /** The events of [rows] on each day from [from] to [to], all-day first then by start; days with none left out. */
     fun days(rows: List<CalendarRow>, from: LocalDate, to: LocalDate, zone: TimeZone, nowMs: Long, twentyFour: Boolean): List<CardDay> {

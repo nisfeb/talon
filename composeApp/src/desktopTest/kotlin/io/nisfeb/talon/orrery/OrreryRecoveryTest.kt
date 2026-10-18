@@ -163,6 +163,11 @@ class OrreryRecoveryTest {
         attached(probeRetryFirstMs = 60_000, keyed = true) { repo, db ->
             until("the check failed") { repo.error.value != null }
             assertEquals(OrreryAvailability.UNKNOWN, repo.availability.value)
+            // The first check's last requests (settings, schema) can land
+            // after its error is set; under the full suite's load they were
+            // counted as the switch-off's. Counted from once it has gone quiet.
+            var seen = -1
+            until("the first check has gone quiet") { asked.size == seen.also { seen = asked.size } && run { Thread.sleep(150); asked.size == seen } }
             var off = false
             val before = asked.size
             assertEquals(

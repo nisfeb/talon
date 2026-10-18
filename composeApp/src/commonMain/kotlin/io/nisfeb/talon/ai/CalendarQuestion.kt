@@ -144,6 +144,42 @@ object CalendarQuestion {
         }
     }
 
+    /**
+     * A plain question about what is on, answered from [calendar] with no
+     * model: the line to say, with the days and the tasks asked about given
+     * to [seen] for the card. Null where it is not one, the [decider] says
+     * it is not, or the calendar did not answer, and the model takes it.
+     * [ready] is waited for once the decision is in: a read under way.
+     * The dictation's and the Assistant's.
+     */
+    suspend fun fromCalendar(
+        calendar: io.nisfeb.talon.calendar.CalendarRepo,
+        decider: Decider,
+        text: String,
+        earlier: List<DictationFlow.Earlier>,
+        twentyFour: Boolean,
+        seen: CardSeen,
+        ready: suspend () -> Unit = {},
+        log: (String) -> Unit = {},
+    ): String? {
+        val zone = io.nisfeb.talon.ui.screens.zoneFor(calendar.zone.value)
+        val now = io.nisfeb.talon.util.nowMs()
+        val today = Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+        val span = decide(decider, text, earlier, today) { log("$it, in ${io.nisfeb.talon.util.nowMs() - now} ms") } ?: return null
+        val t0 = io.nisfeb.talon.util.nowMs()
+        ready()
+        val b = bounds(span, zone)
+        // The read covers six hours back to a month ahead; earlier today, or further, is asked for.
+        val covered = b.first >= now - io.nisfeb.talon.calendar.CalendarRepo.BEHIND_MS + 60_000 &&
+            b.last <= now + io.nisfeb.talon.calendar.CalendarRepo.AHEAD_MS - 60_000
+        val rows = (if (covered) calendar.rows.value else null) ?: calendar.windowRows(b.first, b.last + 1) ?: return null
+        val tasks = calendar.tasks.value.orEmpty()
+        seen.events(rows, span.from, span.to)
+        seen.tasks(tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true })
+        log("calendar answered with no model in ${io.nisfeb.talon.util.nowMs() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
+        return answer(span, rows, tasks, zone, now, twentyFour)
+    }
+
     /** The span as moments, for asking the calendar. */
     fun bounds(span: Span, zone: TimeZone): LongRange =
         span.from.atStartOfDayIn(zone).toEpochMilliseconds() until span.to.plus(1, DateTimeUnit.DAY).atStartOfDayIn(zone).toEpochMilliseconds()

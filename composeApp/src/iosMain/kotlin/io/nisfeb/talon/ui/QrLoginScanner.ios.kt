@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.ui.theme.followAppTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -74,7 +75,7 @@ private object QrScanPresenter {
             dispatch_async(dispatch_get_main_queue()) {
                 when (val host = qrTopController()) {
                     null -> onCode(null)
-                    else -> host.presentViewController(QrScanController(prompt, onCode), animated = true, completion = null)
+                    else -> host.presentViewController(QrScanController(prompt, onCode).apply { followAppTheme() }, animated = true, completion = null)
                 }
             }
         }

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import io.nisfeb.talon.ui.theme.followAppTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -163,6 +164,7 @@ private fun showVoiceAlert(message: String) {
         while (top?.presentedViewController != null) top = top.presentedViewController
         val alert = UIAlertController.alertControllerWithTitle(null, message, UIAlertControllerStyleAlert)
         alert.addAction(UIAlertAction.actionWithTitle("OK", UIAlertActionStyleDefault, handler = null))
+        alert.followAppTheme()
         top?.presentViewController(alert, animated = true, completion = null)
     }
 }

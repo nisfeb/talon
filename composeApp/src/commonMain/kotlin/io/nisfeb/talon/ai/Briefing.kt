@@ -7,7 +7,9 @@ import io.nisfeb.talon.orrery.Brief
 import io.nisfeb.talon.orrery.Decider
 import io.nisfeb.talon.orrery.attempt
 import io.nisfeb.talon.ui.icons.ASSISTANT_NAME
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -174,6 +176,85 @@ object Briefing {
             else -> "in about ${(min + 30) / 60} hours"
         }
     }
+
+    /** How long the opener waits for the calendar read and the mail listing. */
+    const val OPENER_WAIT_MS = 5_000L
+
+    /** The day as Archie opens with it ([day]). */
+    class Day(val mail: Int?, val mailLate: Boolean, val chats: Int?, val questions: Int?, val firstEvent: String?, val card: DictationCard)
+
+    /**
+     * What Archie opens with: the unread mail (null where the inbox
+     * could not be listed, never zero from a list not read), the chat
+     * list's unread, how many of those wait for the owner ([decider]; null
+     * where it did not say), the next event today, and the card, today's
+     * events and unread mail, which [seen] is given too. [calendarRead] is
+     * waited for, a while at most, before the calendar's rows are read;
+     * [zone] after it, since the calendar's own zone may come with it.
+     */
+    suspend fun day(
+        db: AppDatabase,
+        owner: String,
+        mail: io.nisfeb.talon.mail.MailRepo?,
+        calendar: io.nisfeb.talon.calendar.CalendarRepo?,
+        decider: Decider?,
+        zone: () -> kotlinx.datetime.TimeZone,
+        twentyFour: Boolean,
+        name: (String) -> String,
+        seen: CardSeen,
+        calendarRead: suspend () -> Unit = {},
+    ): Day = kotlinx.coroutines.coroutineScope {
+        val inbox = async { runCatching { mail?.listing(io.nisfeb.talon.mail.MailView.INBOX) }.getOrNull() }
+        val questions = async {
+            if (decider == null) null
+            else runCatching { questions(decider, owner, unreadSaid(db, owner, io.nisfeb.talon.urbit.StoryCache::textFor)) }.getOrNull()
+        }
+        val chats = runCatching { chatUnread(db) }.getOrNull()
+        // Capped: a slow calendar or mail held the opener, with nothing said.
+        kotlinx.coroutines.withTimeoutOrNull(OPENER_WAIT_MS) { calendarRead() }
+        val z = zone()
+        val now = io.nisfeb.talon.util.nowMs()
+        val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(z).date
+        val rows = calendar?.rows?.value.orEmpty()
+        val next = rows.filter { !it.isTask && !it.all && it.l > now && kotlin.time.Instant.fromEpochMilliseconds(it.l).toLocalDateTime(z).date == today }.minByOrNull { it.l }
+        val unreadMail = kotlinx.coroutines.withTimeoutOrNull(OPENER_WAIT_MS) { inbox.await() }?.threads?.filter { it.unread }
+        seen.events(rows, today, today)
+        seen.mail(unreadMail.orEmpty())
+        Day(
+            mail = unreadMail?.size,
+            mailLate = mail != null && unreadMail == null,
+            chats = chats,
+            questions = kotlinx.coroutines.withTimeoutOrNull(QUESTIONS_WAIT_MS) { questions.await() },
+            firstEvent = next?.let { "${it.name.ifBlank { "an event" }} at ${DictationCards.clock(it.l, z, twentyFour)}, ${soon(it.l - now)}" },
+            card = seen.card(z, name, twentyFour, now),
+        )
+    }
+
+    /**
+     * The rest of the opener, written by the model from [digest]
+     * ([openerDigest]) while the counts are said. Where the model fails,
+     * the owner is asked what they would like: the counts alone still
+     * open it.
+     */
+    suspend fun openerRest(completer: AgentLoop.Completer, digest: String): String = try {
+        AgentLoop(completer, emptyList(), openerPrompt, 2).run(digest, confirm = { _, _ -> false })
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        VoiceConversation.WHAT_NEXT
+    }
+
+    const val DAY_TOOL = "day_overview"
+
+    /** [day]'s lines for the model to word: the counts, the next event today, and today's brief. */
+    fun dayTool(day: suspend () -> String) = Tool(
+        spec = ToolSpec(
+            DAY_TOOL,
+            "The owner's day as $ASSISTANT_NAME opens it: their new mail and chat messages, how many of those wait for their answer, the next event today, and today's brief from orrery when there is one. Call it when they ask to be briefed or how their day looks. Today's events and unread mail are shown to them under your answer, so do not list those again.",
+            toolSchema(required = emptyList()),
+        ),
+        write = false,
+    ) { day() }
 
     /** What the opener is written from. [brief] only when it is today's. */
     fun openerDigest(now: String, firstEvent: String?, brief: Brief?): String = buildString {

@@ -179,26 +179,6 @@ class OrreryApi(
     }
 
     /**
-     * The ship answers a write before its writer applies it (write-then),
-     * so a read straight after can still see things as they were. This
-     * asks [seen] until it says yes, pausing longer each time, for about
-     * six seconds; a read that fails counts as not seen. It never throws,
-     * since whatever calls it has already changed something. The one
-     * loop every read-back of a write goes through.
-     */
-    suspend fun settle(seen: suspend () -> Boolean): Boolean {
-        var pause = SETTLE_FIRST_MS
-        repeat(SETTLE_READS) { n ->
-            if (n > 0) {
-                kotlinx.coroutines.delay(pause)
-                pause *= 2
-            }
-            if (runCatching { seen() }.getOrDefault(false)) return true
-        }
-        return false
-    }
-
-    /**
      * Merge [body] into a settings document. Owner's route, owner's
      * client. The ship answers once the write has landed, with the
      * document as its GET gives it: that answer is the new state, and
@@ -265,6 +245,12 @@ class OrreryApi(
         }
         val said = request(owner, HttpMethod.Post, "/api/correct", body.toString())
         return reading { Json.parseToJsonElement(said).jsonObject }
+    }
+
+    /** Take one observation back, as the owner: it stays in the timeline, labelled retracted. */
+    suspend fun retract(id: String, note: String) {
+        val body = buildJsonObject { put("id", id); put("note", clipBytes(note.trim(), 500)) }
+        request(owner, HttpMethod.Post, "/api/retract", body.toString())
     }
 
     /**
@@ -507,7 +493,6 @@ class OrreryApi(
             .getOrNull() ?: "asked"
     }
 
-    /** One observe batch under the key. Per-item answers, in order. */
     /** The time-to-leave settings as a key sees them (orrery 69): `enabled` and `lead_min`, never the token. */
     suspend fun travel(token: String): JsonObject {
         val text = request(bare, HttpMethod.Get, "/api/travel") { header(HttpHeaders.Authorization, "Bearer $token") }
@@ -575,9 +560,16 @@ class OrreryApi(
         request(bare, HttpMethod.Post, "/api/health", body) { header(HttpHeaders.Authorization, "Bearer $token") }
     }
 
-    suspend fun observe(batch: JsonObject, token: String): ObserveAnswer {
-        val text = request(bare, HttpMethod.Post, "/api/observe", batch.toString()) {
-            header(HttpHeaders.Authorization, "Bearer $token")
+    /**
+     * One observe batch under the key, or with no [token] as the owner:
+     * a row that names its `by` keeps it then, and one with no `at` is
+     * dated by the ship's own clock. Per-item answers, in order.
+     */
+    suspend fun observe(batch: JsonObject, token: String?): ObserveAnswer {
+        val text = if (token != null) {
+            request(bare, HttpMethod.Post, "/api/observe", batch.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
+        } else {
+            request(owner, HttpMethod.Post, "/api/observe", batch.toString())
         }
         val o = reading { Json.parseToJsonElement(text).jsonObject }
         fun items(k: String) = o[k]?.jsonArray.orEmpty().map { e ->
@@ -672,6 +664,26 @@ class OrreryApi(
         /** A settle's reads and first pause: 200 ms doubling, about six seconds in all. */
         const val SETTLE_READS = 6
         const val SETTLE_FIRST_MS = 200L
+
+        /**
+         * The ship answers a write before its writer applies it (write-then),
+         * so a read straight after can still see things as they were. This
+         * asks [seen] until it says yes, pausing longer each time, for about
+         * six seconds; a read that fails counts as not seen. It never throws,
+         * since whatever calls it has already changed something. The one
+         * loop every read-back of a write goes through.
+         */
+        suspend fun settle(seen: suspend () -> Boolean): Boolean {
+            var pause = SETTLE_FIRST_MS
+            repeat(SETTLE_READS) { n ->
+                if (n > 0) {
+                    kotlinx.coroutines.delay(pause)
+                    pause *= 2
+                }
+                if (runCatching { seen() }.getOrDefault(false)) return true
+            }
+            return false
+        }
 
         /**
          * The settings documents the owner may read and write through

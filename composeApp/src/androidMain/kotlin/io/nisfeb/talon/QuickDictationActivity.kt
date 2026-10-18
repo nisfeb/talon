@@ -12,7 +12,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,10 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Place
 import io.nisfeb.talon.ui.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -55,41 +51,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import io.nisfeb.talon.QuickDictation.Stage
-import io.nisfeb.talon.ai.CardDay
-import io.nisfeb.talon.ai.CardMail
-import io.nisfeb.talon.ai.CardMessage
-import io.nisfeb.talon.ai.CardPerson
-import io.nisfeb.talon.ai.CardProposal
-import io.nisfeb.talon.ai.CardTask
-import io.nisfeb.talon.ai.DictationCard
 import io.nisfeb.talon.ai.DictationRun
 import io.nisfeb.talon.ai.loopsCanRun
 import io.nisfeb.talon.ui.MdBlock
-import io.nisfeb.talon.ui.dmLink
 import io.nisfeb.talon.ui.dmShip
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ui.inlineAnnotated
 import io.nisfeb.talon.ui.parseMarkdownBlocks
 import io.nisfeb.talon.ui.withTalonLinks
 import io.nisfeb.talon.urbit.TalonLink
-import io.nisfeb.talon.ui.theme.talonColors
 import kotlinx.coroutines.delay
 
 /**
@@ -106,7 +89,9 @@ import kotlinx.coroutines.delay
  * buttons mid-screen, since low on the card a tap could land on the
  * fingerprint sensor and unlock the phone.
  *
- * Android-only: no desktop analog (see [QuickDictation]).
+ * Android-only: no desktop analog (see [QuickDictation]). The cards it
+ * draws are common ([io.nisfeb.talon.ui.AnswerCard]), and the Assistant
+ * draws the same ones on every platform.
  */
 class QuickDictationActivity : ComponentActivity() {
     /** Why it cannot listen, in words for the owner; null while it can. */
@@ -136,10 +121,11 @@ class QuickDictationActivity : ComponentActivity() {
         // waiting for the owner's word is shown, not recorded over.
         val now = QuickDictation.stage.value
         if (savedInstanceState == null && (now is Stage.Idle || now is Stage.Said)) start()
-        // The app's colours without TalonTheme, which paints the window's
-        // background and would hide what is behind the card.
+        // The app's theme, as the owner set it up, without painting the
+        // window: that would hide what is behind the card. It drew in the
+        // brand palette whatever the app's theme was.
         setContent {
-            MaterialTheme(colorScheme = talonColors(isSystemInDarkTheme())) {
+            io.nisfeb.talon.ui.theme.TalonAppTheme(application as TalonApplication, paintWindow = false) {
                 CompositionLocalProvider(LocalUriHandler provides links) { Sheet() }
             }
         }
@@ -208,7 +194,7 @@ class QuickDictationActivity : ComponentActivity() {
         val ship = dmShip(uri)
         val target: Intent = when {
             ship != null -> talon.putExtra(Notifications.EXTRA_OPEN_WHOM, ship)
-            uri == CALENDAR -> talon.putExtra(Notifications.EXTRA_OPEN_CALENDAR, io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)
+            uri == io.nisfeb.talon.ui.CALENDAR_LINK -> talon.putExtra(Notifications.EXTRA_OPEN_CALENDAR, io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX)
             TalonLink.isTalonUrl(uri) -> when (val l = TalonLink.parse(uri)) {
                 is TalonLink.Message -> talon.putExtra(Notifications.EXTRA_OPEN_WHOM, l.whom).apply {
                     if (l.parentId != null) putExtra(Notifications.EXTRA_OPEN_THREAD, l.parentId).putExtra(Notifications.EXTRA_THREAD_ANCHOR, l.id)
@@ -388,7 +374,7 @@ class QuickDictationActivity : ComponentActivity() {
             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
         )
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            s.proposals.forEach { Proposal(it) }
+            s.proposals.forEach { io.nisfeb.talon.ui.ProposalCard(it, ::open) }
             if (s.reply.isNotBlank()) Text(s.reply, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(
@@ -415,43 +401,6 @@ class QuickDictationActivity : ComponentActivity() {
         QuietButton("Not now", { QuickDictation.decide(false) })
     }
 
-    /** One thing orrery would do, drawn as what it is. */
-    @Composable
-    private fun Proposal(p: CardProposal) {
-        when (p.kind) {
-            "message" -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                p.to?.let { Person(it, null) }
-                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(topStart = 6.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = 22.dp), modifier = Modifier.fillMaxWidth()) {
-                    Text(p.text ?: p.title, fontSize = 24.sp, lineHeight = 32.sp, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(18.dp))
-                }
-            }
-            "calendar" -> Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(18.dp)).padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Icon(Icons.Filled.DateRange, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(p.title, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium)
-                    p.time?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
-                    p.place?.let { Place(it) }
-                }
-            }
-            "task" -> Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(18.dp)).padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                Column {
-                    Text(p.title, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium)
-                    p.time?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-            }
-            else -> Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                Text(p.title, fontSize = 22.sp, lineHeight = 28.sp, modifier = Modifier.padding(16.dp))
-            }
-        }
-    }
-
     @Composable
     private fun ColumnScope.Said(s: Stage.Said) {
         Column(
@@ -461,7 +410,7 @@ class QuickDictationActivity : ComponentActivity() {
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Answer(s.line, s.card?.names.orEmpty())
-            s.card?.let { Card(it) }
+            s.card?.let { io.nisfeb.talon.ui.AnswerCard(it, ::open) }
         }
         if (s.talking) {
             QuietButton("Done", { close() })
@@ -508,150 +457,8 @@ class QuickDictationActivity : ComponentActivity() {
         }
     }
 
-    /** What the answer read, as Talon shows it, each row opening where it lives. */
-    @Composable
-    private fun Card(card: DictationCard) {
-        if (card.people.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { card.people.forEach { Person(it.name, it.ship) } }
-        card.days.forEach { Day(it) }
-        if (card.tasks.isNotEmpty()) Tasks(card.tasks)
-        if (card.messages.isNotEmpty()) Messages(card.messages)
-        if (card.mail.isNotEmpty()) Mail(card.mail)
-    }
-
-    /** Someone, with a face of their initial; tapped, their chat. */
-    @Composable
-    private fun Person(name: String, ship: String?) {
-        Row(
-            Modifier.clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.secondaryContainer)
-                .clickable(enabled = ship != null) { ship?.let { open(dmLink(it)) } }
-                .padding(start = 6.dp, end = 18.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primary, CircleShape), contentAlignment = Alignment.Center) {
-                Text(name.trimStart('~').take(1).uppercase(), color = MaterialTheme.colorScheme.onPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
-            Column {
-                Text(name, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                if (ship != null && ship != name) Text(ship, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f))
-            }
-        }
-    }
-
-    @Composable
-    private fun Section(title: String, icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Text(title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.primary)
-            }
-            content()
-        }
-    }
-
-    @Composable
-    private fun Messages(messages: List<CardMessage>) = Section("Messages", TalonIcons.Chat) {
-        messages.forEach { m ->
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .clickable { open(m.link) }.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text("${m.author}  \u00b7  ${m.where}  \u00b7  ${m.time}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(m.text, fontSize = 19.sp, lineHeight = 26.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-
-    @Composable
-    private fun Mail(mail: List<CardMail>) = Section("Mail", Icons.Filled.Email) {
-        mail.forEach { t ->
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .clickable { open(t.link) }.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(t.from, style = MaterialTheme.typography.titleMedium.copy(fontWeight = if (t.unread) FontWeight.Bold else FontWeight.Normal), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(t.time, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(t.subject, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = if (t.unread) FontWeight.SemiBold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (t.snippet.isNotBlank()) Text(t.snippet, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-
-    @Composable
-    private fun Place(place: String) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(Icons.Filled.Place, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-            Text(place, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-
-    @Composable
-    private fun Day(day: CardDay) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Filled.DateRange, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Text(day.label, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.primary)
-            }
-            day.events.forEach { e ->
-                Surface(
-                    onClick = { open(CALENDAR) },
-                    color = if (e.now) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth().alpha(if (e.over) 0.55f else 1f),
-                ) {
-                    Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Box(Modifier.width(6.dp).height(52.dp).background(e.color?.let(::colorOf) ?: MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp)))
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                if (e.now) "${e.time}  ·  now" else e.time,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (e.now) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(e.name, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium)
-                            if (e.place.isNotBlank()) Place(e.place)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun Tasks(tasks: List<CardTask>) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Text("Tasks", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.primary)
-            }
-            tasks.forEach { t ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.clickable { open(CALENDAR) }.padding(horizontal = 4.dp, vertical = 4.dp)) {
-                    Box(Modifier.size(18.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), CircleShape))
-                    Text(t.name, fontSize = 20.sp, lineHeight = 26.sp, modifier = Modifier.weight(1f))
-                    t.due?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (t.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     companion object {
-        /** What a tap on a calendar row opens. */
-        private const val CALENDAR = "calendar:"
-
         /** Start a conversation with Archie rather than a dictation. */
         const val EXTRA_CONVERSE = "io.nisfeb.talon.extra.CONVERSE"
     }
-
-    /** A calendar's "#rrggbb" as a colour, or null for one that is not. */
-    private fun colorOf(hex: String): Color? = runCatching {
-        Color(android.graphics.Color.parseColor(if (hex.startsWith("#")) hex else "#$hex"))
-    }.getOrNull()
 }

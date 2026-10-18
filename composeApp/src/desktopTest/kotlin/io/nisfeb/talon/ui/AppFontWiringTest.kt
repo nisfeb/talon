@@ -35,7 +35,10 @@ class AppFontWiringTest {
         fun has(path: String, what: String) = assertTrue(what in File(root, path).readText(), "$path does not call $what")
         has("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt", "rememberAppFontFamily(")
         has("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt", "rememberFontRepo(")
-        has("composeApp/src/androidMain/kotlin/io/nisfeb/talon/MainActivity.kt", "rememberAppFontFamily(")
+        // Android's theme is built in TalonAppTheme, for the app and the
+        // dictation card alike; MainActivity draws in it.
+        has("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/theme/AppTheme.android.kt", "rememberAppFontFamily(")
+        has("composeApp/src/androidMain/kotlin/io/nisfeb/talon/MainActivity.kt", "TalonAppTheme(app)")
         has("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt", "rememberFontRepo(")
     }
 }

@@ -620,8 +620,17 @@ class OrreryRepo(
     /** One body as the ship shows it, current values and all. */
     suspend fun bodyView(id: String): Result<JsonObject> = runCatching { attached().bodyView(id, key()) }
 
-    /** One observe batch under this install's key. */
-    suspend fun observeNow(batch: JsonObject): Result<ObserveAnswer> = runCatching { attached().observe(batch, key()) }
+    /** One observe batch under this install's key, or [asOwner] under the owner's login, on this repo's scope. */
+    suspend fun observeNow(batch: JsonObject, asOwner: Boolean = false): Result<ObserveAnswer> =
+        scope.async { runCatching { attached().observe(batch, if (asOwner) null else key()) } }.await()
+
+    /** One observation taken back ([OrreryApi.retract]), on this repo's scope. */
+    suspend fun retract(id: String, note: String): Result<Unit> =
+        scope.async { runCatching { attached().retract(id, note) } }.await()
+
+    /** What waits for the owner, read from the ship now; the Actions page shows the same list. */
+    suspend fun readActions(): Result<List<OrreryAction>> =
+        runCatching { attached().actions(keyToken()) }.onSuccess { published(it) }
 
     private fun attached(): OrreryApi = api ?: error("Not attached to a ship.")
 
@@ -1815,8 +1824,12 @@ class OrreryRepo(
         return occurrenceNear(rows.filter { (cal == null || it.cal == cal) && it.id == uid }.map { it.l }, nearMs)
     }
 
-    /** The person's word on an action: done, dismissed, or failed with why. */
-    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = runCatching {
+    /**
+     * The person's word on an action: done, dismissed, or failed with why.
+     * On this repo's scope: an assistant stopped while the ship answers
+     * does not take the answer back halfway.
+     */
+    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = scope.async { runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         // This install's key where it has one, else the owner's own say.
@@ -1833,7 +1846,8 @@ class OrreryRepo(
             if (token != null) a.landed(token, id, status) else delay(2_000)
             refreshActions()
         }
-    }
+        Unit
+    } }.await()
 
     /**
      * Send what the owner typed under a proposal, rule 17. The ship

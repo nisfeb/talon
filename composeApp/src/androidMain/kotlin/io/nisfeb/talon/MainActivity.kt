@@ -10,21 +10,15 @@ import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
-import io.nisfeb.talon.ui.AccentMode
-import io.nisfeb.talon.ui.AccentSettings
 import io.nisfeb.talon.ui.AndroidImageDownloader
 import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.TalonApp
-import io.nisfeb.talon.ui.parseHexColor
-import io.nisfeb.talon.ui.theme.TalonTheme
-import io.nisfeb.talon.ui.theme.ThemePreference
 
 class MainActivity : ComponentActivity() {
 
@@ -119,13 +113,6 @@ class MainActivity : ComponentActivity() {
             val answerFrom by pendingAnswerFrom
             val answerCallId by pendingAnswerCallId
             val callBack by pendingCallBack
-            val themeMode by app.themePreference.mode.collectAsState()
-            val systemDark = isSystemInDarkTheme()
-            val darkTheme = when (themeMode) {
-                ThemePreference.Mode.System -> systemDark
-                ThemePreference.Mode.Light -> false
-                ThemePreference.Mode.Dark -> true
-            }
             // Wire AndroidImageDownloader behind the LocalImageDownloader
             // composition-local so the fullscreen viewer's download
             // button can save without an extra plumbing parameter on
@@ -135,51 +122,11 @@ class MainActivity : ComponentActivity() {
             val imageDownloader = remember(app) {
                 AndroidImageDownloader(applicationContext, app.http)
             }
-            // Resolve the user's chosen accent so the theme primary
-            // tints every primary-colored UI element uniformly. Same
-            // logic as commonMain's App.kt, scoped to the production
-            // Android app's TalonApplication graph.
-            //
-            // Critical: observe the ship via `app.activeShipFlow` and
-            // re-key the contacts stream on it. Reading `app.session
-            // .shipName` directly looks correct but doesn't trigger
-            // recomposition on ship switch — that field is a lateinit
-            // var reassigned in buildShipScoped, which Compose has no
-            // way to track. Same trap for `app.db`: caching the flow
-            // with `remember(app)` pinned the old per-ship database
-            // even after switchShip swapped the field. Both surfaced
-            // as "accent stays as the previous ship's color."
-            val accentSettings by app.uiSettings.accentSettings.collectAsState()
-            val activeShipState by app.activeShipFlow.collectAsState()
-            val allShipsState by app.allShipsFlow.collectAsState()
-            val multiShip = allShipsState.size >= 2
-            val ownContacts by remember(activeShipState) {
-                app.db.contacts().stream()
-            }.collectAsState(initial = emptyList())
-            val profileAccent = remember(ownContacts, activeShipState) {
-                val ship = activeShipState ?: return@remember null
-                ownContacts.firstOrNull { it.ship == ship }?.color
-                    ?.let(::parseHexColor)
-            }
-            val accentEnabled = AccentSettings
-                .isEnabled(accentSettings, multiShip)
-            val accentOverride = remember(accentEnabled, accentSettings, profileAccent) {
-                if (!accentEnabled) null
-                else when (accentSettings.mode) {
-                    AccentMode.Brand -> null
-                    AccentMode.Custom ->
-                        accentSettings.customHex?.let(::parseHexColor)
-                    AccentMode.Profile -> profileAccent
-                }
-            }
-            val themeSettings by app.uiSettings.themeSettings.collectAsState()
             androidx.compose.runtime.LaunchedEffect(app) {
                 app.uiSettings.micProcessing.collect { io.nisfeb.talon.call.MicProcessingSettings.current = it }
             }
-            TalonTheme(
-                darkTheme = darkTheme, accentOverride = accentOverride, customTheme = themeSettings.active,
-                fontFamily = io.nisfeb.talon.ui.rememberAppFontFamily(app.uiSettings),
-            ) {
+            // The owner's theme: light or dark, accent, a theme of their own, font.
+            io.nisfeb.talon.ui.theme.TalonAppTheme(app) {
                 CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
                     TalonApp(
                         initialForShip = forShip,

@@ -127,11 +127,14 @@ fun TalonTheme(
     customTheme: CustomTheme? = null,
     /** The font the owner chose for the app; null for the system's. Code keeps its own monospace. */
     fontFamily: androidx.compose.ui.text.font.FontFamily? = null,
+    /** False leaves the window and its bars alone: for a card drawn over
+     *  another app, whose window painted would hide what is behind it. */
+    paintWindow: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val dark = customTheme?.dark ?: darkTheme
     val base = customTheme?.let(::customScheme) ?: talonColors(dark)
-    SystemBarsAppearance(dark, base.background)
+    if (paintWindow) SystemBarsAppearance(dark, base.background)
     val effective = if (accentOverride == null) base else base.copy(
         primary = accentOverride,
         onPrimary = if (accentOverride.luminance() > 0.5f) Color(0xFF1C1917)

@@ -1,11 +1,17 @@
 package io.nisfeb.talon.ai
 
+import io.nisfeb.talon.orrery.ObserveAnswer
+import io.nisfeb.talon.orrery.OrreryAction
 import io.nisfeb.talon.orrery.OrreryApi
+import io.nisfeb.talon.orrery.OrreryError
 import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
+import io.nisfeb.talon.orrery.answerShown
+import io.nisfeb.talon.urbit.asText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -80,12 +86,15 @@ Before you write:
 - Two bodies for one name (activity/ballet and an old
   activity/rose-ballet): take the one with a current `next` or an open
   situation. When neither or both have one, ask the owner which.
-- After a write, read the body back with orrery_read and check that
-  `now` holds what the owner said. A refused row, or an instruction
-  orrery filed as a preference, means it did not land: tell the owner
-  so, never that it is done.
+- Every write to orrery reads the record back and answers, for each
+  change, Confirmed or Not confirmed with what the record still shows.
+  A change is done only once it is Confirmed. Tell the owner which of
+  their changes are confirmed and which are not, and never say a change
+  is made that the record does not show. A refused row, or an
+  instruction orrery filed as a preference, did not land.
 - A fact is one subject, one attribute, one value. `at` is when the
-  thing happened or will happen, not when you are writing it.
+  thing happened or will happen, not when you are writing it. A row
+  dated ahead of now counts only from its time.
 - A schedule is not a fact about the past. An activity's `next` and a
   situation's `starts` are the plan; `started` and `ended` are written
   only once they have.
@@ -103,13 +112,29 @@ Before you write:
 - A standing rule from the owner ("never propose calls before 9",
   "write briefly") is a preference: orrery_set_preferences. Every
   prompt on the ship reads them.
-- Something orrery holds that the owner says is wrong is
-  orrery_correct, once orrery_read of the body shows the exact
-  attribute and value; the ship then refuses it from anyone. Anything
-  looser ("Sam and Samuel are one person", "she moved to Lisbon",
-  "Andrea was not in Barcelona" before you know which body) is
-  orrery_instruct with the owner's words: the ship's model works out
-  the change and files it for the owner to approve.
+- A value orrery holds that should change or go (the plan changed, or
+  it is wrong) is orrery_set, once orrery_read of the body shows the
+  attribute: it files the owner's new value as of now, or takes the
+  value off, and reads it back. wrong true when the old value was never
+  true; the ship then refuses it from anyone. Do not chain
+  orrery_observe and orrery_correct for this. A value that is wrong
+  with nothing to put in its place is orrery_correct. Anything looser
+  ("Sam and Samuel are one person", "she moved to Lisbon", "Andrea was
+  not in Barcelona" before you know which body) is orrery_instruct with
+  the owner's words: the ship's model works out the change and files it
+  for the owner to approve.
+- What orrery took from the calendar is the calendar's. An event's
+  time (starts, ends, next) changes with update_event alone, and orrery
+  takes the new time from the calendar itself. Its place or its people
+  change with update_event, then orrery_set with calendar true, since
+  orrery does not read a one-off event's new place or people again.
+- leave-by is the ship's: it works it out from the start, the place and
+  the drive with traffic, and writes it again as they move, so it is
+  never set. orrery_read of the body says under leave_by_basis what it
+  was worked out from, where the ship says; where it says the record
+  does not keep that, tell the owner so rather than a guess.
+- What orrery has waiting for the owner is orrery_actions. orrery_answer
+  approves one, or dismisses it, which is how a proposal is rejected.
 
 Settings live in documents, read and written whole by name:
 
@@ -184,7 +209,16 @@ interface OrreryTap {
     suspend fun find(q: String): Result<List<Pair<String, String>>>
     suspend fun state(): Result<String>
     suspend fun body(id: String): Result<String>
-    suspend fun observe(batch: JsonObject): Result<List<String>>
+    /** One body as the ship shows it, whole: each attribute's winner with where it came from, and the timeline. */
+    suspend fun view(id: String): Result<JsonObject>
+    /** A batch filed under the key, or [asOwner] as the owner's own word and dated by the ship; its answer per item. */
+    suspend fun observe(batch: JsonObject, asOwner: Boolean = false): Result<ObserveAnswer>
+    /** One observation taken back. */
+    suspend fun retract(id: String, note: String): Result<Unit>
+    /** What waits for the owner, read from the ship now. */
+    suspend fun actions(): Result<List<OrreryAction>>
+    /** The owner's word on one action: approved or dismissed, with why. */
+    suspend fun transition(id: String, status: String, note: String): Result<Unit>
     suspend fun settings(name: String): Result<String>
     suspend fun configure(name: String, body: JsonObject): Result<String>
     suspend fun register(name: String): Result<String>
@@ -212,23 +246,21 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     // model reads it whole instead of a view cut mid-string.
     override suspend fun state() = readState(brief = true).map { it.toString() }
 
-    override suspend fun body(id: String) = bodyView(id).map(::bodyForModel)
-
-    override suspend fun observe(batch: JsonObject) = observeNow(batch).map { answer ->
-        answer.bodies.map {
-            when {
-                it.ok && it.existing -> "body ${it.id}: already there"
-                it.ok -> "body ${it.id}: created"
-                else -> "body ${it.id}: refused, ${it.error ?: "no reason given"}"
-            }
-        } + answer.observations.mapIndexed { i, it ->
-            when {
-                it.ok && it.existing -> "${i + 1}: already known"
-                it.ok -> "${i + 1}: written"
-                else -> "${i + 1}: refused, ${it.error ?: "no reason given"}"
-            }
-        }
+    // The leave plan only for a body with a leave-by: a scry, mostly.
+    override suspend fun body(id: String) = bodyView(id).map { b ->
+        bodyForModel(b, (b["attrs"] as? JsonObject)?.get("leave-by")?.let { leaveBasis(b, travelLast()) })
     }
+
+    override suspend fun view(id: String) = bodyView(id)
+
+    override suspend fun observe(batch: JsonObject, asOwner: Boolean) = observeNow(batch, asOwner)
+
+    override suspend fun retract(id: String, note: String) = this@asTap.retract(id, note)
+
+    override suspend fun actions() = readActions()
+
+    // The repo's own answer, so the Actions page shows it too.
+    override suspend fun transition(id: String, status: String, note: String) = setAction(id, status, note)
 
     override suspend fun settings(name: String) = readSettings(name)
 
@@ -259,6 +291,33 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
 
     override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String) =
         this@asTap.correct(subject, attr, value, why)
+}
+
+/**
+ * [this] with what an instruct not applied leaves waiting put to the
+ * owner at once ([DictationFlow.putToOwner]), as the voice card does,
+ * and not only under Actions. What orrery_instruct then reads says what
+ * they decided; with no word, it waits under Actions as before.
+ */
+fun OrreryTap.puttingToOwner(
+    decide: suspend (reply: String, waiting: List<io.nisfeb.talon.orrery.OrreryAction>) -> Boolean?,
+    answer: suspend (id: String, approve: Boolean) -> Unit,
+): OrreryTap = object : OrreryTap by this {
+    override suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed> {
+        val said = this@puttingToOwner.instruct(text, apply).getOrElse { return Result.failure(it) }
+        val waiting = said.actions.filter { it.status == "proposed" }
+        if (apply || waiting.isEmpty()) return Result.success(said)
+        val ok = try {
+            DictationFlow.putToOwner(said.reply.ifBlank { "Orrery took it." }, waiting, decide, answer)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            return Result.success(said.copy(note = (said.note + " The owner answered, but orrery did not take the answer: ${e.message}. It waits under Actions.").trim()))
+        }
+        if (ok == null) return Result.success(said)
+        val now = if (ok) "approved" else "dismissed"
+        return Result.success(said.copy(actions = said.actions.map { if (it in waiting) it.copy(status = now) else it }))
+    }
 }
 
 /** Orrery's tools, where this install is attached to a ship that has it. */
@@ -297,7 +356,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_read",
-            "Read orrery. With no argument, the brief view: every body the key may see as id, kind, name, aliases, current values and the situations it is in; the open situations with what each needs and whose move it is; the open actions; and the attribute names each kind takes. Read it once at the start of a task, then orrery_find and orrery_read with body for the few things you need more of. With body: what orrery now holds for it (under now, each attribute's current value), its situations and actions, and its timeline with values. Read a body back after writing to it, to check the owner's words landed as facts.",
+            "Read orrery. With no argument, the brief view: every body the key may see as id, kind, name, aliases, current values and the situations it is in; the open situations with what each needs and whose move it is; the open actions; and the attribute names each kind takes. Read it once at the start of a task, then orrery_find and orrery_read with body for the few things you need more of. With body: what orrery now holds for it (under now, each attribute's current value), its situations and actions, its timeline with values, and for a leave-by, under leave_by_basis, what the ship worked it out from or that the record does not say.",
             toolSchema("body" to ("string" to "A body id, e.g. person/alice. Omit for the whole view."), required = emptyList()),
         ),
         write = false,
@@ -319,7 +378,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_observe",
-            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. A value that names a body is {\"ref\": \"person/alice\"}, never the id as text. Put every fact of the task in ONE call: the ship takes up to 50 bodies and 200 observations at once, and each call costs it seconds before any work, so twenty calls is a minute of waiting. Resolve names with orrery_find first. Anyone or anything orrery_find did not find is created in this same call, in bodies, or the ship refuses every fact about it. The ship answers per item and may refuse one. When the owner's message asked for the entries, write them in this turn rather than describing what you would write; the owner confirms once for the turn.",
+            "Write facts to orrery under this install's key. Give a JSON array of observations, each {\"subject\": body id, \"attr\": attribute, \"value\": the value, \"at\": ISO 8601 UTC when it happened}. A value that names a body is {\"ref\": \"person/alice\"}, never the id as text. Put every fact of the task in ONE call: the ship takes up to 50 bodies and 200 observations at once, and each call costs it seconds before any work, so twenty calls is a minute of waiting. Resolve names with orrery_find first. Anyone or anything orrery_find did not find is created in this same call, in bodies, or the ship refuses every fact about it. The ship answers per item and may refuse one, and what it took is read back, Confirmed or Not confirmed. When the owner's message asked for the entries, write them in this turn rather than describing what you would write; the owner confirms once for the turn.",
             toolSchema(
                 "observations" to ("string" to "A JSON array of observation objects."),
                 "bodies" to ("string" to "A JSON array of the new bodies these facts are about, each {\"id\": \"person/mark-beale\", \"name\": \"Mark Beale\"}, with \"aliases\" if the owner gave any. Only for a body orrery_find did not find."),
@@ -336,14 +395,19 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                 ?: return@Tool "Error: bodies must be a JSON array."
         }
         if (arr.isEmpty() && bodies.isNullOrEmpty()) return@Tool "Error: nothing to write."
+        val rows = arr.map(::refBodyIds)
         val batch = buildJsonObject {
             if (!bodies.isNullOrEmpty()) put("bodies", bodies)
-            put("observations", JsonArray(arr.map(::refBodyIds)))
+            put("observations", JsonArray(rows))
         }
         orrery.observe(batch).fold(
-            onSuccess = { said ->
-                if (said.isEmpty()) "The ship answered nothing."
-                else said.joinToString("\n") + if (said.any { "refused" in it }) "\n$NOT_LANDED" else ""
+            onSuccess = { answer ->
+                val said = answer.lines()
+                if (said.isEmpty()) return@fold "The ship answered nothing."
+                // What the ship took, read back: a row it answered is not yet one it holds.
+                val taken = rows.filterIndexed { i, _ -> answer.observations.getOrNull(i)?.ok == true }
+                (said + listOfNotNull(NOT_LANDED.takeIf { answer.refused.isNotEmpty() }, orrery.readBack(taken.flatMap(::changesOf)).ifEmpty { null }))
+                    .joinToString("\n")
             },
             onFailure = { "Could not write to orrery: ${it.message}" },
         )
@@ -470,7 +534,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
     add(Tool(
         spec = ToolSpec(
             "orrery_instruct",
-            "Tell orrery something in the owner's words for its model to act on: that a fact is wrong, that two bodies are one person, a fact to state, a standing preference, or something to do. Not for adding an event or appointment: that is create_event alone, since orrery reads the calendar itself and would place a second copy. The ship answers in words and files what it takes from them as proposals for the owner to approve under Actions. One model call on the ship, counted against its daily limit.",
+            "Tell orrery something in the owner's words for its model to act on: that a fact is wrong, that two bodies are one person, a fact to state, a standing preference, or something to do. A value to change on a body you know is orrery_set, at once and with no model call. Not for adding an event or appointment: that is create_event alone, since orrery reads the calendar itself and would place a second copy. The ship answers in words and files what it takes from them as proposals for the owner to approve under Actions. One model call on the ship, counted against its daily limit.",
             toolSchema(
                 "text" to ("string" to "The owner's words, up to 2000 bytes."),
                 "apply" to ("boolean" to "true only when the owner said to make the change now: everything filed is approved at once, calendar placements included, with no look under Actions."),
@@ -480,8 +544,13 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
         write = true,
     ) { args ->
         val text = args.str("text") ?: return@Tool "Error: text is required."
-        orrery.instruct(text, args.str("apply") == "true").fold(
+        val apply = args.str("apply") == "true"
+        orrery.instruct(text, apply).fold(
             onSuccess = { a ->
+                // What was approved is carried out by the ship soon after, and
+                // read back. Applied, the answer still says proposed: the ship
+                // lists what it filed before it approves it.
+                val made = a.actions.filter { it.kind in FACT_KINDS && (apply || it.status in DECIDED) }
                 listOfNotNull(
                     a.reply.takeIf { it.isNotBlank() }?.let { "Orrery says: $it" },
                     a.actions.takeIf { it.isNotEmpty() }?.let { filed -> "Filed:\n" + filed.joinToString("\n") { "- ${it.kind}: ${it.title} (${it.status})" } },
@@ -490,6 +559,10 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                     // plan reads: "Andrea drops off, I pick up" filed as one
                     // changed nothing (orrery-0c, 2026-10-07).
                     PREFERENCE_ONLY.takeIf { a.actions.any { it.kind == "preference" } && a.actions.none { it.kind in FACT_KINDS } },
+                    orrery.readBack(made.flatMap(::changesOf)).ifEmpty { null },
+                    made.filter { it.kind == "merge" }.takeIf { it.isNotEmpty() }?.joinToString("\n") {
+                        "Not read back: the merge of ${it.payload["from"].asText()} into ${it.payload["into"].asText()}. orrery_read the one kept to see it."
+                    },
                 ).joinToString("\n").ifEmpty { "Orrery answered nothing." }
             },
             onFailure = { "Could not tell orrery: ${it.message}" },
@@ -522,9 +595,149 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             else -> return@Tool "Error: give the wrong value, or ref for a wrong body."
         }
         orrery.correct(subject, attr, value, args.str("why").orEmpty()).fold(
-            onSuccess = { "Struck: $subject's $attr is not ${ref ?: plain}. Orrery refuses it from now on." },
+            onSuccess = {
+                "Orrery took the strike of $subject's $attr $value, and refuses it from then on.\n" +
+                    orrery.readBack(listOf(Change(subject, attr, value, gone = true)))
+            },
             onFailure = { "Could not strike it: ${it.message}" },
         )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_set",
+            "Change one value orrery holds: subject's attr becomes value (or the body ref), filed as the owner's own word as of now, so it wins over every older one. With remove true the value is taken off instead: a single value is cleared, and for a list such as participants only the one given goes. wrong true when the old value was never true rather than out of date: it is struck from every source first, so no reader files it again. It reads the body first and the record back after, and answers Confirmed or Not confirmed with what the record shows. A value orrery took from the calendar is the calendar's: an event's time changes only with update_event, and orrery follows it; its place or people change with update_event, then here with calendar true. leave-by is the ship's and is never set. Read the body with orrery_read first for the attribute's exact name.",
+            toolSchema(
+                "subject" to ("string" to "The body, e.g. situation/2026-10-18-jax-flight."),
+                "attr" to ("string" to "The attribute, as orrery names it."),
+                "value" to ("string" to "The new value as text; with remove, the one value to take off a list."),
+                "ref" to ("string" to "Instead of value: a body, e.g. person/andrea."),
+                "remove" to ("boolean" to "true to take the value off rather than set it."),
+                "wrong" to ("boolean" to "true when the old value was never true, not only out of date."),
+                "calendar" to ("boolean" to "true once the calendar's event has been changed to match, for a place or people orrery took from it."),
+                "why" to ("string" to "The owner's reason, short; optional."),
+                required = listOf("subject", "attr"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val subject = args.str("subject") ?: return@Tool "Error: subject is required."
+        val attr = args.str("attr") ?: return@Tool "Error: attr is required."
+        if (attr == "leave-by") return@Tool LEAVE_BY_SHIPS
+        val ref = args.str("ref")
+        val plain = args.str("value")
+        if (ref != null && plain != null) return@Tool "Error: give value or ref, not both."
+        val given = ref?.let { buildJsonObject { put("ref", it) } } ?: plain?.let { refBodyIds(buildJsonObject { put("value", it) }).jsonObject.getValue("value") }
+        val remove = args.str("remove") == "true"
+        val wrong = args.str("wrong") == "true"
+        if (!remove && given == null) return@Tool "Error: give the new value, or ref, or remove true."
+        val why = args.str("why").orEmpty()
+        val body = orrery.view(subject).getOrElse { return@Tool "Could not read $subject: ${it.message}. Nothing was changed." }
+        val rows = (body["observations"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+            .filter { it["attr"].asText() == attr && it["status"].asText() != "retracted" }
+        val held = shownOf(body["attrs"] as? JsonObject, attr)
+        val list = held is JsonArray
+        // Only what an event carries: the calendar also writes a vanished
+        // event's status and the owner's zone, which are no event's. And a
+        // list's other values are not this change's: adding a person to an
+        // event's people is no change to the ones the calendar named.
+        if (attr in CALENDAR_TIMES || attr in CALENDAR_FIELDS) rows.firstOrNull { it.sourceKind() == "calendar" && (!list || it["value"] == given) }?.let { cal ->
+            val event = (cal["source"] as JsonObject)["id"].asText().orEmpty().substringAfter('/')
+            if (attr in CALENDAR_TIMES) return@Tool "$subject's $attr is the calendar's, from its event $event. Change the event with update_event (list_events finds it): orrery takes the new time from the calendar itself. Nothing was changed in orrery."
+            if (args.str("calendar") != "true") return@Tool "$subject's $attr came from the calendar's event $event. Change the event with update_event first, so the calendar and orrery agree, then call this again with calendar true: orrery does not read a one-off event's new place or people again. Nothing was changed."
+        }
+        var struck = false
+        suspend fun strike(v: JsonElement): String? = orrery.correct(subject, attr, v, why)
+            .fold({ struck = true; null }, { "Could not strike $v: ${it.message}. Nothing was changed." })
+        suspend fun file(v: JsonElement): String? =
+            fileAsOwner(orrery, subject, attr, v)?.let { if (struck) "$it The old value was struck first, and stays struck." else it }
+        val change = when {
+            remove && list -> {
+                val v = given ?: return@Tool "Error: $attr holds a list; say which value to take off."
+                val saying = rows.filter { it["value"] == v }
+                if (saying.isEmpty()) return@Tool "$subject's $attr does not hold $v; it holds $held. Nothing was changed."
+                if (wrong) {
+                    strike(v)?.let { return@Tool it }
+                } else {
+                    // Every row that says it: a value's newest row wins, so
+                    // one left behind brings the value back.
+                    for (r in saying) orrery.retract(r["id"].asText().orEmpty(), why.ifBlank { "taken off by the owner" })
+                        .onFailure { return@Tool "Could not take $v off: ${it.message}. Read the body before trying again." }
+                }
+                Change(subject, attr, v, gone = true)
+            }
+            remove -> {
+                if (held == null) return@Tool "$subject holds no $attr. Nothing was changed."
+                if (given != null && given != held) return@Tool "$subject's $attr is $held, not $given. Nothing was changed."
+                if (wrong) strike(held)?.let { return@Tool it }
+                file(JsonNull)?.let { return@Tool it }
+                Change(subject, attr, JsonNull)
+            }
+            else -> {
+                if (wrong && list) return@Tool "Error: $attr holds a list, so there is no one old value to strike. Take the wrong one off with remove true and wrong true, then add the new one."
+                // Never strike what is about to be filed: the ship would refuse it.
+                if (wrong && held != null && held != given) strike(held)?.let { return@Tool it }
+                file(given!!)?.let { return@Tool it }
+                Change(subject, attr, given)
+            }
+        }
+        orrery.readBack(listOf(change))
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_actions",
+            "What orrery has waiting for the owner: each open action (proposed, approved or claimed) with its id, kind, status, due, the bodies it is about and its title. Read it before orrery_answer.",
+            toolSchema(required = emptyList()),
+        ),
+        write = false,
+    ) { _ ->
+        orrery.actions().fold(
+            onSuccess = { open ->
+                if (open.isEmpty()) "Nothing is waiting in orrery."
+                else clip(open.joinToString("\n") { a ->
+                    "id=${a.id} kind=${a.kind} status=${a.status}" + (a.due?.let { " due=$it" } ?: "") +
+                        (a.about.takeIf { it.isNotEmpty() }?.let { " about=" + it.joinToString(",") } ?: "") + " title=${a.title}"
+                })
+            },
+            onFailure = { "Could not read orrery's actions: ${it.message}" },
+        )
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_answer",
+            "Answer one action orrery has waiting, by its id from orrery_actions: approved to have it done, or dismissed to reject it (one that is old, wrong, or not wanted). It reads orrery's list back and answers what it shows.",
+            toolSchema(
+                "id" to ("string" to "The action's id."),
+                "status" to ("string" to "approved or dismissed."),
+                "note" to ("string" to "Why, short; optional."),
+                required = listOf("id", "status"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val id = args.str("id") ?: return@Tool "Error: id is required."
+        val status = args.str("status")?.takeIf { it in ANSWERS } ?: return@Tool "Error: status is approved or dismissed."
+        // Read first: only an open action can be answered, and what it asks
+        // of the record is read back once it is approved.
+        val was = orrery.actions().getOrElse { return@Tool "Could not read orrery's actions: ${it.message}. Nothing was changed." }
+            .firstOrNull { it.id == id } ?: return@Tool "Orrery has no open action $id; orrery_actions lists what waits. Nothing was changed."
+        val title = was.title.ifBlank { id }
+        orrery.transition(id, status, args.str("note").orEmpty()).onFailure { e ->
+            return@Tool if (e is OrreryError.Unreachable) "The ship did not answer, so it may or may not have taken it. orrery_actions shows what it holds now."
+            else "Orrery did not take it: ${(e as? OrreryError.Refused)?.reason ?: e.message}. Nothing was changed."
+        }
+        var open: List<OrreryAction>? = null
+        OrreryApi.settle { orrery.actions().getOrThrow().also { open = it }.let { l -> answerShown(l.firstOrNull { it.id == id }, status) } }
+        val list = open ?: return@Tool "Not confirmed: orrery took the answer, but its list could not be read back. $NOT_CONFIRMED"
+        val there = list.firstOrNull { it.id == id }
+        val said = when {
+            there == null -> "Confirmed: orrery no longer lists $title as waiting."
+            answerShown(there, status) -> "Confirmed: orrery shows $title as ${there.status}."
+            else -> "Not confirmed (orrery still shows $title as ${there.status}). $NOT_CONFIRMED"
+        }
+        if (status == "approved" && was.kind in FACT_KINDS) said + "\n" + orrery.readBack(changesOf(was)).ifEmpty { "Not read back: a ${was.kind}." } else said
     })
 
     add(Tool(
@@ -666,12 +879,13 @@ private val FACT_KINDS = setOf("fact", "correct", "merge", "resolve")
  * used to give each row's attribute and status but no value, so nothing
  * could be checked against what the owner said.
  */
-internal fun bodyForModel(b: JsonObject): String = clipJson(
+internal fun bodyForModel(b: JsonObject, leaveBasis: String? = null): String = clipJson(
     buildJsonObject {
         for (k in listOf("id", "kind", "name", "aliases", "ship")) b[k]?.let { put(k, it) }
         (b["attrs"] as? JsonObject)?.let { attrs ->
             put("now", JsonObject(attrs.mapValues { (_, v) -> (v as? JsonObject)?.get("value") ?: v }))
         }
+        leaveBasis?.let { put("leave_by_basis", it) }
         b["involved"]?.let { put("involved", it) }
         b["actions"]?.let { put("actions", it) }
         (b["observations"] as? JsonArray)?.let { obs ->
@@ -685,3 +899,187 @@ internal fun bodyForModel(b: JsonObject): String = clipJson(
 
 private val TIMELINE_KEYS = setOf("id", "attr", "value", "at", "status")
 private const val BODY_CHARS = 12_000
+
+/** The ship's answer to an observe batch, a line an item. */
+internal fun ObserveAnswer.lines(): List<String> = bodies.map {
+    when {
+        it.ok && it.existing -> "body ${it.id}: already there"
+        it.ok -> "body ${it.id}: created"
+        else -> "body ${it.id}: refused, ${it.error ?: "no reason given"}"
+    }
+} + observations.mapIndexed { i, it ->
+    when {
+        it.ok && it.existing -> "${i + 1}: already known"
+        it.ok -> "${i + 1}: written"
+        else -> "${i + 1}: refused, ${it.error ?: "no reason given"}"
+    }
+}
+
+/**
+ * One change a write asked for, as the record should then show it:
+ * [value] held, or with [gone] not held; [JsonNull] is the attribute
+ * cleared. [at] is the row's own time, where it gave one.
+ */
+internal data class Change(val subject: String, val attr: String, val value: JsonElement, val gone: Boolean = false, val at: String? = null) {
+    fun shownIn(shown: JsonElement?): Boolean {
+        val empty = shown == null || shown is JsonNull || (shown as? JsonArray)?.isEmpty() == true
+        if (value is JsonNull) return empty
+        val holds = shown == value || (shown as? JsonArray)?.contains(value) == true
+        return holds != gone
+    }
+
+    /** "Confirmed" or "Not confirmed", with what the record shows now. */
+    fun line(shown: JsonElement?, nowMs: Long): String {
+        val what = "$subject $attr"
+        val now = shown?.takeUnless { it is JsonNull || (it as? JsonArray)?.isEmpty() == true }?.toString() ?: "nothing"
+        if (shownIn(shown)) return when {
+            value is JsonNull -> "Confirmed: $what is cleared."
+            gone -> "Confirmed: $what no longer holds $value; it shows $now."
+            else -> "Confirmed: $what shows $now."
+        }
+        val ahead = at?.let { runCatching { kotlin.time.Instant.parse(it).toEpochMilliseconds() > nowMs }.getOrNull() } == true
+        return "Not confirmed (the record still shows $now): $what" + when {
+            value is JsonNull -> " was to be cleared."
+            gone -> " was to lose $value."
+            else -> " was to be $value."
+        } + if (ahead) " The row is dated $at, ahead of now, and orrery counts it only from then." else ""
+    }
+}
+
+/** What an observation asks the record to show: one change a value, a list's values each. */
+internal fun changesOf(row: JsonElement): List<Change> {
+    val o = row as? JsonObject ?: return emptyList()
+    val subject = o["subject"].asText() ?: return emptyList()
+    val attr = o["attr"].asText() ?: return emptyList()
+    val at = o["at"].asText()
+    return when (val v = o["value"] ?: JsonNull) {
+        is JsonArray -> v.map { Change(subject, attr, it, at = at) }
+        else -> listOf(Change(subject, attr, v, at = at))
+    }
+}
+
+/** What an approved action of [FACT_KINDS] asks the record to show; a merge is not read back. */
+internal fun changesOf(a: OrreryAction): List<Change> {
+    fun s(k: String) = a.payload[k].asText()
+    return when (a.kind) {
+        "fact" -> listOf(Change(s("subject") ?: return emptyList(), s("attr") ?: return emptyList(), a.payload["value"] ?: return emptyList()))
+        "correct" -> listOf(Change(s("subject") ?: return emptyList(), s("attr") ?: return emptyList(), a.payload["value"] ?: return emptyList(), gone = true))
+        "resolve" -> {
+            val sit = s("situation") ?: return emptyList()
+            listOfNotNull(Change(sit, "status", JsonPrimitive("closed")), s("outcome")?.let { Change(sit, "outcome", JsonPrimitive(it)) })
+        }
+        else -> emptyList()
+    }
+}
+
+/**
+ * What a body view's or a state view's attributes show for [attr]: its
+ * value without the provenance a full view wraps it in, a list of them
+ * for a multi-valued one; null where it holds none.
+ */
+internal fun shownOf(attrs: JsonObject?, attr: String): JsonElement? {
+    val v = attrs?.get(attr) ?: return null
+    fun bare(e: JsonElement) = (e as? JsonObject)?.get("value") ?: e
+    return if (v is JsonArray) JsonArray(v.map(::bare)) else bare(v)
+}
+
+/**
+ * [changes] read back until the record shows them all, as long as
+ * [OrreryApi.settle] waits, and a line for each saying what it shows. A
+ * write is answered before the ship's writer applies it, so its answer
+ * says nothing of what the record holds (sneagan, 2026-10-18: changes
+ * reported done that the view did not show). One body is read alone;
+ * more, by the brief state view, one request for them all. "" for none.
+ */
+internal suspend fun OrreryTap.readBack(changes: List<Change>, nowMs: Long = io.nisfeb.talon.util.nowMs()): String {
+    if (changes.isEmpty()) return ""
+    val subjects = changes.map { it.subject }.toSet()
+    var shown: Map<String, JsonObject>? = null
+    var problem: String? = null
+    OrreryApi.settle {
+        attrsNow(subjects).fold({ shown = it; problem = null }, { problem = it.message })
+        shown?.let { s -> changes.all { it.shownIn(shownOf(s[it.subject], it.attr)) } } ?: false
+    }
+    val s = shown ?: return "Not confirmed: orrery took the write, but could not be read back ($problem). $NOT_CONFIRMED"
+    val lines = changes.map { it.line(shownOf(s[it.subject], it.attr), nowMs) }
+    return (lines + listOfNotNull(NOT_CONFIRMED.takeIf { changes.any { !it.shownIn(shownOf(s[it.subject], it.attr)) } })).joinToString("\n")
+}
+
+private suspend fun OrreryTap.attrsNow(subjects: Set<String>): Result<Map<String, JsonObject>> = runCatching {
+    fun attrs(b: JsonObject) = b["attrs"] as? JsonObject ?: JsonObject(emptyMap())
+    if (subjects.size == 1) {
+        val id = subjects.single()
+        mapOf(id to attrs(view(id).getOrThrow()))
+    } else {
+        ((Json.parseToJsonElement(state().getOrThrow()) as JsonObject)["bodies"] as? JsonArray).orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .mapNotNull { b -> b["id"].asText()?.takeIf { it in subjects }?.let { it to attrs(b) } }
+            .toMap()
+    }
+}
+
+/** [value] filed on [subject]'s [attr] as the owner's own word, dated by the ship; why not, or null where the ship took it. */
+private suspend fun fileAsOwner(orrery: OrreryTap, subject: String, attr: String, value: JsonElement): String? {
+    val row = buildJsonObject { put("subject", subject); put("attr", attr); put("value", value); put("by", "owner") }
+    val answer = orrery.observe(buildJsonObject { put("observations", JsonArray(listOf(row))) }, asOwner = true).getOrElse {
+        return if (it is OrreryError.Unreachable) "The ship did not answer, so it may or may not have taken it. orrery_read $subject shows what it holds."
+        else "Could not write to orrery: ${it.message}."
+    }
+    val item = answer.observations.firstOrNull() ?: return "The ship answered nothing, so it may not have taken it."
+    return if (item.ok) null else "Orrery refused it: ${item.error ?: "no reason given"}."
+}
+
+private fun JsonObject.sourceKind(): String? = (this["source"] as? JsonObject)?.get("kind").asText()
+
+/**
+ * What a body's leave-by was worked out from, in words, or null for a
+ * body with none. The record holds only the time, when the ship worked
+ * it out and until when: the drive's length, start and roads are in the
+ * leave pass's last plan (GET /api/travel/last), which covers one
+ * appointment, the next. Said from that plan only where it is this
+ * body's, and where it is not, said plainly.
+ */
+internal fun leaveBasis(b: JsonObject, plan: JsonObject?): String? {
+    val row = (b["attrs"] as? JsonObject)?.get("leave-by") as? JsonObject ?: return null
+    val next = plan?.get("next") as? JsonObject
+    fun JsonObject.s(k: String) = this[k].asText()?.takeIf { it.isNotBlank() && it != "null" }
+    if (next == null || next.s("id") != b.s("id")) {
+        return "The record holds only the time, worked out by the ship at ${row.s("at") ?: "a time it does not say"} from the drive with traffic. " +
+            "It keeps neither the drive's length nor its route, " +
+            (next?.s("name")?.let { "and the ship's latest leave plan is for $it, not this. " } ?: if (plan == null) "and the ship's leave plan could not be read. " else "and the ship has no leave plan now. ") +
+            "Say so rather than guess the basis."
+    }
+    val from = when (next.s("from")) {
+        "position" -> "where the phone last was"
+        "previous" -> "the appointment before it"
+        else -> next.s("from") ?: "a start the plan does not say"
+    }
+    return buildString {
+        append("Worked out by the ship for a start of ${next.s("starts")}: leave by ${next.s("leave_by")}")
+        next.s("minutes")?.let { append(", for a $it min drive with traffic from $from") }
+        next.s("via")?.let { append(" via $it") }
+        next.s("typical_minutes")?.let { append(", usually $it min") }
+        next.s("incident")?.let { append("; $it") }
+        append(", and minutes to park")
+        next.s("weather_min")?.takeIf { it != "0" }?.let { append(", $it more for ${next.s("weather") ?: "the weather"}") }
+        append(". The ship works it out again as the traffic and the start move.")
+    }
+}
+
+/** What an answer adds when a change does not show in the record. */
+internal const val NOT_CONFIRMED = "Tell the owner which changes are confirmed and which are not; never say a change is made that the record does not show."
+
+/** What orrery_set says of leave-by. */
+internal const val LEAVE_BY_SHIPS = "leave-by is the ship's: it works it out from the start, the place and the drive with traffic, and writes it again as they move. Change the start or the place instead; leave-by itself cannot be set."
+
+/** The times orrery takes from an event: it reads them again whenever the event's time moves. */
+private val CALENDAR_TIMES = setOf("starts", "ends", "started", "ended", "next", "last")
+
+/** The rest it takes from an event (+plan-events): a series' again as they change, a one-off's once. */
+private val CALENDAR_FIELDS = setOf("location", "participants", "organizer", "cadence", "schedule")
+
+/** The owner's two words on an action here. */
+private val ANSWERS = setOf("approved", "dismissed")
+
+/** An action's statuses once approved: what it asks of the record is carried out. */
+private val DECIDED = setOf("approved", "claimed", "done")
