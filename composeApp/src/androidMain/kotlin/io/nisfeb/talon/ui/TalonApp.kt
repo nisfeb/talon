@@ -279,9 +279,24 @@ fun TalonApp(
     // nothing left to say.
     if (callController != null) {
         val callState by callController.state.collectAsState()
+        val ringLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         androidx.compose.runtime.LaunchedEffect(callState) {
-            if (callState !is io.nisfeb.talon.call.CallUiState.Incoming) {
+            val ring = callState as? io.nisfeb.talon.call.CallUiState.Incoming
+            if (ring == null) {
                 io.nisfeb.talon.Notifications.cancelIncomingCall(app)
+                return@LaunchedEffect
+            }
+            // Talon behind with no push: the ring came over the stream, and
+            // only the push posted its notification, so nothing showed it.
+            // Posted once Talon is not in front; a ring the push already
+            // posted is left (one id, one call).
+            ringLifecycle.currentStateFlow.first { !it.isAtLeast(Lifecycle.State.STARTED) }
+            val id = callController.currentCallId ?: return@LaunchedEffect
+            if (io.nisfeb.talon.Notifications.shownCall != id) {
+                io.nisfeb.talon.Notifications.showIncomingCall(
+                    app, ring.peer, id, io.nisfeb.talon.ui.LastContactMap.value.displayName(ring.peer),
+                    forShip = loggedInShip,
+                )
             }
         }
 
