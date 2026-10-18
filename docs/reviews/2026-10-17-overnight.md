@@ -8,10 +8,10 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Integration worktree: `~/software/personal/talon-ov-2026-10-17`, branch `polish/overnight-2026-10-17`.
 - Base: `github/master` at 60d99a39 (release 1.8.30-rc11). The fetch worked.
 - Pass: 1.
-- Step: review. Five reviewers launched 00:10 EDT.
+- Step: fix. Triage done 01:25 EDT; six fixers launched in the worktrees below.
 - Pass 1 started: 00:10 EDT.
-- Fixer branches in flight: none yet.
-- Next firing: when the reviewers' reports are in, triage them (step 2), adding the Follow-ups from `docs/reviews/2026-10-17-review.md`.
+- Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
+- Next firing: merge each fixer's branch as it reports (step 4), then the full suite and compiles.
 
 ## Pass 1
 
@@ -25,17 +25,32 @@ Areas:
 
 Calls, sync and the shells were reviewed in depth hours ago; their new code is in areas 1 and 3.
 
-### Findings
+### Triage
 
-(after triage)
+Every High and every Medium was read against the code by the lead; the Highs all hold (A4-1, A4-2, A3-1 and A5-1, A5-2, A5-3, A5-4, A5-5), and the Mediums spot-checked hold (A1-1, A1-2, A2-1, A2-2, A4-4, A4-7, A4-8). The rest are taken on the reviewers' quoted proof.
+
+Fix groups, one owner per file:
+
+- settings-calls: A1-1, A1-2, A1-7, and two 2026-10-17 follow-ups (a peer's live bucket wiping a waiting write; the settings lock delaying the bootstrap); calls A1-3, A1-8, A1-10 (verify first), and the follow-up "the device that lost an answer race answers a restart offer".
+- chatrepo: A1-4, A1-5, A1-6, A1-9, A4-1, the repo half of A4-3 and A5-13 (a local_ row is deleted locally), A4-7, A5-9, A5-14, the repo half of A5-18 (a signed-out flow), A5-19, the Lows on live channel ordinals and a pasted URL's path, and the follow-up subscribe walk-back race.
+- chatui: A4-2, the menu half of A4-3, A4-4, A4-5, A4-6, A4-8, A4-9, A4-10, A4-11, A4-12, A4-13, A4-14, A4-15, A4-17, A4-18, A2-13, the screen half of A5-13, and the Lows on the multi-file drop loop, slash commands' raw text, reaction sheet clipping and the gallery post's blank body.
+- apps: A2-1, A2-2, A2-3, the action-match half of A2-4, A2-5, A2-6, A2-7, A2-8, A2-9, A2-10, A2-12, A2-14, A2-15, A2-16, A5-12, and the follow-ups on the key grace period and new events reaching Home.
+- shells: A3-1 and A5-1, A3-2, A3-3, A3-4, A3-5, A5-2, A5-3, A5-4, A5-6, A5-7, A5-8, A5-10, A5-11, A4-20, the screen half of A5-18, the A5 notification and sign-out Lows, and the follow-ups on the comet landing's tab and other sheets bypassing the app's link handler.
+- search-groups: A5-5, A5-15, A5-16, A5-17, A5-20, and the Low on orphan embeddings.
 
 ## Decisions for sneagan
 
-(none yet)
+- A4-19, privacy default: every http(s) link in a received message is fetched from the reader's device to draw its preview, with no setting. It reveals the reader's IP and read time to the sender's server and can reach LAN addresses. Options: keep; skip private and LAN addresses only; previews only for known safe hosts; a setting, off or on by default. Recommendation: skip private and LAN addresses now (no product change), and decide on a setting.
+- A2-11, money: Top up and Subscribe stay tappable while the payment line says "Do not order again", so a second tap makes a second checkout. Recommendation: disable both while a checkout is pending with no page yet.
+- A2-4, wire: an add's refusal is matched by the newest refusal with id "", so two quick adds can take each other's refusals. Matching the action is being fixed; a full fix needs a client nonce in the poke, which the calendar app would have to echo.
+- From 2026-10-17 M5: put the maps or tel link on the voice result notification's tap, so a hidden card can still open it. A behaviour change to the notification.
+- Held as before: IMAGE_AUTO_MAX and the unasked mail image fetch; restartIce in TalonRtc.swift (needs a Mac build); M16's notify-levels marker (trunk's reader).
 
 ## Unconfirmed
 
-(none yet)
+- A4-16 (iOS): the event card's "Another calendar app" may do nothing with a sandbox file:// URL. Needs iOS knowledge or a device.
+- A5: "Host order" may be the groups desk's hash order rather than the host's (`GroupsScryParser.kt:46-58`). Needs the groups desk source.
+- A5: whether /v1/foreigns sends an initial fact on watch (bears on A5-9's reach only).
 
 ## False positives
 
