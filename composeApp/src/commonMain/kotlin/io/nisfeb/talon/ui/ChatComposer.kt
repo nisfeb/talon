@@ -893,7 +893,7 @@ fun ChatComposer(
                         is CommandResult.Send -> strategy.sendText(cmd.body)
                         is CommandResult.Handled -> {}
                         is CommandResult.Error -> {
-                            state.sendError = cmd.message
+                            state.show(io.nisfeb.talon.util.Problem(cmd.message, cmd.details))
                             // Give the typed command back — commands have
                             // no optimistic echo, so the cleared draft
                             // meant retyping a long /poll to fix one
