@@ -107,6 +107,8 @@ class CallController(
     private val defaults: CallDefaults = CallDefaults.None,
     /** How long a lost path may take to come back. A knob for tests. */
     private val restartGiveUpMs: Long = RESTART_GIVE_UP_MS,
+    /** How often a recording is announced again. A knob for tests. */
+    private val recordHeartbeatMs: Long = RECORD_HEARTBEAT_MS,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     private val _state = MutableStateFlow<CallUiState>(CallUiState.None)
@@ -280,6 +282,7 @@ class CallController(
 
     fun start() {
         if (loop != null) return
+        started.update { it + this }
         loop = scope.launch { runLoop() }
         scope.launch {
             io.nisfeb.talon.util.NetworkChanges.events.collect {
@@ -289,6 +292,7 @@ class CallController(
     }
 
     fun stop() {
+        started.update { it - this }
         loop?.cancel()
         loop = null
         val ch = channel
@@ -831,9 +835,11 @@ class CallController(
         }
     }
 
-    fun reject() {
+    /** Decline the ringing call; [forCallId] as for [accept]. */
+    fun reject(forCallId: String? = null) {
         scope.launch {
             val id = callId ?: return@launch
+            if (forCallId != null && forCallId != id) return@launch
             val p = peer
             endLocal("declined")
             p?.let { poke(it, TrunkSig.Reject(id, "declined")) }
@@ -1077,7 +1083,7 @@ class CallController(
 
     /**
      * Announce that we are recording (host, name) and keep saying so
-     * until [endRecordingAnnounce].
+     * until [recording] ends, or [endRecordingAnnounce].
      *
      * The heartbeat lives here, on the controller's own scope, rather
      * than in the screen that started it. Two bugs came from having it
@@ -1086,15 +1092,24 @@ class CallController(
      * and the room it announced to was whichever chat happened to be
      * open rather than the line being recorded. Both are captured here
      * once, at the moment recording starts.
+     *
+     * Ended with the recording, however that ends: stopped, the line
+     * left or traded for another ([joinGranted]), admin rights lost. It
+     * ran on until the result dialog closed, so the host showed us
+     * recording a line we had left; with that chat off screen, for good.
      */
-    fun beginRecordingAnnounce(host: String, name: String) {
+    fun beginRecordingAnnounce(host: String, name: String, recording: StateFlow<Boolean>) {
         recAnnounce?.cancel()
         recAnnounce = scope.launch {
             try {
-                while (true) {
-                    startRecording(host, name)
-                    delay(RECORD_HEARTBEAT_MS)
+                val beat = launch {
+                    while (true) {
+                        startRecording(host, name)
+                        delay(recordHeartbeatMs)
+                    }
                 }
+                recording.first { !it }
+                beat.cancel()
             } finally {
                 withContext(NonCancellable) { stopRecording(host, name) }
             }
@@ -1751,6 +1766,11 @@ class CallController(
         val sig = recv.sig
         when (sig) {
             is TrunkSig.Ring -> {
+                // Declined from the notification before it rang here.
+                if (sig.id in declinedHere.value) {
+                    Log.i(TAG, "ring ${sig.id} was declined here already")
+                    return
+                }
                 // Glare: a ring FROM the ship we are currently dialing
                 // is unambiguous mutual intent, not a busy signal.
                 // Ignoring it (as any other mid-call ring is ignored)
@@ -1813,7 +1833,19 @@ class CallController(
                 // so Active alone is not a restart; an offer after the
                 // first one is. A quick answer's offer taken for a
                 // restart was dropped, and the call died of "no offer".
-                if (_state.value is CallUiState.Active && pendingOffer.isCompleted) {
+                val cur = _state.value
+                if (cur is CallUiState.Active && pendingOffer.isCompleted) {
+                    // Media that never came up here lost the race to answer:
+                    // another of our devices answered too, and the caller
+                    // took its accept. Answering the restart gave the caller
+                    // this device's answer over the one it was talking to.
+                    // ponytail: a restart before even the winner's media is
+                    // up goes unanswered too, and the call rests on its first
+                    // negotiation. A wire that says whose accept won is the fix.
+                    if (cur.connectedAtMs == 0L) {
+                        Log.i(TAG, "restart offer for ${sig.id} ignored: its media never came up here")
+                        return
+                    }
                     // The caller restarted ICE after a network change:
                     // answer in place on the live engine.
                     if (sdpFingerprint(sig.sdp) != sig.fpr) {
@@ -2123,6 +2155,12 @@ class CallController(
     }
 
     companion object {
+        /** The controllers started in this process, for [declineWithoutApp]. */
+        private val started = MutableStateFlow<Set<CallController>>(emptySet())
+
+        /** Calls declined from the notification ([declineWithoutApp]), newest last: none rings here. */
+        private val declinedHere = MutableStateFlow<List<String>>(emptyList())
+
         /** Peeks for a line per connect, 2 s then 6 s apart: enough for a host
          *  briefly asleep, few enough not to hammer one that is gone. */
         const val PEEK_ATTEMPTS = 3
@@ -2191,9 +2229,17 @@ class CallController(
         /** How long [stop] waits on the hangup of a call it ends. */
         private const val STOP_HANGUP_MS = 3_000L
 
+        /** How many declined calls [declinedHere] remembers. */
+        private const val DECLINED_KEPT = 16
+
         /**
          * Decline [callId] from [from] with no controller: the ring
          * notification's Decline, in a process that may have no app up.
+         * A controller here ringing for it declines it instead, so the
+         * call log files it as declined: through the ship's "handled" it
+         * was filed as answered elsewhere. With none, the call is noted
+         * first, so a ring for it arriving later does not ring here.
+         *
          * On a channel of its own, ended on the ship after, or eyre kept
          * it and queued its ack for nobody. Waits at most [waitMs] on the
          * poke, whose ack comes down a stream nothing here reads. False
@@ -2205,6 +2251,13 @@ class CallController(
             callId: String,
             waitMs: Long = 5_000L,
         ): Boolean {
+            declinedHere.update { (it - callId + callId).takeLast(DECLINED_KEPT) }
+            // ponytail: a ring landing between the note and this check still
+            // rings until the ship's "handled", filed as answered elsewhere.
+            started.value.firstOrNull { it.callId == callId && it._state.value is CallUiState.Incoming }?.let {
+                it.reject(forCallId = callId)
+                return true
+            }
             val ch = session.openChannel()
             return try {
                 // Timed out is sent: the PUT went, only its ack is late.

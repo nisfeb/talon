@@ -17,7 +17,10 @@ import kotlinx.coroutines.launch
  * actions of its own, and its ring surface is always on screen.
  *
  * A decline is one poke, so it needs no media stack and no running
- * CallController — which is the point. Answering is deliberately not
+ * CallController — which is the point. When the app's controller is
+ * ringing for the call, the decline goes through it, so the call log
+ * files it as declined, not answered elsewhere
+ * (CallController.declineWithoutApp). Answering is deliberately not
  * handled here: it needs the media negotiation that only the app can
  * do, so the answer action opens MainActivity instead.
  */
