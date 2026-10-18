@@ -213,6 +213,35 @@ class TlonChatRepoSendTest {
         assertNull(db.groups().channelGroupFor(nest), "the leave finished here too")
     }
 
+    // The screens hide these on a post the ship has not got; the repo
+    // refuses them too, so no poke names a stand-in id the ship never
+    // gave (coordinator, 2026-10-18: "local ids refused").
+    @Test
+    fun `an action on a post the ship has not got is refused before any poke`() = live {
+        seedChannel()
+        val local = "local_170141184506"
+        val refused = listOf<Pair<String, suspend () -> Unit>>(
+            "react" to suspend { repo.react(nest, local, "👍") },
+            "react on its reply" to suspend { repo.react(nest, "170141184507", "👍", parentId = local) },
+            "unreact" to suspend { repo.unreact(nest, local) },
+            "reply" to suspend { repo.reply(nest, local, "hi"); Unit },
+            "edit" to suspend { repo.edit(nest, local, "new", originalSentMs = 1); Unit },
+            "pin" to suspend { repo.pinPost(nest, local) },
+            "follow" to suspend { repo.setFollow(nest, local, true); Unit },
+            "quote" to suspend { repo.sendQuote(nest, "look", nest, local); Unit },
+            "quote with an image" to suspend { repo.sendImage(nest, "https://x.test/a.png", 1, 1, "a", quotedNest = nest, quotedPostId = local); Unit },
+        )
+        for ((what, act) in refused) {
+            val e = assertFailsWith<IllegalArgumentException>(what) { act() }
+            assertEquals("this message has not reached your ship yet.", e.message, what)
+        }
+        assertTrue(ship.attempted.isEmpty(), "${ship.attempted}")
+        assertTrue(db.messages().latestAnyFor(nest, 10).isEmpty(), "no reply or quote stored")
+        assertNull(db.reactions().get(nest, local, "~zod"))
+        assertNull(db.groups().pinnedPostIdFor(nest))
+        assertNull(db.followedThreads().get(nest, local))
+    }
+
     // ─── reactions, deletes, pins ─────────────────────────────────
 
     @Test

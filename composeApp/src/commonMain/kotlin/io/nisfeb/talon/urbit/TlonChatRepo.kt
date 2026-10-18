@@ -1126,6 +1126,7 @@ class TlonChatRepo(
         quotedNest: String,
         quotedPostId: String,
     ): String {
+        requireOnShip(quotedPostId)
         val content = buildJsonArray {
             add(citeBlock(quotedNest, quotedPostId))
             if (text.isNotBlank()) {
@@ -1162,13 +1163,16 @@ class TlonChatRepo(
         caption: String = "",
         quotedNest: String? = null,
         quotedPostId: String? = null,
-    ): String = postContent(
-        whom,
-        buildJsonArray {
-            if (quotedNest != null && quotedPostId != null) add(citeBlock(quotedNest, quotedPostId))
-            imageStory(src, width, height, alt, caption).forEach { add(it) }
-        },
-    )
+    ): String {
+        requireOnShip(quotedPostId)
+        return postContent(
+            whom,
+            buildJsonArray {
+                if (quotedNest != null && quotedPostId != null) add(citeBlock(quotedNest, quotedPostId))
+                imageStory(src, width, height, alt, caption).forEach { add(it) }
+            },
+        )
+    }
 
     /**
      * Post a notebook entry to a `diary/~host/slug` channel. Title is
@@ -3209,6 +3213,7 @@ class TlonChatRepo(
      * with a passthrough fallback, so glyphs in stay glyphs out.
      */
     suspend fun react(whom: String, postId: String, emoji: String, parentId: String? = null) {
+        requireOnShip(postId, parentId)
         // Wire: the emoji-presentation glyph (FE0F-bearing), to match
         // what every other Tlon client sends. Local DB + usage: the
         // variation-selector-stripped canonical form so our optimistic
@@ -3294,6 +3299,7 @@ class TlonChatRepo(
 
     /** Remove our reaction from a post. */
     suspend fun unreact(whom: String, postId: String, parentId: String? = null) {
+        requireOnShip(postId, parentId)
         // Gone now, as react() shows at once; a refusal brings it back,
         // and a ship out of reach leaves it gone, queued.
         val rowId = postId.replace(".", "")
@@ -3345,6 +3351,15 @@ class TlonChatRepo(
         // `slav %ud`, which requires dot-grouped decimals.
         buildJsonObject { put("del", JsonPrimitive(dotAtom(postId))) },
     )
+
+    /**
+     * Refuse an action on a post the ship has not got: a `local_` id is a
+     * stand-in the ship never gave, and a poke naming it is refused there,
+     * or worse, read as some other post. The screens hide these actions
+     * on such a post; this is the floor under them.
+     */
+    private fun requireOnShip(vararg ids: String?) =
+        require(ids.none { it?.startsWith("local_") == true }) { "this message has not reached your ship yet." }
 
     /** [m], which the ship never took, gone from here and from the queue. */
     private suspend fun forgetUnsent(m: MessageEntity) {
@@ -3429,6 +3444,7 @@ class TlonChatRepo(
         parentId: String,
         content: JsonArray,
     ): String {
+        requireOnShip(parentId)
         val sent = nowMs()
         val da = UrbitTime.unixMsToDa(sent)
         // Same local-sentinel id rule as postContent — %channels assigns
@@ -3483,6 +3499,7 @@ class TlonChatRepo(
          *  literal text. Null re-parses [text] alone (legacy callers). */
         originalContentJson: String? = null,
     ) = carry {
+        requireOnShip(postId, parentId)
         val ch = channel ?: error("not connected")
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
         val content = originalContentJson
@@ -3616,6 +3633,7 @@ class TlonChatRepo(
     // leaving the chat mid-poke left the pin shown here and never sent.
     suspend fun pinPost(nest: String, postId: String): Unit = carry {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
+        requireOnShip(postId)
         val ch = channel ?: error("not connected")
         val current = db.groups().pinnedPostIdFor(nest)
         // The banner only ever reads order[0]; keeping just [postId]
@@ -4735,6 +4753,7 @@ class TlonChatRepo(
      * reads it too, or its count stays in Tlon's apps.
      */
     suspend fun setFollow(whom: String, parentPostId: String, follow: Boolean) = carry {
+        requireOnShip(parentPostId)
         val id = parentPostId.replace(".", "")
         val dao = db.followedThreads()
         val before = dao.get(whom, id)
