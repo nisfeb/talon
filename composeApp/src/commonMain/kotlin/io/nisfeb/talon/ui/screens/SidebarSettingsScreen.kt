@@ -97,7 +97,7 @@ fun SidebarSettingsScreen(
                     "back here."
             } else {
                 "Drag the handle to reorder. Toggle off to hide an item " +
-                    "from the sidebar (it stays available in the kebab menu)."
+                    "from the sidebar (it stays available in the More menu)."
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -210,7 +210,7 @@ private data class SidebarRowState(
 private fun sidebarRowState(item: RailItem): SidebarRowState = when (item) {
     RailItem.Chats -> SidebarRowState(
         label = "Chats",
-        subtitle = "Always on the sidebar",
+        subtitle = if (io.nisfeb.talon.ui.isDrawerNavigation) "Always in the menu" else "Always on the sidebar",
         fixedAlwaysOn = true,
         gatedOff = false,
     )
