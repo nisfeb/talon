@@ -46,6 +46,7 @@ import io.nisfeb.talon.data.MarkEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.ReactionEntity
 import io.nisfeb.talon.data.UnreadEntity
+import io.nisfeb.talon.data.isUnsent
 import io.nisfeb.talon.ui.ReactionPalette
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1501,7 +1502,7 @@ class TlonChatRepo(
             for (row in batch) {
                 tried += row.whom to row.id
                 val now = db.messages().getOne(row.whom, row.id) ?: continue
-                if (now.status != "queued") continue
+                if (now.status != "queued" || now.isDeleted) continue
                 val out = resendPoke(now)
                 if (out == null) {
                     db.messages().setStatus(now.whom, now.id, "failed")
@@ -1510,10 +1511,19 @@ class TlonChatRepo(
                 try {
                     val untried = neverSent.remove("${now.whom}|${now.id}")
                     if (isChannelNest(now.whom) && !untried && landedAlready(now)) continue
+                    // Deleted while the channel was read: never sent.
+                    if (db.messages().getOne(now.whom, now.id)?.let { it.status == "queued" && !it.isDeleted } != true) continue
                     // Queued until the ship takes it, label and count with it:
                     // marked sent before the send, it lost its label and stood
                     // grey and unexplained for as long as a slow ship took.
                     ch.poke(app = out.app, mark = out.mark, payload = out.payload)
+                    if (db.messages().getOne(now.whom, now.id) == null) {
+                        // Deleted while it went: a DM or club message names
+                        // itself, so the ship takes it back. A channel post's
+                        // id is the ship's own, unknown here until its echo.
+                        if (!isChannelNest(now.whom)) runCatching { pokeDelete(ch, now.whom, now.id, now.parentId) }
+                        continue
+                    }
                     db.messages().setStatus(now.whom, now.id, if (isChannelNest(now.whom)) "pending" else null)
                     // The ship took one: the next wait, if there is one, starts short.
                     drainPauseMs = FIRST_DRAIN_PAUSE_MS
@@ -3279,6 +3289,14 @@ class TlonChatRepo(
      * trying to delete someone else's channel post).
      */
     suspend fun delete(whom: String, postId: String, parentId: String? = null) = carry {
+        // One the ship never took: it goes here only, and the queue never
+        // sends it. A queued DM was hidden and then sent anyway, a channel
+        // post's stand-in sent the ship its local id, and with the ship out
+        // of reach neither could be withdrawn at all.
+        db.messages().getOne(whom, postId.replace(".", ""))?.takeIf { it.isUnsent() }?.let {
+            forgetUnsent(it)
+            return@carry
+        }
         val ch = channel ?: error("not connected")
         if (whomNeedsOptimisticDelete(whom)) {
             // Mirror what react/unreact do — apply the local change
@@ -3289,13 +3307,24 @@ class TlonChatRepo(
             db.messages().softDeleteWithMedia(db.messageMedia(), whom, postId)
             db.reactions().clearForPost(whom, postId)
         }
+        pokeDelete(ch, whom, postId, parentId)
+    }
+
+    /** Delete [postId] on the ship; a reply's goes through its parent. */
+    private suspend fun pokeDelete(ch: UrbitChannel, whom: String, postId: String, parentId: String?) = pokeAt(
+        ch, whom, postId, parentId,
+        buildJsonObject { put("del", JsonNull) },
         // Channel-action-2 `id` / `del` fields dejs through
         // `slav %ud`, which requires dot-grouped decimals.
-        pokeAt(
-            ch, whom, postId, parentId,
-            buildJsonObject { put("del", JsonNull) },
-            buildJsonObject { put("del", JsonPrimitive(dotAtom(postId))) },
-        )
+        buildJsonObject { put("del", JsonPrimitive(dotAtom(postId))) },
+    )
+
+    /** [m], which the ship never took, gone from here and from the queue. */
+    private suspend fun forgetUnsent(m: MessageEntity) {
+        neverSent.remove("${m.whom}|${m.id}")
+        db.messages().hardDelete(m.whom, m.id)
+        db.messageMedia().deleteForMessage(m.whom, m.id)
+        db.reactions().clearForPost(m.whom, m.id)
     }
 
     /**

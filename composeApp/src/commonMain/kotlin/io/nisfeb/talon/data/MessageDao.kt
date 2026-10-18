@@ -232,12 +232,15 @@ abstract class MessageDao {
     @Query("UPDATE messages SET status = 'queued' WHERE status = 'pending'")
     abstract suspend fun requeueStalePending(): Int
 
-    /** Our messages waiting for the ship (status "queued"), oldest first, the order they go out in. */
-    @Query("SELECT * FROM messages WHERE status = 'queued' ORDER BY sentMs ASC")
+    /**
+     * Our messages waiting for the ship (status "queued"), oldest first, the
+     * order they go out in. Not one deleted here: the drain sent those too.
+     */
+    @Query("SELECT * FROM messages WHERE status = 'queued' AND isDeleted = 0 ORDER BY sentMs ASC")
     abstract suspend fun queued(): List<MessageEntity>
 
     /** How many of one conversation's messages are waiting for the ship. */
-    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued'")
+    @Query("SELECT COUNT(*) FROM messages WHERE whom = :whom AND status = 'queued' AND isDeleted = 0")
     abstract suspend fun queuedIn(whom: String): Int
 
     /** A conversation's messages, all of them: one the ship no longer has. */
@@ -249,7 +252,7 @@ abstract class MessageDao {
     abstract suspend fun hasConversation(whom: String): Boolean
 
     /** How many messages are waiting for the ship. */
-    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued'")
+    @Query("SELECT COUNT(*) FROM messages WHERE status = 'queued' AND isDeleted = 0")
     abstract fun queuedCount(): Flow<Int>
 
     /**
