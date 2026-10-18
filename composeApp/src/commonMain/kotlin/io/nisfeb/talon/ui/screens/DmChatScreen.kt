@@ -140,6 +140,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.map
@@ -272,7 +273,6 @@ fun DmChatScreen(
     /** Take in [id]'s post, if it is kept here and older than the window; whether it is kept. */
     suspend fun reach(id: String): Boolean = db.messages().getOne(whom, id)?.sentMs?.let { widenTo(it); true } ?: false
     LaunchedEffect(whom) { widenTo(db.messages().sentMsAfterNewest(whom, CHAT_WINDOW - 1) ?: Long.MIN_VALUE) }
-    LaunchedEffect(initialScrollMessageId) { initialScrollMessageId?.let { reach(it) } }
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val rows by remember(whom) {
         var prevByMsgId: Map<String, DisplayRow> = emptyMap()
@@ -619,6 +619,21 @@ fun DmChatScreen(
             .onFailure { Log.w("DmChatScreen", "refresh $whom failed: ${it.message}") }
             .isFailure
         refreshing = false
+    }
+
+    // A jump to a post not kept here: it may come with the refresh on
+    // opening (a notification tapped before its message landed), so that
+    // is waited for. Still not here, it is said, where the chat used to
+    // open at the bottom with no word. Not fetched alone: a lone old post
+    // stored here leaves a hole behind it that paging never fills.
+    LaunchedEffect(initialScrollMessageId) {
+        val id = initialScrollMessageId ?: return@LaunchedEffect
+        if (reach(id)) return@LaunchedEffect
+        snapshotFlow { refreshing }.first { !it }
+        if (reach(id)) return@LaunchedEffect
+        lastAppliedAnchor = id
+        onScrollConsumed()
+        composerState.sendError = "That message isn't loaded here yet. Scroll up to load older messages."
     }
 
     var paginating by remember(whom) { mutableStateOf(false) }

@@ -757,6 +757,16 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { draft() == "hello there" }
     }
 
+    // A link or a notification to a post this device does not keep opened
+    // the chat at its newest, with no word that the post was not there.
+    @Test
+    fun `a jump to a post not kept here says so and opens at the newest`() = chat(seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }, jumpTo = "~bus/170141184599") { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("That message isn't loaded here yet", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("hello from bus").assertIsDisplayed()
+    }
+
     // ─── the profile sheet ─────────────────────────────────────────
 
     private val sam: suspend AppDatabase.() -> Unit = {
