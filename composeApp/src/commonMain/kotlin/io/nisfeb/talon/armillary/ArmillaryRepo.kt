@@ -405,7 +405,9 @@ class ArmillaryRepo(
         val a = api ?: error("Not attached to a ship.")
         val first = a.checkout(rail, plan, amountMicro)
         val answer = if (first is CheckoutAnswer.Pending) followCheckout(a, first.nonce) else first
-        val start = _account.value?.takeIf { it.hasView }?.balanceMicro ?: 0L
+        // Unknown where the account could not be read: taken as 0, any
+        // balance read next settled the checkout as paid.
+        val start = _account.value?.takeIf { it.hasView }?.balanceMicro
         when (answer) {
             is CheckoutAnswer.Url -> {
                 watchBalance(Payment(answer.nonce, rail, start, Payment.Phase.WAITING, url = answer.url))
@@ -529,7 +531,13 @@ class ArmillaryRepo(
         val p = _payment.value ?: return false
         if (p.phase != Payment.Phase.WAITING && p.phase != Payment.Phase.UNSEEN) return false
         val row = acct.checkouts.firstOrNull { p.nonce.isNotBlank() && it.nonce == p.nonce }
-        val rose = if (acct.hasView) acct.balanceMicro - p.startMicro else 0L
+        // A start not known when the checkout opened is the first balance
+        // read after it: a rise is only a rise past what was there.
+        if (p.startMicro == null && acct.hasView && row == null) {
+            _payment.value = p.copy(startMicro = acct.balanceMicro)
+            return false
+        }
+        val rose = if (acct.hasView && p.startMicro != null) acct.balanceMicro - p.startMicro else 0L
         if (row?.status == "paid" || (row == null && rose > 0)) {
             val added = row?.amountMicro?.takeIf { it > 0 } ?: rose.coerceAtLeast(0L)
             val paid = p.copy(phase = Payment.Phase.PAID, addedMicro = added)
@@ -697,8 +705,8 @@ data class Payment(
     val nonce: String,
     /** `stripe` or `btcpay`. */
     val rail: String,
-    /** The balance when the checkout opened; anything above it is the payment. */
-    val startMicro: Long,
+    /** The balance when the checkout opened, anything above it the payment; null where it could not be read then. */
+    val startMicro: Long?,
     val phase: Phase,
     /** How much the balance rose, once it has. */
     val addedMicro: Long = 0L,

@@ -61,6 +61,8 @@ class ArmillaryPaymentTest {
     @Volatile private var phaseMissing = false
     /** The account view's checkout rows, keyed by nonce as the vendor writes them. */
     @Volatile private var checkouts = "{}"
+    /** The account cannot be read: the proxy in front of the ship answers its 502 page. */
+    @Volatile private var accountDown = false
     /** How long the ship takes over a checkout, a vendor change or a cancel. */
     @Volatile private var holdMs = 0L
     /** Writes the ship finished, which a request cancelled midway never does. */
@@ -108,6 +110,8 @@ class ArmillaryPaymentTest {
                 phaseRefused -> ok("""{"phase":"answered","status":"refused","url":"","note":"Your card was declined."}""")
                 else -> ok("""{"phase":"answered","status":"pending","url":"https://pay.example/late","note":""}""")
             }
+            path.endsWith("/apps/armillary/api/account") && accountDown ->
+                respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
             path.endsWith("/apps/armillary/api/account") -> ok(
                 """{"ship":"~zod","balance":$balance,"plan":"","subscription":{"active":false},"lease":{},"checkouts":$checkouts,"vendor":"~nisfeb","self":"~zod","stale":3}""",
             )
@@ -291,6 +295,24 @@ class ArmillaryPaymentTest {
             repo.refresh()
             assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase)
             assertEquals(emptyList(), told.toList())
+        }
+    }
+
+    // The balance before the checkout could not be read, and was taken as
+    // nothing: the next read of any balance at all settled it as paid.
+    @Test
+    fun `a checkout opened without the balance before it is not paid by the balance there was`() {
+        balance = 10_000_000
+        accountDown = true
+        ship(setUp) { repo, _ ->
+            repo.topUp("stripe", "five", null).getOrThrow()
+            accountDown = false
+            repo.refresh()
+            assertEquals(Payment.Phase.WAITING, repo.payment.value!!.phase, "the balance it had is not a payment")
+            assertEquals(emptyList(), told.toList())
+            balance = 15_000_000
+            repo.refresh()
+            assertEquals(Payment.Phase.PAID to 5_000_000L, repo.payment.value!!.let { it.phase to it.addedMicro }, "a rise from there is")
         }
     }
 
