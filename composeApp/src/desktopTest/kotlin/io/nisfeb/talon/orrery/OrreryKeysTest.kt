@@ -99,7 +99,8 @@ class OrreryKeysTest {
         withTimeout(5_000) { while (asked.none { it.startsWith("POST") && "/api/clients" in it }) delay(10) }
         page.cancel()
         hold.complete(Unit)
-        withTimeout(5_000) { while (db.orreryAccounts().get("~zod") == null) delay(20) }
+        // The switch goes on just after the row is kept: waited for too.
+        withTimeout(5_000) { while (db.orreryAccounts().get("~zod") == null || !repo.enabled.value) delay(20) }
         assertEquals("k1.secret", db.orreryAccounts().get("~zod")?.token)
         assertTrue(repo.enabled.value)
     }
