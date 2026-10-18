@@ -1935,7 +1935,7 @@ class TlonChatRepo(
      * createDefaultGroup: spins up a group with one "General" chat
      * channel. Returns the new group's flag (`~host/slug`).
      */
-    suspend fun createGroup(title: String, description: String = ""): String {
+    suspend fun createGroup(title: String, description: String = ""): String = carry {
         val ch = channel ?: error("not connected")
         val slug = "v" + randomBase32(7)
         val groupId = "$ourPatp/$slug"
@@ -1972,7 +1972,7 @@ class TlonChatRepo(
         // Invalidate the admin-groups cache so the new group appears
         // on the next Administration screen open.
         adminGroupsFetchedMs = 0L
-        return groupId
+        groupId
     }
 
     private fun randomBase32(length: Int): String {
@@ -1990,7 +1990,7 @@ class TlonChatRepo(
         kind: String,
         title: String,
         description: String = "",
-    ): String {
+    ): String = carry {
         require(kind in setOf("chat", "heap", "notes")) { "unknown channel kind: $kind" }
         // Notebooks live on %notes, which registers the channel with
         // %groups itself — there's no %channels create to send, and the
@@ -1998,7 +1998,7 @@ class TlonChatRepo(
         // ("diary"/Bulletin is deliberately absent: deprecated upstream,
         // so we no longer mint new ones.)
         if (kind == "notes") {
-            return notes.createGroupNotebook(groupFlag, title)
+            return@carry notes.createGroupNotebook(groupFlag, title)
                 ?: error("couldn't create notebook")
         }
         val ch = channel ?: error("not connected")
@@ -2019,9 +2019,14 @@ class TlonChatRepo(
                     put("writers", buildJsonArray { })
                 })
             },
+            // Confirmed: the screen says it was made, and silence is not that.
+            confirm = true,
         )
         adminGroupsFetchedMs = 0L
-        return nest
+        // The group's channels read again, so the new one is listed here
+        // even if its fact went by while the stream was down.
+        scope.launch { runCatching { refreshGroups() }.onFailure { Log.w(TAG, "groups not read after a new channel", it) } }
+        nest
     }
 
     /** What this ship's %channels says of who may post in a channel. */
@@ -2340,7 +2345,7 @@ class TlonChatRepo(
     }
 
     /** Accept an inbound group invite: join it, and move it to the groups being joined. */
-    suspend fun acceptInvite(flag: String) {
+    suspend fun acceptInvite(flag: String): Unit = carry {
         joinGroup(flag)
         val accepted = _invites.value?.firstOrNull { it.flag == flag }
         _invites.value = _invites.value?.filterNot { it.flag == flag }
@@ -2351,7 +2356,7 @@ class TlonChatRepo(
      * Stop a join its host has not answered (%groups `group-cancel`). An
      * invite it came from is back to be answered, or declined.
      */
-    suspend fun cancelJoin(flag: String) {
+    suspend fun cancelJoin(flag: String): Unit = carry {
         val ch = channel ?: error("not connected")
         ch.poke(app = "groups", mark = "group-cancel", payload = JsonPrimitive(flag))
         _joining.update { list -> list.filterNot { it.flag == flag } }
@@ -2362,7 +2367,7 @@ class TlonChatRepo(
      * Join a group via `group-join`: one we hold an invite to, or a public
      * group anyone may join, such as one whose code was scanned.
      */
-    suspend fun joinGroup(flag: String) {
+    suspend fun joinGroup(flag: String): Unit = carry {
         val ch = channel ?: error("not connected")
         ch.poke(
             app = "groups",
@@ -2397,7 +2402,7 @@ class TlonChatRepo(
     }
 
     /** Reject an inbound group invite via `invite-decline`. */
-    suspend fun rejectInvite(flag: String) {
+    suspend fun rejectInvite(flag: String): Unit = carry {
         val ch = channel ?: error("not connected")
         ch.poke(
             app = "groups",
@@ -2433,20 +2438,15 @@ class TlonChatRepo(
      * showing a left group until the next full /v2/groups reconcile —
      * i.e. an app restart. So drop the group locally once the ship
      * acks the leave. A refusal throws and keeps it, since it is still
-     * ours; silence keeps it too, and the next reconcile decides.
+     * ours. Silence ([PokeUnacked]) keeps it and throws too: it may yet
+     * land, and the next reconcile decides, but it is not "left". Taken
+     * for one, the screen closed and the group stayed in the list.
      */
-    suspend fun leaveGroup(flag: String) {
+    suspend fun leaveGroup(flag: String): Unit = carry {
         val ch = channel ?: error("not connected")
-        val acked = try {
-            ch.poke(app = "groups", mark = "group-leave", payload = JsonPrimitive(flag), confirm = true)
-            true
-        } catch (_: PokeUnacked) {
-            false
-        }
-        if (acked) {
-            db.groups().deleteChannelsForGroup(flag)
-            db.groups().deleteGroup(flag)
-        }
+        ch.poke(app = "groups", mark = "group-leave", payload = JsonPrimitive(flag), confirm = true)
+        db.groups().deleteChannelsForGroup(flag)
+        db.groups().deleteGroup(flag)
     }
 
     /**

@@ -11,6 +11,7 @@ import io.nisfeb.talon.data.ThreadUnreadEntity
 import io.nisfeb.talon.data.UnreadEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
@@ -150,6 +151,66 @@ class TlonChatRepoSendTest {
         assertFailsWith<PokeNacked> { repo.leaveGroup(flag) }
         assertNotNull(db.groups().getGroup(flag))
         assertNotNull(db.groups().channelGroupFor(nest))
+    }
+
+    // Silence was taken for a leave: the screen closed and the group stayed
+    // in the list. It is said now, calmly, as the ship being slow (review
+    // A5-19). A made channel is confirmed the same way. Real time: the
+    // ack's 15 s wait, the two at once.
+    @Test
+    fun `a leave or a new channel the ship never confirms is not taken as done`() = live {
+        seedChannel()
+        ship.silent = { it.app == "groups" || it.app == "channels" }
+        val leave = async { runCatching { repo.leaveGroup(flag) }.exceptionOrNull() }
+        val made = async { runCatching { repo.createChannel(flag, "chat", "News") }.exceptionOrNull() }
+        assertTrue(leave.await() is PokeUnacked, "${leave.await()}")
+        assertTrue(made.await() is PokeUnacked, "${made.await()}")
+        assertNotNull(db.groups().getGroup(flag), "still ours, as far as anyone knows")
+        assertTrue(io.nisfeb.talon.util.problemOf("Couldn't leave the group", leave.await()!!).calm)
+    }
+
+    // Wire: a %channels create, as the ship took it before this change;
+    // confirmed, and the group's channels read again after.
+    @Test
+    fun `a new channel is created on the ship and the groups are read again`() = live {
+        ship.scries["groups/v3/groups"] = """{"$flag":{"meta":{"title":"Bus"},"channels":{}}}"""
+        val made = repo.createChannel(flag, "chat", "News", "what is new")
+        val create = ship.pokesTo("channels").single()
+        assertEquals("channel-action-2", create.mark)
+        val slug = made.substringAfterLast('/')
+        assertEquals("chat/~zod/$slug", made)
+        assertEquals(
+            """{"create":{"kind":"chat","group":"$flag","name":"$slug","title":"News","description":"what is new","meta":null,"readers":[],"writers":[]}}""",
+            create.json.toString(),
+        )
+        kotlinx.coroutines.withTimeout(5_000) { while ("groups/v3/groups" !in ship.scried) delay(20) }
+    }
+
+    // Join, accept, decline, stop joining, leave and a new channel ran on
+    // the screen's scope: leaving the screen mid-poke cancelled them
+    // (review A5-19). Real time via holdPoke.
+    @Test
+    fun `group writes whose screen is left mid-poke still reach the ship`() = live {
+        seedChannel()
+        ship.holdPoke = 500
+        val writes: List<Pair<String, suspend () -> Unit>> = listOf(
+            "group-join" to suspend { repo.joinGroup("~nec/club") },
+            "group-join" to suspend { repo.acceptInvite("~nec/hall") },
+            "invite-decline" to suspend { repo.rejectInvite("~nec/den") },
+            "group-cancel" to suspend { repo.cancelJoin("~nec/yard") },
+            "channel-action-2" to suspend { repo.createChannel(flag, "chat", "News"); Unit },
+            "group-leave" to suspend { repo.leaveGroup(flag) },
+        )
+        for ((mark, write) in writes) {
+            val before = ship.pokes.size
+            val screen = CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            screen.launch { write() }
+            delay(150)
+            screen.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+            kotlinx.coroutines.withTimeout(5_000) { while (ship.pokes.drop(before).none { it.mark == mark }) delay(20) }
+        }
+        kotlinx.coroutines.withTimeout(5_000) { while (db.groups().getGroup(flag) != null) delay(20) }
+        assertNull(db.groups().channelGroupFor(nest), "the leave finished here too")
     }
 
     // ─── reactions, deletes, pins ─────────────────────────────────
