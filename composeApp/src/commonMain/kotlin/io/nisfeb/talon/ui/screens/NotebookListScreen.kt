@@ -237,7 +237,9 @@ private fun excerptOf(post: io.nisfeb.talon.data.MessageEntity, limit: Int): Str
             if (p is io.nisfeb.talon.urbit.StoryPart.Text) p.text.text else ""
         }
     } else {
-        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { stored.removePrefix(it) } ?: stored
+        // The words as shown: the search text now ends in links' addresses and mentions' @ps.
+        val shown = io.nisfeb.talon.data.shownWordsOf(stored)
+        post.title?.trim()?.takeIf { it.isNotEmpty() }?.let { shown.removePrefix(it) } ?: shown
     }
     val text = words.replace(SPACES, " ").trim()
     return if (text.length <= limit) text else text.take(limit - 1) + "…"
