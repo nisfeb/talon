@@ -94,6 +94,10 @@ object AgentPrompt {
           seconds before any work. When the user's message asked for the
           writes, make them in this turn; do not describe what you would
           write instead. Always end with an answer that says what you did.
+        - A change is done only when its result shows it. Orrery's tools
+          read the record back and say Confirmed or Not confirmed for each
+          change: say which of the user's changes are confirmed and which
+          are not, and never claim a change the record does not show.
 
         DOING THINGS FOR THE USER
         - People: a name in the request ("sunbum", "my brother Tom") is a

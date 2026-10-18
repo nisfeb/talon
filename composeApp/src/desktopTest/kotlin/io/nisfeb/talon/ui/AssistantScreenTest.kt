@@ -100,17 +100,52 @@ class AssistantScreenTest {
     /** How orrery's ship answers the owner's word on an action. */
     @Volatile private var answerStatus = io.ktor.http.HttpStatusCode.OK
 
-    /** Orrery on a ship of its own, built as the Actions tests build it. */
+    /** What orrery's ship answers each read of a body, in turn, and the last again once they run out. */
+    private val bodies = java.util.concurrent.ConcurrentHashMap<String, MutableList<String>>()
+
+    /** What orrery's ship answers each read of what is open, in turn, and the last again. */
+    private val openLists: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf("[]"))
+
+    /** Each POST's path and whether it carried this install's key. */
+    private val orreryKeyed: MutableList<Pair<String, Boolean>> = java.util.concurrent.CopyOnWriteArrayList()
+
+    /** How orrery's ship answers the owner's word on an action, and an observe. */
+    @Volatile private var answerBody = """{"ok":true}"""
+    @Volatile private var observeAnswer = """{"bodies":[],"observations":[{"id":"1-a","ok":true,"existing":false}]}"""
+
+    /** An observe the ship never answers. */
+    @Volatile private var observeDown = false
+
+    private fun <T> MutableList<T>.next(): T = synchronized(this) { if (size > 1) removeAt(0) else single() }
+
+    /** The orrery the screen was given. */
+    private lateinit var orrery: io.nisfeb.talon.orrery.OrreryRepo
+
+    /** Orrery on a ship of its own, built as the Actions tests build it, with this install's key. */
     private fun orreryOn(scope: CoroutineScope, db: AppDatabase): io.nisfeb.talon.orrery.OrreryRepo {
+        runBlocking {
+            db.orreryAccounts().upsert(io.nisfeb.talon.data.OrreryAccountEntity("~zod", "c1", "k1.secret"))
+            // The key's scope counts as checked, so the pipe asks nothing of it.
+            db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
+        }
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
             val path = req.url.encodedPath
             val json = io.ktor.http.headersOf("Content-Type", "application/json")
-            if (req.method == io.ktor.http.HttpMethod.Post) orreryPosts += path to req.body.toByteArray().decodeToString()
+            if (req.method == io.ktor.http.HttpMethod.Post) {
+                orreryPosts += path to req.body.toByteArray().decodeToString()
+                orreryKeyed += path to (req.headers[io.ktor.http.HttpHeaders.Authorization] != null)
+            }
             when {
                 path.endsWith("/api/instruct") -> { kotlinx.coroutines.delay(holdInstruct); respond(instructed, io.ktor.http.HttpStatusCode.OK, json) }
                 path.endsWith("/api/brief/last") -> respond(brief, io.ktor.http.HttpStatusCode.OK, json)
-                req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond("""{"ok":true}""", answerStatus, json)
-                path.endsWith("/api/actions") -> respond("[]", io.ktor.http.HttpStatusCode.OK, json)
+                req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond(answerBody, answerStatus, json)
+                // What is open, in turn; a look at one status sees none.
+                path.endsWith("/api/actions") ->
+                    respond(if (req.url.parameters["status"] == "open") openLists.next() else "[]", io.ktor.http.HttpStatusCode.OK, json)
+                "/api/body/" in path -> bodies[path.substringAfter("/api/body/")]?.let { respond(it.next(), io.ktor.http.HttpStatusCode.OK, json) }
+                    ?: respond("""{"error":"no such body"}""", io.ktor.http.HttpStatusCode.NotFound, json)
+                path.endsWith("/api/observe") -> if (observeDown) throw java.io.IOException("connection reset") else respond(observeAnswer, io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/retract") -> respond("""{"ok":true}""", io.ktor.http.HttpStatusCode.OK, json)
                 else -> respond("", io.ktor.http.HttpStatusCode.NotFound)
             }
         })
@@ -207,7 +242,7 @@ class AssistantScreenTest {
         ship.channel.events().launchIn(sessionScope)
         val calendar = if (withCalendar) calendarOn(sessionScope) else null
         val mail = if (withMail) mailOn(sessionScope) else null
-        val orrery = if (withOrrery) orreryOn(sessionScope, db) else null
+        val orrery = if (withOrrery) orreryOn(sessionScope, db).also { orrery = it } else null
         // The host's, as the shells keep it: it outlives the screen.
         session = AssistantSession(sessionScope)
         try {
@@ -535,6 +570,102 @@ class AssistantScreenTest {
         waitUntil(timeoutMillis = 10_000) { shows("Orrery did not take it.") }
         assertEquals(1, answered("a1").size)
         assertTrue("orrery did not take the answer" in asked.last() && "It waits under Actions." in asked.last(), asked.last().takeLast(600))
+    }
+
+    // ─── changing what orrery holds, and saying only what it shows ───
+
+    // sneagan, 2026-10-18: the assistant could not change a value, and
+    // said changes were made that the view still showed the old way.
+    private val jax = "situation/2026-10-18-dl-2627"
+
+    private fun jaxNeeds(value: String, by: String = "telegram") =
+        """{"id":"$jax","kind":"situation","name":"DL 2627","attrs":{"needs":{"value":"$value","at":"2026-10-18T12:00:00Z","until":null,""" +
+            """"conf":100,"source":{"kind":"$by","id":"t1"},"by":"$by","obs":"o1"}},"involved":[],"actions":[],""" +
+            """"observations":[{"id":"o1","attr":"needs","value":"$value","at":"2026-10-18T12:00:00Z","status":"live","source":{"kind":"$by","id":"t1"}}]}"""
+
+    /** What the model was told the last tool said. */
+    private fun toolSaid(): String = kotlinx.serialization.json.Json.parseToJsonElement(asked.last()).let { it as kotlinx.serialization.json.JsonObject }
+        .getValue("messages").let { it as kotlinx.serialization.json.JsonArray }
+        .last { (it as kotlinx.serialization.json.JsonObject)["role"].toString() == "\"tool\"" }
+        .let { ((it as kotlinx.serialization.json.JsonObject).getValue("content") as kotlinx.serialization.json.JsonPrimitive).content }
+
+    private fun ComposeUiTest.changeNeeds() {
+        toolCall = call("c1", "orrery_set", """{"subject":"$jax","attr":"needs","value":"terminal drop-off"}""")
+        ask("it is a drop-off now, not parking")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+    }
+
+    @Test
+    fun `a value is changed as the owner's word and the answer says what the record shows`() = assistant(withOrrery = true) {
+        bodies[jax] = mutableListOf(jaxNeeds("park at JAX"), jaxNeeds("terminal drop-off", "user"))
+        answer = "It is a drop-off now."
+        changeNeeds()
+        // Left while it writes: the write goes on, and the answer is there on return.
+        showing.value = false
+        waitUntil(timeoutMillis = 10_000) { orreryPosts.any { it.first.endsWith("/api/observe") } }
+        showing.value = true
+        waitUntil(timeoutMillis = 15_000) { shows("It is a drop-off now.") }
+        // orrery's serve-observe keeps the by an owner's row names, and dates one with no at.
+        assertEquals(
+            """{"observations":[{"subject":"$jax","attr":"needs","value":"terminal drop-off","by":"owner"}]}""",
+            orreryPosts.single { it.first.endsWith("/api/observe") }.second,
+        )
+        assertEquals(listOf("/apps/orrery/api/observe" to false), orreryKeyed.filter { it.first.endsWith("/api/observe") }, "the owner's login, not the key")
+        assertEquals("Confirmed: $jax needs shows \"terminal drop-off\".", toolSaid())
+    }
+
+    @Test
+    fun `a change the record does not show reaches the model as not confirmed`() = assistant(withOrrery = true) {
+        bodies[jax] = mutableListOf(jaxNeeds("park at JAX"))
+        answer = "Orrery still shows parking, so that is not confirmed."
+        changeNeeds()
+        waitUntil(timeoutMillis = 20_000) { shows("not confirmed") }
+        assertTrue(toolSaid().startsWith("Not confirmed (the record still shows \"park at JAX\")"), toolSaid())
+        assertTrue("never say a change is made that the record does not show" in toolSaid())
+    }
+
+    @Test
+    fun `a change the ship never answers is said to be unknown`() = assistant(withOrrery = true) {
+        bodies[jax] = mutableListOf(jaxNeeds("park at JAX"))
+        observeDown = true
+        answer = "Your ship did not answer."
+        changeNeeds()
+        waitUntil(timeoutMillis = 15_000) { shows("Your ship did not answer.") }
+        assertTrue("may or may not have taken it" in toolSaid(), toolSaid())
+    }
+
+    private val late = """{"id":"a7","kind":"message","title":"Say you are running late to Park at JAX for DL 2627",""" +
+        """"payload":{"to":"person/rose","text":"Running late"},"about":["$jax"],"due":"2026-10-18T20:45:00Z","status":"proposed","by":"generator"}"""
+
+    private fun ComposeUiTest.dismissLate() {
+        toolCall = call("c1", "orrery_answer", """{"id":"a7","status":"dismissed","note":"dropped off, not parking"}""")
+        ask("drop that running late one")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+    }
+
+    @Test
+    fun `a waiting action is dismissed and read back and the Actions list loses it`() = assistant(withOrrery = true) {
+        openLists.clear(); openLists += listOf("[$late]", "[]")
+        answer = "Dismissed it."
+        dismissLate()
+        waitUntil(timeoutMillis = 15_000) { shows("Dismissed it.") }
+        assertEquals(listOf("""{"status":"dismissed","note":"dropped off, not parking"}"""), answered("a7"), "orrery's serve-set-action: status and note")
+        assertEquals("Confirmed: orrery no longer lists Say you are running late to Park at JAX for DL 2627 as waiting.", toolSaid())
+        assertTrue(orrery.actions.value.none { it.id == "a7" }, "the Actions page shows it gone too")
+    }
+
+    @Test
+    fun `an answer orrery refuses reaches the model as not taken`() = assistant(withOrrery = true) {
+        openLists.clear(); openLists += "[$late]"
+        answerStatus = io.ktor.http.HttpStatusCode.Conflict
+        answerBody = """{"error":"cannot go from dismissed to dismissed"}"""
+        answer = "Orrery would not take that."
+        dismissLate()
+        waitUntil(timeoutMillis = 15_000) { shows("Orrery would not take that.") }
+        assertEquals("Orrery did not take it: cannot go from dismissed to dismissed. Nothing was changed.", toolSaid())
+        assertTrue(orrery.actions.value.any { it.id == "a7" }, "still waiting under Actions")
     }
 
     // ─── the day, as Archie opens it ─────────────────────────────
