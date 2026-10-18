@@ -370,3 +370,11 @@ Fix groups, one owner per file:
    - Held: A1-10 (the 5 s and 3 s caps are in core's CallController; the exact change is in "Pass 2 outcomes"), B2-15 (a failed assistant run after a write keeps its turn), the indexer high-water mark (B5-5), the sidebar badge's semantics (B1-7), marking the open section in both drawers (B1-18), B3-17, and the "emoji alone" flake.
 
 6. How to ship: say "push and PR it", then "cut an rc" (the next is 1.8.30-rc12, versionCode 529). Nothing has been pushed, merged to master or tagged.
+
+## Decisions taken (sneagan, 2026-10-18 morning)
+
+- Approved as recommended: B2-2 (dictation sends through the Approve card), B2-8 (fingerprint before message and mail reads while locked), B3-2 (every direct share to the composer), B6-3 (alerts gated on alerted or read, not age; with it, catch-up alerts), B4-3 (iOS database protected until first unlock), B3-12 (a missed call's body opens the DM), B3-3 (say in Settings that without push calls ring only while Talon is open), B3-16 ("Sign in again" notification), B2-14 (Stop button), B2-11 (about 3 minutes for dictation and Archie transcription).
+- B2-6: "should be possible to require an ask but shouldn't by default." The lead asked how the ask should work; the question timed out, so the recommended shape is being built: a per-loop "Ask before sharing calendars" switch, off by default and kept per device; when on, a loop's share or offer answer is held, and a notification offers Allow or Don't.
+- B2-20: no confirmation needed. Closed, no change.
+- Not answered yet: B2-12, B3-10, B5-16, B5-6, B5-8, B4-15, B4-17, pass 1's A4-19, A2-11, A2-4, A1-2 and M5, the judgment calls, and the OrreryKeysTest question.
+- Built: B4-3 by the lead (7d50cc33). The rest by four groups: dictation (B2-2, B2-8, B2-11), android (B3-2, B3-12, B3-3, B3-16), alerts (B6-3), loops (B2-6, B2-14).
