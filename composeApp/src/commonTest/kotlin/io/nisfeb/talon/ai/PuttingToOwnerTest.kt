@@ -70,6 +70,15 @@ class PuttingToOwnerTest {
     }
 
     @Test
+    fun `a refusal from orrery is said and the owner is not asked`() = runTest {
+        val refusing = object : OrreryTap by OrreryToolsTest.Tap() {
+            override suspend fun instruct(text: String, apply: Boolean) = Result.failure<Instructed>(IllegalStateException("the ship said 502"))
+        }.puttingToOwner(decide = { r, w -> asked += r to w.map { it.id }; true }, answer = { id, _ -> answered += id })
+        assertEquals("Could not tell orrery: the ship said 502", instruct(refusing))
+        assertTrue(asked.isEmpty() && answered.isEmpty())
+    }
+
+    @Test
     fun `a stop while it asks is a stop and not an answer`() = runTest {
         val t = OrreryToolsTest.Tap().apply { instructed = Instructed(actions = listOf(action("a1"))) }
             .puttingToOwner(decide = { _, _ -> throw CancellationException("stopped") }, answer = { _, _ -> answered += "x" })

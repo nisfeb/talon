@@ -34,13 +34,15 @@ import kotlin.test.assertTrue
  */
 class CalendarAnswerTest {
     private val now = io.nisfeb.talon.util.nowMs()
-    private val zoneId = run {
+    /** The hour it is where the calendar is. */
+    private var localHour = 12
+    private val zoneId get() = run {
         val h = ((now / 3_600_000) % 24).toInt()
-        val off = (12 - h).let { if (it > 14) it - 24 else if (it < -12) it + 24 else it }
+        val off = (localHour - h).let { if (it > 14) it - 24 else if (it < -12) it + 24 else it }
         "UTC" + (if (off >= 0) "+" else "-") + kotlin.math.abs(off).toString().padStart(2, '0') + ":00"
     }
-    private val zone = TimeZone.of(zoneId)
-    private val today = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
+    private val zone get() = TimeZone.of(zoneId)
+    private val today get() = kotlin.time.Instant.fromEpochMilliseconds(now).toLocalDateTime(zone).date
     private fun row(id: String, name: String, l: Long, r: Long) =
         """{"id":"$id","cal":"default","cat":"timed","kind":"once","all":false,"l":$l,"r":$r,"meta":{"name":"$name"}}"""
     private fun task(id: String, name: String, dueDaysFromToday: Int?, done: Boolean = false) =
@@ -109,6 +111,15 @@ class CalendarAnswerTest {
         assertEquals(2, windows.size, "the morning is before what the calendar holds")
         assertEquals(today.toString(), kotlin.time.Instant.fromEpochMilliseconds(windows[1].toLong()).toLocalDateTime(zone).date.toString())
         assertEquals(listOf("Rent", "Milk"), seen.card(zone, { it }, true, now).tasks.map { it.name })
+    }
+
+    @Test
+    fun `before six in the morning today is read from what the calendar holds`() {
+        localHour = 3
+        answer(Said(0.95, "today")) { line, _ ->
+            assertTrue(line!!.startsWith("Today you have one event."), line)
+            assertEquals(1, windows.size, "the read reaches back past midnight")
+        }
     }
 
     @Test
