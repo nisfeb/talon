@@ -7,13 +7,11 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Night: 2026-10-17 (started 2026-10-18 00:07 EDT).
 - Integration worktree: `~/software/personal/talon-ov-2026-10-17`, branch `polish/overnight-2026-10-17`.
 - Base: `github/master` at 60d99a39 (release 1.8.30-rc11). The fetch worked.
-- Pass: 2.
-- Step: fix. Pass 2's triage done 03:50 EDT (see "Pass 2 triage"); six fixers launched in the worktrees below, asked to report by 05:30.
-- Pass 1: 00:10 to 03:30 EDT. Pass 2 started 03:30 EDT. Pass 3 will not start: a pass takes two hours or more, and the cutoff is 04:30.
-- Fixer branches in flight: `polish/ov-2026-10-17-p2-<group>` for shells, android, voice, desktop-ios, chat, screens, in `~/software/personal/talon-ov-2026-10-17-p2-<group>`.
+- Pass: 2, done. Step: done; the morning report is at the end of this file.
+- Pass 1: 00:10 to 03:30 EDT. Pass 2: 03:30 to 08:05 EDT. Pass 3 did not start (the 04:30 cutoff).
+- All pass-2 fixer branches are merged and their worktrees removed.
 - Stalled 04:00 to 06:32 EDT: the session limit stopped all six fixers and the loop itself (it reset at 04:40, but the loop's wakeups had hit the same limit). Resumed at 06:32 with each fixer's work kept and a new report-by time of 07:30.
 - Pass 1's lattice entry saved at 03:48 (`/project/talon/overnight-2026-10-17`).
-- Next firing: merge each pass-2 fixer as it reports (check the branch, merge --no-ff, apply asked-for changes elsewhere), then the full suite and four compiles, then the morning report.
 - Pass 1 merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
 - Pass 1's full suite (03:30): 3816 tests, 1 failure, OrreryKeysTest "turning it on finishes though the page that asked is left". It passes alone (8 of 8); it timed out on a 5 s poll under the suite's load, so the poll cap is now 15 s. All four compiles passed.
 - Left for pass 2 by pass 1's merge (now triaged into the groups): `dm:` and `invite:` keys in IosNotifier's postsLocally (desktop and iOS DM-request and invite clicks only raise the window); A1-10 (the 5 s and 3 s caps cut a slow PUT off; needs an ack-wait option on UrbitChannel.poke); the other test classes' temp-dir cleanup (contained by build/test-tmp now); AndroidRelaySettings not persisting registeredEndpointFor; ingestPosts never notifying (a worker catch-up notifies nothing); the DmChatScreenTest "emoji alone" flake (ChatRowsSnapshot shared across tests); an AppShellTest hang seen once ("Escape in a chat's composer closes the chat", a Compose deadlock in the test).
@@ -46,6 +44,9 @@ Fix groups, one owner per file:
 ## Found by the loop itself
 
 - The Talon desktop tests leave their temp directories in /tmp: about 6.7 GB of `/tmp/talon-*` (5,000 from the settings outbox tests alone) had filled the 16 GB tmpfs to 100% during pass 1, which broke a PIT run. Cleared at 02:50 (dirs older than 30 minutes). A pass-2 fix: the tests delete what they create.
+
+- Core's desktop tests wrote into the real `~/.config/talon/log` (no user.home or temp dir of their own). Fixed in pass 2 by the desktop-ios group: core tests now keep both under the build, as composeApp's do.
+- The night's six parallel fixers hit the session limit at about 04:00, and the loop's own wakeups with them, so the night stood still until 06:32.
 
 ## Decisions for sneagan
 
@@ -311,3 +312,60 @@ Fix groups, one owner per file:
 - chat (merged 97a9b768, 07:18): fixed B6-1 (9813517b, e8919c03: `keptPostId` normalizes a hint's dotted id at the chat, gallery and notebook screens), B6-6 (d8c81f25: `textFor` is the preview again; `copyTextFor` gives full addresses), B6-4 (77ca4936: no Delete while a post sends), B6-5 (708a557b, 52f75b9f: no reconnect debounce while signed out), B3-4 (5d1a1e9c), B1-4 (04c7fdfc: "Couldn't load your chats." with Try again; a ship whose chats read fails through every path now says so), B1-5 and B1-17's activity sites (e531c97f), B5-5's search-text mark (169a0922), B5-6's safe half (5990c67e: unforced, in turn; slower to clear on an unreachable ship), B5-7 (fd1b97e6), B6-8 and B5-11 (12d7e504: a new match no longer appears while results show, until the query changes). Held: the indexer high-water mark (needs a design for edits and deletes); the emoji-alone flake, which is a finding: ChatRowsSnapshot carries one test's rows into the next, and two tests pass only when an earlier test left a snapshot (test order, or a real first-open avatar bug; unconfirmed). The fixer rebuilt its history after a misapplied partial staging; HEAD was compiled on all three targets, the middle commits were not.
 - shells (merged 73ea3d42, 07:18): fixed B5-1 (767b7578: on this line means the granted line's host and room, pinned in RecordingGateTest and JoinGrantedTest), B5-2 (same commit), B1-1 (cd289cfd: a fixed Contacts drawer item), B1-2 (536668ba), B1-3, B1-12's sites, B1-14's two, B1-13, B1-9's app site, B5-3, B5-4, B5-13 (focus-gated, keeping the return read), B5-12, B5-14, B5-15, B1-8 (e4db3459: Remove awaits, says "Removing…", says a refusal). Half: B1-7 (the sidebar scrolls; the badge's semantics held for a screen-reader check), B1-18 (the wording; marking the open section held). Follow-ups: `partyLiveHere` matches the room with no host (a count, not consent); the profile sheet's Remove in TalonApp is still fire and forget; the font status says "until it arrives" after it gives up.
 - voice (07:22): fixed B2-1 (2e3c9cbb: every waiting proposal is read aloud), B2-3 (8f139a8c, 2c79d6dd: ModelHttpError from AgentClient; a 503 now reads calmly in the assistant), B2-4 and B2-18's send half (1d08e49d), B2-5 (25ddf68d), B2-7 (fd7aeb88: the read-out rides the history, capped at 4000 characters and labelled as data), B2-9 (26df4a02), B2-10 (0ce46487), B2-13 (b3efdfee), B2-16 (22c8983d), B2-17 (3ea6115d), B2-18's dates (c0350acd), B2-19 (fd3e70e5). Held: B2-15 (for time). A loop's history now keeps the calm line only.
+
+## Morning report
+
+1. Branch `polish/overnight-2026-10-17`, code head 8cebf90b (the state file's commit sits on top), off master at 60d99a39 (1.8.30-rc11). Two passes ran; pass 3 did not start (the 04:30 cutoff, and a session-limit stall from 04:00 to 06:32). Pass 1 fixed about 95 findings; pass 2 fixed about 83 more, including three regressions pass 1 had brought in. The full suite at 8cebf90b: 3,922 tests, 1 failure, OrreryKeysTest "turning it on finishes though the page that asked is left". It hangs at its second wait for the whole 15 s, in the full suite only: it passes alone and with its whole 47-class package, and the class's other seven tests take 0.02 s each in the same run, so it is not load. It failed the same way after pass 1, it is tied to no merge, and it is not fixed (see Unconfirmed). All four compiles passed: composeApp and core, Android and iOS.
+
+2. Decisions for sneagan, each with a recommendation and what yes costs.
+   - B2-2, dictation sends with no confirmation when Orrery is off, in a run that also reads other people's messages and mail. Recommendation: route a dictation's send_message and send_mail through the Approve card, as Orrery's sends already are. Cost: one tap or "send" per dictated message.
+   - B2-8, a locked phone reads messages and mail aloud and shows them on the card. Recommendation: ask for the fingerprint before message and mail reads while locked; keep calendar reads. Cost: the car use case needs an unlock for messages.
+   - B3-2, a forged direct share from another app posts an image or file to any conversation as the owner. Recommendation: send every direct share to the composer, as text already goes. Cost: one more tap to send a shared image.
+   - B6-3, Android's 5-minute alert gate silences messages replayed after an outage on a phone without push. Recommendation: gate on "already alerted or read", not on age. Cost: a small change in NewMessageDiff, and pass 1's "ingestPosts never notifies" is decided with it.
+   - B4-3, iOS keeps the database at NSFileProtectionComplete while calls keep Talon running locked, so reads and writes fail about 10 s after lock. Recommendation: CompleteUntilFirstUserAuthentication for the database directory. Cost: the database is readable while locked after the first unlock.
+   - B2-6, write-authorized loops can share a calendar or answer a calendar offer unattended. Recommendation: add share_calendar and answer_calendar_offer to DESTRUCTIVE_TOOLS. Cost: those loops stop and ask.
+   - B2-20, lattice-save runs with no confirmation in runs that read chat or mail. Recommendation: confirm a save when the run has read chat or mail. Cost: a tap on those saves.
+   - B3-3, without push, calls ring only while Talon's activity exists (not after a reboot or a swipe). Recommendation: say so in Settings now; an app-level call controller later. Cost: a line of copy now, real work later.
+   - B3-12, tapping a missed-call notification's body dials at once. Recommendation: the body opens the DM and Call back stays an action. Cost: none.
+   - B3-16, without push, a lapsed login leaves "Listening for new messages" up and says nothing. Recommendation: a "Sign in again" notification. Cost: a new notification.
+   - B2-14, an assistant run cannot be stopped. Recommendation: a Stop button while busy. Cost: a small feature.
+   - B2-11, a dictation's transcription can wait 11 minutes. Recommendation: about 3 minutes for dictation and Archie turns, keeping 11 for call recordings. Cost: a very slow home speech server would time out on long dictations.
+   - B2-12, no prompt caching. Recommendation: cache_control on Anthropic models and the NOW line out of the system prompt, after a live check. Cost: a live provider test.
+   - B3-10, loops use inexact alarms though USE_EXACT_ALARM is declared. Recommendation: exact when allowed, if Talon is not bound by Play's policy on that permission.
+   - B5-16, desktop mail notices fire only while Talon's window is focused. Recommendation: poll while the app runs, at the background cadence.
+   - B5-6, Mark group read: one %activity poke for the group instead of one per channel. A poke-shape change.
+   - B5-8, orrery's brief state form for the pass, once orrery's source confirms it carries schema and ship.
+   - B4-15 (desktop voice messages could play inline through vlcj) and B4-17 (Linux keeps the pier, models and caches under ~/.config; moving them is a migration): features, for later.
+   - From pass 1: A4-19 (link previews fetch every received http link from the reader's device; recommendation: skip private and LAN addresses now, decide on a setting), A2-11 (Top up and Subscribe stay tappable while a checkout is pending; recommendation: disable both), A2-4 (two quick calendar adds can swap refusals; a full fix needs a nonce the calendar echoes), A1-2 (a settings write counts once eyre takes the PUT; recommendation: keep), M5 (put the maps or tel link on the voice result notification's tap). Held as before: IMAGE_AUTO_MAX and the mail image fetch, restartIce in TalonRtc.swift, M16's notify-levels marker.
+   - Judgment calls made tonight, to confirm or undo: desktop opens only http, https and mailto links from messages (tel, sms, geo, matrix, signal and xmpp are refused; `OPENABLE_SCHEMES` in DesktopUriHandler); orrery passes every 30 minutes while the app is behind (on desktop, behind means unfocused); Delete is hidden while a post sends; search results no longer update live while shown; Mark group read goes channel by channel, so it clears slower on an unreachable ship; the note-delete settle is 30 s; desktop mail reads on focus at most once a minute.
+
+3. What changed that sneagan would notice.
+   - Phones have Contacts in the drawer again, after Edit menu. They had no way in since 2026-09-11.
+   - A narrow desktop window's More menu has Home and Orrery.
+   - Tapping a push notification's message jumps to it again. Pass 1 had made it say "That message isn't loaded here yet."
+   - Previews (list, quotes, notifications) show links cut short again; Copy text, a reply's Copy text and the assistant's reads keep whole addresses.
+   - Cancel on the lapsed-login form stays on the ship (desktop and iOS). Android no longer carries an old search query into a later search.
+   - Record on a party line counts only on that chat's own line, and Android no longer sends a second presence beat.
+   - Dictation reads every waiting proposal aloud ("2 things wait. ..."). Spoken confirmations name people, not ids, and say dates as dates. A queued send says it is queued. An empty balance shows Top up in the assistant, and a 503 reads calmly.
+   - A failed first load says "Couldn't load your chats." with Try again, not "No direct messages yet".
+   - Group activity rows show the group's name and open its page; invite rows open the invites.
+   - Android: notifications open Talon through a private alias, and other apps can no longer place or answer calls. Notifications posted before the update open Talon without acting, once. The sync notice goes away after a swipe when only mail kept it. An in-app update restarts the stream. Ship pushes follow ship switches.
+   - Desktop: Linux notifications survive a notify-send failure. The local comet survives leaving Settings. Session and terminal files are private (0600).
+   - Copy: "Your ship's calling app", "Register again", "Check notification delivery", "Decline", "Save", "the More menu", "Copy the link", iPad named as iPad.
+   - From pass 1: a deleted queued DM is never sent; a voice upload survives leaving the chat; Android's alert listeners live at app level and DMs notify at the default level; smart search leaves out deleted messages; the settings outbox keeps order and no longer re-sends stale writes; a lapsed login no longer loops; a 502, 503 or 504 reads as the ship being down; calendar refusals that come late are caught; new events show on Home at once.
+
+4. What needs a device, most important first.
+   - Android, B3-1: answer a ring from its notification and tap a missed call's Call back. If `intent.component.className` does not report the alias, every call action from a notification is silently ignored.
+   - Android: tap a push hint and land on the message (B6-1).
+   - Android: two waiting Orrery proposals read aloud, and a long unread read-out not cut off by the next paragraph (B2-1, B2-5).
+   - A party line: Record from another group's chat (now refused), and the line's count when a DM is opened while talking (B5-1, B5-2).
+   - Android without push: a ring with Talon in the background posts its notification (B3-3); an in-app update restarts the stream (B3-8); a ring for the non-active ship (B3-5).
+   - iOS: start from a locked PushKit wake and check the saved ships after unlock (B4-2); a voice message played during a call (B4-4); dictation started twice (B4-10).
+   - Linux desktop: notifications after notify-send has failed once (B4-1).
+   - Pass 1: Android message alerts with Talon swiped away, and a voice message upload when leaving the chat.
+
+5. Unconfirmed and held. Nothing was reverted.
+   - Unconfirmed: the OrreryKeysTest hang above. Something an earlier test class leaves behind stops `enable()` between the mint's answer and the switch going on. It is not the dispatchers (no shared one is swapped), not a gate in OrreryApi, and not the orrery package. Next step: bisect the classes that run before it. Also, two tests pass only when an earlier test left a chat snapshot (ChatRowsSnapshot); either test order or a real bug where an avatar tap does nothing on a chat's first open in a process. Also the AppShellTest Escape hang (seen once), whether trunk takes a decline sent from another ship (B3-5), the author field of group activity events (B1-5), and pass 1's A4-16, A5 host order and A5 foreigns.
+   - Held: A1-10 (the 5 s and 3 s caps are in core's CallController; the exact change is in "Pass 2 outcomes"), B2-15 (a failed assistant run after a write keeps its turn), the indexer high-water mark (B5-5), the sidebar badge's semantics (B1-7), marking the open section in both drawers (B1-18), B3-17, and the "emoji alone" flake.
+
+6. How to ship: say "push and PR it", then "cut an rc" (the next is 1.8.30-rc12, versionCode 529). Nothing has been pushed, merged to master or tagged.
