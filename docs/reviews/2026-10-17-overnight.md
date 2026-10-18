@@ -7,12 +7,13 @@ Run by the self-paced loop in `docs/reviews/overnight-loop.md` (main checkout, u
 - Night: 2026-10-17 (started 2026-10-18 00:07 EDT).
 - Integration worktree: `~/software/personal/talon-ov-2026-10-17`, branch `polish/overnight-2026-10-17`.
 - Base: `github/master` at 60d99a39 (release 1.8.30-rc11). The fetch worked.
-- Pass: 1.
+- Pass: 2 (pass 1 merged; its full suite running).
 - Step: fix. Triage done 01:25 EDT; six fixers launched in the worktrees below.
 - Pass 1 started: 00:10 EDT.
 - Fixer branches in flight: `polish/ov-2026-10-17-<group>` for settings-calls, chatrepo, chatui, apps, shells, search-groups, in `~/software/personal/talon-ov-2026-10-17-<group>`.
 - Merged: all six by 03:09 EDT: shells (15 commits), chatui (21), search-groups (5), apps (16), chatrepo (16), settings-calls (9). Lead integration commits: SearchDraft cleared in App.kt; orrery setForeground in both shells; the event card on addSharedWhyNot; test temp dirs under build/test-tmp; the notebook excerpt on shownWordsOf; the lapsed-login bridge into LoginLapses in both shells (with an AppShellTest end to end); a refresh after a new channel; a stale DmChatScreen comment.
-- Next firing: the full suite and the four compiles on the integration branch (step 4). Then pass 2 if it is before 04:30 EDT.
+- Pass 2 started 03:30 EDT: six read-only reviewers (UI polish; voice and the assistant; Android services and lifecycle; desktop and iOS leaves; performance and ship cost; pass 1's own commits), launched while pass 1's full suite runs.
+- Next firing: read pass 1's suite result (fix any failure that is not a known flake), then triage pass 2's reports into fix groups.
 - Left for pass 2 (found while merging): `dm:` and `invite:` keys in IosNotifier's postsLocally (desktop and iOS DM-request and invite clicks only raise the window); A1-10 (the 5 s and 3 s caps cut a slow PUT off; needs an ack-wait option on UrbitChannel.poke); the other test classes' temp-dir cleanup (contained by build/test-tmp now); AndroidRelaySettings not persisting registeredEndpointFor; ingestPosts never notifying (a worker catch-up notifies nothing); the DmChatScreenTest "emoji alone" flake (ChatRowsSnapshot shared across tests); an AppShellTest hang seen once ("Escape in a chat's composer closes the chat", a Compose deadlock in the test).
 
 ## Pass 1
