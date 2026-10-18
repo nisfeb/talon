@@ -190,13 +190,17 @@ class FontRepo(
      * tries. A fetch that failed (a busy ship at start, a dropped
      * request) was not tried again until the list changed or the app
      * restarted, while the page said the font would arrive.
+     *
+     * It stops after the last wait (review B5-14): a font that never
+     * reached the ship was asked about every ten minutes for as long as
+     * Talon ran. The next launch or list change asks again.
      */
     suspend fun keepInLine(waits: List<Long> = RETRY_WAITS_MS) {
-        var i = 0
-        while (sync() > 0) {
-            kotlinx.coroutines.delay(waits[minOf(i, waits.lastIndex)])
-            i++
+        for (wait in waits) {
+            if (sync() == 0) return
+            kotlinx.coroutines.delay(wait)
         }
+        sync()
     }
 
     /** [bytes] kept here as [id] when the platform can load them; false, and nothing kept, when not. */
