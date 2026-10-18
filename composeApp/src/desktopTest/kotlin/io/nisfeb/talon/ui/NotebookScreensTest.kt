@@ -253,6 +253,20 @@ class NotebookScreensTest {
         assertTrue(shows("Markdown"), "the edit is still there to keep or copy")
     }
 
+    // Every failed save said the note had changed on the ship, a ship down
+    // and a reader's save included.
+    @Test
+    fun `a save the ship does not answer says so, and the edit stays`() = note { ship, _ ->
+        ship.answerApi = { method, _, _ -> if (method == "PUT") throw java.io.IOException("Connection refused") else null }
+        showing("rev 3")
+        onNodeWithContentDescription("Edit").performClick()
+        onNode(hasSetTextAction()).performTextInput(" more")
+        onNodeWithContentDescription("Save").performClick()
+        showing("Your ship is slow")
+        assertTrue(!shows("Couldn't save") && !shows("Connection refused"))
+        assertTrue(shows("Markdown"), "still editing, the text kept")
+    }
+
     @Test
     fun `publishing asks first, sends the HTML, and gives the address`() = note { ship, _ ->
         showing("rev 3")

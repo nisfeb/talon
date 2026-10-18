@@ -47,12 +47,15 @@ class MailSelectTest {
         """{"id":"$id","subject":"$subject","from":"~bus","snippet":"","verdict":"valid","forged":false,"count":1,"last":0,
             "unread":$unread,"participants":["~bus"],"unreadable":0,"archived":$archived,"labels":[]}"""
 
-    private val inbox = """{"total":3,"offset":0,"limit":50,"view":"inbox","threads":[
-        ${row("0v1", "Lunch", unread = true)}, ${row("0v2", "Rent")}, ${row("0v3", "Tickets", unread = true)}]}"""
+    /** A reply has come into Rent since it was read: its row says unread, and its thread has a third message, the second read. */
+    @Volatile private var replied = false
+
+    private val inbox get() = """{"total":3,"offset":0,"limit":50,"view":"inbox","threads":[
+        ${row("0v1", "Lunch", unread = true)}, ${row("0v2", "Rent", unread = replied)}, ${row("0v3", "Tickets", unread = true)}]}"""
 
     private fun thread(id: String) = """{"id":"$id","participants":["~bus"],"last":0,"messages":[
         {"id":"$id.a","from":"~bus","subject":"s","body":"b","sent":1,"read":true},
-        {"id":"$id.b","from":"~bus","subject":"s","body":"b","sent":2,"read":false}]}"""
+        {"id":"$id.b","from":"~bus","subject":"s","body":"b","sent":2,"read":${replied && id == "0v2"}}${if (replied && id == "0v2") """,{"id":"$id.c","from":"~bus","subject":"s","body":"c","sent":3,"read":false}""" else ""}]}"""
 
     private val repo = MailRepo(
         HttpClient(MockEngine { req ->
@@ -212,4 +215,19 @@ class MailSelectTest {
         assertEquals(before + 1, reads())
     }
 
+    // Read, then a reply came in: the copy here had nothing unread while
+    // the row said unread, and Mark read on a selection did nothing.
+    @Test
+    fun `marking read a thread that had a reply since it was read marks the reply`() = runBlocking<Unit> {
+        repo.attach("https://ship.test")
+        withTimeout(5_000) { while (repo.page.value == null) delay(20) }
+        repo.loadThread("0v2")
+        repo.markRead(listOf("0v2.b"), "0v2")
+        withTimeout(5_000) { while (posts("read").isEmpty()) delay(20) }
+        replied = true
+        repo.refresh()
+        assertTrue(repo.page.value!!.threads.single { it.id == "0v2" }.unread, "the row says the reply is unread")
+        repo.markManyRead(listOf("0v2"), read = true).join()
+        assertEquals("""{"thread-id":"0v2","msg-ids":["0v2.c"]}""", posts("read").last())
+    }
 }

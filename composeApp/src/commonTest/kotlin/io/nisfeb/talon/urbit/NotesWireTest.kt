@@ -294,6 +294,21 @@ class NotesWireTest {
         assertEquals("unknown", NotesParser.writeErrorType(rejected))
     }
 
+    // Every failed body save was called a conflict: a reader's save and
+    // one still in flight on a cross-ship notebook too.
+    @Test
+    fun `a body save's answer is said as what it is`() {
+        assertNull(NotesParser.saveRefusal(obj("""{"body":{"type":"ok"}}""")))
+        assertNull(NotesParser.saveRefusal(obj("""{"body":{"type":"no-change"}}""")))
+        assertEquals(NotesRepo.NOTE_CHANGED, NotesParser.saveRefusal(obj("""{"body":{"errorType":"unknown","message":[],"type":"error"},"requestId":"0vuc.k6rtf"}""")), "the live ship's stale revision")
+        assertEquals(NotesRepo.NOTE_CHANGED, NotesParser.saveRefusal(obj("""{"body":{"type":"error","errorType":"revision-mismatch"}}""")))
+        assertEquals("You can't edit this notebook. Its owner can make you an editor.", NotesParser.saveRefusal(obj("""{"body":{"type":"error","errorType":"not-authorized"}}""")))
+        assertEquals("That note isn't there any more.", NotesParser.saveRefusal(obj("""{"body":{"type":"error","errorType":"not-found"}}""")))
+        assertEquals("That is too large to save.", NotesParser.saveRefusal(obj("""{"body":{"type":"error","errorType":"request-too-large"}}""")))
+        assertTrue(NotesParser.saveRefusal(obj("""{"body":{"type":"pending"}}"""))!!.startsWith("Sent."))
+        assertEquals("The notebook's host didn't take it.", NotesParser.saveRefusal(obj("""{"nothing":"here"}""")), "an answer with no verdict is not a conflict")
+    }
+
     @Test
     fun `accepted write is read as success`() {
         val accepted = obj(

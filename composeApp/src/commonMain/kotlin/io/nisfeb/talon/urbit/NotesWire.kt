@@ -303,6 +303,28 @@ object NotesParser {
         }
     }
 
+    /**
+     * What to tell the owner of a body save's answer ([NotesRepo.updateNote]):
+     * null when it was taken, otherwise why not. A save the host could not
+     * place against its revision is [NotesRepo.NOTE_CHANGED]: the live ship
+     * says "unknown" for a stale revision, so every error but the two that
+     * say something else is read as that.
+     */
+    fun saveRefusal(el: JsonElement?): String? {
+        if (isWriteOk(el)) return null
+        val body = (el as? JsonObject)?.get("body") as? JsonObject
+        if (body?.get("type").asStr() == "pending") {
+            return "Sent. The notebook's host hasn't answered yet, so your change may show in a moment."
+        }
+        return when (writeErrorType(el)) {
+            "not-authorized" -> "You can't edit this notebook. Its owner can make you an editor."
+            "not-found" -> "That note isn't there any more."
+            "request-too-large" -> "That is too large to save."
+            null -> "The notebook's host didn't take it."
+            else -> NotesRepo.NOTE_CHANGED
+        }
+    }
+
     fun writeErrorType(el: JsonElement?): String? {
         val body = (el as? JsonObject)?.get("body") as? JsonObject ?: return null
         if (body["type"].asStr() != "error") return null

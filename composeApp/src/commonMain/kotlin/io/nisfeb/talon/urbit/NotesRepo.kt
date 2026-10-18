@@ -7,6 +7,7 @@ import io.nisfeb.talon.data.NotesNotebookEntity
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.nowMs
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,6 +34,8 @@ import kotlinx.serialization.json.put
 class NotesRepo(
     private val db: AppDatabase,
     private val scope: CoroutineScope,
+    /** How long after a delete its notebook is read again: its host's answer, for one not ours. */
+    private val deleteSettleMs: Long = 3_000,
 ) {
     private var channel: UrbitChannel? = null
 
@@ -302,39 +305,49 @@ class NotesRepo(
     private suspend fun write(flag: NotesFlag, path: String, body: JsonObject): String? = scope.async {
         val ch = channel ?: return@async "Not connected to your ship."
         val resp = runCatching { ch.apiJson(method = "POST", path = path, body = body) }
-            .getOrElse { err ->
-                // Calm, not a raw transport string: a slow or unreachable
-                // ship said "Read timed out" / "Connection refused" to the
-                // user verbatim. Say it plainly and tell them to retry.
-                return@async if (io.nisfeb.talon.util.isShipSlow(err)) {
-                    "Your ship is slow, so it didn't go through. Try again when it's back."
-                } else {
-                    "Your ship couldn't take it" +
-                        (io.nisfeb.talon.util.readableReason(err.message)?.let { " ($it)" } ?: "") + "."
-                }
-            }
+            .getOrElse { err -> return@async notSent(err) }
         NotesParser.writeRefusal(resp).also { if (it == null) refreshNotebook(flag) }
     }.await()
+
+    /**
+     * A write that got no answer, said calmly, not as a raw transport
+     * string: a slow or unreachable ship said "Read timed out" /
+     * "Connection refused" to the user verbatim.
+     */
+    private fun notSent(err: Throwable): String =
+        if (io.nisfeb.talon.util.isShipSlow(err)) {
+            "Your ship is slow, so it didn't go through. Try again when it's back."
+        } else {
+            "Your ship couldn't take it" +
+                (io.nisfeb.talon.util.readableReason(err.message)?.let { " ($it)" } ?: "") + "."
+        }
 
     /**
      * Save an edited body. [expectedRevision] must be the revision the
      * editor opened — the host rejects the poke if it moved on, so a
      * concurrent edit surfaces as a failure instead of silently winning.
-     * The row is marked pending and the host echo clears it.
+     * The row is marked pending and the host echo clears it. Null when
+     * the host took it, otherwise what to say: [NOTE_CHANGED] when the
+     * note moved on, and the rest ([NotesParser.saveRefusal], no answer)
+     * as what they are. Every failure was called a conflict.
      */
     suspend fun updateNote(
         flag: NotesFlag,
         noteId: Long,
         body: String,
         expectedRevision: Long,
-    ): Boolean = scope.async {
+    ): String? = scope.async {
         // On the repo's scope: the row is marked pending before the PUT and
         // the mark is cleared after. Leaving the screen mid-save on the
         // caller's scope cancelled it between the two, and replaceTree then
         // re-applied pending on every later scry, pinning the note as
         // "saving…" forever.
-        val ch = channel ?: return@async false
+        val ch = channel ?: return@async "Not connected to your ship."
         val key = flag.flagString
+        // The host's copy, put back if the save does not land. Left to the
+        // read after it, a ship down for that read kept the unsaved body
+        // here as the current revision.
+        val hosts = db.notes().note(key, noteId)
         db.notes().applyLocalEdit(key, noteId, body, nowMs())
         // Deliberately NOT a poke. A channel poke returns the moment eyre
         // accepts it, so a stale-revision rejection is indistinguishable
@@ -342,7 +355,7 @@ class NotesRepo(
         // silently. The v1 endpoint answers synchronously with
         // {"body":{"type":"ok"|"error"}}, which is the whole point of
         // threading expectedRevision through in the first place.
-        val ok = runCatching {
+        val said = runCatching {
             val resp = ch.apiJson(
                 method = "PUT",
                 path = NotesPaths.v1Note(flag, noteId),
@@ -354,10 +367,10 @@ class NotesRepo(
             if (!NotesParser.isWriteOk(resp)) {
                 Log.w(TAG, "note update rejected for $key/$noteId: ${NotesParser.writeErrorType(resp)}")
             }
-            NotesParser.isWriteOk(resp)
+            NotesParser.saveRefusal(resp)
         }.getOrElse {
             Log.w(TAG, "note update failed for $key/$noteId", it)
-            false
+            notSent(it)
         }
         // Clear the in-flight mark either way — the write is settled, and
         // only an unsettled row should read as "saving…". This has to
@@ -366,13 +379,12 @@ class NotesRepo(
         // make every later scry restore it and pin the note as saving
         // forever.
         db.notes().setPending(key, noteId, false)
+        if (said != null) hosts?.let { db.notes().upsertNotes(listOf(it.copy(pending = false))) }
         // Re-read either way. On success it picks up the host's new
         // revision, which the next edit must send back as
-        // expectedRevision; on failure it replaces the optimistic body
-        // with the host's version rather than leaving an edit on screen
-        // that never landed.
+        // expectedRevision; on failure the host's own, where it answers.
         refreshNotebook(flag)
-        return@async ok
+        return@async said
     }.await()
 
     suspend fun renameNote(flag: NotesFlag, noteId: Long, title: String): Boolean =
@@ -383,8 +395,17 @@ class NotesRepo(
 
     suspend fun deleteNote(flag: NotesFlag, noteId: Long): Boolean {
         val ok = poke(NotesActions.deleteNote(flag, noteId))
-        // Drop it locally right away; the stream echo re-syncs either way.
-        if (ok) db.notes().deleteNote(flag.flagString, noteId)
+        if (ok) {
+            // Gone here at once, and read again behind it: in a notebook
+            // that is not ours the poke is answered before its host has,
+            // and a host that refused it (a reader's delete) sends nothing,
+            // so the note stayed hidden until the notebook next changed.
+            db.notes().deleteNote(flag.flagString, noteId)
+            scope.launch {
+                kotlinx.coroutines.delay(deleteSettleMs)
+                refreshNotebook(flag)
+            }
+        }
         return ok
     }
 
@@ -467,7 +488,13 @@ class NotesRepo(
         groupFlag: String,
         title: String,
         readers: Set<String> = emptySet(),
-    ): String? {
+    ): String? = scope.async {
+        // On the repo's scope, like write(): made from a group's admin page,
+        // leaving it while the host answered lost the notebook it made.
+        createGroupNotebookNow(groupFlag, title, readers)
+    }.await()
+
+    private suspend fun createGroupNotebookNow(groupFlag: String, title: String, readers: Set<String>): String? {
         val ch = channel ?: return null
         val group = NotesFlag.parse(groupFlag) ?: run {
             Log.w(TAG, "createGroupNotebook: bad group flag $groupFlag")
@@ -531,6 +558,11 @@ class NotesRepo(
 
     companion object {
         private const val TAG = "NotesRepo"
+
+        /** What a save says when the note moved on since the editor opened. */
+        const val NOTE_CHANGED =
+            "This note changed on the ship since you started editing, so the save was rejected to avoid overwriting it. " +
+                "Your text is still here: copy anything you need, then back out and re-open to get the latest version."
 
         /**
          * Does this SSE payload belong to %notes? Facts don't name their

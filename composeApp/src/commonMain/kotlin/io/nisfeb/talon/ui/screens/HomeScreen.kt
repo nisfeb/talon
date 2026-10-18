@@ -1299,9 +1299,13 @@ private fun CalendarPanel(
     // Ticks on their way to the ship, kept by the calendar, not here:
     // kept here, they were lost by going to another section and back.
     val ticking = calendar?.ticking?.collectAsState()?.value.orEmpty()
+    val error = calendar?.error?.collectAsState()?.value
     val scope = rememberCoroutineScope()
     var installing by remember { mutableStateOf(false) }
     var installError by remember { mutableStateOf<String?>(null) }
+    // A tick the ship did not take; the box goes back by itself, and said
+    // nothing of why.
+    var tickError by remember { mutableStateOf<String?>(null) }
     // The minute decides what is "now" and what is "today".
     var tick by remember { mutableStateOf(nowMs()) }
     LaunchedEffect(Unit) {
@@ -1324,7 +1328,7 @@ private fun CalendarPanel(
                             installing = true
                             installError = null
                             scope.launch {
-                                onInstall().onFailure { installError = it.message }
+                                onInstall().onFailure { installError = installFailedLine(it) }
                                 installing = false
                             }
                         },
@@ -1336,6 +1340,16 @@ private fun CalendarPanel(
 
             availability == CalendarAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
 
+            // The first read failed with nothing kept to show: said, and
+            // asked again on a tap. It said "Looking…" for good.
+            rows == null && error != null -> {
+                Empty(error)
+                TextButton(
+                    onClick = { scope.launch { calendar.refreshAll() } },
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                ) { Text("Try again") }
+            }
+
             rows == null -> Empty("Looking…")
 
             else -> {
@@ -1345,6 +1359,12 @@ private fun CalendarPanel(
                 val shown = remember(rows, range, tick, zoneId) { agenda(rows.filter { !it.isTask }, range, tick, zone) }
                 val today = Instant.fromEpochMilliseconds(tick).toLocalDateTime(zone).date
                 val due = remember(tasks, range, tick, zoneId) { tasksInRange(tasks, range, tick, zone) }
+                tickError?.let {
+                    Text(
+                        it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.fillMaxWidth().clickable { tickError = null }.padding(horizontal = 14.dp, vertical = 4.dp),
+                    )
+                }
                 if (offers > 0) {
                     Text(
                         if (offers == 1) "A calendar was shared with you." else "$offers calendars were shared with you.",
@@ -1365,7 +1385,12 @@ private fun CalendarPanel(
                         ) {
                             androidx.compose.material3.Checkbox(
                                 checked = ticking[t.id] ?: t.done,
-                                onCheckedChange = { done -> scope.launch { calendar!!.setDone(t.id, done) } },
+                                onCheckedChange = { done ->
+                                    tickError = null
+                                    scope.launch {
+                                        if (!calendar!!.setDone(t.id, done)) tickError = calendar.failedLine("\"${t.name.ifBlank { "The task" }}\" was not ticked: the ship did not take it.")
+                                    }
+                                },
                                 enabled = t.cal !in readOnly,
                                 modifier = Modifier.size(32.dp),
                             )
@@ -1463,6 +1488,16 @@ private fun EventRow(
             maxLines = 1,
         )
     }
+}
+
+/**
+ * An install of [what] that did not finish, in words: the installer's own
+ * sentences, but never a transport's raw text ("Connection refused", a
+ * trace), which reached the home page and the mail list as it came.
+ */
+internal fun installFailedLine(e: Throwable, what: String = "The calendar"): String = when {
+    io.nisfeb.talon.util.isTransientNetworkError(e) -> "Your ship did not answer. Try again when it's back."
+    else -> io.nisfeb.talon.util.readableReason(e.message) ?: "$what did not install. Try again shortly."
 }
 
 /** When a row is, said the way somebody glancing at it needs. */

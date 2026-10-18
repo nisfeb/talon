@@ -2,7 +2,9 @@ package io.nisfeb.talon.mail
 
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -103,6 +105,31 @@ class MailListTest {
             }
             assertTrue(!offered, "the offer is a control, not something that fires on its own")
         }
+
+    // The installer's failure went on screen as its own text, a
+    // transport's "Connection refused" included.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `an install that fails on the wire says so in words`() = runComposeUiTest {
+        val repo = repoServing { path ->
+            if (path.endsWith("desks/stock")) 404 to ""
+            else 404 to """{"error":"not found"}"""
+        }
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    io.nisfeb.talon.mail.LocalGrubberyInstall provides { Result.failure(java.io.IOException("Connection refused")) },
+                ) {
+                    MailList(repo = repo, contacts = ContactMap.EMPTY, onOpenThread = {})
+                }
+            }
+        }
+        repo.attach("https://ship.example")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Install Grubbery").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("Install Grubbery").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Your ship did not answer", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("Connection refused", substring = true).fetchSemanticsNodes().isEmpty())
+    }
 
     @OptIn(ExperimentalTestApi::class)
     @Test

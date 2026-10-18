@@ -30,6 +30,7 @@ import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.UnreadEntity
 import io.nisfeb.talon.ui.screens.HomeScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -220,24 +221,35 @@ class HomeScreenTest {
     private val now = System.currentTimeMillis()
     private val todayUtc = java.time.LocalDate.now(java.time.ZoneOffset.UTC).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
+    /** The ship is down: the web server in front of it answers with its 502 page. */
+    @Volatile private var calendarDown = false
+    /** The ship refuses every calendar write. */
+    @Volatile private var calendarRefuses = false
+
     /** A calendar app on the ship, or none where [present] is false. */
-    private fun calendar(present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0, taskPriority: Int? = null, taskName: String = "Buy milk"): io.nisfeb.talon.calendar.CalendarRepo {
+    private fun calendar(
+        present: Boolean = true, offers: String = "{}", writeTakesMs: Long = 0, taskPriority: Int? = null, taskName: String = "Buy milk",
+        zone: String = "UTC", taskDueMs: Long = todayUtc,
+        /** The window's rows; the task's own row is the ship's to add where it wants one. */
+        rows: String = """{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}""",
+    ): io.nisfeb.talon.calendar.CalendarRepo {
         val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
             val path = req.url.encodedPath
             val json = { body: String -> respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json")) }
             when {
                 !present -> respond("", io.ktor.http.HttpStatusCode.NotFound)
+                calendarDown -> respond(io.nisfeb.talon.mail.NGINX_502, io.ktor.http.HttpStatusCode.BadGateway, io.ktor.http.headersOf("Content-Type", "text/html"))
                 path.startsWith("/grubbery/api/poke/") -> {
                     kotlinx.coroutines.delay(writeTakesMs)
+                    if (calendarRefuses) return@MockEngine respond("", io.ktor.http.HttpStatusCode.BadRequest)
                     calendarWrites += String(req.body.toByteArray()); json("")
                 }
-                path.endsWith("/window.json") ->
-                    json("""{"rows":[{"id":"e1","cal":"default","meta":{"name":"Dentist"},"l":${now - 600_000},"r":${now + 600_000}}]}""")
+                path.endsWith("/window.json") -> json("""{"rows":[$rows]}""")
                 // Done once written: the ship's own word after the tick.
                 path.endsWith("/events.json") ->
-                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"$taskName"},"due_ms":$todayUtc${if (calendarWrites.any { "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
+                    json("""[{"id":"t1","cal":"default","cat":"todo","meta":{"name":"$taskName"},"due_ms":$taskDueMs${if (calendarWrites.any { "done-event" in it && "t1" in it }) ""","done":true""" else ""}${taskPriority?.let { ",\"priority\":$it" } ?: ""}}]""")
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
-                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"$zone","ball":"abc123"}""")
                 path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":$offers,"accepted":{}}""")
                 else -> json("[]")
             }
@@ -345,5 +357,96 @@ class HomeScreenTest {
         waitForIdle()
         assertTrue(onAllNodesWithText("Done").fetchSemanticsNodes().isNotEmpty(), "arranging")
     }
-}
 
+    // ─── the Today widget, when things go wrong ─────────────────────
+
+    // A first read that failed with nothing kept said "Looking…" for good.
+    @Test
+    fun `a calendar that did not answer the first time says so, and Try again reads it`() {
+        calendarDown = true
+        home(calendar = calendar()) {
+            waitUntil(timeoutMillis = 5_000) { shows("isn't answering") }
+            assertTrue(!shows("Looking") && !shows("<html"), "said, in words")
+            calendarDown = false
+            onNodeWithText("Try again").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
+        }
+    }
+
+    @Test
+    fun `a tick the ship refuses says so on the home page`() {
+        calendarRefuses = true
+        home(calendar = calendar()) {
+            waitUntil(timeoutMillis = 5_000) { shows("Buy milk") }
+            onAllNodes(androidx.compose.ui.test.isToggleable())[0].performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("was not ticked") }
+        }
+    }
+
+    @Test
+    fun `an install that fails on the wire says so in words`() = home(
+        calendar = calendar(present = false),
+        onInstallCalendar = { Result.failure(java.io.IOException("Connection refused")) },
+    ) {
+        waitUntil(timeoutMillis = 5_000) { shows("Install the calendar") }
+        onNodeWithText("Install the calendar").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer") }
+        assertTrue(!shows("Connection refused"))
+    }
+
+    // ─── what was saved elsewhere, here at once ─────────────────────
+
+    // Saved on the calendar screen, the event stayed as it was here until
+    // the ship's own copy came back, a minute and more on a busy ship.
+    @Test
+    fun `an event edited elsewhere shows its new words here before the ship answers, and its old ones if refused`() {
+        val cal = calendar(writeTakesMs = 2_000)
+        home(calendar = cal) {
+            waitUntil(timeoutMillis = 5_000) { shows("Dentist") }
+            // Still under way, so the widget shows it wherever it moved to.
+            val wall = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneOffset.UTC)
+            fun named(name: String) = io.nisfeb.talon.calendar.eventBody(
+                io.nisfeb.talon.calendar.EventDraft(
+                    name = name, date = kotlinx.datetime.LocalDate(wall.year, wall.monthValue, wall.dayOfMonth),
+                    minuteOfDay = wall.hour * 60 + wall.minute, durMin = 30, cal = "default",
+                ),
+                "e1",
+            )
+            val edit = named("Dentist, moved")
+            val saving = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()).launch { cal.writeEvent(edit, readBack = false) }
+            waitUntil(timeoutMillis = 1_500) { shows("Dentist, moved") }
+            assertTrue(calendarWrites.isEmpty(), "before the ship has it")
+            runBlocking { saving.join() }
+            calendarRefuses = true
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob()).launch {
+                cal.writeEvent(named("Dentist, again"), readBack = false)
+            }
+            waitUntil(timeoutMillis = 1_500) { shows("Dentist, again") }
+            // Refused: back to what the ship has.
+            waitUntil(timeoutMillis = 5_000) { !shows("Dentist, again") && shows("Dentist, moved") }
+        }
+    }
+
+    // A task due today in a calendar in New York, renamed on the calendar
+    // screen, was written as due the day before, and the home page called
+    // it overdue.
+    @Test
+    fun `a task renamed elsewhere in a calendar west of UTC stays due today here`() {
+        val nyToday = java.time.LocalDate.now(java.time.ZoneId.of("America/New_York"))
+        val due = nyToday.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        val cal = calendar(
+            zone = "America/New_York", taskDueMs = due,
+            rows = """{"id":"t1","cal":"default","cat":"todo","kind":"todo","all":true,"meta":{"name":"Buy milk"},"l":$due,"r":$due}""",
+        )
+        home(calendar = cal) {
+            waitUntil(timeoutMillis = 5_000) { shows("Buy milk") && shows("today") }
+            // What the calendar screen's editor does with the row it opens.
+            val row = cal.rows.value!!.single { it.id == "t1" }
+            val draft = io.nisfeb.talon.calendar.taskDraft(row, kotlinx.datetime.LocalDate(nyToday.year, nyToday.monthValue, nyToday.dayOfMonth))!!
+            runBlocking { cal.writeEvent(io.nisfeb.talon.calendar.eventBody(draft.copy(name = "Buy oat milk"), "t1"), readBack = false) }
+            waitUntil(timeoutMillis = 5_000) { shows("Buy oat milk") }
+            assertTrue(shows("today") && !shows("overdue"), "still due today")
+            assertTrue("\"due_ms\":$due" in calendarWrites.single(), calendarWrites.single())
+        }
+    }
+}

@@ -71,9 +71,16 @@ class LocationPickerTest {
             type("Atlantis")
             waitUntil(timeoutMillis = 5_000) { shows("Nowhere by that name.") }
         }
-        picker(lookup = { Result.failure(IllegalStateException("offline")) }) {
+        // In words, with the way round it: the service's own text went on screen.
+        picker(lookup = { Result.failure(IllegalStateException("HTTP 500")) }) {
             type("Boston")
-            waitUntil(timeoutMillis = 5_000) { shows("Could not look that up: offline") }
+            waitUntil(timeoutMillis = 5_000) { shows("Could not look that up. Try again, or type latitude, longitude.") }
+            assertTrue(!shows("HTTP 500"))
+        }
+        picker(lookup = { Result.failure(java.io.IOException("Connection refused")) }) {
+            type("Boston")
+            waitUntil(timeoutMillis = 5_000) { shows("The place search did not answer") }
+            assertTrue(!shows("Connection refused"))
         }
     }
 
