@@ -54,7 +54,26 @@ class TalonMessagingReceiver : MessagingReceiver() {
         Log.i(TAG, "new endpoint for instance=$instance: ${endpoint.url.take(48)}…")
         // The ship's own pushes are another registration, with its own endpoint.
         if (instance == ShipPushes.INSTANCE) return ShipPushes.onEndpoint(context, endpoint)
+        val was = cachedEndpoint(context)
         cacheEndpoint(context, endpoint.url)
+        // The push app gave a new address: the relay goes on pushing to
+        // the old one, which delivers nothing, unless it is told. The
+        // first one goes with registering. ponytail: one try; a relay
+        // that misses it learns at the next register. A ship's own
+        // %trunk is given the new one at the next start (moveToShipPush).
+        if (was == null || was == endpoint.url) return
+        val app = context.applicationContext as? io.nisfeb.talon.TalonApplication ?: return
+        val ids = app.allShipsFlow.value.map { app.relaySettings.deviceIdFor(it) }.filter { it.isNotBlank() }
+        if (ids.isEmpty()) return
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val relay = RelayClient(http = app.ktorHttp, endpoint = { app.relaySettings.endpoint.value })
+                ids.forEach { if (!relay.updateEndpoint(it, endpoint.url)) Log.w(TAG, "the relay did not take the new endpoint for $it") }
+            } finally {
+                pending.finish()
+            }
+        }
     }
 
     override fun onUnregistered(context: Context, instance: String) {

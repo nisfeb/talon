@@ -394,11 +394,13 @@ class TalonApplication : Application() {
         val saved = sessionStore.all().firstOrNull { it.ship == ship }
         val deviceId = relaySettings.deviceIdFor(ship)
         appScope.launch {
-            if (deviceId.isNotBlank()) {
-                runCatching {
-                    io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
-                        .unregister(deviceId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN)
-                }
+            // Kept when the relay did not take it: cleared, nothing could
+            // ever stop its pushes. A hint for this ship asks again
+            // (TalonMessagingReceiver).
+            if (deviceId.isNotBlank() &&
+                io.nisfeb.talon.notify.RelayClient(http = ktorHttp, endpoint = { relaySettings.endpoint.value })
+                    .unregister(deviceId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN)
+            ) {
                 relaySettings.clearDeviceIdFor(ship)
             }
             io.nisfeb.talon.notify.forgetShipPush(ship, relaySettings) { body ->

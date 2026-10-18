@@ -2135,8 +2135,11 @@ fun App(
                     val goneSaved = sessionStore.all().firstOrNull { it.ship == gone }
                     val goneRelayId = relaySettings.deviceIdFor(gone)
                     pushCleanupScope.launch {
-                        if (goneRelayId.isNotBlank()) {
-                            runCatching { relayClient.unregister(goneRelayId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN) }
+                        // Kept when the relay did not take it: cleared,
+                        // nothing could ever stop its pushes.
+                        if (goneRelayId.isNotBlank() &&
+                            relayClient.unregister(goneRelayId, io.nisfeb.talon.notify.RelayClient.REASON_FORGOTTEN)
+                        ) {
                             relaySettings.clearDeviceIdFor(gone)
                         }
                         io.nisfeb.talon.notify.forgetShipPush(gone, relaySettings) { body ->
