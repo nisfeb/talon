@@ -2376,6 +2376,7 @@ fun TalonApp(
                 twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
                 onOpenChat = { ship -> assistantOpen = false; openWhom = ship },
                 onOpenCalendar = { assistantOpen = false; calendarOpen = true },
+                http = app.ktorHttp,
                 onOpenMessage = { whom, postId, parentId ->
                     assistantOpen = false
                     openWhom = whom

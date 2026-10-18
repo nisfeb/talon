@@ -63,6 +63,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AgentClient
+import io.nisfeb.talon.ai.Briefing
+import io.nisfeb.talon.ai.VoiceConversation
+import kotlinx.datetime.toLocalDateTime
 import io.nisfeb.talon.ai.AgentLoop
 import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AgentMessage
@@ -257,6 +260,9 @@ private const val CONV_KEEP = io.nisfeb.talon.data.ASSISTANT_CONV_KEEP
 /** Max chars of the first question used as a conversation's title. */
 private const val CONV_TITLE_CHARS = 60
 
+/** What the opener is asked as, in the transcript and the history. */
+internal const val BRIEF_ME = "Brief me"
+
 /** A run that failed after a write: asked again, it would do the write twice. */
 internal const val FAILED_AFTER_WRITE =
     "It did not finish. It may have done part of it, so check before asking again."
@@ -310,6 +316,8 @@ fun AssistantScreen(
     onOpenChat: (ship: String) -> Unit = {},
     /** A card's event or task tapped: the calendar. */
     onOpenCalendar: () -> Unit = {},
+    /** A client with no ship cookie, for the decision model where it is on; null and it is not asked. */
+    http: io.ktor.client.HttpClient? = null,
     modifier: Modifier = Modifier,
 ) {
     DisposableEffect(session) {
@@ -437,6 +445,20 @@ fun AssistantScreen(
             if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
+    // The time is appended per call rather than baked in, so a
+    // conversation that runs past midnight still says today.
+    val completer = AgentLoop.Completer { sys, msgs, tools ->
+        agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
+    }
+    fun today() = kotlin.time.Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zoneFor(calendarZone)).date
+    // The day as Archie opens with it, its events and unread mail on this run's card.
+    suspend fun day(): Briefing.Day = Briefing.day(
+        db, repo?.ownShip.orEmpty(), mail, calendar,
+        http?.let { io.nisfeb.talon.ai.CalendarQuestion.decider(it, aiSettings.state.value, Briefing.QUESTIONS_WAIT_MS) },
+        { zoneFor(calendarZone) }, twentyFourHour, { contactMap.displayName(it) }, session.seen,
+    )
+    // Today's brief for the opener: none where orrery is off or did not answer.
+    suspend fun openerBrief() = orrery?.briefLast()?.getOrNull()?.let { Briefing.todays(it, today()) }
     val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
@@ -448,11 +470,7 @@ fun AssistantScreen(
                 onEvents = session.seen::events, onTasks = session.seen::tasks, onPeople = session.seen::people, onMail = session.seen::mail,
             )
             AgentLoop(
-                // The time is appended per call rather than baked in, so a
-                // conversation that runs past midnight still says today.
-                completer = { sys, msgs, tools ->
-                    agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
-                },
+                completer = completer,
                 // Built-ins first, then the assistant's actions, then the
                 // ship's MCP tools — de-duplicated across the concatenation:
                 // an MCP tool whose sanitized name equals a built-in would
@@ -470,6 +488,13 @@ fun AssistantScreen(
                     onMessages = session.seen::messages,
                     conversationLabel = contactMap::conversationLabel,
                 ) { contactMap.displayName(it) } + io.nisfeb.talon.ai.actionTools(actions) +
+                    // The day as Archie opens it, and orrery's brief where it is on.
+                    Briefing.dayTool {
+                        val d = day()
+                        Briefing.countsLine(d.mail, d.chats, d.questions, d.mailLate) + "\n" +
+                            Briefing.openerDigest(io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), d.firstEvent, openerBrief())
+                    } +
+                    listOfNotNull(orrery?.let { o -> VoiceConversation.briefTool({ o.briefLast().getOrThrow()?.let { Briefing.todays(it, today()) } }) }) +
                     orrery?.let { o ->
                         // What orrery leaves waiting is put to the owner here,
                         // as the voice card puts it, and answered the same way.
@@ -558,11 +583,16 @@ fun AssistantScreen(
         }
     }
 
-    fun submit() {
+    /**
+     * Ask what is typed, or [asked]. [quick] answers with no agent loop
+     * where it can, from the exchanges before ([DictationFlow.Earlier]);
+     * null, and the model takes it.
+     */
+    fun submit(asked: String? = null, quick: (suspend (List<io.nisfeb.talon.ai.DictationFlow.Earlier>) -> String?)? = null) {
         val loop = agentLoop ?: return
-        val q = questionField.text.trim()
+        val q = (asked ?: questionField.text).trim()
         if (q.isEmpty() || busy) return
-        questionField = TextFieldValue("")
+        if (asked == null) questionField = TextFieldValue("")
         busy = true; error = null; session.allowAll = false
         session.seen.reset()
         transcript.add(Line.You(q))
@@ -673,7 +703,7 @@ fun AssistantScreen(
                 // Restore the question so a network timeout doesn't cost
                 // the user their typed text — unless they've started
                 // typing something new while the run was in flight.
-                if (questionField.text.isBlank()) {
+                if (asked == null && questionField.text.isBlank()) {
                     questionField = TextFieldValue(q, TextRange(q.length))
                 }
             }
@@ -704,20 +734,24 @@ fun AssistantScreen(
                 val canJudge = qVec != null && snapCentroid != null
                 continuing = snapConvId != null &&
                     (snapExplicit || !canJudge || ConversationGrouper.continues(qVec, snapCentroid))
-                val priorTurns = if (continuing) {
-                    historyDao.forConversation(snapConvId!!)
-                        .takeLast(ConversationGrouper.CONTEXT_TURNS)
-                        .flatMap {
-                            listOf(
-                                AgentMessage.User(it.question),
-                                AgentMessage.Assistant(it.answer, emptyList()),
-                            )
-                        }
+                val prior = if (continuing) {
+                    historyDao.forConversation(snapConvId!!).takeLast(ConversationGrouper.CONTEXT_TURNS)
                 } else {
                     emptyList()
                 }
+                val priorTurns = prior.flatMap {
+                    listOf(
+                        AgentMessage.User(it.question),
+                        AgentMessage.Assistant(it.answer, emptyList()),
+                    )
+                }
 
-                loop.run(
+                val said = quick?.invoke(prior.map { io.nisfeb.talon.ai.DictationFlow.Earlier(it.question, it.answer) })
+                if (said != null) {
+                    finalAnswer = said
+                    transcript.add(Line.Said(said))
+                    turnLog.append("answered with no agent loop, ${said.length} chars\n")
+                } else loop.run(
                     question = q,
                     priorTurns = priorTurns,
                     confirm = { call, tool ->
@@ -800,6 +834,17 @@ fun AssistantScreen(
         session.clear()
         error = null
         mobileShowSidebar = false
+    }
+
+    // Archie's opener: the counts, the model's rest after them, and the card.
+    fun briefMe() {
+        newConversation()
+        submit(asked = BRIEF_ME) {
+            val d = day()
+            val counts = Briefing.countsLine(d.mail, d.chats, d.questions, d.mailLate)
+            val rest = Briefing.openerRest(completer, Briefing.openerDigest(io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), d.firstEvent, openerBrief()))
+            "$counts $rest".trim()
+        }
     }
 
     // Load a past conversation into the active transcript — replaces the
@@ -955,6 +1000,8 @@ fun AssistantScreen(
                     Button(onClick = { submit() }, enabled = !busy && questionField.text.isNotBlank()) {
                         Text(if (busy) "Working…" else "Send")
                     }
+                    // The day as Archie opens it, in a conversation of its own.
+                    if (!busy) OutlinedButton(onClick = { briefMe() }) { Text(BRIEF_ME) }
                     // A stalled model call held the run for minutes a step.
                     if (busy) OutlinedButton(onClick = { session.stop() }) { Text("Stop") }
                 }

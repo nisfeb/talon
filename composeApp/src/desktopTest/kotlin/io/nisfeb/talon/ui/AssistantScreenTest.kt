@@ -66,6 +66,19 @@ class AssistantScreenTest {
     /** Rows the calendar's window holds besides the events added, as the ship sends them. */
     @Volatile private var calRows: List<String> = emptyList()
 
+    /** The calendar's zone. */
+    @Volatile private var calZone = "UTC"
+
+    /** Today's brief, as orrery's ship answers /api/brief/last. */
+    @Volatile private var brief = "{}"
+
+    /** A zone where it is about noon now, so "later today" stays today. */
+    private fun noonZone(): String {
+        val h = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).hour
+        val off = (12 - h).let { if (it > 14) it - 24 else if (it < -12) it + 24 else it }
+        return "UTC" + (if (off >= 0) "+" else "-") + kotlin.math.abs(off).toString().padStart(2, '0') + ":00"
+    }
+
     /** Where a card's taps went: "chat ~bus", "calendar". */
     private val opened: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -89,6 +102,7 @@ class AssistantScreenTest {
             if (req.method == io.ktor.http.HttpMethod.Post) orreryPosts += path to req.body.toByteArray().decodeToString()
             when {
                 path.endsWith("/api/instruct") -> respond(instructed, io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/brief/last") -> respond(brief, io.ktor.http.HttpStatusCode.OK, json)
                 req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond("""{"ok":true}""", answerStatus, json)
                 path.endsWith("/api/actions") -> respond("[]", io.ktor.http.HttpStatusCode.OK, json)
                 else -> respond("", io.ktor.http.HttpStatusCode.NotFound)
@@ -124,7 +138,7 @@ class AssistantScreenTest {
                     }).joinToString(",", "{\"rows\":[", "]}"),
                 )
                 path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
-                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"$calZone","ball":"abc123"}""")
                 path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":{},"accepted":{}}""")
                 path.endsWith("/google.json") -> json("""{"connected":false,"linked":{}}""")
                 path.endsWith(".json") -> json("[]")
@@ -477,6 +491,66 @@ class AssistantScreenTest {
         waitUntil(timeoutMillis = 10_000) { shows("Orrery did not take it.") }
         assertEquals(1, answered("a1").size)
         assertTrue("orrery did not take the answer" in asked.last() && "It waits under Actions." in asked.last(), asked.last().takeLast(600))
+    }
+
+    // ─── the day, as Archie opens it ─────────────────────────────
+
+    /** An event on now, one later today, an unread mail and today's brief, where it is noon. */
+    private fun aDay() {
+        calZone = noonZone()
+        val now = System.currentTimeMillis()
+        calRows = listOf(
+            """{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":${now - 60_000},"r":${now + 3_600_000},"meta":{"name":"Seed swap"}}""",
+            """{"id":"d2","cal":"default","cat":"timed","kind":"once","all":false,"l":${now + 1_800_000},"r":${now + 3_600_000},"meta":{"name":"Tea with Rose"}}""",
+        )
+        inbox = """{"total":1,"offset":0,"limit":50,"view":"inbox","threads":[
+            {"id":"0v1","subject":"Seed catalogue","from":"~nec","snippet":"The spring list","verdict":"verified",
+             "forged":false,"count":1,"last":$now,"unread":true,"participants":[],
+             "unreadable":0,"archived":false,"labels":[]}]}"""
+        val today = java.time.ZonedDateTime.now(java.time.ZoneId.of(calZone)).toLocalDate()
+        brief = """{"day":"$today","text":"Andrea is away, so you drop off."}"""
+    }
+
+    // sneagan, 2026-10-18: "go for parity". Archie opens with the counts,
+    // the model's rest and the day's card; Brief me does the same here.
+    @Test
+    fun `Brief me opens the day as Archie does with its card and the brief follows`() {
+        aDay()
+        assistant(withCalendar = true, withMail = true, withOrrery = true) { db ->
+            waitUntil(timeoutMillis = 5_000) { shows("Brief me") }
+            answer = "Tea with Rose is in half an hour. Shall I read you the brief?"
+            onNodeWithText("Brief me").performClick()
+            waitUntil(timeoutMillis = 10_000) { shows("You have 1 new email, and no new messages. Tea with Rose is in half an hour.") }
+            // The day's card: today's events and the unread mail.
+            assertTrue(shows("Today") && shows("Seed swap") && shows("Seed catalogue"))
+            val opener = asked.single()
+            assertTrue("do not say those numbers again" in opener, "Archie's own opener prompt")
+            assertTrue("First event today: Tea with Rose at" in opener && "Andrea is away, so you drop off." in opener, opener.takeLast(800))
+            waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
+            val turn = runBlocking { db.assistantHistory().forConversation(db.assistantConversations().mostRecent()!!.id) }.single()
+            assertEquals("Brief me" to "You have 1 new email, and no new messages. Tea with Rose is in half an hour. Shall I read you the brief?", turn.question to turn.answer)
+
+            // "Yes": the brief, read from orrery, with the opener before it.
+            toolCall = call("c1", "read_brief")
+            answer = "Andrea is away, so you drop off."
+            ask("yes please")
+            waitUntil(timeoutMillis = 10_000) { asked.size == 3 && onAllNodesWithText("Andrea is away, so you drop off.").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue("Shall I read you the brief?" in asked[1], "the opener is the turn before")
+            assertTrue("Andrea is away, so you drop off." in asked[2], "the brief, as the tool read it")
+        }
+    }
+
+    @Test
+    fun `the model can open the day itself and its card shows under the answer`() {
+        aDay()
+        assistant(withCalendar = true, withMail = true) {
+            toolCall = call("c1", "day_overview")
+            answer = "A busy one."
+            ask("how does my day look?")
+            waitUntil(timeoutMillis = 10_000) { shows("A busy one.") && shows("Seed catalogue") }
+            assertTrue(shows("Tea with Rose"))
+            assertTrue("You have 1 new email, and no new messages." in asked.last() && "No brief today." in asked.last(), asked.last().takeLast(600))
+        }
     }
 
     // ─── Stop ──────────────────────────────────────────────────────
