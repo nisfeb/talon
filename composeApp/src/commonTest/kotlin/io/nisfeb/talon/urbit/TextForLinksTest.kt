@@ -41,4 +41,23 @@ class TextForLinksTest {
             said("two", """{"link":{"href":"$long","content":"$long"}}," and ",{"link":{"href":"$other","content":"$other"}}"""),
         )
     }
+
+    // Straight to the function: textFor keeps what it said for an id, so
+    // a second reading of the same post never reaches it again.
+    @Test
+    fun `words with no link come back as they are`() {
+        assertEquals("plain words", withAddresses(androidx.compose.ui.text.AnnotatedString("plain words")))
+    }
+
+    @Test
+    fun `a cut address between words comes back whole in its place`() {
+        val text = androidx.compose.ui.text.buildAnnotatedString {
+            append("see ")
+            pushStringAnnotation(URL_TAG, long)
+            append(shortLinkLabel(long))
+            pop()
+            append(" today")
+        }
+        assertEquals("see $long today", withAddresses(text))
+    }
 }
