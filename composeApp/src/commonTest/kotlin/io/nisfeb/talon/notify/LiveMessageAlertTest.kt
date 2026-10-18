@@ -10,19 +10,20 @@ import kotlin.test.assertTrue
  * Android's in-process alert, decided here so both its sides are tested
  * (TalonApplication calls it; there is no Android harness). It demanded a
  * mention of every chat at the default level, so a DM never alerted, and
- * it alerted for messages eyre replayed however old they were.
+ * it alerted again for a message it had already alerted for (A5-11). Then
+ * a five-minute age rule silenced what eyre hands back after an outage,
+ * on a phone with no push (B6-3): heard before or read is the test now.
  */
 class LiveMessageAlertTest {
-    private val now = 10_000_000L
-
     private fun alerts(
         whom: String = "~bus",
         level: String? = NotifyLevel.DEFAULT,
         mention: Boolean = false,
         replyToUs: Boolean = false,
-        ageMs: Long = 1_000L,
+        heard: Boolean = false,
+        read: Boolean = false,
         onScreen: Boolean = false,
-    ) = liveMessageAlerts(whom, level, mention, replyToUs, now - ageMs, now, onScreen)
+    ) = liveMessageAlerts(whom, level, mention, replyToUs, heard, read, onScreen)
 
     @Test
     fun `a dm or a club at the default level alerts and a channel needs a mention`() {
@@ -52,14 +53,52 @@ class LiveMessageAlertTest {
         assertFalse(alerts(whom = "chat/~bus/general", level = NotifyLevel.NONE, replyToUs = true))
     }
 
+    // A5-11: a message this device had already, alerted for then or held
+    // back, does not alert when it comes again, however it is flagged.
     @Test
-    fun `a replay older than five minutes and a chat on screen do not alert`() {
-        assertTrue(alerts(ageMs = ALERT_FRESH_MS))
-        assertFalse(alerts(ageMs = ALERT_FRESH_MS + 1))
-        assertFalse(alerts(ageMs = 60L * 60_000L, mention = true, replyToUs = true))
-        assertTrue(alerts(ageMs = -60_000L), "a sender's clock ahead of ours is still news")
+    fun `a message heard before, one read or a chat on screen does not alert`() {
+        assertFalse(alerts(heard = true))
+        assertFalse(alerts(heard = true, mention = true, replyToUs = true, level = NotifyLevel.ALL))
+        assertFalse(alerts(read = true))
+        assertFalse(alerts(whom = "chat/~bus/general", read = true, replyToUs = true, level = NotifyLevel.ALL))
         assertFalse(alerts(onScreen = true))
         assertFalse(alerts(onScreen = true, replyToUs = true, level = NotifyLevel.ALL))
+    }
+
+    // B6-3: no push, and what came during an outage arrives only as eyre's
+    // replay, with its old time. Unread and new here, it is news.
+    @Test
+    fun `a chat read only up to an old message still alerts for a newer one`() {
+        assertTrue(readPast(count = 0, recencyMs = 5_000, sentMs = 5_000), "read at the message")
+        assertTrue(readPast(count = 0, recencyMs = 5_001, sentMs = 5_000), "read past it")
+        assertFalse(readPast(count = 0, recencyMs = 4_999, sentMs = 5_000), "read only before it")
+        assertFalse(readPast(count = 1, recencyMs = 9_000, sentMs = 5_000), "something unread")
+        assertFalse(readPast(count = null, recencyMs = null, sentMs = 5_000), "no row is unread")
+        assertFalse(readPast(count = 0, recencyMs = null, sentMs = Long.MIN_VALUE))
+        assertTrue(alerts(read = readPast(count = 0, recencyMs = 1_000, sentMs = 5_000)), "an hour old or a second")
+    }
+
+    // What a catch-up brought after an outage: one alert a chat, not one
+    // a message, and a mention is not hidden behind the chat after it.
+    @Test
+    fun `a catch-up alerts once a chat and a mention or a reply to us wins`() {
+        fun msg(whom: String, id: String, sent: Long, text: String = "hi") =
+            io.nisfeb.talon.data.MessageEntity(whom, id, "~bus", sent, text, "/chat")
+        val nest = "chat/~bus/general"
+        val mention = """[{"inline":[{"ship":"~zod"}]}]"""
+        val picked = catchUpAlerts(
+            listOf(
+                msg("~bus", "1", 1_000) to false, msg("~bus", "3", 3_000) to false, msg("~bus", "2", 2_000) to false,
+                msg(nest, "4", 4_000, mention) to false, msg(nest, "5", 5_000) to false,
+                msg("~nec", "6", 6_000) to false, msg("~nec", "7", 7_000) to true, msg("~nec", "8", 8_000) to false,
+            ),
+            ourPatp = "~zod",
+        ).map { it.first.id to it.second }.toSet()
+        assertEquals(setOf("3" to false, "4" to false, "7" to true), picked)
+        val two = catchUpAlerts(listOf(msg(nest, "4", 4_000, mention) to false, msg(nest, "9", 9_000, mention) to false), "~zod")
+        assertEquals(listOf("9"), two.map { it.first.id }, "the newest of the mentions")
+        assertEquals(listOf("5"), catchUpAlerts(listOf(msg(nest, "4", 4_000, mention) to false, msg(nest, "5", 5_000) to false), "~nec").map { it.first.id })
+        assertTrue(catchUpAlerts(emptyList(), "~zod").isEmpty())
     }
 
     @Test

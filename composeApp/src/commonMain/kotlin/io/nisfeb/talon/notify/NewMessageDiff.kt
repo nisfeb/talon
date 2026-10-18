@@ -1,7 +1,9 @@
 package io.nisfeb.talon.notify
 
+import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
+import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.shipHandle
 
@@ -176,30 +178,58 @@ fun notifyAllowed(whom: String, level: String?, mention: Boolean): Boolean = whe
     else -> true
 }
 
-/** Older than this, a message is a replay or a backlog, not news: neither shell alerts for it. */
-const val ALERT_FRESH_MS = 5L * 60_000L
-
 /**
- * Whether a message the repo heard live alerts (Android's in-process
- * path). [replyToUs] is a reply in a thread that counts, which passes a
+ * Whether a message the repo hands on alerts (Android's in-process path).
+ * [replyToUs] is a reply in a thread that counts, which passes a
  * "mentions" level: following is asking. Anything else takes the chat's
  * level as [notifyAllowed] reads it, so a DM or club at the default
  * level alerts, as on desktop and through push. Not for a chat on
- * screen ([onScreen]), and not for one replayed after a resume: eyre
- * hands those back however old they are.
+ * screen ([onScreen]), one this device had before ([heard]: it alerted
+ * then, or held it back), or one read already ([read]). Age is no test:
+ * eyre hands back what came during an outage with its old time, and
+ * without push that is the only way it arrives.
  */
 fun liveMessageAlerts(
     whom: String,
     level: String?,
     mention: Boolean,
     replyToUs: Boolean,
-    sentMs: Long,
-    nowMs: Long,
+    heard: Boolean,
+    read: Boolean,
     onScreen: Boolean,
 ): Boolean {
-    if (onScreen || nowMs - sentMs > ALERT_FRESH_MS) return false
+    if (onScreen || heard || read) return false
     return if (replyToUs) level != NotifyLevel.NONE else notifyAllowed(whom, level, mention)
 }
+
+/**
+ * Whether a chat or thread is read past a message sent at [sentMs]: none
+ * unread in it ([count]), as of activity at or after the message
+ * ([recencyMs]). No row is unread. The two clocks differ, so a doubt is
+ * unread: a wrong "read" loses the alert, a wrong "unread" only alerts.
+ */
+fun readPast(count: Int?, recencyMs: Long?, sentMs: Long): Boolean =
+    count == 0 && recencyMs != null && recencyMs >= sentMs
+
+/** [liveMessageAlerts] for [m], with its chat's level and read state from [this] database. */
+suspend fun AppDatabase.messageAlerts(m: MessageEntity, replyToUs: Boolean, heard: Boolean, ourShip: String, onScreen: Boolean): Boolean {
+    val read = if (m.parentId == null) unreads().getOne(m.whom).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
+    else threadUnreads().getOne(m.whom, m.parentId).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
+    return liveMessageAlerts(m.whom, notifyLevelOf(m.whom), isMentioned(m.contentJson, ourShip), replyToUs, heard, read, onScreen)
+}
+
+/**
+ * What a catch-up alerts for, of the messages it brought that are new
+ * here, each with whether it is a reply that counts: one a chat, so many
+ * go up as that chat's one notification. The newest that names us or is
+ * such a reply, else the newest: in a chat at "mentions only", the newest
+ * plain message would hide the mention before it.
+ */
+fun catchUpAlerts(fresh: List<Pair<MessageEntity, Boolean>>, ourPatp: String?): List<Pair<MessageEntity, Boolean>> =
+    fresh.groupBy { it.first.whom }.values.map { msgs ->
+        msgs.filter { (m, toUs) -> toUs || isMentioned(m.contentJson, ourPatp) }.maxByOrNull { it.first.sentMs }
+            ?: msgs.maxBy { it.first.sentMs }
+    }
 
 /** How a chat notification goes up over the one showing under its tag. */
 enum class ChatAlert { Post, Quiet, Skip }

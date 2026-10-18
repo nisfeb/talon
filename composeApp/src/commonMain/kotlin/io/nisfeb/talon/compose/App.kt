@@ -1661,11 +1661,12 @@ fun App(
                     }
             }
             // Replies, which the diff above never sees. Only those in a
-            // thread that counts reach the listener: the repo decides.
+            // thread that counts reach the listener: the repo decides. One
+            // this device had before is not news again.
             val replyScope = rememberCoroutineScope()
             DisposableEffect(repo, notifier, loggedInShip) {
-                repo.messageListener = { m, _ ->
-                    if (m.parentId != null) replyScope.launch {
+                repo.messageListener = { m, _, heard ->
+                    if (m.parentId != null && !heard) replyScope.launch {
                         val level = db.notifyLevelOf(m.whom)
                         io.nisfeb.talon.notify.replyNotification(
                             reply = m,

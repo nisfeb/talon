@@ -45,7 +45,8 @@ class AndroidNoticesGuardTest {
     // A3-1, A5-1: set by TalonApp's screen, the listeners went with it, and
     // a stream kept by the sync service (a boot start, Talon swiped from
     // recents) notified nothing. They are the repo's, set where the repo is
-    // built, and decided by the common, tested liveMessageAlerts (A5-3, A5-11).
+    // built, and decided by the common, tested messageAlerts (A5-3, A5-11,
+    // B6-3), with the repo's word on whether the message was heard before.
     @Test
     fun `the chat notifications are set on each ship's repo, not by a screen`() {
         val build = application.substringAfter("private fun buildShipScoped(").substringBefore("\n    }\n")
@@ -55,7 +56,7 @@ class AndroidNoticesGuardTest {
             assertTrue(set in listen, "listenForAlerts does not set $set")
             assertTrue(set !in talonApp, "TalonApp sets $set again, on the screen's lifetime")
         }
-        assertTrue("liveMessageAlerts(" in listen && "ShownConversation.keys" in listen, listen)
+        assertTrue("shipDb.messageAlerts(m, replyToUs, heard, ship, onScreen)" in listen && "ShownConversation.keys" in listen, listen)
         // The open chat counts as shown in its thread too, as openWhom did.
         assertTrue("openWhom?.let { io.nisfeb.talon.notify.ClearNotificationsWhileShown(it) }" in talonApp)
         assertTrue("forShip = ship" in listen && "\"invite:${'$'}{invite.flag}\"" in listen, listen)

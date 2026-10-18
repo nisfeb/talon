@@ -6,7 +6,7 @@ import android.app.Application
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.data.AppDatabase
-import io.nisfeb.talon.data.notifyLevelOf
+import io.nisfeb.talon.notify.messageAlerts
 import io.nisfeb.talon.ui.contactMapNow
 import io.nisfeb.talon.ui.DraftStore
 import io.nisfeb.talon.ui.ShipProfileStore
@@ -455,15 +455,11 @@ class TalonApplication : Application() {
         val notices = io.nisfeb.talon.notify.NoticeRepo(shipDb.notices(), appScope)
         suspend fun names() = runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { shipDb.contactMapNow() } }.getOrNull()
             ?: io.nisfeb.talon.ui.ContactMap(alwaysPatp = io.nisfeb.talon.ui.ShipNames.alwaysPatp.value)
-        shipRepo.messageListener = { m, replyToUs ->
+        shipRepo.messageListener = { m, replyToUs, heard ->
             appScope.launch {
                 // On screen is the chat open in front, for the ship signed in now.
                 val onScreen = ship == _activeShip.value && m.whom in io.nisfeb.talon.notify.ShownConversation.keys
-                val alerts = io.nisfeb.talon.notify.liveMessageAlerts(
-                    m.whom, shipDb.notifyLevelOf(m.whom), io.nisfeb.talon.notify.isMentioned(m.contentJson, ship),
-                    replyToUs, m.sentMs, System.currentTimeMillis(), onScreen,
-                )
-                if (!alerts) return@launch
+                if (!shipDb.messageAlerts(m, replyToUs, heard, ship, onScreen)) return@launch
                 val names = names()
                 val preview = io.nisfeb.talon.urbit.StoryCache.previewFor(m).replace('\n', ' ').take(160)
                 Notifications.showMessage(

@@ -71,6 +71,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -323,8 +324,10 @@ class TlonChatRepo(
      * thread that counts for the owner (followed, a DM's, their own: see
      * [threadCounts]), and always with `replyToUs` true: following is
      * asking for it, so a chat at "mentions only" still lets it through.
+     * `heard` says the row was here before this delta: a post sent again,
+     * or one a read of the chat brought first. It was news then, not now.
      */
-    @Volatile var messageListener: ((MessageEntity, Boolean) -> Unit)? = null
+    @Volatile var messageListener: ((m: MessageEntity, replyToUs: Boolean, heard: Boolean) -> Unit)? = null
 
     /**
      * A chat the ship says is read to the end, here or on any other client:
@@ -1063,15 +1066,16 @@ class TlonChatRepo(
         // every chat and the whole activity anyway, a healthy socket or not.
         if (ch.streamIdleMs < STREAM_FRESH_MS) return
         scope.launch {
+            // What is read first: the posts' alerts wait on it.
+            runCatching { bootstrapActivity(ch) }
+                .onSuccess { notificationHealth.markReconcileSuccess() }
+                .onFailure { Log.w(TAG, "catchUp activity failed", it) }
             // catchUp pulls just the recent slice — anything older was
             // already covered by the deep-history scry on the original
             // bootstrap. Smaller page = lower bandwidth on every wake
             // / network-change tick.
             runCatching { catchUpPosts(ch) }
                 .onFailure { Log.w(TAG, "catchUp bootstrap failed", it) }
-            runCatching { bootstrapActivity(ch) }
-                .onSuccess { notificationHealth.markReconcileSuccess() }
-                .onFailure { Log.w(TAG, "catchUp activity failed", it) }
         }
     }
 
@@ -3774,13 +3778,13 @@ class TlonChatRepo(
      * scroll position. Caller controls the timeout via
      * [BOOTSTRAP_TIMEOUT_SECS] — heavy ships need it.
      */
-    private suspend fun bootstrap(channel: UrbitChannel, count: Int) {
+    private suspend fun bootstrap(channel: UrbitChannel, count: Int, alertsAfterMs: Long? = null) {
         val body = channel.scry(
             "groups-ui",
             "/v6/init-posts/$count/$count",
             BOOTSTRAP_TIMEOUT_SECS,
         )
-        ingestPosts(body, "init-posts (count=$count)")
+        ingestPosts(body, "init-posts (count=$count)", alertsAfterMs)
     }
 
     /**
@@ -3804,6 +3808,9 @@ class TlonChatRepo(
     private suspend fun catchUpPosts(ch: UrbitChannel) {
         val start = nowMs()
         val since = postsReadMs.takeIf { it > 0 } ?: db.marks().get(MarkDao.POSTS_READ) ?: 0L
+        // What came after the last read alerts. With none (a new install,
+        // a wiped database) nothing old does.
+        val alertsAfter = since.takeIf { it > 0 }?.minus(CHANGES_OVERLAP_MS)
         if (useChanges(since, start, changesUnserved)) {
             try {
                 readChanges(ch, since - CHANGES_OVERLAP_MS)
@@ -3816,7 +3823,7 @@ class TlonChatRepo(
                 changesUnserved = true
             }
         }
-        bootstrap(ch, count = INITIAL_PAGE_COUNT)
+        bootstrap(ch, count = INITIAL_PAGE_COUNT, alertsAfterMs = alertsAfter)
         postsRead(start)
     }
 
@@ -3838,7 +3845,7 @@ class TlonChatRepo(
             "/v11/changes/$da", "/v10/changes/$da", "/v9/changes/$da", "/v8/changes/$da",
             timeoutSecs = BOOTSTRAP_TIMEOUT_SECS,
         )
-        ingestPosts(body, "changes since $da")
+        ingestPosts(body, "changes since $da", alertsAfterMs = sinceMs)
     }
 
     /**
@@ -3862,8 +3869,13 @@ class TlonChatRepo(
         }
     }
 
-    /** A chat-and-channels post map, init-posts' or /changes', into the tables. */
-    private suspend fun ingestPosts(body: JsonElement, what: String) {
+    /**
+     * A chat-and-channels post map, init-posts' or /changes', into the
+     * tables. What a catch-up brings that is new here and sent after
+     * [alertsAfterMs] came while nothing was listening: it alerts, as
+     * eyre's replay does (see [announceCaughtUp]). Null alerts nothing.
+     */
+    private suspend fun ingestPosts(body: JsonElement, what: String, alertsAfterMs: Long? = null) {
         val obj = body as? JsonObject
         if (obj == null) {
             // Used to silently `return` here. Real ships have returned
@@ -3904,8 +3916,16 @@ class TlonChatRepo(
             "$what ingested: messages=${messages.size} reactions=${reactions.size}",
         )
 
+        // New here is told before the rows go in.
+        val fresh = alertsAfterMs?.let { after -> messages.filter { it.author != ourPatp && it.sentMs > after && !heard(it) } }.orEmpty()
         if (messages.isNotEmpty()) db.messages().upsertAllWithMedia(db.messageMedia(), messages)
         if (reactions.isNotEmpty()) db.reactions().upsertAll(reactions)
+        if (fresh.isNotEmpty()) {
+            // A reply only from a thread that counts, as live.
+            val counted = fresh.filter { it.parentId == null || replyCounts(it) }
+            caughtUp.update { it + counted.map { m -> m to (m.parentId != null) } }
+            if (activityKnown) announceCaughtUp()
+        }
 
         // Reap our own optimistic grey twins against this scry, not just
         // against live SSE deltas. If the SSE echo for a just-sent post
@@ -3918,6 +3938,20 @@ class TlonChatRepo(
         // fallback can't clobber a *different* still-pending post's twin
         // when this snapshot lands mid-flight. Idempotent once gone.
         reapTwinsOf(messages)
+    }
+
+    /** What a catch-up brought, held until what is read is known; each with whether it is a reply. */
+    private val caughtUp = MutableStateFlow<List<Pair<MessageEntity, Boolean>>>(emptyList())
+
+    /**
+     * The catch-up's alerts, once the ship's word on what is read has
+     * landed: a chat read on another client meanwhile does not alert, and
+     * nothing would take that alert down after. One a chat
+     * ([catchUpAlerts]), so many go up as its one notification.
+     */
+    private fun announceCaughtUp() {
+        val held = caughtUp.getAndUpdate { emptyList() }
+        if (held.isNotEmpty()) io.nisfeb.talon.notify.catchUpAlerts(held, ourPatp).forEach { (m, toUs) -> messageListener?.invoke(m, toUs, false) }
     }
 
     /**
@@ -4154,6 +4188,9 @@ class TlonChatRepo(
         }
     }
 
+    /** Whether [m]'s row was here before it came again: see [messageListener]. */
+    private suspend fun heard(m: MessageEntity) = db.messages().getOne(m.whom, m.id) != null
+
     private suspend fun applyChatDelta(
         whom: String,
         id: String,
@@ -4162,8 +4199,9 @@ class TlonChatRepo(
         (response["add"] as? JsonObject)?.let { add ->
             val essay = add["essay"] as? JsonObject ?: return@let
             val entity = toEntity(whom, id, essay)
+            val heard = heard(entity)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
-            if (entity.author != ourPatp) messageListener?.invoke(entity, false)
+            if (entity.author != ourPatp) messageListener?.invoke(entity, false, heard)
             return
         }
         response["del"]?.let {
@@ -4201,9 +4239,10 @@ class TlonChatRepo(
         (delta["add"] as? JsonObject)?.let { add ->
             val replyEssay = add["reply-essay"] as? JsonObject ?: return@let
             val entity = toReplyEntity(whom, parentId, replyId, replyEssay)
+            val heard = heard(entity)
             db.messages().upsertWithMedia(db.messageMedia(), entity)
             // For the owner, whatever the chat's level: following is asking.
-            if (entity.author != ourPatp && replyCounts(entity)) messageListener?.invoke(entity, true)
+            if (entity.author != ourPatp && replyCounts(entity)) messageListener?.invoke(entity, true, heard)
             return
         }
         delta["del"]?.let {
@@ -4277,6 +4316,7 @@ class TlonChatRepo(
                 val msgs = mutableListOf<MessageEntity>()
                 val rx = mutableListOf<ReactionEntity>()
                 ingestPost(nest, intent.post, msgs, rx)
+                val heard = msgs.firstOrNull { it.id == intent.id }?.let { heard(it) } ?: false
                 db.messages().upsertAllWithMedia(db.messageMedia(), msgs)
                 if (rx.isNotEmpty()) {
                     db.reactions().clearForPost(nest, intent.id)
@@ -4287,7 +4327,7 @@ class TlonChatRepo(
                 }
                 msgs.firstOrNull { it.id == intent.id && it.parentId == null }
                     ?.takeIf { it.author != ourPatp }
-                    ?.let { messageListener?.invoke(it, false) }
+                    ?.let { messageListener?.invoke(it, false, heard) }
             }
             is ChannelDeltaIntent.PostTombstone, is ChannelDeltaIntent.PostDeleted -> {
                 val id = when (intent) {
@@ -4335,11 +4375,12 @@ class TlonChatRepo(
         when (inner) {
             is ReplyIntent.Upsert -> {
                 val entity = toReplyEntity(whom, parentId, replyId, inner.replyEssay)
+                val heard = heard(entity)
                 db.messages().upsertWithMedia(db.messageMedia(), entity)
                 if (entity.author == ourPatp) {
                     reapOwnEchoTwin(whom, entity.sentMs)
                 } else if (replyCounts(entity)) {
-                    messageListener?.invoke(entity, true)
+                    messageListener?.invoke(entity, true, heard)
                 }
             }
             is ReplyIntent.Tombstone, is ReplyIntent.Deleted -> {
@@ -4424,6 +4465,7 @@ class TlonChatRepo(
         if (rows.isNotEmpty()) db.unreads().upsertAll(rows)
         if (threadRows.isNotEmpty()) db.threadUnreads().upsertAll(threadRows)
         activityKnown = true
+        announceCaughtUp()
     }
 
     /** %activity's base notify-count: what the app-icon badge shows, the
