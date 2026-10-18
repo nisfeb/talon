@@ -1500,7 +1500,21 @@ fun DmListScreen(
                     // completes on a ship with zero conversations,
                     // point at the FAB instead of a blank list.
                     item(key = "__home_loading") {
-                        SpecialEmpty(
+                        // A first read that failed is not an empty ship.
+                        val loadFailed by repo.loadFailed.collectAsState()
+                        if (loadFailed && !bootstrapping && homeRows.isEmpty()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    "Couldn't load your chats.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                TextButton(onClick = { repo.retryChats() }) { Text("Try again") }
+                            }
+                        } else SpecialEmpty(
                             when {
                                 bootstrapping && homeRows.isEmpty() -> "Loading your chats and groups…"
                                 selectedHomeTab == HomeTab.Groups -> "No groups yet."

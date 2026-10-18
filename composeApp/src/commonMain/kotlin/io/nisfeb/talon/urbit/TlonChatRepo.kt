@@ -514,6 +514,7 @@ class TlonChatRepo(
             val gone = ended.exceptionOrNull() as? ChannelGone
             if (gone != null) lastBootstrapMs = 0L
             val ok = endedWell(ended.exceptionOrNull())
+            if (!ok && !chatsRead) _loadFailed.value = true
             if (!scope.isActive || !started) break
             firstRun = false
             // Back off exponentially after failures; reset on a normal
@@ -535,6 +536,37 @@ class TlonChatRepo(
             } else withTimeoutOrNull(jittered(backoffMs)) { reconnectWake.receive() } != null
             if (woken) backoffMs = 2_000L
         }
+    }
+
+    private val _loadFailed = MutableStateFlow(false)
+
+    /**
+     * The chats could not be read: their read failed, or no pass got that
+     * far. No answer is not empty, so the list says so, with Try again
+     * ([retryChats]), where it said "No direct messages yet". False
+     * again once a read lands.
+     */
+    val loadFailed: StateFlow<Boolean> = _loadFailed.asStateFlow()
+    @Volatile private var chatsRead = false
+
+    /**
+     * Try again after [loadFailed]: on a live stream, read the chats again
+     * on it; with none, connect again ([forceReconnect]).
+     */
+    fun retryChats() {
+        val ch = channel
+        if (ch == null || ch.streamIdleMs >= STREAM_FRESH_MS) return forceReconnect()
+        scope.launch {
+            io.nisfeb.talon.util.runSuspendCatching { catchUpPosts(ch) }
+                .onFailure { Log.w(TAG, "chats read again failed", it) }
+                .also(::chatsReadAs)
+        }
+    }
+
+    /** Note how a read of the chats went, for [loadFailed]. */
+    private fun chatsReadAs(result: Result<Unit>) {
+        if (result.isSuccess) chatsRead = true
+        _loadFailed.value = result.isFailure
     }
 
     private val _signedOut = MutableStateFlow(false)
@@ -800,6 +832,7 @@ class TlonChatRepo(
                     val initJob = async {
                         runCatching { catchUpPosts(ch) }
                             .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                            .also(::chatsReadAs)
                     }
                     val activityJob = async {
                         runCatching { bootstrapActivity(ch) }
@@ -854,6 +887,7 @@ class TlonChatRepo(
                         async {
                             runCatching { catchUpPosts(ch) }
                                 .onFailure { Log.e(TAG, "initPosts scry failed", it) }
+                                .also(::chatsReadAs)
                         },
                         async {
                             runCatching { bootstrapActivity(ch) }
