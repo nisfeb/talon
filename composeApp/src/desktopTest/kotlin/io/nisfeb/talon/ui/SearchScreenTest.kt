@@ -161,8 +161,8 @@ class SearchScreenTest {
     @Test
     fun `operators narrow the search and say what they did`() = search {
         type("lunch from:~nec", "from ~nec")
-        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
-        assertTrue(shows("lunch plans tomorrow"))
+        // The old rows go before the narrowed ones come, so wait for both.
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") && shows("lunch plans tomorrow") }
 
         type("lunch has:image", "has image")
         waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") && shows("lunch plans tomorrow") }
