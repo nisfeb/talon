@@ -493,6 +493,9 @@ class OrreryRepo(
     /** The last daily brief the ship sent; null before the first. */
     suspend fun briefLast(): Result<Brief?> = runCatching { attached().briefLast() }
 
+    /** Orrery's flight and page watches, with what each last found; the flight API key masked. */
+    suspend fun readWatches(): Result<JsonObject> = runCatching { attached().watches() }
+
     /** One settings document, as the ship serves it; credentials masked. */
     suspend fun readSettings(name: String): Result<String> = runCatching { attached().settingsDoc(name) }
 

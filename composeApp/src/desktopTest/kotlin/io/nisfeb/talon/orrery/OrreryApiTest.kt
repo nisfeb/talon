@@ -5,6 +5,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
@@ -182,6 +183,21 @@ class OrreryApiTest {
         assertEquals(emptyList(), owned, "off: the pass's record is not asked for")
         api.travelLast()
         assertEquals("https://ship/apps/orrery/api/travel/last", owned.single().url.toString())
+        assertEquals(null, owned.single().headers[HttpHeaders.Authorization], "the owner's, by cookie, not the key")
+    }
+
+    // orrery's own route table: GET /api/watches, owner only (%own).
+    @Test
+    fun `the watches are read with the owner's session, never the key`() = runTest {
+        val owned = mutableListOf<HttpRequestData>()
+        val api = OrreryApi(
+            owner = HttpClient(MockEngine { req -> owned += req; respond("""{"watches":[]}""", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }),
+            bare = HttpClient(MockEngine { error("the watches went with the key") }),
+            baseUrl = "https://ship/",
+        )
+        assertEquals(Json.parseToJsonElement("""{"watches":[]}""").jsonObject, api.watches())
+        assertEquals("https://ship/apps/orrery/api/watches", owned.single().url.toString())
+        assertEquals(HttpMethod.Get, owned.single().method)
         assertEquals(null, owned.single().headers[HttpHeaders.Authorization], "the owner's, by cookie, not the key")
     }
 

@@ -150,7 +150,7 @@ class DictationAgent(
             "list_calendars", "list_events", "find_free_time", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task",
             "find_places", "open_directions", "call_place", "web_search",
-            "orrery_guide", "orrery_find", "orrery_read", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
+            "orrery_guide", "orrery_find", "orrery_read", "orrery_flights", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
         )
 
         /**
