@@ -36,5 +36,9 @@ class EventLinksTest {
         assertEquals("maps://?daddr=Hotel&dirflg=r", appleDirectionsUri("Hotel", "transit"))
         assertEquals("maps://?daddr=Hotel", appleDirectionsUri("Hotel", "bicycling"), "Apple has no flag for a bicycle")
         assertEquals(mapsDirectionsUriFor("Hotel", null), mapsDirectionsUri(" Hotel ", "by camel"), "a mode it does not know is left out")
+        assertEquals("walking", travelModeOf(" Walking "))
+        assertEquals(null, travelModeOf("by camel"))
+        assertEquals(null, travelModeOf(null))
+        assertEquals(TRAVEL_MODES.toList(), TRAVEL_MODES.map { travelModeOf(it) })
     }
 }

@@ -49,7 +49,10 @@ val TRAVEL_MODES: Set<String> = setOf("walking", "driving", "bicycling", "transi
  * tap from starting, by [mode] where it is one of [TRAVEL_MODES].
  */
 fun mapsDirectionsUri(destination: String, mode: String? = null): String =
-    mapsDirectionsUriFor(destination.trim().encodeURLParameter(), mode?.takeIf { it in TRAVEL_MODES })
+    mapsDirectionsUriFor(destination.trim().encodeURLParameter(), travelModeOf(mode))
+
+/** [mode] as one of [TRAVEL_MODES], whatever its case, or null for none it knows. */
+fun travelModeOf(mode: String?): String? = mode?.trim()?.lowercase()?.takeIf { it in TRAVEL_MODES }
 
 /** The platform's directions, given the destination already encoded. A computer knows no "from here": its map search. */
 expect fun mapsDirectionsUriFor(encodedDestination: String, mode: String?): String

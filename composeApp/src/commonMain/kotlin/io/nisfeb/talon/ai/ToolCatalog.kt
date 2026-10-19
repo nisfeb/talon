@@ -278,8 +278,7 @@ object ToolCatalog {
                 write = false,
             ) { args ->
                 val to = args.str("destination")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: destination is required."
-                val mode = args.str("mode")?.trim()?.lowercase()
-                if (opener(io.nisfeb.talon.ui.mapsDirectionsUri(to, mode))) "Opened directions to $to." else "Couldn't open a maps app."
+                if (opener(io.nisfeb.talon.ui.mapsDirectionsUri(to, args.str("mode")))) "Opened directions to $to." else "Couldn't open a maps app."
             }
         },
         open?.takeIf { dials }?.let { opener ->
