@@ -40,6 +40,8 @@ class VoiceConversation(
      * ([unlockingReads]): true once unlocked. Asked again on a later turn.
      */
     private val unlock: suspend () -> Boolean = { false },
+    /** The owner's lattice ([LatticeMind]): the index and a recall each turn, neither while the phone is locked. */
+    private val memory: LatticeMind = LatticeMind.NONE,
 ) {
     /** What comes after a turn. */
     sealed interface Next {
@@ -94,8 +96,10 @@ class VoiceConversation(
         done.clear()
         begun.clear()
         val prior = turns.takeLast(MAX_CONTEXT).flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
-        val line = AgentLoop(completer, turnTools(), prompt, maxSteps).run(
-            question = words,
+        val shut = locked()
+        val mind = if (shut) memory.locked() else memory
+        val line = AgentLoop(completer, turnTools(), prompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" }, maxSteps).run(
+            question = if (shut) words else mind.ask(words),
             priorTurns = prior,
             // The conversation's writes go ahead, as a dictation's do; what
             // reaches another person waits inside [tell] for the owner.

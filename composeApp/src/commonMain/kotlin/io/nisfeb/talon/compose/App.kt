@@ -2455,6 +2455,14 @@ fun App(
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(http, url) ?: error("The ship could not be asked.") }
                         },
+                        latticeKey = sessionStore.active()?.ship.let { s -> remember(s, db) { s?.let { db.latticeKeys().stream(it) } } },
+                        onNewLatticeKey = sessionStore.active()?.let { s ->
+                            {
+                                io.nisfeb.talon.ai.LatticeKeys(
+                                    db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(session.http, http, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
+                                ).renew()
+                            }
+                        },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("The ship could not be asked.") }
                         },

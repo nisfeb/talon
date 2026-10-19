@@ -150,6 +150,9 @@ class Loops(
     private val dictationClient by lazy { AgentClient(io.nisfeb.talon.ai.AiFeature.Dictation) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.Dictation) } }
     private val braveClient by lazy { BraveSearchClient { aiSettings.state.value } }
 
+    /** No ship cookie: lattice takes a request that carries one for the owner's, whatever key it shows. */
+    private val bareHttp by lazy { io.nisfeb.talon.util.createAppHttpClient() }
+
     /** Place search for a dictation, where the assistant is on and the vendor offers search. */
     private fun placesClient(): BraveSearchClient? =
         aiSettings.state.value.takeIf { it.assistantOn() && it.braveSearch() != null }?.let { braveClient }
@@ -242,6 +245,20 @@ class Loops(
             runCatching { calendar?.refresh(rarely = false) }
             io.nisfeb.talon.util.Log.i("Dictation", "calendar read in ${System.currentTimeMillis() - t0} ms")
         }
+        /**
+         * The owner's lattice, read while they talk: this install's key
+         * (minted on first use), the index and the tools ([LatticeKeys]).
+         * None where the ship has no Lattice.
+         */
+        private val memory = run.async {
+            val s = sessionStore.active()
+            val owner = http
+            if (s == null || owner == null) LatticeMind.NONE
+            else io.nisfeb.talon.util.runSuspendCatching {
+                LatticeKeys(getDb().latticeKeys(), s.ship, LatticeApi(owner, bareHttp, s.shipUrl), io.nisfeb.talon.ui.platformLabel).mind()
+            }.getOrDefault(LatticeMind.NONE)
+        }
+
         private val contacts = run.async {
             val db = getDb()
             runCatching {
@@ -299,8 +316,11 @@ class Loops(
                 onMessages = seen::messages,
                 conversationLabel = known::conversationLabel,
             ) { known.displayName(it) } + actionTools(actions)
+            // Locked: memory's reads wait for the fingerprint, and nothing of
+            // it is put before whoever is speaking.
+            val mind = memory.await().let { if (locked) it.locked() else it }
             return withOrrery(cfg) { orrery ->
-                val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked)
+                val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty() + mind.tools, locked)
                     .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
                 // What a locked phone was allowed, readable in a release logcat.
                 io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
@@ -310,11 +330,12 @@ class Loops(
                     // until the calendar says its own.
                     completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                     tools = offered,
-                    systemPrompt = DictationAgent.prompt,
+                    systemPrompt = DictationAgent.prompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" },
                     ownerSends = send,
                     name = known::conversationLabel,
                     locked = lockedNow,
                     unlock = unlock,
+                    ask = mind::ask,
                 ).run(transcript, earlier).also { card = cardOf(seen, actions.zone(), known) }
             }
         }
@@ -369,7 +390,8 @@ class Loops(
             )
             val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = talkSeen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions)
             // Every dictation tool; the conversation drops the locked ones turn by turn.
-            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty(), locked = false)
+            val mind = memory.await()
+            val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty() + mind.tools, locked = false)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(zone()), msgs, t) },
@@ -387,6 +409,7 @@ class Loops(
                 brief = { orrery?.briefLast()?.getOrThrow()?.let { Briefing.todays(it, today()) } },
                 locked = locked,
                 unlock = unlock,
+                memory = mind,
             )
         }
 
@@ -444,15 +467,17 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
-            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = seen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions), orrery?.asTap())
+            val mind = memory.await().let { if (locked()) it.locked() else it }
+            val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = seen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions) + mind.tools, orrery?.asTap())
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
             return DictationAgent(
                 completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
                 tools = tools,
-                systemPrompt = DictationAgent.askPrompt,
+                systemPrompt = DictationAgent.askPrompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" },
                 locked = locked,
                 unlock = unlock,
+                ask = mind::ask,
             ).run(question, earlier).also { card = cardOf(seen, actions.zone(), known) }
         }
 

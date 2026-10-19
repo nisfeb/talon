@@ -382,30 +382,23 @@ fun AssistantScreen(
         }
     }
 
-    // The owner's memory in Lattice, where the ship has it: a second MCP,
-    // grubbery's, beside %mcp-server's. None is not an error, only no
-    // memory, and the prompt says nothing of one.
-    var latticeTools by remember { mutableStateOf<List<Tool>>(emptyList()) }
-    LaunchedEffect(repo) {
-        val shipHttp = repo?.shipHttp
+    // The owner's memory in Lattice, as Claude Code's plugin has it: this
+    // install's own key, minted on first use, its tools, the index in the
+    // prompt and a recall of each question. None where the ship has no
+    // Lattice, and the prompt says nothing of one.
+    var memory by remember { mutableStateOf(io.nisfeb.talon.ai.LatticeMind.NONE) }
+    // The key goes with no cookie, or lattice would take it for the owner.
+    val bareHttp = http ?: remember { io.nisfeb.talon.util.createAppHttpClient() }
+    LaunchedEffect(repo, db) {
+        val owner = repo?.shipHttp
         val shipBase = repo?.shipBaseUrl
-        if (shipHttp == null || shipBase == null) {
-            latticeTools = emptyList()
+        val ship = repo?.ownShip
+        if (owner == null || shipBase == null || ship.isNullOrBlank()) {
+            memory = io.nisfeb.talon.ai.LatticeMind.NONE
             return@LaunchedEffect
         }
-        io.nisfeb.talon.ai.LatticeMemory.cached(shipHttp, shipBase)?.let {
-            latticeTools = it
-            return@LaunchedEffect
-        }
-        runCatching { io.nisfeb.talon.ai.LatticeMemory.connect(shipHttp, shipBase) }
-            .onSuccess {
-                io.nisfeb.talon.ai.LatticeMemory.keep(shipHttp, shipBase, it)
-                latticeTools = it
-            }
-            .onFailure { e ->
-                latticeTools = emptyList()
-                Log.i("AssistantScreen", "no Lattice memory: ${e.message}")
-            }
+        val keys = io.nisfeb.talon.ai.LatticeKeys(db.latticeKeys(), ship, io.nisfeb.talon.ai.LatticeApi(owner, bareHttp, shipBase), io.nisfeb.talon.ui.platformLabel)
+        memory = keys.mind()
     }
 
     // Web access is part of the assistant (no separate toggle) — being here
@@ -437,12 +430,10 @@ fun AssistantScreen(
     // Built once per prompt change, not per recomposition — it's a multi-KB
     // concat used as a remember key, so rebuilding it every frame also meant
     // a full-length string compare every frame.
-    val hasMemory = latticeTools.isNotEmpty()
-    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt, hasMemory) {
+    val systemPrompt = remember(aiState.urbitKnowledgePrompt, aiState.assistantPrompt, memory) {
         // Told of a memory only where it has one: the tools and the prompt
         // arrive together or not at all.
-        AgentPrompt.forAssistant(aiState) +
-            if (hasMemory) "\n\n" + io.nisfeb.talon.ai.LatticeMemory.prompt else ""
+        AgentPrompt.forAssistant(aiState) + memory.prompt.let { if (it.isBlank()) "" else "\n\n$it" }
     }
     val calendarZone by (calendar?.zone ?: remember { kotlinx.coroutines.flow.MutableStateFlow<String?>(null) }).collectAsState()
     // The time is appended per call rather than baked in, so a
@@ -467,7 +458,7 @@ fun AssistantScreen(
         val decider = http?.let { io.nisfeb.talon.ai.CalendarQuestion.decider(it, aiSettings.state.value) } ?: return null
         return io.nisfeb.talon.ai.CalendarQuestion.fromCalendar(cal, decider, text, earlier, twentyFourHour, session.seen) { Log.i("AssistantScreen", it) }
     }
-    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, latticeTools, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour, http) {
+    val agentLoop = remember(aiSettings, embedder, repo, contactMap, mcpTools, memory, braveKeyPresent, systemPrompt, mail, calendar, calls, orrery, calendarZone, session, twentyFourHour, http) {
         // Needs a ship session for its tools; the embedder is optional
         // (search_history degrades to keyword-only, grouping to flat).
         if (repo != null) {
@@ -512,7 +503,7 @@ fun AssistantScreen(
                             },
                             answer = { id, ok -> o.setAction(id, if (ok) "approved" else "dismissed").getOrThrow() },
                         ))
-                    }.orEmpty() + mcpTools + latticeTools).dedupToolNames(),
+                    }.orEmpty() + mcpTools + memory.tools).dedupToolNames(),
                 systemPrompt = systemPrompt,
             )
         } else null
@@ -762,7 +753,9 @@ fun AssistantScreen(
                     transcript.add(Line.Said(said))
                     turnLog.append("answered with no agent loop, ${said.length} chars\n")
                 } else loop.run(
-                    question = q,
+                    // What memory recalls of it goes before it for this turn
+                    // alone: not shown, not kept, not replayed.
+                    question = memory.ask(q),
                     priorTurns = priorTurns,
                     confirm = { call, tool ->
                         if (session.allowAll && call.name in io.nisfeb.talon.ai.ALLOW_ALL_TOOLS) {

@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.net.InetSocketAddress
@@ -124,6 +125,28 @@ class AssistantScreenTest {
 
     private fun <T> MutableList<T>.next(): T = synchronized(this) { if (size > 1) removeAt(0) else single() }
 
+    /** Lattice on the ship (sneagan, 2026-10-19: memory parity with Claude Code): what key-mint answers, and what each key route answers. */
+    @Volatile private var latticeMint: Pair<io.ktor.http.HttpStatusCode, String> = io.ktor.http.HttpStatusCode.OK to """{"key":{"id":"k1"},"token":"k1.s3cret"}"""
+    @Volatile private var latticeAnswer: (String) -> Pair<io.ktor.http.HttpStatusCode, String> = { route ->
+        when (route) {
+            "know-index" -> io.ktor.http.HttpStatusCode.OK to "# Lattice memory\n\n## /feedback/say-the-ship\nAlways name the ship."
+            "know-recall" -> io.ktor.http.HttpStatusCode.OK to """{"recall":{"weak":false,"results":[{"key":"/user/trips","strength":80,"score":20000,"snippet":"Flies Delta out of JAX."}]}}"""
+            else -> io.ktor.http.HttpStatusCode.OK to """{"ok":true}"""
+        }
+    }
+    /** Each request to lattice on the owner's login (which also carries the ship's MCP), and each with the key. */
+    private val latticeOwned: MutableList<io.ktor.client.request.HttpRequestData> = java.util.concurrent.CopyOnWriteArrayList()
+    private val latticeKeyed: MutableList<io.ktor.client.request.HttpRequestData> = java.util.concurrent.CopyOnWriteArrayList()
+    private val latticeOwner = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+        if ("/apps/lattice/" in req.url.encodedPath) latticeOwned += req
+        respond(latticeMint.second, latticeMint.first, io.ktor.http.headersOf("Content-Type", "application/json"))
+    })
+    private val latticeBare = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+        latticeKeyed += req
+        val (status, body) = latticeAnswer(req.url.encodedPath.substringAfterLast('/'))
+        respond(body, status, io.ktor.http.headersOf("Content-Type", "application/json"))
+    })
+
     /** The orrery the screen was given. */
     private lateinit var orrery: io.nisfeb.talon.orrery.OrreryRepo
 
@@ -208,7 +231,7 @@ class AssistantScreenTest {
         """{"answers":{"calendar_only":{"noul":$calendarOnly},"days":{"choice":"$days","probabilities":{"$days":0.9}}},"usage":{"input_tokens":400,"cost":0.0001}}"""
 
     /** With [decisions], the vendor's decision model is on and answers so, and the assistant's model is the vendor's row. */
-    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, withOrrery: Boolean = false, decisions: String? = null, block: ComposeUiTest.(AppDatabase) -> Unit) {
+    private fun assistant(withCalendar: Boolean = false, withMail: Boolean = false, withOrrery: Boolean = false, decisions: String? = null, withLattice: Boolean = false, seed: suspend AppDatabase.() -> Unit = {}, block: ComposeUiTest.(AppDatabase) -> Unit) {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/v1/chat/completions") { ex ->
             asked += ex.requestBody.readBytes().decodeToString()
@@ -249,7 +272,11 @@ class AssistantScreenTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         ship = FakeShip("~zod")
-        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        io.nisfeb.talon.ai.LatticeKeys.forget()
+        runBlocking { db.seed() }
+        val repo = TlonChatRepo(db).apply {
+            if (withLattice) attachForTest(ship.channel, "~zod", http = latticeOwner, base = "https://ship.test") else attachForTest(ship.channel, "~zod")
+        }
         ship.channel.events().launchIn(sessionScope)
         val calendar = if (withCalendar) calendarOn(sessionScope) else null
         val mail = if (withMail) mailOn(sessionScope) else null
@@ -263,7 +290,7 @@ class AssistantScreenTest {
                         if (showing.value) AssistantScreen(
                             db = db, aiSettings = ai, embedder = null, onOpenMessage = { _, _, _ -> }, repo = repo,
                             session = session, forceExpanded = true, calendar = calendar, mail = mail, orrery = orrery,
-                            onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" }, http = decisionHttp,
+                            onOpenChat = { opened += "chat $it" }, onOpenCalendar = { opened += "calendar" }, http = decisionHttp ?: latticeBare.takeIf { withLattice },
                         )
                     }
                 }
@@ -674,6 +701,93 @@ class AssistantScreenTest {
         ask("is my flight on time")
         waitUntil(timeoutMillis = 15_000) { shows("Your orrery is too old to watch flights.") }
         assertEquals("This orrery has no flight watches: it is older than version 105.", toolSaid())
+    }
+
+    /** The model's request [n]: its system prompt, its last user message, and its tools' names. */
+    private fun request(n: Int): Triple<String, String, List<String>> {
+        val o = kotlinx.serialization.json.Json.parseToJsonElement(asked[n]) as kotlinx.serialization.json.JsonObject
+        val msgs = o.getValue("messages") as kotlinx.serialization.json.JsonArray
+        fun content(m: kotlinx.serialization.json.JsonElement) = ((m as kotlinx.serialization.json.JsonObject)["content"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+        val system = msgs.first { (it as kotlinx.serialization.json.JsonObject)["role"].toString() == "\"system\"" }.let(::content)
+        val user = msgs.last { (it as kotlinx.serialization.json.JsonObject)["role"].toString() == "\"user\"" }.let(::content)
+        val tools = (o["tools"] as? kotlinx.serialization.json.JsonArray).orEmpty().map {
+            (((it as kotlinx.serialization.json.JsonObject)["function"] as kotlinx.serialization.json.JsonObject)["name"] as kotlinx.serialization.json.JsonPrimitive).content
+        }
+        return Triple(system, user, tools)
+    }
+
+    private fun ComposeUiTest.memoryLoaded() {
+        waitUntil(timeoutMillis = 10_000) { latticeKeyed.any { it.url.encodedPath.endsWith("/know-index") } }
+        settle()
+    }
+
+    /** The memory is read off the main thread: give its answer a moment to reach the prompt. */
+    private fun ComposeUiTest.settle() {
+        waitForIdle()
+        Thread.sleep(300)
+        waitForIdle()
+    }
+
+    // sneagan, 2026-10-19: "give talon an agent key and bring the voice and
+    // text assistants up to memory parity with Claude Code".
+    @Test
+    fun `a question carries what memory recalls, the index is in the prompt, and a save goes under Talon's own key`() = assistant(withLattice = true) { db ->
+        memoryLoaded()
+        toolCall = call("c1", "memory_save", """{"key":"user/trips","body":"Flies Delta out of JAX."}""")
+        answer = "I'll remember that."
+        ask("remember that I fly Delta out of JAX")
+        waitUntil(timeoutMillis = 15_000) { shows("I'll remember that.") }
+        val (system, user, tools) = request(0)
+        assertTrue("MEMORY" in system && "LATTICE INDEX" in system && "Always name the ship." in system, system.takeLast(400))
+        assertTrue(user.startsWith("Lattice memories that may bear on this question") && "- /user/trips (strength 80): Flies Delta out of JAX." in user, user)
+        assertTrue(user.endsWith("\n\nremember that I fly Delta out of JAX"), user)
+        assertTrue(tools.containsAll(listOf("memory_recall", "memory_save", "wiki_search", "web_read")), "$tools")
+        // Lattice signs it with the key's name: Bearer, no cookie.
+        val save = latticeKeyed.single { it.url.encodedPath.endsWith("/know-save") }
+        assertEquals("Bearer k1.s3cret", save.headers[io.ktor.http.HttpHeaders.Authorization])
+        assertEquals(null, save.headers[io.ktor.http.HttpHeaders.Cookie])
+        assertEquals("user/trips", save.url.parameters["key"])
+        assertEquals("Flies Delta out of JAX.", (save.body as io.ktor.http.content.TextContent).text)
+        assertEquals(listOf("/apps/lattice/key-mint"), latticeOwned.map { it.url.encodedPath }, "minted once, on the owner's login")
+        assertEquals("k1.s3cret", runBlocking { db.latticeKeys().get("~zod") }?.token)
+        // What was recalled reached the model only: not shown, not kept.
+        assertTrue(!shows("Lattice memories that may bear"))
+        assertEquals(listOf("remember that I fly Delta out of JAX"), runBlocking { db.assistantHistory().recent(5).first() }.map { it.question })
+    }
+
+    // The owner's revoke stands: a new key only at their word, in Settings.
+    @Test
+    fun `a key the owner revoked is said, and no new one is made`() = assistant(
+        withLattice = true,
+        seed = { latticeKeys().upsert(io.nisfeb.talon.data.LatticeKeyEntity("~zod", "k0", "k0.old", revoked = true)) },
+    ) {
+        settle()
+        answer = "Talon's memory key was revoked."
+        ask("what do you remember about my trips")
+        waitUntil(timeoutMillis = 15_000) { shows("Talon's memory key was revoked.") }
+        val (system, user, tools) = request(0)
+        assertTrue(io.nisfeb.talon.ai.LatticeMemory.REVOKED in system, system.takeLast(300))
+        assertEquals("what do you remember about my trips", user)
+        assertTrue(tools.none { it.startsWith("memory_") || it.startsWith("wiki_") }, "$tools")
+        assertTrue(latticeOwned.isEmpty(), "not minted again")
+        assertTrue(latticeKeyed.isEmpty())
+    }
+
+    @Test
+    fun `a ship with no lattice has no memory, and the assistant answers`() {
+        latticeMint = io.ktor.http.HttpStatusCode.NotFound to "<html>404</html>"
+        assistant(withLattice = true) {
+            waitUntil(timeoutMillis = 10_000) { latticeOwned.isNotEmpty() }
+            settle()
+            answer = "Tuesday."
+            ask("when is the next library day")
+            waitUntil(timeoutMillis = 15_000) { shows("Tuesday.") }
+            val (system, user, tools) = request(0)
+            assertTrue("LATTICE" !in system && "MEMORY\n" !in system, system.takeLast(300))
+            assertEquals("when is the next library day", user)
+            assertTrue(tools.none { it.startsWith("memory_") })
+            assertTrue(latticeKeyed.isEmpty())
+        }
     }
 
     private val late = """{"id":"a7","kind":"message","title":"Say you are running late to Park at JAX for DL 2627",""" +

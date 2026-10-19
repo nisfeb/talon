@@ -356,10 +356,11 @@ class TlonChatRepo(
     @Volatile var groupInviteListener: ((InviteSummary) -> Unit)? = null
 
     /** A channel and an identity without the session loop, for tests of what a write does before the ship answers. */
-    internal fun attachForTest(ch: UrbitChannel, us: String, http: HttpClient? = null) {
+    internal fun attachForTest(ch: UrbitChannel, us: String, http: HttpClient? = null, base: String? = null) {
         channel = ch
         ourPatp = us
         this.http = http
+        if (base != null) baseUrl = base
     }
 
     /**

@@ -60,6 +60,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun notices(): NoticeDao
     actual abstract fun settingsOutbox(): SettingsOutboxDao
     actual abstract fun marks(): MarkDao
+    actual abstract fun latticeKeys(): LatticeKeyDao
 }
 
 /**

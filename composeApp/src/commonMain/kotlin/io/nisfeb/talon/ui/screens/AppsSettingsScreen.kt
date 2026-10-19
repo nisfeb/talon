@@ -72,6 +72,10 @@ fun AppsSettingsScreen(
     onAddArmillary: (suspend () -> Result<Unit>)? = null,
     /** This ship's base URL, for the permits page. Null when signed out. */
     shipUrl: String?,
+    /** The assistants' own key in this ship's Lattice ([io.nisfeb.talon.ai.LatticeKeys]); null where no ship is known. */
+    latticeKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
+    /** A new key in place of one the owner revoked. Null hides the offer. */
+    onNewLatticeKey: (suspend () -> Result<Unit>)? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -92,6 +96,7 @@ fun AppsSettingsScreen(
     val armillaryError by (armillary?.error ?: noError).collectAsState()
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
+    val memoryKey = latticeKey?.collectAsState(initial = null)?.value
     var groups by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
@@ -227,6 +232,42 @@ fun AppsSettingsScreen(
                     } else if (installFor(row) != null) {
                         // Offered only where the tap has something to run.
                         TextButton(enabled = busy == null, onClick = { install(row) }) { Text("Install") }
+                    }
+                }
+                HorizontalDivider()
+            }
+
+            // The assistants' memory: this install's key in Lattice, made on
+            // first use. Revoked, it is made again only at the owner's word.
+            memoryKey?.let { key ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Assistant memory", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (key.revoked) "Lattice refused Talon's key: it was revoked. The assistants have no memory until there is a new one."
+                            else "The assistants remember in Lattice with this install's own key.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (key.revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val renew = onNewLatticeKey
+                    if (busy == "memory") {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else if (key.revoked && renew != null) {
+                        TextButton(enabled = busy == null, onClick = {
+                            busy = "memory"
+                            note = null
+                            scope.launch {
+                                renew().fold(
+                                    onSuccess = { note = "Made a new key. The assistants remember again." },
+                                    onFailure = { note = io.nisfeb.talon.util.failureLine("The key was not made", it) },
+                                )
+                                busy = null
+                            }
+                        }) { Text("Make a new key") }
                     }
                 }
                 HorizontalDivider()

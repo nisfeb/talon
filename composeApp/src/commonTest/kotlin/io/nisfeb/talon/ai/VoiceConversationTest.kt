@@ -46,6 +46,33 @@ class VoiceConversationTest {
             brief = { brief },
         )
 
+    // sneagan, 2026-10-19: memory parity with Claude Code. The index and
+    // a recall reach a turn only while the phone is unlocked.
+    private val mind = LatticeMind(
+        listOf(tool("memory_recall", false), tool("memory_save", false)),
+        "MEMORY rules",
+        "LATTICE INDEX core",
+    ) { q -> "RECALLED for $q" }
+
+    @Test
+    fun `an unlocked turn has the index and the recall, a locked one neither, nor memory's writes`() = runBlocking {
+        var locked = false
+        val model = Model(AgentTurn.Final("It leaves at seven."), AgentTurn.Final("Unlock to hear it."))
+        val t = VoiceConversation(model.completer, tools = mind.tools, tell = null, brief = { null }, locked = { locked }, memory = mind)
+        t.next("when does my flight leave")
+        val (system, messages, tools) = model.calls[0]
+        assertTrue("MEMORY rules" in system && "LATTICE INDEX core" in system, system)
+        assertEquals(AgentMessage.User("RECALLED for when does my flight leave\n\nwhen does my flight leave"), messages.last())
+        assertEquals(listOf("memory_recall", "memory_save", "read_brief"), tools)
+        assertEquals("when does my flight leave", t.said.last().words, "kept as said, not as asked")
+        locked = true
+        t.next("what do you remember about me")
+        val (system2, messages2, tools2) = model.calls[1]
+        assertTrue("MEMORY rules" in system2 && "LATTICE INDEX" !in system2, system2)
+        assertEquals(AgentMessage.User("what do you remember about me"), messages2.last())
+        assertEquals(listOf("memory_recall", "read_brief"), tools2)
+    }
+
     @Test
     fun `nothing reaches another person unasked, and orrery's instruct asks first`() {
         val t = talk(Model())

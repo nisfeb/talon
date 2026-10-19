@@ -281,13 +281,54 @@ class DictationAgentTest {
     // ─── a locked phone reads no one's words (B2-8) ───────────────
 
     @Test
-    fun `the private reads are every dictation tool that gives messages or mail, and no other`() {
+    fun `the private reads are every dictation tool that gives messages, mail or memory, and no other`() {
         assertEquals(
-            setOf("search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail"),
+            setOf(
+                "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
+                "memory_index", "memory_recall", "memory_search", "memory_read", "memory_explore", "memory_tidy", "wiki_search", "wiki_read",
+            ),
             DictationAgent.PRIVATE_READS,
         )
+        assertTrue("web_read" !in DictationAgent.PRIVATE_READS, "what other ships publish is not the owner's")
         assertTrue(DictationAgent.TOOLS.containsAll(DictationAgent.PRIVATE_READS))
         assertTrue(DictationAgent.CALENDAR_TOOLS.none { it in DictationAgent.PRIVATE_READS }, "the calendar's reads stay free")
+    }
+
+    // sneagan, 2026-10-19: memory parity with Claude Code, voice too.
+    // Memory's saves run free (no Allow card), so they are not marked
+    // write; a question and a locked phone still never get them.
+    private val memory = LatticeMemory.tools(object : LatticeClient {
+        override suspend fun get(route: String, args: Map<String, String?>) = "{}"
+        override suspend fun post(route: String, args: Map<String, String?>, body: String?) = "{}"
+    })
+
+    @Test
+    fun `a dictation has every memory tool, a question only its reads, and a locked phone none of its writes`() {
+        assertTrue(DictationAgent.TOOLS.containsAll(LatticeMemory.NAMES))
+        assertEquals(LatticeMemory.NAMES, DictationAgent.toolsFor(memory, locked = false).map { it.spec.name }.toSet())
+        val reads = LatticeMemory.NAMES - LatticeMemory.WRITES
+        assertEquals(reads, DictationAgent.readsFor(memory).map { it.spec.name }.toSet())
+        assertEquals(reads, DictationAgent.toolsFor(memory, locked = true).map { it.spec.name }.toSet(), "no one holding a locked phone writes the owner's memory")
+    }
+
+    @Test
+    fun `while locked a memory read waits for the fingerprint`() = runBlocking {
+        var unlocks = 0
+        val read = DictationAgent.toolsFor(memory, locked = true).unlockingReads(locked = { true }) { unlocks++; false }
+            .single { it.spec.name == "memory_read" }
+        assertEquals(DictationAgent.UNLOCK_TO_READ, read.execute(buildJsonObject { put("key", "/user/health") }))
+        assertEquals(1, unlocks)
+    }
+
+    @Test
+    fun `what memory recalls goes before the words, for the model alone`() = runBlocking {
+        val asked = mutableListOf<List<AgentMessage>>()
+        DictationAgent(
+            completer = { _, messages, _ -> asked += messages.toList(); AgentTurn.Final("Delta 2627 leaves at 7.") },
+            tools = emptyList(),
+            ask = { "RECALLED\n\n$it" },
+        ).run("when does my flight leave")
+        assertEquals(AgentMessage.User("RECALLED\n\nwhen does my flight leave"), asked.single().last())
     }
 
     @Test
