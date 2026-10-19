@@ -100,7 +100,8 @@ class DictationAgent(
             orrery first: orrery_read with no body gives every open
             situation and action, then orrery_find and orrery_read with a
             body for the one you need. The calendar says when, orrery says
-            what and why.
+            what and why. A flight's status, delay, gate or times:
+            orrery_flights, what orrery last found.
 
             Begin your answer with one short sentence that is read aloud
             to the owner, who may be driving: the highlights only, under
@@ -150,7 +151,7 @@ class DictationAgent(
             "list_calendars", "list_events", "find_free_time", "create_event", "update_event", "delete_event",
             "list_tasks", "create_task", "complete_task",
             "find_places", "open_directions", "call_place", "web_search",
-            "orrery_guide", "orrery_find", "orrery_read", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
+            "orrery_guide", "orrery_find", "orrery_read", "orrery_flights", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
         )
 
         /**
