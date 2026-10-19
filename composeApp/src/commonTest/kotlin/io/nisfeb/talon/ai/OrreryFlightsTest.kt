@@ -98,5 +98,7 @@ class OrreryFlightsTest {
     fun `the voice assistant may ask it too`() {
         assertTrue("orrery_flights" in DictationAgent.TOOLS)
         assertTrue(DictationAgent.readsFor(emptyList(), OrreryToolsTest.Tap()).any { it.spec.name == "orrery_flights" })
+        assertTrue("orrery_flights" in DictationAgent.askPrompt, "a spoken flight question is pointed at it")
+        assertTrue("a flight or its status" in CalendarQuestion.QUESTIONS.toString(), "and is not taken for a look at the calendar")
     }
 }
