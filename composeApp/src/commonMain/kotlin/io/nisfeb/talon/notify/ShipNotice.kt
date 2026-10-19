@@ -50,6 +50,9 @@ sealed interface NoticeLanding {
 fun noticeLanding(tag: String): NoticeLanding? = when {
     tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> NoticeLanding.Calendar(tag)
     tag.startsWith("orrery:") -> NoticeLanding.Actions
+    // The ship's own push about an action, a late one's nag among them
+    // (iOS hands its tag here when tapped): Actions, where it leads.
+    io.nisfeb.talon.orrery.actionIdOfTag(tag) != null -> NoticeLanding.Actions
     tag.startsWith("loop:") -> NoticeLanding.Loops
     tag.startsWith("invite:") -> NoticeLanding.Invites
     tag == "armillary" -> NoticeLanding.Assistant

@@ -6,7 +6,10 @@ import io.nisfeb.talon.orrery.OrreryApi
 import io.nisfeb.talon.orrery.OrreryError
 import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
+import io.nisfeb.talon.orrery.MARKS_VERSION
 import io.nisfeb.talon.orrery.answerShown
+import io.nisfeb.talon.orrery.high
+import io.nisfeb.talon.orrery.markable
 import io.nisfeb.talon.urbit.asText
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
@@ -137,6 +140,10 @@ Before you write:
   does not keep that, tell the owner so rather than a guess.
 - What orrery has waiting for the owner is orrery_actions. orrery_answer
   approves one, or dismisses it, which is how a proposal is rejected.
+- An open action whose due costs what cannot be had back once missed (a
+  check-in, a filing) is marked high with orrery_mark. Once a high one is
+  past its due the ship pushes the owner every 15 minutes until it is
+  done, dismissed, unmarked or snoozed; orrery_mark snoozes it too.
 
 Settings live in documents, read and written whole by name:
 
@@ -235,6 +242,11 @@ interface OrreryTap {
     suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed>
     /** Strike a value as wrong everywhere it is said; the ship's record of it. */
     suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject>
+    /** An open action marked high or not ([high]), or its late pushes held [snoozeMinutes] (orrery 110). */
+    suspend fun mark(id: String, high: Boolean?, snoozeMinutes: Int?): Result<Unit> =
+        Result.failure(UnsupportedOperationException("this orrery cannot mark actions"))
+    /** Orrery's version on the ship, where it is known. */
+    suspend fun version(): Int? = null
     /** Orrery's watches: each flight with what it last found. */
     suspend fun watches(): Result<JsonObject>
 }
@@ -296,6 +308,10 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
     override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String) =
         this@asTap.correct(subject, attr, value, why)
 
+    // The repo's own mark, so every list that shows actions shows it too.
+    override suspend fun mark(id: String, high: Boolean?, snoozeMinutes: Int?) = markAction(id, high, snoozeMinutes)
+
+    override suspend fun version() = this@asTap.version.value
     override suspend fun watches() = readWatches()
 }
 
@@ -720,6 +736,7 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                 if (open.isEmpty()) "Nothing is waiting in orrery."
                 else clip(open.joinToString("\n") { a ->
                     "id=${a.id} kind=${a.kind} status=${a.status}" + (a.due?.let { " due=$it" } ?: "") +
+                        (if (a.high) " priority=high" else "") + (a.payload["snooze_until"].asText()?.takeIf { it.isNotBlank() }?.let { " snooze_until=$it" } ?: "") +
                         (a.about.takeIf { it.isNotEmpty() }?.let { " about=" + it.joinToString(",") } ?: "") + " title=${a.title}"
                 })
             },
@@ -761,6 +778,47 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
             else -> "Not confirmed (orrery still shows $title as ${there.status}). $NOT_CONFIRMED"
         }
         if (status == "approved" && was.kind in FACT_KINDS) said + "\n" + orrery.readBack(changesOf(was)).ifEmpty { "Not read back: a ${was.kind}." } else said
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_mark",
+            "Mark one open orrery action (proposed or approved, by its id from orrery_actions) high priority or not, or snooze its late pushes: one change a call. Once a high action is past its due, the ship pushes the owner every 15 minutes, outside quiet hours, until it is done, dismissed, unmarked or snoozed. Mark high only what costs something that cannot be had back if missed. It reads orrery's list back and answers Confirmed or Not confirmed.",
+            toolSchema(
+                "id" to ("string" to "The action's id."),
+                "high" to ("boolean" to "true to mark it high, false to take high off."),
+                "snooze_minutes" to ("integer" to "Instead of high: hold its pushes this many minutes, 1 to 10080; 0 ends a snooze."),
+                required = listOf("id"),
+            ),
+        ),
+        write = true,
+    ) { args ->
+        val id = args.str("id") ?: return@Tool "Error: id is required."
+        val high = args.str("high")?.let { it == "true" }
+        val snooze = args.str("snooze_minutes")?.let { it.toDoubleOrNull()?.toInt() ?: return@Tool "Error: snooze_minutes is a number of minutes." }
+        if ((high == null) == (snooze == null)) return@Tool "Error: give high or snooze_minutes, one a call."
+        if (snooze != null && snooze !in 0..10_080) return@Tool "Error: snooze_minutes is 0 to 10080."
+        if ((orrery.version() ?: MARKS_VERSION) < MARKS_VERSION) {
+            return@Tool "Orrery on the owner's ship is older than $MARKS_VERSION, which marks an action high and snoozes it. Nothing was changed."
+        }
+        val was = orrery.actions().getOrElse { return@Tool "Could not read orrery's actions: ${it.message}. Nothing was changed." }
+            .firstOrNull { it.id == id } ?: return@Tool "Orrery has no open action $id; orrery_actions lists what waits. Nothing was changed."
+        val title = was.title.ifBlank { id }
+        if (!was.markable) return@Tool "$title is ${was.status}: orrery marks only a proposed or approved action. Nothing was changed."
+        orrery.mark(id, high, snooze).onFailure { e ->
+            return@Tool if (e is OrreryError.Unreachable) "The ship did not answer, so it may or may not have taken it. orrery_actions shows what it holds now."
+            else "Orrery did not take it: ${(e as? OrreryError.Refused)?.reason ?: e.message}. Nothing was changed."
+        }
+        // What the action says now, in the words the answer uses.
+        fun said(a: OrreryAction): String = if (high != null) (if (a.high) "high" else "not high")
+            else a.payload["snooze_until"].asText()?.takeIf { (io.nisfeb.talon.ui.parseIsoUtc(it) ?: 0) > io.nisfeb.talon.util.nowMs() }?.let { "snoozed until $it" } ?: "not snoozed"
+        fun shows(a: OrreryAction?) = a != null && if (high != null) a.high == high else (said(a) == "not snoozed") == (snooze == 0)
+        var open: List<OrreryAction>? = null
+        OrreryApi.settle { orrery.actions().getOrThrow().also { open = it }.let { l -> shows(l.firstOrNull { it.id == id }) } }
+        val list = open ?: return@Tool "Not confirmed: orrery took it, but its list could not be read back. $NOT_CONFIRMED"
+        val there = list.firstOrNull { it.id == id } ?: return@Tool "Not confirmed: orrery no longer lists $title as open."
+        if (shows(there)) "Confirmed: orrery shows $title as ${said(there)}."
+        else "Not confirmed (orrery still shows $title as ${said(there)}). $NOT_CONFIRMED"
     })
 
     add(Tool(

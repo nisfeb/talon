@@ -18,6 +18,16 @@ class NoticeLandingTest {
         assertEquals(NoticeLanding.Chat("~bus"), noticeLanding("dm:~bus"))
     }
 
+    // iOS hands a tapped ship push's tag here: orrery's action pushes,
+    // the late nag's among them, open Actions, where the Late section leads.
+    @Test
+    fun `the ship's push about an action lands on Actions`() {
+        assertEquals(NoticeLanding.Actions, noticeLanding("orrery-a1"))
+        assertEquals(NoticeLanding.Actions, noticeLanding("orrery-overdue-a1"))
+        assertNull(noticeLanding("orrery-nudge-3"))
+        assertNull(noticeLanding("orrery-review"))
+    }
+
     @Test
     fun `a calendar reminder keeps its whole tag, to find its occurrence`() {
         assertEquals(NoticeLanding.Calendar("cal-ev1-170"), noticeLanding("cal-ev1-170"))

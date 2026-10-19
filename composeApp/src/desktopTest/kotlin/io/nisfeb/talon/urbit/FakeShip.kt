@@ -406,8 +406,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                     }
                 }
             }
-            // An app's own HTTP API (%notes' v1, …): recorded, and answered by [answerApi].
-            req.method != HttpMethod.Get || path.startsWith("/notes/") -> {
+            // An app's own HTTP API (%notes' v1, orrery's reads, …): recorded, and answered by [answerApi].
+            req.method != HttpMethod.Get || path.startsWith("/notes/") || path.startsWith("/apps/orrery/") -> {
                 val body = req.body.toByteArray().decodeToString()
                 api += "${req.method.value} $path $body"
                 answerApi(req.method.value, path, body)

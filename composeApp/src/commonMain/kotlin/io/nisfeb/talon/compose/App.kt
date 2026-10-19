@@ -1387,7 +1387,9 @@ fun App(
         // Not while Actions is on screen: the list is the news.
         LaunchedEffect(orreryRepo, notifier, noticeRepo) {
             orreryRepo.onActions = { raise, clear ->
-                clear.forEach { notifier.clear("action:$it"); noticeRepo.dismiss("orrery:$it") }
+                // The ship's own nag about a late one too: iOS shows it as
+                // pushed, under its tag, where the app's own slot is not.
+                clear.forEach { notifier.clear("action:$it"); notifier.clear(io.nisfeb.talon.orrery.OVERDUE_TAG_PREFIX + it); noticeRepo.dismiss("orrery:$it") }
                 raise.forEach {
                     val key = it.id.ifBlank { "more" }
                     // The inbox records every proposal; the toast is only

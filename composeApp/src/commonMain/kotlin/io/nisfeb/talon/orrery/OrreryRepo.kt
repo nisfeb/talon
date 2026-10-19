@@ -356,6 +356,14 @@ class OrreryRepo(
      */
     private val answering = MutableStateFlow<Map<String, Pair<String, Long>>>(emptyMap())
 
+    /**
+     * The same for marks (orrery 110): by action and payload field, the
+     * value sent and when. The ship answers a mark before its writer
+     * applies it, so a list read meanwhile put a snoozed action back on
+     * the Late section.
+     */
+    private val marking = MutableStateFlow<Map<Pair<String, String>, Pair<String, Long>>>(emptyMap())
+
     /** The open list as the ship just said it, and what that means for notifications. */
     private fun published(fromShip: List<OrreryAction>) {
         // Approved and gone with no answer from here: the ship carried it
@@ -369,11 +377,21 @@ class OrreryRepo(
                 !answerShown(fromShip.firstOrNull { it.id == id }, sent.first) && now - sent.second < ANSWER_GRACE_MS
             }
         }
-        val list = waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }
+        val marks = marking.updateAndGet { m ->
+            m.filter { (at, sent) ->
+                !markShown(fromShip.firstOrNull { it.id == at.first }, at.second, sent.first) && now - sent.second < ANSWER_GRACE_MS
+            }
+        }
+        val list = marks.entries.fold(waiting.entries.fold(fromShip) { l, (id, sent) -> settledActions(l, id, sent.first) }) { l, (at, sent) ->
+            l.map { if (it.id == at.first) it.marked(at.second, sent.first) else it }
+        }
         _actions.value = list
         val news = diffActionNotifications(list, seenProposals)
         seenProposals = news.seen
         if (news.raise.isNotEmpty() || news.clear.isNotEmpty()) onActions?.invoke(news.raise, news.clear)
+        // A late one's nag shares its slot: done on another device, the
+        // last nag stayed on the phone, since only proposals were taken back.
+        if (left.isNotEmpty()) onActions?.invoke(emptyList(), left.toSet())
         if (left.isNotEmpty()) scope.launch {
             loadFailed()
             val failed = _failed.value.filter { it.id in left }.map(::failureNotification)
@@ -417,6 +435,8 @@ class OrreryRepo(
             // Settings saw orrery there after.
             launch {
                 _availability.first { it == OrreryAvailability.PRESENT }
+                // Beside the list, not before it: one request more on a busy ship.
+                launch { readVersion() }
                 refreshActions()
                 // Orrery's beacon moves once for every write that changed
                 // something: a new proposal, or an answer given anywhere.
@@ -667,7 +687,21 @@ class OrreryRepo(
      */
     suspend fun opened() {
         scope.launch { loadFailed() }
+        scope.launch { readVersion() }
         refreshWaiting()
+    }
+
+    private val _version = MutableStateFlow<Int?>(null)
+    /** Orrery's version on the ship, once read; null before, or while it did not answer. */
+    val version: StateFlow<Int?> = _version.asStateFlow()
+
+    /** Read once per login, and again on opening Actions only after it did not answer. */
+    private suspend fun readVersion() {
+        val a = api ?: return
+        if (_version.value != null) return
+        io.nisfeb.talon.util.runSuspendCatching { a.version() }
+            .onSuccess { if (api === a) _version.value = it }
+            .onFailure { Log.i(TAG, "version skipped: ${it.message}") }
     }
 
     fun detach() {
@@ -701,6 +735,8 @@ class OrreryRepo(
         // or another ship, its proposals and their notifications go.
         val shown = _actions.value.map { it.id }.toSet()
         answering.value = emptyMap()
+        marking.value = emptyMap()
+        _version.value = null
         _actions.value = emptyList()
         if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
     }
@@ -1832,12 +1868,14 @@ class OrreryRepo(
      * On this repo's scope: an assistant stopped while the ship answers
      * does not take the answer back halfway.
      */
-    suspend fun setAction(id: String, status: String, note: String = ""): Result<Unit> = scope.async { runCatching {
+    suspend fun setAction(id: String, status: String, note: String = "", proposed: Boolean = false): Result<Unit> = scope.async { runCatching {
         val a = api ?: error("Not attached to a ship.")
         val s = ship ?: error("Not attached to a ship.")
         // This install's key where it has one, else the owner's own say.
         val token = db.orreryAccounts().get(s)?.token
-        a.transition(token, id, status, note)
+        // Done on a proposal is approve, then done: the answer below stays
+        // done throughout, so a read between the two does not show it back.
+        if (status == "done" && proposed) a.finish(token, id, proposed = true) else a.transition(token, id, status, note)
         answering.update { it + (id to (status to nowMs())) }
         _actions.value = settledActions(_actions.value, id, status)
         // The mirror reads every action and the whole calendar before it
@@ -1890,7 +1928,7 @@ class OrreryRepo(
         // Answered here: its notification goes now, not on the next read.
         onActions?.invoke(emptyList(), setOf(id))
         scope.launch {
-            setAction(id, status, note).onFailure { e ->
+            setAction(id, status, note, proposed = was?.status == "proposed").onFailure { e ->
                 answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
                 // No answer is not a refusal: said as one, a proxy's error page was the reason.
@@ -1901,6 +1939,51 @@ class OrreryRepo(
         }
     }
 
+
+    /**
+     * Mark [id] high or not ([high]), or hold its nags [snoozeMinutes]
+     * (orrery 110), on this repo's scope. Kept over the ship's list as the
+     * value the ship answered it holds, until the list shows it.
+     */
+    suspend fun markAction(id: String, high: Boolean? = null, snoozeMinutes: Int? = null): Result<Unit> = scope.async { runCatching {
+        val a = api ?: error("Not attached to a ship.")
+        val token = keyToken()
+        val (field, held) = if (high != null) "priority" to a.priority(token, id, high)
+        else "snooze_until" to a.snooze(token, id, snoozeMinutes ?: error("Say high or a snooze."))
+        hold(id, field, held)
+    } }.await()
+
+    private fun hold(id: String, field: String, value: String) {
+        marking.update { it + ((id to field) to (value to nowMs())) }
+        _actions.value = _actions.value.map { if (it.id == id) it.marked(field, value) else it }
+    }
+
+    /**
+     * The same, taken at once, as [answer] is: every list shows it now and
+     * the ship is told behind them. A snooze shows as this device's hour
+     * until the ship says its own. A refusal puts the field back as it was
+     * and says why where Actions shows problems.
+     */
+    fun mark(id: String, high: Boolean? = null, snoozeMinutes: Int? = null) {
+        _answerProblem.value = null
+        val was = _actions.value.firstOrNull { it.id == id } ?: return
+        val field = if (high != null) "priority" else "snooze_until"
+        val shown = when {
+            high != null -> if (high) "high" else ""
+            snoozeMinutes == null || snoozeMinutes <= 0 -> ""
+            else -> kotlin.time.Instant.fromEpochMilliseconds(nowMs() + snoozeMinutes * 60_000L).toString()
+        }
+        hold(id, field, shown)
+        scope.launch {
+            markAction(id, high, snoozeMinutes).onFailure { e ->
+                marking.update { it - (id to field) }
+                _actions.value = _actions.value.map { if (it.id == id) it.marked(field, was.payload[field].asText().orEmpty()) else it }
+                val what = when { high == true -> "Mark high"; high == false -> "Not high"; else -> "Snooze" }
+                _answerProblem.value = markProblemLine(what, e)
+                Log.w(TAG, "$what on $id refused: ${e.message}")
+            }
+        }
+    }
 
     /**
      * What is waiting for an answer, read now. Needs nothing but orrery

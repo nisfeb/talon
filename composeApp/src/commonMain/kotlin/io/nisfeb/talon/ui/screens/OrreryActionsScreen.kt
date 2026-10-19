@@ -26,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.orrery.OrreryAction
+import io.nisfeb.talon.orrery.high
+import io.nisfeb.talon.orrery.shipCarriesOut
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.filled.Refresh
@@ -70,6 +72,12 @@ fun OrreryActionsScreen(
     onLeave: () -> Unit = {},
     /** Off under the Orrery section's tabs, which carry back and refresh, and read on entering and see [told] on leaving. */
     header: Boolean = true,
+    /** Orrery keeps priorities and nags about late ones (110 and later): the Late section, the badge and their buttons. */
+    marks: Boolean = false,
+    /** Hold a late one's nags an hour. */
+    onSnooze: (OrreryAction) -> Unit = {},
+    /** Mark one high, or not. */
+    onPriority: (OrreryAction, Boolean) -> Unit = { _, _ -> },
     onOpen: (OrreryAction) -> Unit,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -134,7 +142,7 @@ fun OrreryActionsScreen(
             )
         }
         HorizontalDivider()
-        Body(actions, failed, onOpen, onDecide, twentyFourHour)
+        Body(actions, failed, onOpen, onDecide, twentyFourHour, marks, onSnooze, onPriority)
     }
 }
 
@@ -145,9 +153,18 @@ private fun Body(
     onOpen: (OrreryAction) -> Unit,
     onDecide: (OrreryAction, String, String) -> Unit,
     twentyFourHour: Boolean,
+    marks: Boolean,
+    onSnooze: (OrreryAction) -> Unit,
+    onPriority: (OrreryAction, Boolean) -> Unit,
 ) {
-    val waiting = actions.filter { it.status == "proposed" }
-    val settled = actions.filter { it.status != "proposed" }
+    // A minute's clock, so one comes onto Late as its due passes with the page open.
+    val now by androidx.compose.runtime.produceState(io.nisfeb.talon.util.nowMs()) {
+        while (true) { kotlinx.coroutines.delay(60_000); value = io.nisfeb.talon.util.nowMs() }
+    }
+    // Each in one place: a late one leads, in red, until it is done or snoozed.
+    val late = if (marks) io.nisfeb.talon.orrery.lateActions(actions, now) else emptyList()
+    val waiting = actions.filter { it.status == "proposed" && it !in late }
+    val settled = actions.filter { it.status != "proposed" && it !in late }
     if (actions.isEmpty() && failed.isEmpty()) {
         Column(
             Modifier.fillMaxSize().padding(24.dp),
@@ -164,6 +181,39 @@ private fun Body(
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
+        // High and past its due: the ship nags about each every 15 minutes,
+        // so the ways to stop it are on the row. Words as orrery's Late card.
+        if (late.isNotEmpty()) {
+            item(key = "late-head") { Heading("Late · ${late.size}", accent = true, color = MaterialTheme.colorScheme.error) }
+            items(late, key = { "l-" + it.id }) { a ->
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Column(Modifier.clickable { onOpen(a) }.padding(12.dp)) {
+                        Text(
+                            a.title.ifBlank { a.kind },
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Text(
+                            io.nisfeb.talon.orrery.lateLine(a, now, TimeZone.currentSystemDefault(), twentyFourHour),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // One the ship carries out is approved in its window:
+                            // Done here would send it.
+                            if (!a.shipCarriesOut) Button(onClick = { onDecide(a, "done", "") }) { Text("Done") }
+                            OutlinedButton(onClick = { onSnooze(a) }) { Text("Snooze 1 h") }
+                            io.nisfeb.talon.ui.TextButton(onClick = { onPriority(a, false) }) { Text("Not high") }
+                        }
+                    }
+                }
+            }
+        }
         // What needs you, first and unmistakable: its own heading, a card
         // in the accent colour, and the answer right there on the row.
         item(key = "waiting-head") {
@@ -179,6 +229,7 @@ private fun Body(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
                 Column(Modifier.clickable { onOpen(a) }.padding(12.dp)) {
+                    if (marks && a.high) HighBadge()
                     Text(
                         a.title.ifBlank { a.kind },
                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
@@ -217,6 +268,7 @@ private fun Body(
                     Modifier.fillMaxWidth().clickable { onOpen(a) }
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
+                    if (marks && a.high) HighBadge()
                     Text(
                         a.title.ifBlank { a.kind },
                         style = MaterialTheme.typography.bodyMedium,
@@ -259,12 +311,22 @@ private fun Body(
 }
 
 @Composable
-private fun Heading(text: String, accent: Boolean) {
+private fun Heading(text: String, accent: Boolean, color: androidx.compose.ui.graphics.Color? = null) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-        color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = color ?: if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+    )
+}
+
+/** Marked high: orrery nags about it once it is late. */
+@Composable
+private fun HighBadge() {
+    Text(
+        "high",
+        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+        color = MaterialTheme.colorScheme.error,
     )
 }
 

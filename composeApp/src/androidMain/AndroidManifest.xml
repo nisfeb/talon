@@ -331,6 +331,10 @@
             android:exported="false" />
 
         <receiver
+            android:name="io.nisfeb.talon.OrreryLateReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name="io.nisfeb.talon.BootReceiver"
             android:exported="true">
             <intent-filter>

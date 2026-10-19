@@ -144,6 +144,7 @@ class AssistantScreenTest {
             when {
                 path.endsWith("/api/instruct") -> { kotlinx.coroutines.delay(holdInstruct); respond(instructed, io.ktor.http.HttpStatusCode.OK, json) }
                 path.endsWith("/api/brief/last") -> respond(brief, io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/version") -> respond("""{"version":110}""", io.ktor.http.HttpStatusCode.OK, json)
                 req.method == io.ktor.http.HttpMethod.Post && "/api/actions/" in path -> respond(answerBody, answerStatus, json)
                 // What is open, in turn; a look at one status sees none.
                 path.endsWith("/api/actions") ->
@@ -451,7 +452,12 @@ class AssistantScreenTest {
             db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~bus", "Bus", null, null))
             db.messages().upsert(io.nisfeb.talon.data.MessageEntity("~bus", "170.1", "~bus", now - 60_000, """[{"inline":["Seeds are in the shed"]}]""", "/chat"))
         }
-        calRows = listOf("""{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":${now - 60_000},"r":${now + 3_600_000},"meta":{"name":"Seed swap"}}""")
+        // Inside today in the calendar's zone (UTC here): an hour on from
+        // 23:00 crossed midnight and drew the event under two days.
+        val day = 86_400_000L
+        val from = maxOf(now - 60_000, now / day * day)
+        val to = minOf(now + 3_600_000, (now / day + 1) * day - 1)
+        calRows = listOf("""{"id":"d1","cal":"default","cat":"timed","kind":"once","all":false,"l":$from,"r":$to,"meta":{"name":"Seed swap"}}""")
         inbox = """{"total":1,"offset":0,"limit":50,"view":"inbox","threads":[
             {"id":"0v1","subject":"Seed catalogue","from":"~nec","snippet":"The spring list","verdict":"verified",
              "forged":false,"count":1,"last":$now,"unread":true,"participants":[],
@@ -689,6 +695,23 @@ class AssistantScreenTest {
         assertEquals(listOf("""{"status":"dismissed","note":"dropped off, not parking"}"""), answered("a7"), "orrery's serve-set-action: status and note")
         assertEquals("Confirmed: orrery no longer lists Say you are running late to Park at JAX for DL 2627 as waiting.", toolSaid())
         assertTrue(orrery.actions.value.none { it.id == "a7" }, "the Actions page shows it gone too")
+    }
+
+    // Orrery 110: a deadline that matters is marked high, through the card
+    // and with the read back, and the Actions page shows it at once.
+    @Test
+    fun `an action is marked high through the card and read back and the Actions list shows it`() = assistant(withOrrery = true) {
+        openLists.clear(); openLists += listOf("[$late]", "[${late.replace("\"payload\":{", "\"payload\":{\"priority\":\"high\",")}]")
+        answerBody = """{"ok":true,"id":"a7","priority":"high"}"""
+        answer = "Marked it high."
+        toolCall = call("c1", "orrery_mark", """{"id":"a7","high":true}""")
+        ask("make the running late one high priority")
+        waitUntil(timeoutMillis = 10_000) { shows("Allow this action?") }
+        onNodeWithText("Allow").performClick()
+        waitUntil(timeoutMillis = 15_000) { shows("Marked it high.") }
+        assertEquals(listOf("/apps/orrery/api/actions/a7/priority" to """{"priority":"high"}"""), orreryPosts.filter { "/priority" in it.first }, "orrery's serve-mark")
+        assertEquals("Confirmed: orrery shows Say you are running late to Park at JAX for DL 2627 as high.", toolSaid())
+        assertTrue(orrery.actions.value.single { it.id == "a7" }.payload["priority"].toString() == "\"high\"", "the Actions page shows it high")
     }
 
     @Test

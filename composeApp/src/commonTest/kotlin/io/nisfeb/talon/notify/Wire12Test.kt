@@ -5,7 +5,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Talon's side of trunk wire 12 (sneagan, 2026-10-07: "I want trunk to do
@@ -83,9 +85,29 @@ class Wire12Test {
     @Test
     fun an_orrery_action_push_is_known_by_its_action() {
         assertEquals("a1b2", io.nisfeb.talon.orrery.actionIdOfTag("orrery-a1b2"))
-        listOf("orrery-leave-x@1", "orrery-late-x", "orrery-nudge-3", "orrery-review", "cal-x-0", null, "orrery-").forEach {
+        listOf("orrery-leave-x@1", "orrery-late-x", "orrery-nudge-3", "orrery-review", "cal-x-0", null, "orrery-", "orrery-overdue-").forEach {
             assertNull(io.nisfeb.talon.orrery.actionIdOfTag(it), "$it")
         }
+    }
+
+    // Orrery 110's nag about a late high action: tagged by the action, so
+    // each push replaces the last and lands in the action's own slot.
+    @Test
+    fun a_late_nag_is_known_by_its_action_and_as_a_nag() {
+        val tag = "orrery-overdue-1791915693-e8f6ea94"
+        assertEquals("1791915693-e8f6ea94", io.nisfeb.talon.orrery.actionIdOfTag(tag))
+        // The same nag through the ship's %trunk (its +trunk-notice): the tag whole.
+        assertEquals(
+            ShipPushMessage("Late: Check in for DL 2627", "Due 19:05, 2 h 10 late.", tag),
+            noticeOf(Json.parseToJsonElement("""{"event":"notice","patp":"~zod","tag":"$tag","title":"Late: Check in for DL 2627","body":"Due 19:05, 2 h 10 late.","open":null}""").jsonObject),
+        )
+        assertTrue(io.nisfeb.talon.orrery.isOverdueTag(tag))
+        listOf("orrery-1791915693-e8f6ea94", "orrery-overdue-", "orrery-late-x", "overdue-x", null).forEach {
+            assertFalse(io.nisfeb.talon.orrery.isOverdueTag(it), "$it")
+        }
+        // The relay keys an iOS notice by its tag, cut to APNs' 64 bytes:
+        // a whole one fits, so each nag still replaces the last there.
+        assertTrue(tag.length <= 64)
     }
 }
 

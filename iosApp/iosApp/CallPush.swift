@@ -91,6 +91,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         // The token goes to the relay next to the VoIP one.
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        // Done and Snooze 1 h on orrery's nag about a late action: the
+        // relay names this category on the push (Apns.kt). Face ID first:
+        // they act as the owner, and the kept login reads only unlocked.
+        let done = UNNotificationAction(identifier: "orrery-done", title: "Done", options: [.authenticationRequired])
+        let snooze = UNNotificationAction(identifier: "orrery-snooze", title: "Snooze 1 h", options: [.authenticationRequired])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: "orrery-overdue", actions: [done, snooze], intentIdentifiers: [], options: [])
+        ])
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
             CallTrace.log("notifications \(granted ? "allowed" : "refused")")
             // Registering with the relay waits on this answer before
@@ -179,6 +187,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         let info = response.notification.request.content.userInfo
         if let nonce = info["nonce"] as? String {
             IosVoipBridge.shared.pushTestReceived(nonce: nonce)
+        }
+        // Done or Snooze 1 h on orrery's nag: carried out in Kotlin
+        // (IosLateMoves), then the nag is taken back, or posted again in
+        // its place saying what failed, with its buttons.
+        let move: String? = response.actionIdentifier == "orrery-done" ? "DONE"
+            : (response.actionIdentifier == "orrery-snooze" ? "SNOOZE" : nil)
+        if let move = move, let tag = info["whom"] as? String, !tag.isEmpty {
+            let request = response.notification.request
+            IosVoipBridge.shared.lateMove(tag: tag, move: move, ship: info["patp"] as? String) { failed in
+                if let failed = failed {
+                    let again = UNMutableNotificationContent()
+                    again.title = request.content.title
+                    again.body = failed
+                    again.userInfo = request.content.userInfo
+                    again.categoryIdentifier = "orrery-overdue"
+                    center.add(UNNotificationRequest(identifier: request.identifier, content: again, trigger: nil))
+                } else {
+                    center.removeDeliveredNotifications(withIdentifiers: [request.identifier])
+                }
+                completionHandler()
+            }
+            return
         }
         // A notice from another app on the ship (calendar, orrery): its
         // "whom" is its tag, not a chat.

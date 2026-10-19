@@ -1,6 +1,7 @@
 package io.nisfeb.talon.notify
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -74,6 +75,24 @@ object IosVoipBridge {
 
     /** A tapped notice from another app on the ship: open what it is about. */
     fun openNotice(tag: String) = OpenNoticeRequests.request(tag)
+
+    /**
+     * Done or Snooze 1 h tapped on orrery's nag about a late action
+     * (CallPush.swift): [move] is DONE or SNOOZE, [ship] the ship the nag
+     * came from. [finished] gets what failed, or null when it went
+     * through, on the main queue, so Swift can take the nag back or say.
+     */
+    fun lateMove(tag: String, move: String, ship: String?, finished: (String?) -> Unit) {
+        lateScope.launch {
+            val failed = runCatching { io.nisfeb.talon.orrery.IosLateMoves.run(tag, move, ship) }
+                .getOrElse { "That did not go through. Open Talon to try it again." }
+            platform.darwin.dispatch_async(platform.darwin.dispatch_get_main_queue()) { finished(failed) }
+        }
+    }
+
+    private val lateScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default + io.nisfeb.talon.util.backgroundExceptionHandler,
+    )
 
     /** A tapped alert: open its chat, on the ship it was for. */
     fun openChat(whom: String, postId: String?, forShip: String?) =

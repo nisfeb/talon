@@ -123,7 +123,7 @@ class TalonApplication : Application() {
     val allShipsFlow: StateFlow<List<String>> = _allShips.asStateFlow()
 
     // The handler: one uncaught throw in a launch here took the app down.
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + io.nisfeb.talon.util.backgroundExceptionHandler)
+    internal val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + io.nisfeb.talon.util.backgroundExceptionHandler)
 
     /**
      * The Activity feed's own notices, for the ship signed in now. On the

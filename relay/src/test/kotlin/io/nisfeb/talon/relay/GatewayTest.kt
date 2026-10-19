@@ -128,6 +128,18 @@ class GatewayTest {
         assertNull(r["nonce"])
     }
 
+    // Orrery's nag about a late action gets the app's Done and Snooze 1 h
+    // (the category CallPush.swift registers); other notices and messages
+    // get no category.
+    @Test
+    fun `an overdue nag names the category with its buttons and nothing else does`() {
+        fun aps(event: String?, whom: String) =
+            Json.parseToJsonElement(alertPayload("Late: Check in", "Due 19:05", "~zod", whom, "", event = event)).jsonObject["aps"]!!.jsonObject
+        assertEquals("orrery-overdue", aps("notice", "orrery-overdue-1791915693-e8f6ea94")["category"]!!.jsonPrimitive.content)
+        assertNull(aps("notice", "orrery-leave-activity/x@1")["category"])
+        assertNull(aps(null, "orrery-overdue-1")["category"], "a message whose whom only looks like it")
+    }
+
     // The trunk review (2026-10-06) found a control character in a peer's
     // text broke the body; Push.kt escaped only quote and backslash.
     @Test

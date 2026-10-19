@@ -14,6 +14,15 @@ class ShipPushTest {
         )
     }
 
+    // Orrery 110's nag, as its +notify-owner sends it through grubbery's
+    // web push: the tag comes whole, for the action's own slot.
+    @Test
+    fun `a late nag reads whole with its tag`() {
+        val push = parseShipPush("""{"title":"Late: Check in for DL 2627","body":"Due 19:05, 2 h 10 late.","url":"/apps/orrery","tag":"orrery-overdue-1791915693-e8f6ea94"}""")
+        assertEquals(ShipPushMessage("Late: Check in for DL 2627", "Due 19:05, 2 h 10 late.", "orrery-overdue-1791915693-e8f6ea94"), push)
+        assertEquals("1791915693-e8f6ea94", io.nisfeb.talon.orrery.actionIdOfTag(push?.tag))
+    }
+
     @Test
     fun `the optional keys may be absent`() {
         assertEquals(ShipPushMessage("Standup", "in 30 min", null), parseShipPush("""{"title":"Standup","body":"in 30 min"}"""))

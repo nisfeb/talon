@@ -125,16 +125,28 @@ fun leaveByOf(last: JsonObject?): LeaveBy? {
 }
 
 /**
+ * The ship's nag about a late high-priority action (orrery 110):
+ * [OVERDUE_TAG_PREFIX] + the action's id, pushed again every fifteen
+ * minutes until it is done, dismissed, unmarked or snoozed.
+ */
+const val OVERDUE_TAG_PREFIX = "orrery-overdue-"
+
+/**
  * The action a ship push is about, from its tag: orrery tags a proposed
- * or filed action `orrery-<id>`, beside its leave, late and nudge tags
- * and the review. Talon shows that action under its own slot, so the
- * pushed copy and the app's own replace each other, and answering it
+ * or filed action `orrery-<id>`, and a late one `orrery-overdue-<id>`,
+ * beside its leave, late and nudge tags and the review. Talon shows that
+ * action under its own slot, so the pushed copy and the app's own
+ * replace each other, each nag replaces the last, and answering it
  * anywhere takes back both. Null for anything else.
  */
 fun actionIdOfTag(tag: String?): String? {
     val rest = tag?.takeIf { it.startsWith("orrery-") }?.removePrefix("orrery-") ?: return null
+    if (tag.startsWith(OVERDUE_TAG_PREFIX)) return tag.removePrefix(OVERDUE_TAG_PREFIX).takeIf { it.isNotBlank() }
     if (rest.isBlank() || rest == "review") return null
     if (listOf("leave-", "late-", "nudge-").any { rest.startsWith(it) }) return null
     return rest
 }
+
+/** Whether a ship push is the nag about a late action: its own channel and buttons on Android. */
+fun isOverdueTag(tag: String?): Boolean = tag != null && tag.startsWith(OVERDUE_TAG_PREFIX) && actionIdOfTag(tag) != null
 

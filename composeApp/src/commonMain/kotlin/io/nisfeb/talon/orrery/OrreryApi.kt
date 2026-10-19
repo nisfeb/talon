@@ -465,6 +465,59 @@ class OrreryApi(
     }
 
     /**
+     * Done on an open action. The ship moves only an approved one to done
+     * (transition-ok), and answers a move before its writer applies it, so
+     * a [proposed] one is approved, read back until it shows approved, and
+     * then done: sent straight after, done was refused.
+     */
+    suspend fun finish(token: String?, id: String, proposed: Boolean) {
+        if (proposed) {
+            transition(token, id, "approved")
+            if (!settle { actions(token, "approved").any { it.id == id } }) error("approved, but not yet marked done. Try Done again")
+        }
+        transition(token, id, "done")
+    }
+
+    /**
+     * Mark an open action high or not (orrery 110): `{"priority": "high"}`
+     * or `{"priority": ""}`. The ship's answer: the value as it stores it.
+     */
+    suspend fun priority(token: String?, id: String, high: Boolean): String =
+        mark(token, "/api/actions/$id/priority", buildJsonObject { put("priority", if (high) "high" else "") }, "priority")
+
+    /**
+     * Hold a late action's nags [minutes] (orrery 110), 0 to 10080; 0 ends
+     * a snooze. The ship's answer: the `snooze_until` it stores, "" for none.
+     */
+    suspend fun snooze(token: String?, id: String, minutes: Int): String =
+        mark(token, "/api/actions/$id/snooze", buildJsonObject { put("minutes", minutes) }, "snooze_until")
+
+    /**
+     * One mark-action route (serve-mark): the owner, or a key that writes
+     * and holds the kind (else 403, or 404 for a kind out of its scope);
+     * 409 unless the action is proposed or approved. Answered before the
+     * writer applies it, with the payload field it will hold.
+     */
+    private suspend fun mark(token: String?, path: String, body: JsonObject, field: String): String {
+        val text = if (token != null) {
+            request(bare, HttpMethod.Post, path, body.toString()) { header(HttpHeaders.Authorization, "Bearer $token") }
+        } else {
+            request(owner, HttpMethod.Post, path, body.toString())
+        }
+        return reading { Json.parseToJsonElement(text).jsonObject[field]!!.jsonPrimitive.content }
+    }
+
+    /** Orrery's version on the ship (GET /api/version, open to anyone), or 0 for one too old to have the route. */
+    suspend fun version(): Int {
+        val text = try {
+            request(owner, HttpMethod.Get, "/api/version")
+        } catch (e: OrreryError.Refused) {
+            if (e.status == NOT_FOUND) return 0 else throw e
+        }
+        return reading { Json.parseToJsonElement(text).jsonObject["version"]!!.jsonPrimitive.content.toInt() }
+    }
+
+    /**
      * Whether action [id] shows [status] yet. The ship answers a change,
      * and a new action's id, before its writer applies them, so what
      * follows at once can still see the action as it was: read back a
