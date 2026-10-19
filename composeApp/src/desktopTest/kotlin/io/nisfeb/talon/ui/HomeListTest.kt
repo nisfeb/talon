@@ -145,8 +145,11 @@ class HomeListTest {
     fun `mark all read takes the chats whose only news is a reaction, and leaves the rest`() = home(seed = threeDms) { ship ->
         ship.scries["activity/v6/activity/full"] = reactedAndUnread
         runBlocking { repo.bootstrapActivityForTest() }
-        tap("DMs")
-        shows("see you soon", substring = true)
+        // The Unread tab comes in ahead of All once the activity lands: a
+        // press made before it moves All is lost (and the tab to tap does
+        // not matter: Mark all read takes every chat).
+        shows("Unread", substring = true)
+        waitForIdle()
         onNodeWithText("All").performTouchInput { longClick() }
         shows("Clears the unread badge on 2 chats.")
         onNodeWithText("Mark read").performClick()
@@ -161,8 +164,9 @@ class HomeListTest {
         ship.scries["activity/v6/activity/full"] = """{"ship/~bus":{"count":0,"notify-count":1,"recency":2,"notify":true,"unread":null},""" +
             """"ship/~nec":{"count":0,"notify-count":0,"recency":3,"notify":false,"unread":null}}"""
         runBlocking { repo.bootstrapActivityForTest() }
-        tap("DMs")
-        shows("see you soon", substring = true)
+        // Mark all read takes every chat whatever tab is showing: no tab to
+        // tap, which the activity just written could redraw from under it.
+        waitForIdle()
         onNodeWithText("All").performTouchInput { longClick() }
         shows("Clears the unread badge on 1 chat.")
         onNodeWithText("Mark read").performClick()
