@@ -47,6 +47,31 @@ internal fun sourceKeyToWhom(key: String): String? = when {
 }
 
 /**
+ * The ship's notify-count for each chat and thread in [summaries], keyed
+ * as reads are: whom, and whom#parent for a thread.
+ */
+internal fun notifyCounts(summaries: JsonObject): Map<String, Int> = buildMap {
+    for ((key, summary) in summaries) {
+        val n = (summary as? JsonObject)?.get("notify-count").asInt() ?: continue
+        val at = sourceKeyToWhom(key) ?: sourceKeyToThreadSource(key)?.let { "${it.whom}#${it.parentPostId}" } ?: continue
+        put(at, n)
+    }
+}
+
+/**
+ * What [whom]'s own stream notified that the ship still counts: its
+ * notify-count less its threads', which roll up into it. A reaction to
+ * the owner's message notifies and is never unread (Tlon's default
+ * volumes), so no row here counts it, and only a read of the chat takes
+ * it off the ship's total, the number on the iPhone's icon.
+ * ponytail: a scan of every source per read; index by whom if it shows.
+ */
+internal fun ownNotified(counts: Map<String, Int>, whom: String): Int {
+    val threads = counts.entries.sumOf { (k, v) -> if (k.startsWith("$whom#")) v else 0 }
+    return ((counts[whom] ?: 0) - threads).coerceAtLeast(0)
+}
+
+/**
  * For `thread/<nest>/<msg>` and `dm-thread/<whom>/<msg>` source keys,
  * extract both the parent conversation [whom] AND the parent post id
  * the thread hangs off. Returns null for any non-thread key.

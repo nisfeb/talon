@@ -1434,6 +1434,17 @@ class TlonChatRepo(
     private val owedReads = MutableStateFlow<Map<String, OwedRead>>(emptyMap())
 
     /**
+     * The ship's notify-count per chat and thread as it last said it
+     * ([notifyCounts]): where a reaction to the owner shows, which the
+     * rows here leave out ([ownNotified]).
+     */
+    private val shipNotify = MutableStateFlow<Map<String, Int>>(emptyMap())
+
+    /** Whether the ship still counts something in [whom] that no row here
+     *  shows, a reaction to the owner ([ownNotified]): Mark all read takes it. */
+    fun shipStillCounts(whom: String): Boolean = ownNotified(shipNotify.value, whom) > 0
+
+    /**
      * Whether the ship's word on what is unread has been read since this
      * connection began. Until it has, the counts here may be stale, so a
      * chat with none here is read on the ship anyway: skipped, its unread
@@ -1452,7 +1463,7 @@ class TlonChatRepo(
      */
     private fun localView(row: UnreadEntity, focused: String?): UnreadEntity {
         if (row.whom == focused) {
-            if (row.count > 0 || row.notifyCount > 0) markReadSoon(row.whom) { markRead(row.whom, force = true) }
+            if (row.count > 0 || row.notifyCount > 0 || ownNotified(shipNotify.value, row.whom) > 0) markReadSoon(row.whom) { markRead(row.whom, force = true) }
             return row.copy(count = 0, notifyCount = 0)
         }
         return if (readHere(row.whom, row.recencyMs)) row.copy(count = 0, notifyCount = 0) else row
@@ -4429,6 +4440,7 @@ class TlonChatRepo(
             )
             return
         }
+        shipNotify.value = notifyCounts(obj)
         val focused = focusedWhom()
         val rows = obj.entries.mapNotNull { (sourceKey, summary) ->
             toUnread(sourceKey, summary as? JsonObject ?: return@mapNotNull null)
@@ -4479,6 +4491,7 @@ class TlonChatRepo(
         val focused = focusedWhom()
         (obj["activity"] as? JsonObject)?.let { map -> baseNotifyCount(map)?.let { _notifiedTotal.value = it } }
         (obj["activity"] as? JsonObject)?.let { map ->
+            shipNotify.update { it + notifyCounts(map) }
             val rows = map.entries.mapNotNull { (key, summary) ->
                 toUnread(key, summary as? JsonObject ?: return@mapNotNull null)
             }.map { row ->
@@ -4514,6 +4527,9 @@ class TlonChatRepo(
         (obj["read"] as? JsonObject)?.let { read ->
             val source = read["source"] as? JsonObject ?: return@let
             val summary = read["activity"] as? JsonObject ?: return@let
+            (sourceToThreadSource(source)?.let { "${it.whom}#${it.parentPostId}" } ?: sourceToWhom(source))?.let { at ->
+                shipNotify.update { it + (at to (summary["notify-count"].asInt() ?: 0)) }
+            }
             // A thread read on another client (or our own poke echoed
             // back): mirror the ship's count for that one thread.
             sourceToThreadSource(source)?.let { src ->
@@ -4673,7 +4689,11 @@ class TlonChatRepo(
         val had = db.unreads().getOne(whom)
         // Told the ship anyway where the counts here are not yet the ship's
         // (this connection has not read them) or a read of it is owed.
-        val unread = owesRead(whom, had != null && (had.count > 0 || had.notifyCount > 0), force)
+        // Or the ship's own count says something here notified: a reaction
+        // to the owner's message is never unread, so the row holds none of
+        // it, and the ship kept it on the iPhone's icon until a read (a
+        // user's report, 2026-10-19).
+        val unread = owesRead(whom, had != null && (had.count > 0 || had.notifyCount > 0) || ownNotified(shipNotify.value, whom) > 0, force)
 
         // Clear the badge locally immediately so the list flips the moment
         // the user enters the conversation. The server fact will confirm.
@@ -4718,6 +4738,8 @@ class TlonChatRepo(
         } else null
         if (!unread) return
         val source = activityReadSource(whom, groupFlag) ?: return
+        // Told: not told again on the next open before the ship's answer.
+        shipNotify.update { it - whom }
         pokeActivityRead(ch, whom, source)
     }
 

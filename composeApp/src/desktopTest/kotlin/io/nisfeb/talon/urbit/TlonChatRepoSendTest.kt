@@ -577,6 +577,103 @@ class TlonChatRepoSendTest {
         assertTrue(ship.pokesTo("activity").isEmpty(), "opened and left with nothing new: ${ship.pokesTo("activity")}")
     }
 
+    // A user's report, 2026-10-19: the iPhone's icon kept 4 with every
+    // chat read here. Two reactions in a channel and one in each of two
+    // DMs: they notify and are never unread (Tlon's default volumes), so
+    // no row here counted them and opening the chat told the ship nothing.
+    private val reacted = """{"base":{"count":0,"notify-count":1,"recency":2,"notify":true,"unread":null},""" +
+        """"ship/~bus":{"count":0,"notify-count":1,"recency":2,"notify":true,"unread":null}}"""
+
+    @Test
+    fun `a chat whose only news is a reaction is read on opening, once`() = live {
+        ship.scries["activity/v6/activity/full"] = reacted
+        repo.bootstrapActivityForTest()
+        assertEquals(0 to 0, db.unreads().getOne("~bus")!!.let { it.count to it.notifyCount }, "no dot: a reaction is not unread")
+        assertEquals(1, repo.notifiedTotal.first(), "but it is on the icon")
+        repo.setOpenChat("~bus")
+        kotlinx.coroutines.withTimeout(5_000) { while (ship.pokesTo("activity").isEmpty()) delay(20) }
+        // desk/lib/activity-json.hoon's read decoder: a source, and all with time and deep.
+        assertEquals(
+            """{"read":{"source":{"dm":{"ship":"~bus"}},"action":{"all":{"time":null,"deep":false}}}}""",
+            ship.pokesTo("activity").single().json.toString(),
+        )
+        repo.setOpenChat(null)
+        repo.setOpenChat("~bus")
+        delay(300)
+        assertEquals(1, ship.pokesTo("activity").size, "told once, not again before the ship answers")
+        // %activity's answer to the read: the chat and the total caught up.
+        repo.applyActivityUpdate(Json.parseToJsonElement(
+            """{"activity":{"base":{"count":0,"notify-count":0,"recency":3,"notify":false,"unread":null},"ship/~bus":{"count":0,"notify-count":0,"recency":3,"notify":false,"unread":null}}}""",
+        ).jsonObject)
+        assertEquals(0, repo.notifiedTotal.first(), "off the icon")
+        repo.setOpenChat(null)
+        repo.setOpenChat("~bus")
+        delay(300)
+        assertEquals(1, ship.pokesTo("activity").size, "caught up: nothing more to tell")
+    }
+
+    @Test
+    fun `a channel's reactions are read with its group, and its threads' count is not its own`() = live {
+        seedChannel()
+        db.groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~bus/busy", flag, title = "busy")))
+        ship.scries["activity/v6/activity/full"] = """{"channel/$nest":{"count":0,"notify-count":2,"recency":2,"notify":true,"unread":null},""" +
+            """"channel/chat/~bus/busy":{"count":1,"notify-count":1,"recency":2,"notify":true,"unread":null},""" +
+            """"thread/chat/~bus/busy/170.141.184.506":{"count":1,"notify-count":1,"recency":2,"notify":true,"unread":null}}"""
+        repo.bootstrapActivityForTest()
+        // A shallow read clears a thread's count nowhere: read on every open, it never ends.
+        repo.setOpenChat("chat/~bus/busy")
+        delay(300)
+        repo.setOpenChat(null)
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "${ship.pokesTo("activity")}")
+        repo.setOpenChat(nest)
+        kotlinx.coroutines.withTimeout(5_000) { while (ship.pokesTo("activity").isEmpty()) delay(20) }
+        assertEquals(
+            """{"read":{"source":{"channel":{"nest":"$nest","group":"$flag"}},"action":{"all":{"time":null,"deep":false}}}}""",
+            ship.pokesTo("activity").single().json.toString(),
+        )
+    }
+
+    @Test
+    fun `a reaction that lands in the chat in view is read`() = live {
+        ship.scries["activity/v6/activity/full"] = "{}"
+        repo.bootstrapActivityForTest()
+        repo.setForeground(true)
+        repo.setOpenChat("~bus")
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty())
+        repo.applyActivityUpdate(Json.parseToJsonElement("""{"activity":$reacted}""").jsonObject)
+        kotlinx.coroutines.withTimeout(TlonChatRepo.FOCUSED_READ_EVERY_MS + 2_000) { while (ship.pokesTo("activity").isEmpty()) delay(50) }
+        assertTrue("\"dm\":{\"ship\":\"~bus\"}" in ship.pokesTo("activity").single().json.toString())
+    }
+
+    // Real time: the read's own retries wait out about seven seconds before it is owed.
+    @Test
+    fun `a reaction's read the ship does not hear is owed and sent when it answers`() = live {
+        ship.scries["activity/v6/activity/full"] = reacted
+        repo.bootstrapActivityForTest()
+        ship.lose = { if (it.app == "activity") java.io.IOException("The network connection was lost.") else null }
+        repo.markRead("~bus")
+        assertTrue(ship.pokesTo("activity").isEmpty(), "none heard")
+        assertNull(repo.notifiedTotal.first(), "owed: the icon counts what is here")
+        ship.lose = { null }
+        repo.drainQueue()
+        assertEquals(1, ship.pokesTo("activity").size, "sent once the ship answers")
+    }
+
+    @Test
+    fun `a ship's read of the chat elsewhere takes its reaction off here too`() = live {
+        ship.scries["activity/v6/activity/full"] = reacted
+        repo.bootstrapActivityForTest()
+        // Read in Tlon's own app: %activity's read fact, with the summary after it.
+        repo.applyActivityUpdate(Json.parseToJsonElement(
+            """{"read":{"source":{"dm":{"ship":"~bus"}},"activity":{"count":0,"notify-count":0,"recency":3,"notify":false,"unread":null}}}""",
+        ).jsonObject)
+        repo.setOpenChat("~bus")
+        delay(300)
+        assertTrue(ship.pokesTo("activity").isEmpty(), "already read there: ${ship.pokesTo("activity")}")
+    }
+
     @Test
     fun `messages arriving in the chat in view are read once, not once each`() = live {
         ship.scries["activity/v6/activity/full"] = "{}"
