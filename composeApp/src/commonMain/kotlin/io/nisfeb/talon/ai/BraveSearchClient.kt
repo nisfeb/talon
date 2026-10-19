@@ -118,6 +118,26 @@ class BraveSearchClient(
         }
     }
 
+    /**
+     * Where [place] is: the place search's first hit, or "lat,lon" as
+     * given. Null where it finds none or cannot ask. Never throws.
+     */
+    suspend fun locate(place: String): Pair<Double, Double>? {
+        latLonOf(place.trim())?.let { return it }
+        val cfg = settings()
+        if (!cfg.assistantOn()) return null
+        val (base, key) = cfg.braveSearch() ?: return null
+        return withContext(ioDispatcher) {
+            io.nisfeb.talon.util.runSuspendCatching {
+                val (ok, body) = placeSearch(base, key) {
+                    parameter("q", place.trim())
+                    parameter("count", "1")
+                }
+                if (ok) parsePlaces(body).firstOrNull()?.let { it.lat to it.lon } else null
+            }.getOrNull()
+        }
+    }
+
     /** One place search: true and the body, or false and what to say. */
     private suspend fun placeSearch(
         base: String,

@@ -134,6 +134,8 @@ class TalonApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Which maps app directions go to (Google Maps, else OsmAnd).
+        io.nisfeb.talon.ui.MapsApps.context = this
         // Images off screen leave the memory cache while Talon is in the
         // background (those still drawn stay, held weakly), so a hidden
         // Talon holds less. ponytail: half is a guess; Coil names none.

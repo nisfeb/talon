@@ -278,7 +278,15 @@ object ToolCatalog {
                 write = false,
             ) { args ->
                 val to = args.str("destination")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: destination is required."
-                if (opener(io.nisfeb.talon.ui.mapsDirectionsUri(to, args.str("mode")))) "Opened directions to $to." else "Couldn't open a maps app."
+                // OsmAnd routes only to coordinates: the place is looked up first.
+                val point = if (io.nisfeb.talon.ui.directionsWantPoint()) places?.locate(to) else null
+                val link = io.nisfeb.talon.ui.mapsDirections(to, args.str("mode"), point)
+                when {
+                    !opener(link.uri) -> "Couldn't open a maps app."
+                    link.route -> "Opened directions to $to."
+                    // Said as it is, so the model does not promise a route.
+                    else -> "Opened maps at $to; directions are a tap away there."
+                }
             }
         },
         open?.takeIf { dials }?.let { opener ->
