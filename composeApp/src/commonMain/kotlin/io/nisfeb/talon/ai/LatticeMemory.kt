@@ -270,10 +270,10 @@ class LatticeApi(private val owner: HttpClient, private val bare: HttpClient, ba
             }
         }
         val text = call(owner, HttpMethod.Post, "key-mint", emptyMap(), body.toString(), ContentType.Application.Json, token = null)
-        val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
-        val token = o?.get("token")?.jsonPrimitive?.contentOrNull ?: throw LatticeError.Refused(200, "the answer had no key")
-        val id = (o["key"] as? JsonObject)?.get("id")?.jsonPrimitive?.contentOrNull ?: token.substringBefore('.')
-        return Minted(id, token)
+        val token = runCatching { Json.parseToJsonElement(text).jsonObject["token"]?.jsonPrimitive?.contentOrNull }.getOrNull()
+            ?: throw LatticeError.Refused(200, "the answer had no key")
+        // The token is the key's id and its secret: "<id>.<secret>".
+        return Minted(token.substringBefore('.'), token)
     }
 
     /** One of the key's routes. Saves send their text as the body, the rest as the query. */

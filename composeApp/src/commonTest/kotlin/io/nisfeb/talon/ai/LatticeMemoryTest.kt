@@ -97,7 +97,7 @@ class LatticeMemoryTest {
         assertTrue(ship.keyed.isEmpty())
     }
 
-    @Test fun `a mint answer with no key view takes the id from the token`() = runTest {
+    @Test fun `the key's id is the token's own`() = runTest {
         val ship = Ship().apply { mint = HttpStatusCode.OK to """{"token":"k9.x"}""" }
         assertEquals(LatticeApi.Minted("k9", "k9.x"), ship.api().mint("n", "b"))
     }
@@ -116,7 +116,8 @@ class LatticeMemoryTest {
         val ship = Ship()
         val dao = Keys()
         val save = keys(dao, ship).mind().tools.single { it.spec.name == "memory_save" }
-        save.execute(buildJsonObject { put("key", "user/trips"); put("body", "Flies Delta & Air France."); put("expected_updated", "~2026.10.19"); put("force_new", true) })
+        val said = save.execute(buildJsonObject { put("key", "user/trips"); put("body", "Flies Delta & Air France."); put("expected_updated", "~2026.10.19"); put("force_new", true) })
+        assertEquals("""{"ok":true}""", said, "lattice's own answer reaches the model")
         val req = ship.keyed.single { it.url.encodedPath.endsWith("/know-save") }
         assertEquals(HttpMethod.Post, req.method)
         assertEquals("Bearer k7.s3cret", req.headers[HttpHeaders.Authorization])
