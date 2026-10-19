@@ -263,7 +263,10 @@ fun AppsSettingsScreen(
                             scope.launch {
                                 renew().fold(
                                     onSuccess = { note = "Made a new key. The assistants remember again." },
-                                    onFailure = { note = io.nisfeb.talon.util.failureLine("The key was not made", it) },
+                                    onFailure = {
+                                        note = (it as? io.nisfeb.talon.ai.LatticeError.Refused)?.let { e -> "The key was not made: ${e.reason}." }
+                                            ?: io.nisfeb.talon.util.failureLine("The key was not made", it)
+                                    },
                                 )
                                 busy = null
                             }
