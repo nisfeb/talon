@@ -1440,6 +1440,10 @@ class TlonChatRepo(
      */
     private val shipNotify = MutableStateFlow<Map<String, Int>>(emptyMap())
 
+    /** Whether the ship still counts something in [whom] that no row here
+     *  shows, a reaction to the owner ([ownNotified]): Mark all read takes it. */
+    fun shipStillCounts(whom: String): Boolean = ownNotified(shipNotify.value, whom) > 0
+
     /**
      * Whether the ship's word on what is unread has been read since this
      * connection began. Until it has, the counts here may be stale, so a

@@ -1784,7 +1784,10 @@ fun DmListScreen(
                 }
                 .toSet()
         }
-        val unreadWhoms = rows.filter { (_, count) -> count > 0 }
+        // And every chat whose only news is a reaction the ship still counts
+        // on the iPhone's icon: no unread here, but not read there either
+        // (sneagan, 2026-10-19: "mark all read should also clear the reactions").
+        val unreadWhoms = rows.filter { (m, count) -> count > 0 || repo.shipStillCounts(m.whom) }
             .map { (m, _) -> m.whom }
             .filter { folderWhoms == null || it in folderWhoms }
         val dismiss = {

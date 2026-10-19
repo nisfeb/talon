@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -54,6 +55,7 @@ import kotlin.test.assertEquals
 class HomeListTest {
     private val opened = mutableListOf<String>()
     private lateinit var db: AppDatabase
+    private lateinit var repo: TlonChatRepo
 
     /** Where the list sent the user: each menu destination by name. */
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
@@ -74,6 +76,7 @@ class HomeListTest {
         val ship = FakeShip("~zod")
         val sync = if (synced) io.nisfeb.talon.urbit.SettingsSyncImpl(db = db, aiSettings = io.nisfeb.talon.urbit.FakeAiSettings()).apply { attach(ship.channel) } else null
         val repo = TlonChatRepo(db, settingsSync = sync).apply { attachForTest(ship.channel, "~zod") }
+        this.repo = repo
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
         runBlocking { db.seed() }
@@ -121,6 +124,50 @@ class HomeListTest {
     private fun ComposeUiTest.tap(text: String, substring: Boolean = false) {
         shows(text, substring)
         onNodeWithText(text, substring = substring).performClick()
+    }
+
+    // sneagan, 2026-10-19: "mark all read should also clear the reactions".
+    // A reaction to the owner notifies and is never unread: no count here,
+    // but the ship keeps it on the iPhone's icon until the chat is read.
+    private val reactedAndUnread = """{"ship/~bus":{"count":0,"notify-count":1,"recency":2,"notify":true,"unread":null},""" +
+        """"ship/~nec":{"count":1,"notify-count":1,"recency":3,"notify":true,"unread":{"id":"~nec/170.141.184.507","time":"170.141.184.507","count":1,"notify":true}},""" +
+        """"ship/~wes":{"count":0,"notify-count":0,"recency":1,"notify":false,"unread":null}}"""
+
+    private val threeDms: suspend AppDatabase.() -> Unit = {
+        messages().upsert(msg("~bus", "~zod/170141184506", "~zod", "lunch?", 1_000))
+        messages().upsert(msg("~nec", "~nec/170141184507", "~nec", "see you soon", 2_000))
+        messages().upsert(msg("~wes", "~wes/170141184505", "~wes", "old news", 500))
+    }
+
+    private fun readOf(p: FakeShip.Poke) = p.json.toString().substringAfter("\"ship\":\"").substringBefore("\"")
+
+    @Test
+    fun `mark all read takes the chats whose only news is a reaction, and leaves the rest`() = home(seed = threeDms) { ship ->
+        ship.scries["activity/v6/activity/full"] = reactedAndUnread
+        runBlocking { repo.bootstrapActivityForTest() }
+        tap("DMs")
+        shows("see you soon", substring = true)
+        onNodeWithText("All").performTouchInput { longClick() }
+        shows("Clears the unread badge on 2 chats.")
+        onNodeWithText("Mark read").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").size >= 2 }
+        waitForIdle()
+        assertEquals(setOf("~bus", "~nec"), ship.pokesTo("activity").map(::readOf).toSet(), "not ~wes: nothing there")
+        assertEquals(2, ship.pokesTo("activity").size)
+    }
+
+    @Test
+    fun `with only reactions left mark all read still has something to do`() = home(seed = threeDms) { ship ->
+        ship.scries["activity/v6/activity/full"] = """{"ship/~bus":{"count":0,"notify-count":1,"recency":2,"notify":true,"unread":null},""" +
+            """"ship/~nec":{"count":0,"notify-count":0,"recency":3,"notify":false,"unread":null}}"""
+        runBlocking { repo.bootstrapActivityForTest() }
+        tap("DMs")
+        shows("see you soon", substring = true)
+        onNodeWithText("All").performTouchInput { longClick() }
+        shows("Clears the unread badge on 1 chat.")
+        onNodeWithText("Mark read").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("activity").isNotEmpty() }
+        assertEquals(listOf("~bus"), ship.pokesTo("activity").map(::readOf))
     }
 
     @Test
