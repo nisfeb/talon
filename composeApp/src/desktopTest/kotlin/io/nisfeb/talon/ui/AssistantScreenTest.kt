@@ -116,6 +116,12 @@ class AssistantScreenTest {
     /** An observe the ship never answers. */
     @Volatile private var observeDown = false
 
+    /** What GET /api/watches answers; null, an orrery older than watches. */
+    @Volatile private var watchesDoc: String? = null
+
+    /** Each read of the watches, and whether it carried this install's key. */
+    private val watchReads: MutableList<Boolean> = java.util.concurrent.CopyOnWriteArrayList()
+
     private fun <T> MutableList<T>.next(): T = synchronized(this) { if (size > 1) removeAt(0) else single() }
 
     /** The orrery the screen was given. */
@@ -146,6 +152,10 @@ class AssistantScreenTest {
                     ?: respond("""{"error":"no such body"}""", io.ktor.http.HttpStatusCode.NotFound, json)
                 path.endsWith("/api/observe") -> if (observeDown) throw java.io.IOException("connection reset") else respond(observeAnswer, io.ktor.http.HttpStatusCode.OK, json)
                 path.endsWith("/api/retract") -> respond("""{"ok":true}""", io.ktor.http.HttpStatusCode.OK, json)
+                path.endsWith("/api/watches") -> {
+                    watchReads += req.headers[io.ktor.http.HttpHeaders.Authorization] != null
+                    watchesDoc?.let { respond(it, io.ktor.http.HttpStatusCode.OK, json) } ?: respond("""{"error":"not found"}""", io.ktor.http.HttpStatusCode.NotFound, json)
+                }
                 else -> respond("", io.ktor.http.HttpStatusCode.NotFound)
             }
         })
@@ -633,6 +643,31 @@ class AssistantScreenTest {
         changeNeeds()
         waitUntil(timeoutMillis = 15_000) { shows("Your ship did not answer.") }
         assertTrue("may or may not have taken it" in toolSaid(), toolSaid())
+    }
+
+    // sneagan, 2026-10-18: "the assistant says it can't get my flight
+    // status. both text and voice assistants should be able to do that.
+    // orrery can". Orrery watches the flight; the assistant reads it.
+    @Test
+    fun `a flight's status is read from orrery's watches and reaches the model`() = assistant(withOrrery = true) {
+        watchesDoc = """{"flight_api":{"key_set":true},"watches":[{"id":"dl2627","kind":"flight","flight":"dl2627","date":"2026-10-18","from":"JAX",""" +
+            """"last":{"status":"Delayed","dep_sched":"2026-10-18 23:00Z","dep_gate":"B4"}}]}"""
+        toolCall = call("c1", "orrery_flights")
+        answer = "DL2627 is delayed, gate B4."
+        ask("what's my flight status")
+        waitUntil(timeoutMillis = 15_000) { shows("DL2627 is delayed, gate B4.") }
+        assertTrue("DL2627 on 2026-10-18 from JAX: status Delayed" in toolSaid() && "gate B4" in toolSaid(), toolSaid())
+        assertEquals(listOf(false), watchReads, "read once, on the owner's login")
+        assertTrue(!shows("Allow this action?"), "a read asks nothing")
+    }
+
+    @Test
+    fun `an orrery with no watches is said to be too old, not to have no flights`() = assistant(withOrrery = true) {
+        toolCall = call("c1", "orrery_flights")
+        answer = "Your orrery is too old to watch flights."
+        ask("is my flight on time")
+        waitUntil(timeoutMillis = 15_000) { shows("Your orrery is too old to watch flights.") }
+        assertEquals("This orrery has no flight watches: it is older than version 105.", toolSaid())
     }
 
     private val late = """{"id":"a7","kind":"message","title":"Say you are running late to Park at JAX for DL 2627",""" +

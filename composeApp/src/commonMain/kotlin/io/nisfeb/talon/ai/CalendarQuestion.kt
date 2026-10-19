@@ -68,7 +68,7 @@ object CalendarQuestion {
             put("instructions", "Is the owner only asking what is on their calendar on some days, or what is next on it, so that those days' events and due tasks answer them in full?")
             putJsonObject("criteria") {
                 put("true", "a plain question about what is on: what's on today, what do I have tomorrow, how does my week look, anything this weekend, what's next, or a bare follow-up such as \"and tomorrow?\" to one of these")
-                put("false", "anything else: an instruction or a request (add, remind, text, send, cancel, move, something to do or to keep), what is left to do, a trip, a person, a place, when or where something is, being free or busy, a count, mail or messages")
+                put("false", "anything else: an instruction or a request (add, remind, text, send, cancel, move, something to do or to keep), what is left to do, a trip, a flight or its status, a person, a place, when or where something is, being free or busy, a count, mail or messages")
             }
         }
         putJsonObject("days") {

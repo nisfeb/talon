@@ -182,7 +182,7 @@ class DictationAgentTest {
     fun `a question reads orrery too, and writes nothing to it`() {
         // "What do I have left to do before Barcelona?" is orrery's to answer: its open situations and actions.
         val events = listOf(tool("list_events", false))
-        assertEquals(listOf("list_events", "orrery_find", "orrery_read"), DictationAgent.readsFor(events, OrreryToolsTest.Tap()).map { it.spec.name })
+        assertEquals(listOf("list_events", "orrery_find", "orrery_read", "orrery_flights"), DictationAgent.readsFor(events, OrreryToolsTest.Tap()).map { it.spec.name })
         assertEquals(listOf("list_events"), DictationAgent.readsFor(events).map { it.spec.name }, "no orrery, no orrery tools")
         assertTrue("orrery_read" in DictationAgent.askPrompt && "left to do" in DictationAgent.askPrompt)
         assertTrue("not on the screen" in DictationAgent.askPrompt, "what orrery holds is said, since the card draws none of it")

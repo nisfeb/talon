@@ -119,6 +119,9 @@ class OrreryToolsTest {
             struck = "$subject $attr $value $why".trim()
             return Result.success(buildJsonObject { put("id", "c1") })
         }
+        /** What GET /api/watches answers. */
+        var watchesDoc: Result<JsonObject> = Result.success(buildJsonObject { })
+        override suspend fun watches() = watchesDoc
     }
 
     // ─── telling orrery, and striking what it holds ─────────────────
@@ -359,7 +362,7 @@ class OrreryToolsTest {
         val byWrite = orreryTools(Tap()).groupBy({ it.write }, { it.spec.name })
         assertEquals(setOf("orrery_observe", "orrery_configure", "orrery_set_preferences", "orrery_file_text", "orrery_register", "orrery_instruct", "orrery_correct", "orrery_set", "orrery_answer"), byWrite[true]?.toSet())
         assertEquals(
-            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_settings", "orrery_preferences", "orrery_actions"),
+            setOf("orrery_guide", "orrery_find", "orrery_read", "orrery_flights", "orrery_settings", "orrery_preferences", "orrery_actions"),
             byWrite[false]?.toSet(),
         )
     }

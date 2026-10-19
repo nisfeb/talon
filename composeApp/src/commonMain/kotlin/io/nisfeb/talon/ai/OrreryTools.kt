@@ -8,6 +8,8 @@ import io.nisfeb.talon.orrery.OrreryPreferences
 import io.nisfeb.talon.orrery.OrreryRepo
 import io.nisfeb.talon.orrery.answerShown
 import io.nisfeb.talon.urbit.asText
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -233,6 +235,8 @@ interface OrreryTap {
     suspend fun instruct(text: String, apply: Boolean): Result<io.nisfeb.talon.orrery.Instructed>
     /** Strike a value as wrong everywhere it is said; the ship's record of it. */
     suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String): Result<JsonObject>
+    /** Orrery's watches: each flight with what it last found. */
+    suspend fun watches(): Result<JsonObject>
 }
 
 /** The repo as the tools see it. */
@@ -291,6 +295,8 @@ fun OrreryRepo.asTap(): OrreryTap = object : OrreryTap {
 
     override suspend fun correct(subject: String, attr: String, value: kotlinx.serialization.json.JsonElement, why: String) =
         this@asTap.correct(subject, attr, value, why)
+
+    override suspend fun watches() = readWatches()
 }
 
 /**
@@ -373,6 +379,23 @@ fun orreryTools(orrery: OrreryTap): List<Tool> = buildList {
                 onFailure = { "Could not read $id: ${it.message}" },
             )
         }
+    })
+
+    add(Tool(
+        spec = ToolSpec(
+            "orrery_flights",
+            "The owner's flights as orrery watches them: each one's status, departure and arrival times (scheduled and revised), terminal and gates, as orrery last found them in the airline data, and when it looks again. Use it for any question about a flight: its status, a delay, a gate, when it leaves or lands. Orrery looks on its own, as often as every five minutes near departure; this reads what it found and asks the airline nothing. A flight orrery does not watch is not here.",
+            toolSchema(required = emptyList()),
+        ),
+        write = false,
+    ) { _ ->
+        orrery.watches().fold(
+            onSuccess = { flightLines(it, kotlinx.datetime.TimeZone.currentSystemDefault()) },
+            onFailure = { e ->
+                if (e is OrreryError.Refused && e.status == 404) "This orrery has no flight watches: it is older than version 105."
+                else "Could not read orrery's flights: ${e.message}"
+            },
+        )
     })
 
     add(Tool(
@@ -1083,3 +1106,49 @@ private val ANSWERS = setOf("approved", "dismissed")
 
 /** An action's statuses once approved: what it asks of the record is carried out. */
 private val DECIDED = setOf("approved", "claimed", "done")
+
+/**
+ * Orrery's flight watches as the model reads them: what each last look
+ * found, its times in [zone]. The flight API's times are UTC, as
+ * "2026-10-18 23:00Z", and one that does not parse is shown as it came.
+ * A failed look keeps the one before it, so that is said.
+ */
+internal fun flightLines(doc: JsonObject, zone: kotlinx.datetime.TimeZone): String {
+    val flights = (doc["watches"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().filter { it.str("kind") == "flight" }
+    if (flights.isEmpty()) return "Orrery watches no flights."
+    fun at(t: String?): String? = t?.let { raw ->
+        runCatching {
+            val d = kotlinx.datetime.LocalDateTime.parse(raw.trim().removeSuffix("Z").replace(' ', 'T'))
+                .toInstant(kotlinx.datetime.TimeZone.UTC).toLocalDateTime(zone)
+            "${d.date} ${d.hour.toString().padStart(2, '0')}:${d.minute.toString().padStart(2, '0')}"
+        }.getOrDefault(raw)
+    }
+    return "Times are in ${zone.id}.\n" + flights.joinToString("\n") { w ->
+        val head = listOfNotNull(w.str("flight")?.uppercase(), w.str("date")?.let { "on $it" }, w.str("from")?.let { "from ${it.uppercase()}" })
+            .joinToString(" ") + (w.str("label")?.let { " ($it)" } ?: "")
+        val last = w["last"] as? JsonObject
+        val said = buildList {
+            w.str("note")?.let { add(if (last == null) "not looked at yet: $it" else "orrery's last look failed ($it), so this is the look before") }
+            if (last == null && w.str("note") == null) add("not looked at yet")
+            if (last != null) {
+                add("status ${last.str("status") ?: "not given"}")
+                val dep = listOfNotNull(
+                    at(last.str("dep_sched"))?.let { "departs $it" },
+                    at(last.str("dep_revised"))?.let { "revised $it" },
+                    last.str("dep_term")?.let { "terminal $it" },
+                    last.str("dep_gate")?.let { "gate $it" },
+                )
+                val arr = listOfNotNull(
+                    at(last.str("arr_sched"))?.let { "arrives $it" },
+                    at(last.str("arr_revised"))?.let { "revised $it" },
+                    last.str("arr_gate")?.let { "arrival gate $it" },
+                )
+                if (dep.isNotEmpty()) add(dep.joinToString(", "))
+                if (arr.isNotEmpty()) add(arr.joinToString(", "))
+            }
+            if ((w["done"] as? JsonPrimitive)?.contentOrNull == "true") add("landed or a day past due: orrery no longer looks")
+            else at(w.str("next"))?.let { add("orrery looks again at $it") }
+        }
+        "$head: ${said.joinToString("; ")}."
+    }
+}

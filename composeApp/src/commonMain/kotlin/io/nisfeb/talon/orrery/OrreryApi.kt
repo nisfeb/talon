@@ -505,6 +505,16 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 
+    /**
+     * Orrery's watches (version 105): each flight it checks with what it
+     * last found, and each page. The owner's only. A request, not a scry:
+     * the file holds the flight API key, and this route masks it.
+     */
+    suspend fun watches(): JsonObject {
+        val text = request(owner, HttpMethod.Get, "/api/watches")
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
     /** [travelLast] read by scry: the same document, or null where it cannot be scried. */
     suspend fun travelLastByScry(): JsonObject? =
         scryFile("/leave-last.json.json")?.let { text -> reading { Json.parseToJsonElement(text).jsonObject } }
