@@ -16,6 +16,10 @@
          (DEFAULT + BROWSABLE) so the visibility match is exact. -->
     <queries>
         <package android:name="io.nisfeb.lattice" />
+        <!-- The maps apps directions go to (ui/EventLinks.android.kt MapsApps). -->
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="net.osmand" />
+        <package android:name="net.osmand.plus" />
         <!-- Health Connect before Android 14, where it is an app (orrery/HealthWatch.kt). -->
         <package android:name="com.google.android.apps.healthdata" />
         <intent>

@@ -120,6 +120,17 @@ class DictationFlow(
         private val LOOKUP = Regex("""^(please |can you |could you |would you |will you )?(tell me|show me|read me|look up|check(?!(\s+\S+){0,2}\s+off\b)|find out|let me know(?!\s+when\b))\b""")
 
         /**
+         * Asking to be taken somewhere: the phone's maps, which orrery
+         * cannot open. "Take me back to the hotel" went to orrery as an
+         * instruction (sneagan, 2026-10-19).
+         */
+        private val NAVIGATE = Regex(
+            """^(please |can you |could you |would you |will you )?(take me|get me|guide me|navigate( me)?|route me|drive me|walk me) (back|home|to|there)\b""" +
+                """|^(please |can you |could you |would you |will you )?((give|get|show) me )?directions (to|home|back)\b""" +
+                """|^how (do|can|would|should) (i|we) get (back|home|to|there)\b""",
+        )
+
+        /**
          * Where [text] goes. A question is one whisper wrote with a
          * question mark, the punctuation being the signal it is surest
          * of; a first word alone misleads ("Have Andrea pick up Linus",
@@ -130,7 +141,7 @@ class DictationFlow(
             val t = text.trim()
             val lower = t.lowercase()
             return when {
-                LOOKUP.containsMatchIn(lower) -> DictationRoute.Ask
+                LOOKUP.containsMatchIn(lower) || NAVIGATE.containsMatchIn(lower) -> DictationRoute.Ask
                 t.endsWith("?") && !REQUEST.containsMatchIn(lower) -> DictationRoute.Ask
                 t.encodeToByteArray().size > INSTRUCT_BYTES -> DictationRoute.File
                 else -> DictationRoute.Tell

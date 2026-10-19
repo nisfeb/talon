@@ -131,6 +131,27 @@ class FindPlacesTest {
         assertTrue(groups[0].startsWith("Nearest \"hardware store\"") && groups[1].startsWith("Nearest \"pharmacy\""), said)
     }
 
+    // OsmAnd routes only to coordinates (sneagan, 2026-10-19: OsmAnd where
+    // Google Maps is not): the place is looked up once, by the same search.
+    @Test
+    fun `a place is located by the vendor's search, and coordinates are taken as given`() = runBlocking {
+        assertEquals(30.329 to -81.6568, client.locate("Florida Theatre, Jacksonville"))
+        val ask = asked.single()
+        assertEquals("Florida Theatre, Jacksonville" to "1", ask.second["q"] to ask.second["count"])
+        assertEquals("k1", ask.third)
+        asked.clear()
+        assertEquals(41.4036 to 2.1744, client.locate("41.4036, 2.1744"))
+        assertTrue(asked.isEmpty(), "nothing to look up")
+        geocode = """{"results":[]}"""
+        assertEquals(null, client.locate("Nowhere at all"))
+        status = HttpStatusCode.BadGateway
+        assertEquals(null, client.locate("Florida Theatre"), "a failed search is no place, not an error")
+        config = cfg(row = null)
+        asked.clear()
+        assertEquals(null, client.locate("Florida Theatre"))
+        assertTrue(asked.isEmpty(), "no vendor search, nothing asked")
+    }
+
     /** Every link handed to the device, and whether it took it. */
     private val opened = CopyOnWriteArrayList<String>()
     @Volatile private var opens = true
@@ -143,8 +164,10 @@ class FindPlacesTest {
     // answer that does not claim a call was made.
     @Test
     fun `take me there opens maps at the address, and call it opens the dialer without calling`() {
-        assertEquals("Opened maps at 5 Main St, Jacksonville, FL 32206.", handOff("open_directions", false, "destination" to "5 Main St, Jacksonville, FL 32206"))
-        assertEquals("https://www.openstreetmap.org/search?query=5%20Main%20St%2C%20Jacksonville%2C%20FL%2032206", opened.single(), "desktop's maps are a web page")
+        // A computer knows no "here": its map search, said as just that.
+        assertEquals("Opened maps at 5 Main St, Jacksonville, FL 32206; directions are a tap away there.", handOff("open_directions", false, "destination" to "5 Main St, Jacksonville, FL 32206", "mode" to "Walking"))
+        assertEquals("https://www.openstreetmap.org/search?query=5%20Main%20St%2C%20Jacksonville%2C%20FL%2032206", opened.single())
+        assertEquals(io.nisfeb.talon.ui.mapsDirections("5 Main St, Jacksonville, FL 32206", "walking").uri, opened.single(), "the mode as the platform takes it")
         opened.clear()
         assertEquals("Opened the dialer with +1 (904) 555-0100. The call starts when the user taps call.", handOff("call_place", true, "number" to "+1 (904) 555-0100"))
         assertEquals("tel:+19045550100", opened.single())

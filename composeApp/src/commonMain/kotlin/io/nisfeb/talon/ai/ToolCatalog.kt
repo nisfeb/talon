@@ -268,13 +268,25 @@ object ToolCatalog {
             Tool(
                 spec = ToolSpec(
                     "open_directions",
-                    "Open the device's maps app at a place, for directions there. Give the address find_places or list_events gave, with its town.",
-                    toolSchema("destination" to ("string" to "The address, or a place's name and town."), required = listOf("destination")),
+                    "Open the device's maps app with directions from where the owner is to a place, ready to start. Give the address find_places, list_events or orrery gave, with its town.",
+                    toolSchema(
+                        "destination" to ("string" to "The address, or a place's name and town."),
+                        "mode" to ("string" to "walking, driving, bicycling or transit, where the owner said how or it is plain; else leave it out and the maps app chooses."),
+                        required = listOf("destination"),
+                    ),
                 ),
                 write = false,
             ) { args ->
                 val to = args.str("destination")?.trim()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: destination is required."
-                if (opener(io.nisfeb.talon.ui.mapsSearchUri(to))) "Opened maps at $to." else "Couldn't open a maps app."
+                // OsmAnd routes only to coordinates: the place is looked up first.
+                val point = if (io.nisfeb.talon.ui.directionsWantPoint()) places?.locate(to) else null
+                val link = io.nisfeb.talon.ui.mapsDirections(to, args.str("mode"), point)
+                when {
+                    !opener(link.uri) -> "Couldn't open a maps app."
+                    link.route -> "Opened directions to $to."
+                    // Said as it is, so the model does not promise a route.
+                    else -> "Opened maps at $to; directions are a tap away there."
+                }
             }
         },
         open?.takeIf { dials }?.let { opener ->

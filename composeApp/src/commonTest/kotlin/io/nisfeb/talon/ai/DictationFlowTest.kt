@@ -31,6 +31,21 @@ class DictationFlowTest {
         assertEquals(DictationRoute.Tell, DictationFlow.route("Please add milk to my list?"))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Could you tell me what's on tomorrow?"))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Tell me what's on tomorrow."))
+    }
+
+    // sneagan, 2026-10-19: "take me back to the hotel" and "navigate me to
+    // sagrada familia" went to orrery, which cannot open the phone's maps.
+    @Test
+    fun `asking to be taken somewhere is the assistant's, which opens maps`() {
+        listOf(
+            "Take me back to the hotel", "take me home.", "Navigate me to Sagrada Familia", "navigate to the airport",
+            "Can you take me to the hotel?", "Please get me back to the hotel", "Directions to Park Güell",
+            "Give me directions home", "How do I get back to the hotel", "how can we get to the beach", "Walk me there",
+        ).forEach { assertEquals(DictationRoute.Ask, DictationFlow.route(it), it) }
+        listOf(
+            "Take Linus to the hotel at three", "Remind me to take my passport", "Take me off the carpool list",
+            "Navigate the contract with Andrea", "Have Andrea drive me to the airport",
+        ).forEach { assertEquals(DictationRoute.Tell, DictationFlow.route(it), it) }
         assertEquals(DictationRoute.Ask, DictationFlow.route("Read me my unread messages"), "not a todo for orrery: something to hear")
         assertEquals(DictationRoute.Tell, DictationFlow.route("Reading list: add Dune."), "only read me")
         assertEquals(DictationRoute.Tell, DictationFlow.route("Check off the milk."), "a tick, not a lookup")
@@ -110,6 +125,15 @@ class DictationFlowTest {
         assertEquals(DictationFlow.Reply("You have ballet at 4:45.", DictationRoute.Ask), ship.flow().handle("What's on today?"))
         assertEquals(listOf("What's on today?" to emptyList<DictationFlow.Earlier>()), ship.questions)
         assertTrue(ship.asked.isEmpty() && ship.answered.isEmpty())
+    }
+
+    @Test
+    fun `being taken somewhere goes to the assistant, and orrery is not told`() = runBlocking {
+        val ship = Ship()
+        assertEquals(DictationRoute.Ask, ship.flow().handle("Take me back to the hotel").route)
+        assertEquals(DictationRoute.Ask, ship.flow().handle("Navigate me to Sagrada Familia").route)
+        assertEquals(listOf("Take me back to the hotel", "Navigate me to Sagrada Familia"), ship.questions.map { it.first })
+        assertTrue(ship.told.isEmpty(), "${ship.told}")
     }
 
     @Test
