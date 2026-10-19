@@ -25,4 +25,16 @@ class EventLinksTest {
     @Test fun `a map search encodes the address`() {
         assertEquals(true, mapsSearchUri("1 Main St, Springfield").endsWith("1+Main+St%2C+Springfield") || mapsSearchUri("1 Main St, Springfield").endsWith("1%20Main%20St%2C%20Springfield"))
     }
+
+    // sneagan, 2026-10-19: directions laid out, one tap from starting.
+    @Test
+    fun `directions are each platform's own, by how the owner travels`() {
+        assertEquals("https://www.google.com/maps/dir/?api=1&destination=Sagrada%20Fam%C3%ADlia&travelmode=walking", googleDirectionsUri("Sagrada%20Fam%C3%ADlia", "walking"))
+        assertEquals("https://www.google.com/maps/dir/?api=1&destination=Hotel", googleDirectionsUri("Hotel", null))
+        assertEquals("maps://?daddr=Hotel&dirflg=w", appleDirectionsUri("Hotel", "walking"))
+        assertEquals("maps://?daddr=Hotel&dirflg=d", appleDirectionsUri("Hotel", "driving"))
+        assertEquals("maps://?daddr=Hotel&dirflg=r", appleDirectionsUri("Hotel", "transit"))
+        assertEquals("maps://?daddr=Hotel", appleDirectionsUri("Hotel", "bicycling"), "Apple has no flag for a bicycle")
+        assertEquals(mapsDirectionsUriFor("Hotel", null), mapsDirectionsUri(" Hotel ", "by camel"), "a mode it does not know is left out")
+    }
 }

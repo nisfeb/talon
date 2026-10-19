@@ -40,3 +40,33 @@ fun mapsSearchUri(query: String): String = mapsSearchUriFor(query.trim().encodeU
 
 /** The platform's map search, given the query already encoded. */
 expect fun mapsSearchUriFor(encodedQuery: String): String
+
+/** How a route is travelled, as the maps hand-off takes it. */
+val TRAVEL_MODES: Set<String> = setOf("walking", "driving", "bicycling", "transit")
+
+/**
+ * Directions from where the owner is to [destination], laid out and one
+ * tap from starting, by [mode] where it is one of [TRAVEL_MODES].
+ */
+fun mapsDirectionsUri(destination: String, mode: String? = null): String =
+    mapsDirectionsUriFor(destination.trim().encodeURLParameter(), mode?.takeIf { it in TRAVEL_MODES })
+
+/** The platform's directions, given the destination already encoded. A computer knows no "from here": its map search. */
+expect fun mapsDirectionsUriFor(encodedDestination: String, mode: String?): String
+
+/**
+ * Google Maps' directions link, for Android: the app where it is
+ * installed, else Google Maps in the browser.
+ * ponytail: another maps app is not offered it; geo: carries no route.
+ */
+fun googleDirectionsUri(encodedDestination: String, mode: String?): String =
+    "https://www.google.com/maps/dir/?api=1&destination=$encodedDestination" + (mode?.let { "&travelmode=$it" } ?: "")
+
+/** Apple Maps' directions from here, for iOS. Its dirflg has driving, walking and transit, and nothing for a bicycle. */
+fun appleDirectionsUri(encodedDestination: String, mode: String?): String =
+    "maps://?daddr=$encodedDestination" + when (mode) {
+        "driving" -> "&dirflg=d"
+        "walking" -> "&dirflg=w"
+        "transit" -> "&dirflg=r"
+        else -> ""
+    }

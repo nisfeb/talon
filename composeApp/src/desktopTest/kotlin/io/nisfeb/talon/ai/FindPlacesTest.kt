@@ -143,8 +143,9 @@ class FindPlacesTest {
     // answer that does not claim a call was made.
     @Test
     fun `take me there opens maps at the address, and call it opens the dialer without calling`() {
-        assertEquals("Opened maps at 5 Main St, Jacksonville, FL 32206.", handOff("open_directions", false, "destination" to "5 Main St, Jacksonville, FL 32206"))
-        assertEquals("https://www.openstreetmap.org/search?query=5%20Main%20St%2C%20Jacksonville%2C%20FL%2032206", opened.single(), "desktop's maps are a web page")
+        assertEquals("Opened directions to 5 Main St, Jacksonville, FL 32206.", handOff("open_directions", false, "destination" to "5 Main St, Jacksonville, FL 32206", "mode" to "Walking"))
+        assertEquals("https://www.openstreetmap.org/search?query=5%20Main%20St%2C%20Jacksonville%2C%20FL%2032206", opened.single(), "a computer knows no here: its map search")
+        assertEquals(io.nisfeb.talon.ui.mapsDirectionsUri("5 Main St, Jacksonville, FL 32206", "walking"), opened.single(), "the mode as the platform takes it")
         opened.clear()
         assertEquals("Opened the dialer with +1 (904) 555-0100. The call starts when the user taps call.", handOff("call_place", true, "number" to "+1 (904) 555-0100"))
         assertEquals("tel:+19045550100", opened.single())
