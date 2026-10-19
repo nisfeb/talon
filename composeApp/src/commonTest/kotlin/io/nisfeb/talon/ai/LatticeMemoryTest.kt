@@ -93,7 +93,13 @@ class LatticeMemoryTest {
             """{"name":"Talon on Android","by":"talon-android","scope":{"memory":"write","pages":"write","web":true,"sensitive":false}}""",
             (req.body as TextContent).text,
         )
+        assertEquals("application/json", (req.body as TextContent).contentType.withoutParameters().toString())
         assertTrue(ship.keyed.isEmpty())
+    }
+
+    @Test fun `a mint answer with no key view takes the id from the token`() = runTest {
+        val ship = Ship().apply { mint = HttpStatusCode.OK to """{"token":"k9.x"}""" }
+        assertEquals(LatticeApi.Minted("k9", "k9.x"), ship.api().mint("n", "b"))
     }
 
     @Test fun `the name a key writes as is only what lattice takes`() {
@@ -142,6 +148,7 @@ class LatticeMemoryTest {
         val a = keys(dao, ship)
         listOf(async { a.mind() }, async { keys(dao, ship).mind() }).awaitAll()
         assertEquals(1, ship.owned.size, "two at once make one key")
+        assertTrue(""""name":"Talon on Android","by":"talon-android"""" in (ship.owned.single().body as TextContent).text)
         assertEquals(LatticeKeyEntity("~zod", "k7", "k7.s3cret"), dao.get("~zod"))
         a.mind()
         assertEquals(1, ship.owned.size)
@@ -202,14 +209,19 @@ class LatticeMemoryTest {
         val dao = Keys()
         val m = keys(dao, ship).mind()
         assertTrue(m.prompt.startsWith(LatticeMemory.prompt), m.prompt.take(80))
+        // The plugin's skills: recall first, what not to save, others' words as data.
+        listOf("memory_recall with a sentence", "Don't save", "quoted material", "expected_updated", "memory_supersede").forEach {
+            assertTrue(it in LatticeMemory.prompt, it)
+        }
         assertTrue("LATTICE INDEX" in m.prompt && "Always say which ship." in m.prompt)
         val index = ship.keyed.single { it.url.encodedPath.endsWith("/know-index") }
         assertEquals("1" to "50000", index.url.parameters["brief"] to index.url.parameters["cap"])
-        keys(dao, ship).mind()
+        val again = keys(dao, ship).mind()
         assertEquals(1, ship.keyed.count { it.url.encodedPath.endsWith("/know-index") }, "a session's, not each question's")
-        clock += LatticeKeys.INDEX_FOR_MS + 1
+        assertTrue("Always say which ship." in again.prompt, "the kept index, not none")
+        clock += LatticeKeys.INDEX_FOR_MS
         keys(dao, ship).mind()
-        assertEquals(2, ship.keyed.count { it.url.encodedPath.endsWith("/know-index") })
+        assertEquals(2, ship.keyed.count { it.url.encodedPath.endsWith("/know-index") }, "read again once its time is up")
     }
 
     @Test fun `an index that does not load leaves the tools and the instructions`() = runTest {
@@ -289,6 +301,7 @@ class LatticeMemoryTest {
         assertTrue(one!!.endsWith("- /a (strength 50): edge"), one)
         assertNull(LatticeMemory.recallBlock("""{"recall":{"results":[{"key":"/a","strength":49,"score":10000,"snippet":"s"},{"key":"/b","strength":50,"score":9999,"snippet":"s"}]}}"""))
         assertTrue(LatticeMemory.worthRecalling("is my flight late"))
+        assertTrue(LatticeMemory.worthRecalling("is it late"), "three words are enough")
         assertFalse(LatticeMemory.worthRecalling("  yes  go "))
         assertFalse(LatticeMemory.worthRecalling("/recall my flights please"))
     }
