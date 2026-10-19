@@ -18,7 +18,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -156,6 +158,8 @@ object LatticeMemory {
                     throw e
                 } catch (e: LatticeError.Refused) {
                     if (e.status == 401) REVOKED_TOOL else "Lattice refused it: ${e.reason}"
+                } catch (e: LatticeError.Unreachable) {
+                    "Lattice did not answer: " + (io.nisfeb.talon.util.readableReason(e.cause?.message) ?: "no answer from the ship")
                 } catch (e: Throwable) {
                     "Lattice did not answer: ${e.message}"
                 }
@@ -269,15 +273,19 @@ class LatticeApi(private val owner: HttpClient, private val bare: HttpClient, ba
                 put("sensitive", false)
             }
         }
-        val text = call(owner, HttpMethod.Post, "key-mint", emptyMap(), body.toString(), ContentType.Application.Json, token = null)
+        val text = call(owner, HttpMethod.Post, "key-mint", emptyMap(), body.toString(), ContentType.Application.Json, token = null, timeoutMs = 20_000)
         val token = runCatching { Json.parseToJsonElement(text).jsonObject["token"]?.jsonPrimitive?.contentOrNull }.getOrNull()
             ?: throw LatticeError.Refused(200, "the answer had no key")
         // The token is the key's id and its secret: "<id>.<secret>".
         return Minted(token.substringBefore('.'), token)
     }
 
-    /** One of the key's routes. Saves send their text as the body, the rest as the query. */
-    fun keyed(token: String, onRefused: suspend () -> Unit): LatticeClient = object : LatticeClient {
+    /**
+     * One of the key's routes. Saves send their text as the body, the rest
+     * as the query. A 401 is [onRefused]'s to judge: true, the key is
+     * revoked; false, lattice has not stored a key this new yet.
+     */
+    fun keyed(token: String, onRefused: suspend () -> Boolean): LatticeClient = object : LatticeClient {
         override suspend fun get(route: String, args: Map<String, String?>) = guarded { call(bare, HttpMethod.Get, route, args, null, null, token) }
         override suspend fun post(route: String, args: Map<String, String?>, body: String?) =
             guarded { call(bare, HttpMethod.Post, route, args, body, ContentType.Text.Plain, token) }
@@ -285,9 +293,33 @@ class LatticeApi(private val owner: HttpClient, private val bare: HttpClient, ba
         private suspend fun guarded(block: suspend () -> String): String = try {
             block()
         } catch (e: LatticeError.Refused) {
-            if (e.status == 401) onRefused()
+            if (e.status == 401 && !onRefused()) throw LatticeError.Unreachable(IllegalStateException("lattice has not taken Talon's new key yet"))
             throw e
         }
+    }
+
+    /**
+     * Whether a key minted just now works yet. Lattice answers the mint
+     * once it has handed the key to its writer, as orrery does, and a key
+     * not stored yet is refused: tried at once, it read as revoked.
+     */
+    suspend fun landed(token: String): Boolean {
+        var pause = 200L
+        repeat(6) { n ->
+            if (n > 0) {
+                delay(pause)
+                pause *= 2
+            }
+            try {
+                call(bare, HttpMethod.Get, "know-tags", emptyMap(), null, null, token, 10_000)
+                return true
+            } catch (e: LatticeError.Refused) {
+                if (e.status != 401) return true
+            } catch (e: LatticeError.Unreachable) {
+                return false
+            }
+        }
+        return false
     }
 
     private suspend fun call(
@@ -298,30 +330,31 @@ class LatticeApi(private val owner: HttpClient, private val bare: HttpClient, ba
         body: String?,
         type: ContentType?,
         token: String?,
+        /** The plugin's own bound on a call; the client sets none of its own on a read. */
+        timeoutMs: Long = 60_000,
     ): String {
         val query = args.entries.filter { it.value != null }.joinToString("&") { (k, v) -> k.encodeURLParameter() + "=" + v!!.encodeURLParameter() }
-        val resp: HttpResponse = try {
-            client.request(root + route + if (query.isEmpty()) "" else "?$query") {
-                this.method = method
-                token?.let { header(HttpHeaders.Authorization, "Bearer $it") }
-                if (body != null) {
-                    type?.let { contentType(it) }
-                    setBody(body)
+        val answered = try {
+            within(timeoutMs) {
+                val resp: HttpResponse = client.request(root + route + if (query.isEmpty()) "" else "?$query") {
+                    this.method = method
+                    token?.let { header(HttpHeaders.Authorization, "Bearer $it") }
+                    if (body != null) {
+                        type?.let { contentType(it) }
+                        setBody(body)
+                    }
                 }
+                io.nisfeb.talon.orrery.proxyAnswered(resp)?.let { throw LatticeError.Unreachable(it) }
+                resp to resp.bodyAsText()
             }
         } catch (c: CancellationException) {
             throw c
+        } catch (e: LatticeError) {
+            throw e
         } catch (t: Throwable) {
             throw LatticeError.Unreachable(t)
-        }
-        io.nisfeb.talon.orrery.proxyAnswered(resp)?.let { throw LatticeError.Unreachable(it) }
-        val text = try {
-            resp.bodyAsText()
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            throw LatticeError.Unreachable(t)
-        }
+        } ?: throw LatticeError.Unreachable(IllegalStateException("lattice did not answer within ${timeoutMs / 1000} s"))
+        val (resp, text) = answered
         if (!resp.status.isSuccess()) {
             val reason = runCatching { Json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.contentOrNull }.getOrNull()
                 ?: io.nisfeb.talon.mail.bodyAsReason(text, 160)
@@ -345,10 +378,14 @@ class LatticeMind(
     /** The prompt's part: how memory works, then the index where it loaded. */
     val prompt: String get() = listOfNotNull(instructions.ifBlank { null }, index).joinToString("\n\n")
 
-    /** The question with what memory recalls of it before it, for the model's turn alone. */
-    suspend fun ask(question: String): String {
+    /**
+     * The question with what memory recalls of it before it, for the
+     * model's turn alone. A recall that takes longer than [waitMs] is
+     * left out: the plugin's prompt hook waits 8 s, a spoken one less.
+     */
+    suspend fun ask(question: String, waitMs: Long = RECALL_WAIT_MS): String {
         val found = try {
-            recall(question)
+            within(waitMs) { recall(question) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -367,6 +404,11 @@ class LatticeMind(
     companion object {
         /** No lattice on the ship: nothing said of memory at all. */
         val NONE = LatticeMind(emptyList(), "", null) { null }
+
+        const val RECALL_WAIT_MS = 8_000L
+
+        /** A spoken question waits no longer for memory than for the decision model ([CalendarQuestion.WAIT_MS]). */
+        const val SPOKEN_WAIT_MS = CalendarQuestion.WAIT_MS
     }
 }
 
@@ -390,7 +432,7 @@ class LatticeKeys(
             Key.Absent -> return LatticeMind.NONE
             is Key.Failed -> return LatticeMind(emptyList(), LatticeMemory.unavailable(k.why), null) { null }
         }
-        val lattice = api.keyed(token) { revoked() }
+        val lattice = api.keyed(token) { revoked(token) }
         val index = index(lattice)
         return LatticeMind(LatticeMemory.tools(lattice), LatticeMemory.prompt, index?.let(LatticeMemory::sessionBlock)) { q ->
             if (!LatticeMemory.worthRecalling(q)) null
@@ -400,12 +442,16 @@ class LatticeKeys(
 
     /** A new key in place of one the owner revoked: their word, from Settings. */
     suspend fun renew(): Result<Unit> = io.nisfeb.talon.util.runSuspendCatching {
-        MINTING.withLock {
+        val m = MINTING.withLock {
             withContext(NonCancellable) {
-                val m = api.mint(name(), by(platform))
-                keys.upsert(LatticeKeyEntity(ship, m.id, m.token))
+                api.mint(name(), by(platform)).also {
+                    keys.upsert(LatticeKeyEntity(ship, it.id, it.token))
+                    minted[it.token] = now()
+                }
             }
         }
+        api.landed(m.token)
+        Unit
     }
 
     private sealed interface Key {
@@ -421,11 +467,14 @@ class LatticeKeys(
         try {
             // Minted and kept together, or a screen left midway leaves a key
             // on the ship that nobody holds, and the next open mints another.
-            withContext(NonCancellable) {
-                val m = api.mint(name(), by(platform))
-                keys.upsert(LatticeKeyEntity(ship, m.id, m.token))
-                Key.Ready(m.token)
+            val m = withContext(NonCancellable) {
+                api.mint(name(), by(platform)).also {
+                    keys.upsert(LatticeKeyEntity(ship, it.id, it.token))
+                    minted[it.token] = now()
+                }
             }
+            api.landed(m.token)
+            Key.Ready(m.token)
         } catch (e: LatticeError.Refused) {
             // No lattice on the ship: not asked again this run of the app.
             if (e.status == 404) absent += ship
@@ -435,14 +484,19 @@ class LatticeKeys(
         }
     }
 
-    private suspend fun revoked() {
-        keys.get(ship)?.let { keys.upsert(it.copy(revoked = true)) }
+    /** Lattice refused [token]: revoked, unless it is new enough that lattice may not have stored it yet. */
+    private suspend fun revoked(token: String): Boolean {
+        if (minted[token]?.let { now() - it < NEW_KEY_GRACE_MS } == true) return false
+        keys.get(ship)?.takeIf { it.token == token }?.let { keys.upsert(it.copy(revoked = true)) }
+        return true
     }
 
     private suspend fun index(lattice: LatticeClient): String? {
         INDEX_LOCK.withLock { INDEXES[ship] }?.takeIf { now() - it.first < INDEX_FOR_MS }?.let { return it.second }
         return try {
-            lattice.get("know-index", mapOf("brief" to "1", "cap" to "50000")).also { INDEX_LOCK.withLock { INDEXES[ship] = now() to it } }
+            // The plugin's session hook waits 20 s for it.
+            within(20_000) { lattice.get("know-index", mapOf("brief" to "1", "cap" to "50000")) }
+                ?.also { INDEX_LOCK.withLock { INDEXES[ship] = now() to it } }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -460,6 +514,10 @@ class LatticeKeys(
         /** The index as last read, per ship: a session's start, not each question's. */
         private val INDEXES = mutableMapOf<String, Pair<Long, String>>()
         private val INDEX_LOCK = Mutex()
+
+        /** When each key this process minted was made: a 401 soon after is lattice not having stored it yet. */
+        private val minted = mutableMapOf<String, Long>()
+        const val NEW_KEY_GRACE_MS = 2 * 60_000L
         const val INDEX_FOR_MS = 10 * 60_000L
 
         /** The name the key writes as: lattice takes letters, digits, `-`, `_` and `.`. */
@@ -470,6 +528,15 @@ class LatticeKeys(
         internal fun forget() {
             absent.clear()
             INDEXES.clear()
+            minted.clear()
         }
     }
 }
+
+/**
+ * [block], or null after [ms] by the wall clock: on the IO dispatcher, so
+ * the bound is real time wherever the caller runs, a test's virtual clock
+ * included.
+ */
+internal suspend fun <T> within(ms: Long, block: suspend () -> T): T? =
+    withContext(io.nisfeb.talon.util.ioDispatcher) { withTimeoutOrNull(ms) { block() } }

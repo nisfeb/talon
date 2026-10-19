@@ -389,7 +389,9 @@ fun AssistantScreen(
     var memory by remember { mutableStateOf(io.nisfeb.talon.ai.LatticeMind.NONE) }
     // The key goes with no cookie, or lattice would take it for the owner.
     val bareHttp = http ?: remember { io.nisfeb.talon.util.createAppHttpClient() }
-    LaunchedEffect(repo, db) {
+    // Again once the ship is connected: before, the repo has no client to mint with.
+    val booting = repo?.bootstrapping?.collectAsState()?.value
+    LaunchedEffect(repo, db, booting) {
         val owner = repo?.shipHttp
         val shipBase = repo?.shipBaseUrl
         val ship = repo?.ownShip

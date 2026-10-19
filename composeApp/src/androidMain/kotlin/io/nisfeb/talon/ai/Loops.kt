@@ -259,6 +259,10 @@ class Loops(
             }.getOrDefault(LatticeMind.NONE)
         }
 
+        /** [memory] as far as it has got: a slow ship's lattice is not waited for past a spoken question's wait. */
+        private suspend fun recalled(): LatticeMind =
+            kotlinx.coroutines.withTimeoutOrNull(LatticeMind.SPOKEN_WAIT_MS) { memory.await() } ?: LatticeMind.NONE
+
         private val contacts = run.async {
             val db = getDb()
             runCatching {
@@ -318,7 +322,7 @@ class Loops(
             ) { known.displayName(it) } + actionTools(actions)
             // Locked: memory's reads wait for the fingerprint, and nothing of
             // it is put before whoever is speaking.
-            val mind = memory.await().let { if (locked) it.locked() else it }
+            val mind = recalled().let { if (locked) it.locked() else it }
             return withOrrery(cfg) { orrery ->
                 val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty() + mind.tools, locked)
                     .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
@@ -335,7 +339,7 @@ class Loops(
                     name = known::conversationLabel,
                     locked = lockedNow,
                     unlock = unlock,
-                    ask = mind::ask,
+                    ask = { mind.ask(it, LatticeMind.SPOKEN_WAIT_MS) },
                 ).run(transcript, earlier).also { card = cardOf(seen, actions.zone(), known) }
             }
         }
@@ -390,7 +394,7 @@ class Loops(
             )
             val tools = ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = talkSeen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions)
             // Every dictation tool; the conversation drops the locked ones turn by turn.
-            val mind = memory.await()
+            val mind = recalled()
             val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty() + mind.tools, locked = false)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
@@ -467,7 +471,7 @@ class Loops(
                 zone = { io.nisfeb.talon.ui.screens.zoneFor(calendar?.zone?.value) },
                 onEvents = seen::events, onTasks = seen::tasks, onPeople = seen::people, onMail = seen::mail,
             )
-            val mind = memory.await().let { if (locked()) it.locked() else it }
+            val mind = recalled().let { if (locked()) it.locked() else it }
             val tools = DictationAgent.readsFor(ToolCatalog.default(getRepo(), getDb(), getEmbedder(), braveSearch = placesClient(), places = placesClient(), open = ::openOnScreen, dials = true, onMessages = seen::messages, conversationLabel = known::conversationLabel) { known.displayName(it) } + actionTools(actions) + mind.tools, orrery?.asTap())
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
@@ -477,7 +481,7 @@ class Loops(
                 systemPrompt = DictationAgent.askPrompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" },
                 locked = locked,
                 unlock = unlock,
-                ask = mind::ask,
+                ask = { mind.ask(it, LatticeMind.SPOKEN_WAIT_MS) },
             ).run(question, earlier).also { card = cardOf(seen, actions.zone(), known) }
         }
 

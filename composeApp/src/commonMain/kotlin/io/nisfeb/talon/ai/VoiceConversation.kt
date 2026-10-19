@@ -99,7 +99,7 @@ class VoiceConversation(
         val shut = locked()
         val mind = if (shut) memory.locked() else memory
         val line = AgentLoop(completer, turnTools(), prompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" }, maxSteps).run(
-            question = if (shut) words else mind.ask(words),
+            question = if (shut) words else mind.ask(words, LatticeMind.SPOKEN_WAIT_MS),
             priorTurns = prior,
             // The conversation's writes go ahead, as a dictation's do; what
             // reaches another person waits inside [tell] for the owner.

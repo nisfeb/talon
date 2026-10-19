@@ -161,6 +161,7 @@ class LatticeMemoryTest {
         val dao = Keys()
         val k = keys(dao, ship)
         val read = k.mind().tools.single { it.spec.name == "memory_read" }
+        clock += LatticeKeys.NEW_KEY_GRACE_MS
         ship.answers = { HttpStatusCode.Unauthorized to """{"error":"invalid or revoked key"}""" }
         assertEquals(LatticeMemory.REVOKED_TOOL, read.execute(buildJsonObject { put("key", "/user/trips") }))
         assertEquals(true, dao.get("~zod")?.revoked)
@@ -173,6 +174,36 @@ class LatticeMemoryTest {
         assertTrue(k.renew().isSuccess)
         assertEquals(LatticeKeyEntity("~zod", "k8", "k8.n3w", revoked = false), dao.get("~zod"))
         assertEquals(14, k.mind().tools.size)
+    }
+
+    // Lattice answers a mint once its writer has the key, as orrery does:
+    // used at once, a key not stored yet is refused, and read as revoked
+    // that killed every install's memory on its first use.
+    @Test fun `a key refused just after it was made is waited for, not taken for revoked`() = runTest {
+        val ship = Ship()
+        var refusals = 2
+        ship.answers = { route ->
+            if (refusals > 0) { refusals--; HttpStatusCode.Unauthorized to """{"error":"invalid or revoked key"}""" }
+            else if (route == "know-index") HttpStatusCode.OK to "## /core\nrule" else HttpStatusCode.OK to "{}"
+        }
+        val dao = Keys()
+        val m = keys(dao, ship).mind()
+        assertEquals(14, m.tools.size)
+        assertTrue("LATTICE INDEX" in m.prompt, "read once the key was taken")
+        assertEquals(3, ship.keyed.count { it.url.encodedPath.endsWith("/know-tags") }, "two refusals, then taken")
+        assertEquals(false, dao.get("~zod")?.revoked)
+        // Still refused within its first minutes: said so, and not revoked.
+        ship.answers = { HttpStatusCode.Unauthorized to "{}" }
+        val said = m.tools.single { it.spec.name == "memory_read" }.execute(buildJsonObject { put("key", "/user/x") })
+        assertEquals("Lattice did not answer: lattice has not taken Talon's new key yet", said)
+        assertEquals(false, dao.get("~zod")?.revoked)
+    }
+
+    @Test fun `a recall slower than the wait leaves the question as it was`() = runTest {
+        val ship = Ship()
+        val m = keys(Keys(), ship).mind()
+        ship.answers = { route -> if (route == "know-recall") { Thread.sleep(400); HttpStatusCode.OK to RECALLED } else HttpStatusCode.OK to "{}" }
+        assertEquals("when does my flight leave", m.ask("when does my flight leave", waitMs = 50))
     }
 
     @Test fun `a ship with no lattice has no memory, and is not asked again`() = runTest {
