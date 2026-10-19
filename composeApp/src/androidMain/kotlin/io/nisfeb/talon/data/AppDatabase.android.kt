@@ -48,6 +48,7 @@ actual abstract class AppDatabase : RoomDatabase() {
     actual abstract fun notices(): NoticeDao
     actual abstract fun settingsOutbox(): SettingsOutboxDao
     actual abstract fun marks(): MarkDao
+    actual abstract fun latticeKeys(): LatticeKeyDao
 }
 
 /**
@@ -75,6 +76,7 @@ fun createAppDatabase(context: Context, name: String): AppDatabase {
             MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50,
             MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54, MIGRATION_54_55,
             MIGRATION_55_56, MIGRATION_56_57, MIGRATION_57_58,
+            MIGRATION_58_59,
         )
         // dropAllTables = true preserves the pre-2.7 behaviour: when
         // Room can't find a migration path, drop everything and rebuild.
@@ -507,6 +509,12 @@ private val MIGRATION_56_57 = object : Migration(56, 57) {
 private val MIGRATION_57_58 = object : Migration(57, 58) {
     override fun migrate(db: SupportSQLiteDatabase) {
         LOOP_HOLD_SQL.forEach { db.execSQL(it) }
+    }
+}
+
+private val MIGRATION_58_59 = object : Migration(58, 59) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(LATTICE_KEYS_SQL)
     }
 }
 

@@ -68,8 +68,9 @@ import androidx.sqlite.execSQL
         NoticeEntity::class,
         SettingsOutboxEntity::class,
         MarkEntity::class,
+        LatticeKeyEntity::class,
     ],
-    version = 58,
+    version = 59,
     exportSchema = false,
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -109,6 +110,7 @@ expect abstract class AppDatabase : RoomDatabase {
     abstract fun notices(): NoticeDao
     abstract fun settingsOutbox(): SettingsOutboxDao
     abstract fun marks(): MarkDao
+    abstract fun latticeKeys(): LatticeKeyDao
 }
 
 /**
@@ -165,5 +167,5 @@ val SHARED_MIGRATIONS = arrayOf(
     COMET_DOMES_MIGRATION, ORRERY_HANDOFF_MIGRATION, ORRERY_SHIP_WORK_MIGRATION, MESSAGE_SEARCH_TEXT_MIGRATION,
     URB_UNFURLS_MIGRATION, MESSAGE_STATUS_INDEX_MIGRATION, WATCHWORDS_DROP_MIGRATION, ASSISTANT_LOG_MIGRATION,
     FOLLOWED_THREADS_MIGRATION, ORRERY_CACHE_MIGRATION, NOTICE_MIGRATION, SYNC_STATE_MIGRATION,
-    LOOP_HOLD_MIGRATION,
+    LOOP_HOLD_MIGRATION, LATTICE_KEYS_MIGRATION,
 )

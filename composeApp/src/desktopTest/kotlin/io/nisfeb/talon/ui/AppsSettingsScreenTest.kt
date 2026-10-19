@@ -47,6 +47,8 @@ class AppsSettingsScreenTest {
         grubbery: (suspend () -> Result<Unit>)? = null,
         withOrrery: Boolean = false,
         shipUrl: String? = "https://zod.test",
+        memoryKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
+        renewKey: (suspend () -> Result<Unit>)? = null,
         block: ComposeUiTest.() -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-apps-").toFile()
@@ -75,6 +77,7 @@ class AppsSettingsScreenTest {
                                 onInstallGroups = installGroups,
                                 onAddOrrery = { did += "add orrery"; orreryHere = true; Result.success(Unit) },
                                 shipUrl = shipUrl, onBack = {},
+                                latticeKey = memoryKey, onNewLatticeKey = renewKey,
                             )
                         }
                     }
@@ -173,5 +176,54 @@ class AppsSettingsScreenTest {
     fun `signed out, the permits page is only mentioned`() = apps(shipUrl = null) {
         waitUntil(timeoutMillis = 5_000) { shows("Sign in to a ship to reach its permits page.") }
         assertTrue(!shows("Open permits on your ship"))
+    }
+
+    // sneagan, 2026-10-19: the assistants' memory key. Made on first use;
+    // revoked by the owner, made again only here, at their word.
+    private val key = kotlinx.coroutines.flow.MutableStateFlow<io.nisfeb.talon.data.LatticeKeyEntity?>(null)
+
+    @Test
+    fun `no key yet, no memory row`() = apps(memoryKey = key) {
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Assistant memory").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a working key is said, and offers nothing`() {
+        key.value = io.nisfeb.talon.data.LatticeKeyEntity("~zod", "k1", "k1.s")
+        apps(memoryKey = key, renewKey = { did += "renew"; Result.success(Unit) }) {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Assistant memory").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("The assistants remember in Lattice with this install's own key.").assertExists()
+            assertTrue(onAllNodesWithText("Make a new key").fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test
+    fun `a revoked key is said, and a new one is made at the owner's word`() {
+        key.value = io.nisfeb.talon.data.LatticeKeyEntity("~zod", "k1", "k1.s", revoked = true)
+        apps(memoryKey = key, renewKey = {
+            did += "renew"
+            key.value = io.nisfeb.talon.data.LatticeKeyEntity("~zod", "k2", "k2.s")
+            Result.success(Unit)
+        }) {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Make a new key").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Lattice refused Talon's key", substring = true).assertExists()
+            onNodeWithText("Make a new key").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Made a new key. The assistants remember again.").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals(listOf("renew"), did.filter { it == "renew" })
+            onNodeWithText("The assistants remember in Lattice with this install's own key.").assertExists()
+        }
+    }
+
+    @Test
+    fun `a new key the ship will not make says why, and leaves the offer`() {
+        key.value = io.nisfeb.talon.data.LatticeKeyEntity("~zod", "k1", "k1.s", revoked = true)
+        apps(memoryKey = key, renewKey = { Result.failure(io.nisfeb.talon.ai.LatticeError.Refused(409, "keys: 50 at most")) }) {
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Make a new key").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Make a new key").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("The key was not made", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("keys: 50 at most", substring = true).assertExists()
+            onNodeWithText("Make a new key").assertExists()
+        }
     }
 }

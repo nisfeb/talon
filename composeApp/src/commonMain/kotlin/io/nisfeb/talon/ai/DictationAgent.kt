@@ -41,6 +41,8 @@ class DictationAgent(
     private val locked: () -> Boolean = { false },
     /** The fingerprint while [locked] ([unlockingReads]): true once the phone is unlocked. */
     private val unlock: suspend () -> Boolean = { false },
+    /** The words as the model gets them: what memory recalls put before them ([LatticeMind.ask]). */
+    private val ask: suspend (String) -> String = { it },
 ) {
     /**
      * Run [transcript] and return the agent's own summary of what it
@@ -54,7 +56,7 @@ class DictationAgent(
         val prior = earlier.flatMap { listOf(AgentMessage.User(it.words), AgentMessage.Assistant(it.line, emptyList())) }
         val gated = tools.askingToSend(name, ownerSends).unlockingReads(locked, unlock)
         return AgentLoop(completer, gated, systemPrompt, maxSteps)
-            .run(question = text, priorTurns = prior, confirm = { _, _ -> true }, finish = ::plainly)
+            .run(question = ask(text), priorTurns = prior, confirm = { _, _ -> true }, finish = ::plainly)
     }
 
     companion object {
@@ -127,7 +129,7 @@ class DictationAgent(
          */
         fun readsFor(all: List<Tool>, orrery: OrreryTap? = null): List<Tool> =
             toolsFor(all + orrery?.let { orreryTools(it) }.orEmpty(), locked = false)
-                .filterNot { it.write || it.spec.name == "orrery_guide" }
+                .filterNot { it.write || it.spec.name == "orrery_guide" || it.spec.name in LatticeMemory.WRITES }
 
         /**
          * The whole prompt: the content-is-data rule and [role]. Not the
@@ -152,7 +154,7 @@ class DictationAgent(
             "list_tasks", "create_task", "complete_task",
             "find_places", "open_directions", "call_place", "web_search",
             "orrery_guide", "orrery_find", "orrery_read", "orrery_flights", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
-        )
+        ) + LatticeMemory.NAMES
 
         /**
          * The writes a dictation keeps while the phone is locked: the
@@ -188,7 +190,7 @@ class DictationAgent(
          */
         val PRIVATE_READS: Set<String> = setOf(
             "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
-        )
+        ) + LatticeMemory.PRIVATE_READS
 
         /** What the model reads, and the card shows, while the phone stays locked. */
         const val UNLOCK_TO_READ = "Unlock your phone to hear messages."
@@ -221,9 +223,13 @@ class DictationAgent(
         fun toolsFor(all: List<Tool>, locked: Boolean): List<Tool> =
             whileLocked(all.dedupToolNames().filter { it.spec.name in TOOLS }, locked)
 
-        /** [tools] less the writes [LOCKED_WRITES] leaves out, while [locked]. */
+        /**
+         * [tools] less the writes [LOCKED_WRITES] leaves out, while [locked].
+         * Never memory's: whoever holds a locked phone could tell Talon's
+         * memory anything, for every agent of the owner's to read.
+         */
         fun whileLocked(tools: List<Tool>, locked: Boolean): List<Tool> =
-            if (!locked) tools else tools.filter { !it.write || it.spec.name in LOCKED_WRITES }
+            if (!locked) tools else tools.filter { (!it.write || it.spec.name in LOCKED_WRITES) && it.spec.name !in LatticeMemory.WRITES }
 
         /**
          * A turn's writes said back to the owner as the tools reported
