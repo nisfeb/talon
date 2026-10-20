@@ -70,6 +70,16 @@ class LineAskTest {
         h.await { c.lineAsks.value[key] == LineAsk.Ignored }
     }
 
+    /** A nameless denial is our own ship relaying a nack, so it says
+     *  nothing about the host's %trunk. */
+    @Test
+    fun aRelayedNackIsNotTheHostsTrunkSpeaking() = run(waitMs = 200) { h, c ->
+        h.emitFact("""{"denied":{"from":"~bus","name":"","why":"host unreachable"}}""")
+        delay(300)
+        c.switchOn()
+        h.await { c.lineAsks.value[key] == LineAsk.NoAnswer }
+    }
+
     @Test
     fun theHostsAnnouncementSettlesIt() = run { h, c ->
         c.switchOn()
