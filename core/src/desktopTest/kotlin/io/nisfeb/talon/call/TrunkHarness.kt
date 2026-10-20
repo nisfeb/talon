@@ -50,6 +50,9 @@ internal class TrunkHarness(ship: String = "~nec") {
      *  Runs on the engine's thread — keep it tiny. */
     var onPut: ((String) -> Unit)? = null
 
+    /** Nack every poke with this, as a ship whose agent refuses it. */
+    @Volatile var pokeErr: String? = null
+
     /** The answer to a scry, by its path (e.g. "/~/scry/trunk/version.json"). */
     @Volatile var scryBody: (String) -> String = { "{}" }
 
@@ -101,7 +104,13 @@ internal class TrunkHarness(ship: String = "~nec") {
                             ?.takeIf { o["action"]?.jsonPrimitive?.contentOrNull == "poke" }
                     }
                 }.getOrDefault(emptyList())
-                for (id in pokeIds) emit("""{"id":$id,"response":"poke","ok":true}""")
+                for (id in pokeIds) {
+                    val err = pokeErr
+                    emit(
+                        if (err == null) """{"id":$id,"response":"poke","ok":true}"""
+                        else """{"id":$id,"response":"poke","err":"$err"}""",
+                    )
+                }
                 respond("", HttpStatusCode.NoContent)
             }
             req.url.encodedPath.startsWith("/~/scry") -> {

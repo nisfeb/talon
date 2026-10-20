@@ -907,6 +907,27 @@ private const val MEMBER_PAGE = 50
  * enforces that on its own, but showing switches that would be
  * refused is worse than showing none.
  */
+/** The roster a host's %trunk takes from another ship (roster-cap). */
+private const val LINE_ROSTER_CAP = 256
+
+/** What the admin sees after switching on a line [host] keeps. */
+internal fun lineAskText(ask: io.nisfeb.talon.call.LineAsk, host: String, members: Int): String =
+    when {
+        ask is io.nisfeb.talon.call.LineAsk.Asking -> "Asking $host to open it…"
+        ask == io.nisfeb.talon.call.LineAsk.OwnShip ->
+            "Your ship didn't take the request. Check that %trunk is installed and running on it."
+        ask == io.nisfeb.talon.call.LineAsk.Refused ->
+            "$host turned it down. Its %trunk may be out of date."
+        // A host refuses a bigger roster without a word.
+        members > LINE_ROSTER_CAP ->
+            "$host won't open it: a party line holds at most $LINE_ROSTER_CAP members, and this group has $members."
+        ask == io.nisfeb.talon.call.LineAsk.Ignored ->
+            "$host has %trunk but didn't open the line. Its call settings may not let your ship ring it."
+        else ->
+            "$host hasn't answered. This group's line lives on $host, which needs %trunk installed and running. " +
+                "It may also be offline, or not let your ship ring it."
+    }
+
 @Composable
 private fun PartyLineSection(
     controller: io.nisfeb.talon.call.CallController,
@@ -978,6 +999,22 @@ private fun PartyLineSection(
             }
         },
     )
+
+    // Switching on a line another ship hosts is a request to that
+    // ship, and most ways it fails are silence. Say which.
+    val asks by controller.lineAsks.collectAsState()
+    val ask = asks[key]
+    if (!enabled && ask != null) {
+        Text(
+            lineAskText(ask, host, group.members.size),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (ask is io.nisfeb.talon.call.LineAsk.Asking) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+        )
+    }
 
     if (!enabled) return
 

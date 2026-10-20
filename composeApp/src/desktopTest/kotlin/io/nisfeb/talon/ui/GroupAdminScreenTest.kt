@@ -62,7 +62,14 @@ class GroupAdminScreenTest {
 
     /** [rooms], when given, is %trunk's list of lines this ship hosts, and turns calling on. */
     /** [group] null: the ship will not give the group, until a test sets it. */
-    private fun admin(me: String = "~zod", rooms: String? = null, group: String? = record, block: ComposeUiTest.(FakeShip) -> Unit) {
+    /** [flag] another ship's group: a line there is asked of that ship. */
+    private fun admin(
+        me: String = "~zod",
+        rooms: String? = null,
+        group: String? = record,
+        flag: String = this.flag,
+        block: ComposeUiTest.(FakeShip) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-admin-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -78,7 +85,11 @@ class GroupAdminScreenTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(scope)
         val calls = rooms?.let {
-            CallController(UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") }, CallEngineProvider { error("no media") })
+            CallController(
+                UrbitSession(ship.http, ship.session).apply { tryRestore("~zod") },
+                CallEngineProvider { error("no media") },
+                joinAskTimeoutMs = 500,
+            )
                 .apply { start() }
         }
         try {
@@ -536,6 +547,20 @@ class GroupAdminScreenTest {
         for (part in listOf("\"host\":\"~zod\"", "\"name\":\"garden\"", "\"open\":true", "\"title\":\"The Garden\"", "\"~nec\"")) {
             assertTrue(part in on, "$part in $on")
         }
+    }
+
+    @Test
+    fun `a line another ship keeps, switched on and never answered, says that ship needs trunk`() = admin(
+        rooms = "[]",
+        flag = "~bus/garden",
+        // We hold the admin role in ~bus's group.
+        group = record.replace("\"~zod\":{\"roles\":[]", "\"~bus\":{\"roles\":[],\"joined\":0},\"~zod\":{\"roles\":[\"admin\"]"),
+    ) {
+        waitUntil(timeoutMillis = 5_000) { shows("A voice room for the whole group. Every channel joins the same one.") }
+        switchOf("A voice room for the whole group. Every channel joins the same one.")
+        assertTrue("\"host\":\"~bus\"" in trunkPoke(it, "configure-room"))
+        waitUntil(timeoutMillis = 5_000) { says("which needs %trunk installed and running") }
+        assertTrue(says("~bus hasn't answered."))
     }
 
     @Test
