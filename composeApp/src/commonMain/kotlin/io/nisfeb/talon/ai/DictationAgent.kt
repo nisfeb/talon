@@ -105,6 +105,8 @@ class DictationAgent(
             what and why. A flight's status, delay, gate or times:
             orrery_flights, what orrery last found.
 
+            ${AgentPrompt.nearby}
+
             Begin your answer with one short sentence that is read aloud
             to the owner, who may be driving: the highlights only, under
             25 words, with no lists, links, markdown or @p. Then a blank

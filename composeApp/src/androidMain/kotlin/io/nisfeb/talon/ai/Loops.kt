@@ -330,9 +330,9 @@ class Loops(
                 io.nisfeb.talon.util.Log.i("Dictation", "locked=$locked, ${offered.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}, writes: " + offered.filter { it.write }.joinToString { it.spec.name })
                 DictationAgent(
                     // The time per call, as the assistant screen does:
-                    // "tomorrow at three" needs today. The phone's zone
-                    // until the calendar says its own.
-                    completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                    // "tomorrow at three" needs today. The phone's clock,
+                    // where the owner is, beside the calendar's zone.
+                    completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowHere(actions.zone()), msgs, t) },
                     tools = offered,
                     systemPrompt = DictationAgent.prompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" },
                     ownerSends = send,
@@ -398,7 +398,7 @@ class Loops(
             val offered = DictationAgent.toolsFor(tools + orrery?.let { orreryTools(it) }.orEmpty() + mind.tools, locked = false)
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             return VoiceConversation(
-                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(zone()), msgs, t) },
+                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowHere(zone()), msgs, t) },
                 tools = offered,
                 tell = orrery?.let { o ->
                     { text: String ->
@@ -446,7 +446,7 @@ class Loops(
         }
 
         /** The time, for the opener's digest. */
-        fun now(): String = nowLine(zone())
+        fun now(): String = nowHere(zone())
 
         /**
          * Answer a question, looking things up only: where Orrery is on,
@@ -476,7 +476,7 @@ class Loops(
                 .waitingFor(DictationAgent.CALENDAR_TOOLS) { read.await() }
             io.nisfeb.talon.util.Log.i("Dictation", "route=ask, ${tools.size} tools, calendar read ${if (read.isCompleted) "done" else "pending"}")
             return DictationAgent(
-                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowLine(actions.zone()), msgs, t) },
+                completer = { sys, msgs, t -> dictationClient.completeWithTools(sys + "\n\n" + nowHere(actions.zone()), msgs, t) },
                 tools = tools,
                 systemPrompt = DictationAgent.askPrompt + mind.prompt.let { if (it.isBlank()) "" else "\n\n$it" },
                 locked = locked,

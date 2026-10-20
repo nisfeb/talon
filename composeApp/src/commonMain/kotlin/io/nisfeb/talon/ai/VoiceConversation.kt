@@ -256,6 +256,8 @@ class VoiceConversation(
             When they want today's brief read, call read_brief with aloud
             true; it is read to them as it is. Their unread messages are
             list_unread's, read to them the same way with aloud true.
+
+            ${AgentPrompt.nearby}
         """.trimIndent()
     }
 }

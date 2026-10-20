@@ -441,7 +441,7 @@ fun AssistantScreen(
     // The time is appended per call rather than baked in, so a
     // conversation that runs past midnight still says today.
     val completer = AgentLoop.Completer { sys, msgs, tools ->
-        agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), msgs, tools)
+        agentClient.completeWithTools(sys + "\n\n" + io.nisfeb.talon.ai.nowHere(zoneFor(calendarZone)), msgs, tools)
     }
     fun today() = kotlin.time.Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zoneFor(calendarZone)).date
     // The day as Archie opens with it, its events and unread mail on this run's card.
@@ -493,7 +493,7 @@ fun AssistantScreen(
                     Briefing.dayTool {
                         val d = day()
                         Briefing.countsLine(d.mail, d.chats, d.questions, d.mailLate) + "\n" +
-                            Briefing.openerDigest(io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), d.firstEvent, openerBrief())
+                            Briefing.openerDigest(io.nisfeb.talon.ai.nowHere(zoneFor(calendarZone)), d.firstEvent, openerBrief())
                     } +
                     listOfNotNull(orrery?.let { o -> VoiceConversation.briefTool({ o.briefLast().getOrThrow()?.let { Briefing.todays(it, today()) } }) }) +
                     orrery?.let { o ->
@@ -847,7 +847,7 @@ fun AssistantScreen(
         submit(asked = BRIEF_ME) {
             val d = day()
             val counts = Briefing.countsLine(d.mail, d.chats, d.questions, d.mailLate)
-            val rest = Briefing.openerRest(completer, Briefing.openerDigest(io.nisfeb.talon.ai.nowLine(zoneFor(calendarZone)), d.firstEvent, openerBrief()))
+            val rest = Briefing.openerRest(completer, Briefing.openerDigest(io.nisfeb.talon.ai.nowHere(zoneFor(calendarZone)), d.firstEvent, openerBrief()))
             "$counts $rest".trim()
         }
     }

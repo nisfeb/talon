@@ -18,6 +18,8 @@ class DictationFlowTest {
     fun `a question is what whisper wrote with a question mark`() {
         assertEquals(DictationRoute.Ask, DictationFlow.route("What's on my calendar today?"))
         assertEquals(DictationRoute.Ask, DictationFlow.route("Is Linus's game at two?"))
+        // An open question goes to the model, which looks near the owner.
+        assertEquals(DictationRoute.Ask, DictationFlow.route("What should I do this evening?"))
         assertEquals(DictationRoute.Tell, DictationFlow.route("Text Andrea I'm running late."))
         assertEquals(DictationRoute.Tell, DictationFlow.route("Remind me to buy milk"))
         // A first word alone is not a question.

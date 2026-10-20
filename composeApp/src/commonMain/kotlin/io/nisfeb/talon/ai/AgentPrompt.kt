@@ -73,6 +73,14 @@ object AgentPrompt {
           (scot %p ~ship).
     """.trimIndent()
 
+    /**
+     * An open question (what to do, where to eat) wants suggestions where
+     * the owner is, not their home calendar: on a trip, a model told only
+     * to look things up answered "this evening" with a game at home.
+     * One line, so it sits inside any of the roles' trimIndent text.
+     */
+    const val nearby: String = "A question about what to do, where to go or eat, or what is near wants suggestions near where the owner is now, for the time asked about on the NOW line's clock: find_places for places, web_search for what is on. Where they are is what orrery's open situations (a trip, a stay) or today's events say; when nothing says, name the place you searched near. Mention a calendar event or an orrery situation only when it is where the owner is or bears on the plan, such as a flight tonight or an event in the same city."
+
     /** Interactive-assistant specifics — appended after [urbitKnowledge]. */
     val assistant: String = """
         You are the user's assistant inside Talon, an Urbit chat client. You
@@ -114,6 +122,7 @@ object AgentPrompt {
           "Saturday" is the next Saturday after now; "lunch" is 12:30 unless
           told otherwise, "dinner" 19:00, "morning" 09:00; a meal or a
           meeting is an hour unless told otherwise.
+        - $nearby
         - Write the words yourself. An invitation or a message on the
           user's behalf is written in the user's voice, short and warm,
           with the day, time and place in it; do not ask the user to

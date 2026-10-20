@@ -12,6 +12,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.sun.net.httpserver.HttpServer
+import io.nisfeb.talon.ai.AgentPrompt
 import io.nisfeb.talon.ai.AiSettings
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.ui.screens.AssistantScreen
@@ -69,6 +70,9 @@ class AssistantScreenTest {
 
     /** The calendar's zone. */
     @Volatile private var calZone = "UTC"
+
+    /** The calendar the screen was given, when it was given one. */
+    @Volatile private var calRepo: io.nisfeb.talon.calendar.CalendarRepo? = null
 
     /** Today's brief, as orrery's ship answers /api/brief/last. */
     @Volatile private var brief = "{}"
@@ -278,7 +282,7 @@ class AssistantScreenTest {
             if (withLattice) attachForTest(ship.channel, "~zod", http = latticeOwner, base = "https://ship.test") else attachForTest(ship.channel, "~zod")
         }
         ship.channel.events().launchIn(sessionScope)
-        val calendar = if (withCalendar) calendarOn(sessionScope) else null
+        val calendar = if (withCalendar) calendarOn(sessionScope).also { calRepo = it } else null
         val mail = if (withMail) mailOn(sessionScope) else null
         val orrery = if (withOrrery) orreryOn(sessionScope, db).also { orrery = it } else null
         // The host's, as the shells keep it: it outlives the screen.
@@ -325,6 +329,22 @@ class AssistantScreenTest {
         assertTrue("when is the book club?" in request && "test-model" in request, request.take(400))
         waitUntil(timeoutMillis = 5_000) { runBlocking { db.assistantConversations().mostRecent() } != null }
         assertTrue(!shows("No conversations yet."), "the conversation is listed")
+    }
+
+    // sneagan, in Barcelona with the calendar on New York, asked what to do
+    // this evening and was told of a game at home.
+    @Test
+    fun `away from the calendar's zone the model is told the owner's clock, both zones, and to look nearby`() {
+        val here = kotlinx.datetime.TimeZone.currentSystemDefault().id
+        calZone = if (here == "Pacific/Chatham") "Pacific/Kiritimati" else "Pacific/Chatham"
+        assistant(withCalendar = true) {
+            waitUntil(timeoutMillis = 10_000) { calRepo?.zone?.value == calZone }
+            ask("what should I do this evening?")
+            waitUntil(timeoutMillis = 10_000) { asked.isNotEmpty() }
+            val request = asked.first()
+            assertTrue("zone $here, where the owner is. The calendar's times are in $calZone." in request, request.substringAfter("NOW:").take(300))
+            assertTrue(AgentPrompt.nearby in request, "the typed assistant's role has the nearby rule")
+        }
     }
 
     @Test

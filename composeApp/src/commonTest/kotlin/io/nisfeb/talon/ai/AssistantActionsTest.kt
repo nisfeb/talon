@@ -32,6 +32,38 @@ class AssistantActionsTest {
         assertTrue(line.startsWith("NOW: 2026-09-14 (Monday) 10:00, zone UTC"), line)
     }
 
+    /** In Barcelona with the calendar on New York: "this evening" is Barcelona's. */
+    @Test fun `on a trip the now line is the owner's clock and names the calendar's zone`() {
+        val madrid = TimeZone.of("Europe/Madrid")
+        val home = TimeZone.of("America/New_York")
+        // 2026-10-20 15:05 UTC: 17:05 in Madrid, 11:05 in New York.
+        assertEquals(
+            "NOW: 2026-10-20 (Tuesday) 17:05, zone Europe/Madrid, where the owner is. The calendar's times are in America/New_York. " +
+                "Resolve relative dates (\"Saturday\", \"tomorrow\", \"next week\") from this; a weekday named without a date means the next one to come.",
+            nowLine(madrid, 1_792_508_700_000L, calendar = home),
+        )
+        // 22:30 UTC is already tomorrow in Madrid, still today at home.
+        assertTrue(nowLine(madrid, 1_792_535_400_000L, calendar = home).startsWith("NOW: 2026-10-21 (Wednesday) 00:30, zone Europe/Madrid,"))
+    }
+
+    @Test fun `at home the now line is as it was`() {
+        val home = TimeZone.of("America/New_York")
+        val line = nowLine(home, 1_792_508_700_000L, calendar = home)
+        assertEquals(nowLine(home, 1_792_508_700_000L), line)
+        assertTrue(line.startsWith("NOW: 2026-10-20 (Tuesday) 11:05, zone America/New_York. Resolve"), line)
+    }
+
+    /** Every role that answers an open question is told to look near the owner. */
+    @Test fun `what to do is looked for where the owner is, in every role`() {
+        // Its own line in each, so trimIndent still trimmed the role around it.
+        for (prompt in listOf(DictationAgent.askPrompt, VoiceConversation.prompt)) {
+            assertTrue(prompt.lines().any { it == AgentPrompt.nearby })
+        }
+        assertTrue(AgentPrompt.system.lines().any { it == "- " + AgentPrompt.nearby })
+        assertTrue(DictationAgent.askPrompt.lines().any { it.startsWith("The owner just asked you this out loud") })
+        assertTrue("find_places" in AgentPrompt.nearby && "web_search" in AgentPrompt.nearby)
+    }
+
     @Test fun `an event posted by the assistant carries a card that decodes back`() {
         // 2026-09-19 00:00 UTC, a Saturday.
         val sat = 1_789_776_000_000L

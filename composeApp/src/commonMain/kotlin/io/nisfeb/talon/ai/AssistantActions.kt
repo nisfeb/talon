@@ -120,12 +120,21 @@ fun parseClock(s: String?): Int? {
     return if (h in 0..23 && mi in 0..59) h * 60 + mi else null
 }
 
-/** The line the model reads first: what time it is where the user is. */
-fun nowLine(zone: TimeZone, atMs: Long = nowMs()): String {
+/**
+ * The line the model reads first: what time it is where the owner is
+ * ([zone]). The calendar keeps its own zone on a trip, so when
+ * [calendar] differs the line names it too, and "this evening" is the
+ * evening where the owner is, not at home.
+ */
+fun nowLine(zone: TimeZone, atMs: Long = nowMs(), calendar: TimeZone = zone): String {
     val t = Instant.fromEpochMilliseconds(atMs).toLocalDateTime(zone)
-    return "NOW: ${t.date} (${t.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}) ${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')}, zone ${zone.id}. " +
+    val where = if (calendar == zone) "zone ${zone.id}." else "zone ${zone.id}, where the owner is. The calendar's times are in ${calendar.id}."
+    return "NOW: ${t.date} (${t.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}) ${t.hour.toString().padStart(2, '0')}:${t.minute.toString().padStart(2, '0')}, $where " +
         "Resolve relative dates (\"Saturday\", \"tomorrow\", \"next week\") from this; a weekday named without a date means the next one to come."
 }
+
+/** [nowLine] on the phone's own clock, which travels with the owner, beside the [calendar]'s. */
+fun nowHere(calendar: TimeZone, atMs: Long = nowMs()): String = nowLine(TimeZone.currentSystemDefault(), atMs, calendar)
 
 private val WEEKDAYS = mapOf("mon" to DayOfWeek.MONDAY, "tue" to DayOfWeek.TUESDAY, "wed" to DayOfWeek.WEDNESDAY, "thu" to DayOfWeek.THURSDAY, "fri" to DayOfWeek.FRIDAY, "sat" to DayOfWeek.SATURDAY, "sun" to DayOfWeek.SUNDAY)
 
