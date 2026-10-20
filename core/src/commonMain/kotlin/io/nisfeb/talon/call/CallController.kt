@@ -55,6 +55,27 @@ sealed interface TrunkInstall {
     data class Failed(val why: String) : TrunkInstall
 }
 
+/**
+ * What came of switching on a line another ship hosts. The host answers
+ * a line it opened with an announcement, which clears the ask. Its
+ * %trunk nacks a poke it can't take. A host with no %trunk, an offline
+ * host, and a host whose call settings don't let us ring it all say
+ * nothing at all.
+ */
+sealed interface LineAsk {
+    /** Sent, waiting on the host. Compared by identity, so the timer
+     *  of an earlier ask can't settle a later one. */
+    class Asking : LineAsk
+    /** Our own ship didn't take the poke. */
+    data object OwnShip : LineAsk
+    /** The host's %trunk nacked it: most likely too old. */
+    data object Refused : LineAsk
+    /** No answer from a host we have heard %trunk speak for. */
+    data object Ignored : LineAsk
+    /** No answer, and we have never heard %trunk on the host. */
+    data object NoAnswer : LineAsk
+}
+
 /** An anonymous listen link, and when it stops working. */
 data class ListenLink(val room: String, val url: String, val expiresSecs: Long)
 
@@ -99,7 +120,8 @@ class CallController(
     /** Call tones. Noop where a platform has no playback path, so
      *  nothing here has to check. */
     private val sounds: CallSoundPlayer = CallSoundPlayer.Noop,
-    /** How long a party-line ask may sit unanswered before the pending
+    /** How long a party-line ask (a join, or switching on a line
+     *  another ship hosts) may sit unanswered before the pending
      *  indicator gives up on the host. A knob for tests. */
     private val joinAskTimeoutMs: Long = JOIN_ASK_TIMEOUT_MS,
     /** Fallback ICE and sidecar this build ships, adopted by a ship
@@ -203,6 +225,16 @@ class CallController(
      *  and a torn LinkedHashSet iteration inside events.collect
      *  would tear down the whole SSE channel. */
     private val pendingPeeks = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Switching on a line another ship hosts, by "host/name": what the
+     *  admin screen says while the host thinks it over, or after it
+     *  didn't. */
+    private val _lineAsks = MutableStateFlow<Map<String, LineAsk>>(emptyMap())
+    val lineAsks: StateFlow<Map<String, LineAsk>> = _lineAsks.asStateFlow()
+
+    /** Hosts whose %trunk has answered us. Silence from one of these
+     *  is a quiet refusal, not a missing desk. */
+    private val trunkHosts = MutableStateFlow<Set<String>>(emptySet())
 
     /** The wire the ship speaks, once known. */
     private val _wire = MutableStateFlow(0)
@@ -564,6 +596,8 @@ class CallController(
                                 // line until the chat was reopened.
                                 pendingPeeks.update { it - key }
                                 _peekFailed.value = _peekFailed.value - key
+                                _lineAsks.update { it - key }
+                                trunkHosts.update { it + up.invite.host }
                                 _invites.value = _invites.value + (key to up.invite)
                                 if (up.invite.host == session.shipName) refreshRooms()
                             }
@@ -619,6 +653,19 @@ class CallController(
                                     "the host couldn't be reached"
                                 } else {
                                     up.why
+                                }
+                                // A named denial is the host's %trunk
+                                // speaking. A nameless one is our own
+                                // ship relaying a nack.
+                                if (up.name.isNotEmpty()) trunkHosts.update { it + up.from }
+                                // A nack answering a switch-on: the host
+                                // has %trunk but couldn't take the poke.
+                                // A nameless nack from a peek or join to
+                                // the same host matches too.
+                                _lineAsks.update { asks ->
+                                    asks.mapValues { (k, v) ->
+                                        if (v is LineAsk.Asking && matches(k)) LineAsk.Refused else v
+                                    }
                                 }
                                 val peeked = pendingPeeks.value.filter(::matches)
                                 if (peeked.isNotEmpty()) {
@@ -1266,18 +1313,45 @@ class CallController(
         members: List<String> = emptyList(),
         admins: List<String> = emptyList(),
     ) {
-        val ch = channel ?: return
-        runCatching {
-            ch.poke(
-                TrunkWire.AGENT, TrunkWire.ACTION_MARK,
-                TrunkWire.configureRoomAction(
-                    host, name, open, listen, sfu, keepSfu, title, members, admins,
-                ),
-            )
-        }.onFailure { Log.e(TAG, "configure-room poke failed", it) }
-        // The host answers with an announcement; refresh our own view
-        // too, for the case where the host is us.
-        refreshRooms()
+        // On our own scope: backing out of the admin screen mid-poke
+        // must neither drop the change nor strand the ask at "asking".
+        scope.launch {
+            val key = "$host/$name"
+            // Only switching on a line another ship hosts waits on an
+            // answer. Every other change clears what an earlier ask left.
+            val ask = LineAsk.Asking().takeIf {
+                open && host != session.shipName && lineFor(host, name) == null
+            }
+            _lineAsks.update { if (ask != null) it + (key to ask) else it - key }
+            val ch = channel
+            val sent = ch != null && runCatching {
+                ch.poke(
+                    TrunkWire.AGENT, TrunkWire.ACTION_MARK,
+                    TrunkWire.configureRoomAction(
+                        host, name, open, listen, sfu, keepSfu, title, members, admins,
+                    ),
+                    // Silence from our own ship would otherwise pass
+                    // as sent, and the wait below would blame the host.
+                    confirm = ask != null,
+                )
+            }.onFailure { Log.e(TAG, "configure-room poke failed", it) }.isSuccess
+            if (ask != null) {
+                if (!sent) {
+                    _lineAsks.update { if (it[key] === ask) it + (key to LineAsk.OwnShip) else it }
+                } else {
+                    scope.launch {
+                        delay(joinAskTimeoutMs)
+                        _lineAsks.update {
+                            if (it[key] !== ask) return@update it
+                            it + (key to if (host in trunkHosts.value) LineAsk.Ignored else LineAsk.NoAnswer)
+                        }
+                    }
+                }
+            }
+            // The host answers with an announcement; refresh our own view
+            // too, for the case where the host is us.
+            refreshRooms()
+        }.join()
     }
 
     /**
