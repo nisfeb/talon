@@ -1186,7 +1186,10 @@ fun ChatComposer(
             OutlinedTextField(
                 value = state.draft,
                 onValueChange = updateDraft,
-                placeholder = { Text(placeholder) },
+                // Material draws a placeholder in bodyLarge. Left so, the
+                // empty box was taller than the typed one at bigger text
+                // sizes, and jumped as typing began.
+                placeholder = { Text(placeholder, style = MaterialTheme.typography.bodyMedium) },
                 enabled = canSend,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 visualTransformation = composerLook,
