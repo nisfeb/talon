@@ -170,9 +170,45 @@ actual fun Modifier.imagePasteTarget(
     onImage: (DroppedFile) -> Unit,
 ): Modifier = this
 
-// Images arrive through the field itself here (content receiver
-// on Android, the Ctrl+V intercept on desktop), so the composer
-// never needs to offer a manual paste action.
-actual fun clipboardHasImage(): Boolean = runCatching {
-    Toolkit.getDefaultToolkit().systemClipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)
-}.getOrDefault(false)
+// The composer polls this every 600 ms on the UI thread. On X11 the
+// answer is a request to whichever app owns the clipboard, and an
+// owner that never replies held the UI thread for AWT's selection
+// timeout on every poll: Talon froze (a user on Hyprland's XWayland,
+// 2026-10-23). So the poll gets the last answer and the asking happens
+// off the UI thread.
+actual fun clipboardHasImage(): Boolean = clipboardImage.hasImage()
+
+private val clipboardImage = ClipboardWatch(probe = {
+    runCatching {
+        Toolkit.getDefaultToolkit().systemClipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)
+    }.getOrDefault(false)
+})
+
+/**
+ * [probe]'s last answer, asked again on a background thread at each
+ * [hasImage]. At most one ask is in flight: an owner that never replies
+ * holds that one thread and nothing more, and the answer stays what it
+ * last was.
+ */
+internal class ClipboardWatch(
+    private val probe: () -> Boolean,
+    private val asker: java.util.concurrent.Executor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "talon-clipboard").apply { isDaemon = true }
+    },
+) {
+    private val last = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val asking = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun hasImage(): Boolean {
+        if (asking.compareAndSet(false, true)) {
+            asker.execute {
+                try {
+                    last.set(probe())
+                } finally {
+                    asking.set(false)
+                }
+            }
+        }
+        return last.get()
+    }
+}
