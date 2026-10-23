@@ -20,6 +20,7 @@ package io.nisfeb.talon.ui
  *  - isCallsSupported — A, D, i: a libwebrtc-backed CallEngine actual exists on each.
  *  - isCallRecordingSupported — A, D (party lines and 1:1 calls); i: the Swift bridge exposes no PCM tap.
  *  - isWindowFullScreenSupported — D (window placement is ours); A/i: the app already is the whole screen.
+ *  - isWholeWindowZoom — D: Ctrl +/- and the slider zoom everything, as a browser does. A/i: the slider is text size; the system owns display size.
  *  - isBackgroundCallRingSupported — A (UnifiedPush), i (PushKit + CallKit). D: closing the window quits, so a ring lands only while Talon is open.
  *  - needsPushForBackgroundRing: A (without push only the open activity hears a ring, not after a reboot or a swipe). D: the calls line covers it. i: PushKit rings through the relay, set up at sign-in.
  *  - isVideoCallsSupported — A, D, i: camera capture + render end-to-end on all three.
@@ -234,6 +235,14 @@ expect val isCallRecordingSupported: Boolean
  * already the whole screen and the immersive call view covers it.
  */
 expect val isWindowFullScreenSupported: Boolean
+
+/**
+ * Whether the size setting zooms the whole window rather than the text
+ * alone. Desktop: true. Ctrl +/- there is zoom, and text alone grew
+ * past its icons and wrapped in boxes that stayed the same size. Android
+ * and iOS: false, it is text size, beside the system's display size.
+ */
+expect val isWholeWindowZoom: Boolean
 
 /**
  * Whether an incoming call can ring this device while the app is in

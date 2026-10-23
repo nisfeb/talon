@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -235,10 +237,16 @@ class PartyLineScreensTest {
         override fun set(full: Boolean) { did += "window:$full"; on = full }
     }
 
-    private fun controls(audio: AudioDevices = AudioDevices.Noop, cameraOn: Boolean = false, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    /** A microphone or speaker the platform reports chosen, its row ticked. */
+    private fun ComposeUiTest.ticked(label: String) =
+        onAllNodes(hasText(label) and hasContentDescription("Selected")).fetchSemanticsNodes().isNotEmpty()
+
+    /** [zoom] is the size setting, through the shell's own provider. */
+    private fun controls(audio: AudioDevices = AudioDevices.Noop, cameraOn: Boolean = false, zoom: Float = 1f, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         val window = Window()
+        val settings = InMemoryUiSettings().apply { setFontScale(zoom) }
         setContent {
-            CompositionLocalProvider(LocalWindowFullScreen provides window) {
+            CompositionLocalProvider(LocalWindowFullScreen provides window, *chatDensityLocals(settings)) {
                 TalonTheme(darkTheme = false) {
                     PartyLineFullScreen(
                         state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
@@ -253,22 +261,63 @@ class PartyLineScreensTest {
         block()
     }
 
+    private class Mics : AudioDevices {
+        var mic: String? = null
+        override val supported = true
+        override fun inputs() = listOf(AudioDevice("usb", "USB mic"), AudioDevice("obs", "OBS virtual mic"))
+        override fun outputs() = listOf(AudioDevice("spk", "Speakers"))
+        override val selectedInput get() = mic
+        override fun selectInput(id: String?) { mic = id }
+    }
+
+    // A user report: "Add a mic input selector in meeting view."
+    @Test
+    fun `the microphone is chosen in the meeting view, beside the speaker`() {
+        val mics = Mics()
+        controls(mics) {
+            onNodeWithContentDescription("Devices").performClick()
+            waitForIdle()
+            assertTrue(shows("Microphone") && shows("Speaker") && shows("Camera"))
+            onNodeWithText("OBS virtual mic").performClick()
+            waitForIdle()
+            assertTrue(ticked("OBS virtual mic"))
+        }
+        assertEquals("obs", mics.mic)
+    }
+
+    // A user report: the meeting view's icons "don't scale properly with zoom".
+    @Test
+    fun `the meeting view's buttons grow with the zoom`() {
+        fun circle(zoom: Float): Int {
+            var h = 0
+            controls(Mics(), zoom = zoom) {
+                h = onNode(hasContentDescription("Devices"), useUnmergedTree = true).fetchSemanticsNode().size.height
+                assertTrue(onAllNodesWithText("Audio").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Source").fetchSemanticsNodes().isEmpty(), "no words in the circles")
+            }
+            return h
+        }
+        val at100 = circle(1f)
+        val at160 = circle(1.6f)
+        assertEquals(1.6f, at160.toFloat() / at100, 0.03f)
+    }
+
     @Test
     fun `the speaker is picked from the outputs, and the caption says what took`() {
         val speakers = Speakers()
         controls(speakers) {
-            assertTrue(shows("System default"), "nothing chosen is the system's choice")
-            onNodeWithText("Audio").performClick()
+            onNodeWithContentDescription("Devices").performClick()
+            waitForIdle()
+            assertTrue(!ticked("Headset") && ticked("System default"), "nothing chosen is the system's choice")
             onNodeWithText("Headset").performClick()
             waitForIdle()
-            assertTrue(shows("Headset"))
+            assertTrue(ticked("Headset"))
         }
         assertEquals("hs", speakers.chosen)
         controls(Speakers(takes = false)) {
-            onNodeWithText("Audio").performClick()
+            onNodeWithContentDescription("Devices").performClick()
             onNodeWithText("Headset").performClick()
             waitForIdle()
-            assertTrue(shows("System default") && !shows("Headset"), "a route the platform refused is not claimed")
+            assertTrue(!ticked("Headset"), "a route the platform refused is not claimed")
         }
     }
 
@@ -277,12 +326,12 @@ class PartyLineScreensTest {
         controls {
             assertTrue(onAllNodesWithContentDescription("Flip").fetchSemanticsNodes().isEmpty())
             onNodeWithContentDescription("Camera").performClick()
-            assertTrue(shows("Front"), "the camera in use")
-            onNodeWithText("Source").performClick()
+            onNodeWithContentDescription("Devices").performClick()
+            waitForIdle()
+            assertTrue(ticked("Front"), "the camera in use")
             onNodeWithText("Back").performClick()
             waitForIdle()
-            onNodeWithText("Source").performClick()
-            onAllNodesWithText("Back").onLast().performClick()
+            onNodeWithText("Back").performClick()
             waitForIdle()
         }
         assertEquals(listOf("camera", "source:back"), did.filterNot { it.startsWith("window:") }, "the camera in use picked again restarts nothing")
