@@ -18,16 +18,19 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class ChatDensityTest {
     @Test
-    fun `the setting reaches the rows and scales every sp, on top of the user's own scale`() = runComposeUiTest {
+    fun `the setting reaches the rows and scales every sp, and the user's own scale zooms the window`() = runComposeUiTest {
         val settings = InMemoryUiSettings()
         var seen: Pair<ChatDensity, Float>? = null
+        var density = 0f
         setContent {
             CompositionLocalProvider(*chatDensityLocals(settings)) {
                 seen = LocalChatDensity.current to LocalDensity.current.fontScale
+                density = LocalDensity.current.density
                 Text("x")
             }
         }
         val base = seen!!.second
+        val baseDensity = density
         assertEquals(ChatDensity.Comfortable, seen!!.first)
 
         settings.setDensity(Density.Compact)
@@ -35,9 +38,12 @@ class ChatDensityTest {
         assertEquals(ChatDensity.Compact, seen!!.first)
         assertEquals(base * 0.90f, seen!!.second, 0.0001f)
 
+        // Desktop: the user's scale is zoom. Icons and boxes grow with the
+        // text, and the text is not scaled a second time.
         settings.setFontScale(1.5f)
         waitForIdle()
-        assertEquals(base * 0.90f * 1.5f, seen!!.second, 0.0001f)
+        assertEquals(baseDensity * 1.5f, density, 0.0001f)
+        assertEquals(base * 0.90f, seen!!.second, 0.0001f)
     }
 
     // Nothing runs the Android shell in a test, so this is what stops it

@@ -26,6 +26,7 @@ actual fun isOnDeviceAiFeatureSupported(
 actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = true
 actual val isWindowFullScreenSupported: Boolean = false
+actual val isWholeWindowZoom: Boolean = false
 
 // UnifiedPush wakes the process, so a ring lands with the app closed.
 actual val isBackgroundCallRingSupported: Boolean = true

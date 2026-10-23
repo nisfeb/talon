@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -210,8 +208,12 @@ fun PartyLineFullScreen(
                 }
             }
 
-            if (audioDevices.supported) {
-                SpeakerControl(audioDevices)
+            // Microphone, speaker and camera behind one icon. Their own
+            // circles held the words "Audio" and "Source", which outgrew
+            // them at bigger sizes, and the microphone had no choice here.
+            val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
+            if (audioDevices.supported || cameraChoice != null) {
+                DevicesControl(audioDevices, videoDevices, cameraChoice)
             }
             if (isWindowFullScreenSupported) {
                 ControlButton(
@@ -274,10 +276,6 @@ fun PartyLineFullScreen(
                     }
                 }
             }
-            if (onToggleCamera != null && videoDevices.supported && onSelectCamera != null) {
-                CameraControl(videoDevices, onSelectCamera)
-            }
-
             if (onSwitchCamera != null && cameraOn) {
                 ControlButton(
                     label = "Flip",
@@ -513,66 +511,29 @@ private fun ControlButton(
     }
 }
 
+/** The call's devices, the bar's lists in a menu, behind an icon that scales as the others do. */
 @Composable
-private fun SpeakerControl(audioDevices: AudioDevices) {
+private fun DevicesControl(
+    audioDevices: AudioDevices,
+    videoDevices: io.nisfeb.talon.call.VideoDevices,
+    onSelectCamera: ((String) -> Unit)?,
+) {
     var menuOpen by remember { mutableStateOf(false) }
-    val outputs = remember(menuOpen) { audioDevices.outputs() }
-    // selectedOutput isn't observable, so the caption is driven by local
-    // state: seeded from the current route, updated on pick, and
-    // re-read each time the menu opens (the route can also change from
-    // outside — a headset plugged in, the bar's own picker).
-    var selected by remember { mutableStateOf(audioDevices.selectedOutput) }
-    LaunchedEffect(menuOpen) { if (menuOpen) selected = audioDevices.selectedOutput }
-    val routeLabel = outputs.firstOrNull { it.id == selected }?.label ?: "System default"
-    // Circle and caption open the menu alike, as ControlButton's do.
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button) { menuOpen = true },
-    ) {
-        Box {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(58.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "Audio",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                    )
-                }
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                // A long device list must scroll; a menu taller than the window
-                // otherwise just runs off it.
-                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    for (out in outputs) {
-                        DropdownMenuItem(
-                            text = { Text(out.label) },
-                            onClick = {
-                                menuOpen = false
-                                audioDevices.selectOutput(out.id)
-                                // Reflect what actually took effect: the
-                                // platform can refuse a route.
-                                selected = audioDevices.selectedOutput
-                            },
-                        )
-                    }
-                }
+    Box {
+        ControlButton(
+            label = "Devices",
+            onClick = { menuOpen = true },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Icon(TalonIcons.Tune, contentDescription = null, modifier = Modifier.size(26.dp))
+        }
+        // Open while picking: a microphone and a speaker are often chosen together.
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            Column(Modifier.widthIn(min = 220.dp, max = 360.dp).padding(horizontal = 12.dp)) {
+                DeviceChoices(audioDevices, videoDevices, onSelectCamera)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            routeLabel,
-            style = MaterialTheme.typography.labelLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -673,58 +634,5 @@ private fun ParticipantRow(
                 }
             }
         }
-    }
-}
-
-
-/** Which camera to send from, next to the camera toggle; a live camera is restarted on the new one. */
-@Composable
-private fun CameraControl(videoDevices: io.nisfeb.talon.call.VideoDevices, onSelectCamera: (String) -> Unit) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val cameras = remember(menuOpen) { videoDevices.cameras() }
-    var selected by remember { mutableStateOf(videoDevices.selectedCamera) }
-    val label = cameras.firstOrNull { it.id == selected }?.label ?: cameras.firstOrNull()?.label ?: "No camera"
-    if (cameras.isEmpty()) return
-    // Circle and caption open the menu alike, as ControlButton's do.
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button) { menuOpen = true },
-    ) {
-        Box {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(58.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "Source",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                }
-            }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                // A long device list must scroll; a menu taller than the window
-                // otherwise just runs off it.
-                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                    for (cam in cameras) {
-                        DropdownMenuItem(
-                            text = { Text(cam.label) },
-                            onClick = {
-                                menuOpen = false
-                                if (cam.id == selected) return@DropdownMenuItem
-                                selected = cam.id
-                                onSelectCamera(cam.id)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

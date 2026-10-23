@@ -93,11 +93,9 @@ val LocalChatDensity = staticCompositionLocalOf { ChatDensity.Comfortable }
 
 /**
  * What the density setting provides, for a shell's root provider: the
- * spacing rows read ([LocalChatDensity]), and [LocalDensity] with every
- * `sp` scaled by the preset and the user's own font scale. Only the
- * font scale: scaling `density` itself would resize icons, images and
- * the gaps that are no part of it. One function for both shells; the
- * Android one provided neither, and the setting did nothing there.
+ * spacing rows read ([LocalChatDensity]), and [LocalDensity] scaled by
+ * [scaledDensity]. One function for both shells; the Android one
+ * provided neither, and the setting did nothing there.
  */
 @Composable
 fun chatDensityLocals(uiSettings: UiSettings): Array<ProvidedValue<*>> {
@@ -105,11 +103,23 @@ fun chatDensityLocals(uiSettings: UiSettings): Array<ProvidedValue<*>> {
     val userFontScale by uiSettings.fontScale.collectAsState()
     val chat = ChatDensity.forMode(mode)
     val base = LocalDensity.current
-    val scaled = remember(base, chat, userFontScale) {
-        androidx.compose.ui.unit.Density(
-            density = base.density,
-            fontScale = base.fontScale * chat.fontScaleMultiplier * userFontScale,
-        )
-    }
+    val scaled = remember(base, chat, userFontScale) { scaledDensity(base, chat, userFontScale, isWholeWindowZoom) }
     return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled)
 }
+
+/**
+ * [base] with the preset's text scale and the user's own [userScale].
+ * Where [wholeWindow], the user's scale zooms everything: icons, gaps
+ * and boxes grow with the text, so nothing outgrows its icon or wraps
+ * in a box that stayed put. Elsewhere it scales text alone. The preset
+ * is chat spacing, never zoom, so it only ever touches text.
+ */
+internal fun scaledDensity(
+    base: androidx.compose.ui.unit.Density,
+    chat: ChatDensity,
+    userScale: Float,
+    wholeWindow: Boolean,
+): androidx.compose.ui.unit.Density = androidx.compose.ui.unit.Density(
+    density = base.density * (if (wholeWindow) userScale else 1f),
+    fontScale = base.fontScale * chat.fontScaleMultiplier * (if (wholeWindow) 1f else userScale),
+)

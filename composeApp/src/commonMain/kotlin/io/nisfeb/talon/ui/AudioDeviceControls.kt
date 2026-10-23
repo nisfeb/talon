@@ -81,62 +81,78 @@ fun AudioDeviceControls(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (open) {
-                // Read once per open, not per recomposition: each call
-                // crosses into the native device layer.
-                val inputs = remember(open) { devices.inputs() }
-                val outputs = remember(open) { devices.outputs() }
-                var input by remember { mutableStateOf(devices.selectedInput) }
-                var output by remember { mutableStateOf(devices.selectedOutput) }
-
-                if (devices.unifiedRoute) {
-                    // One choice drives both directions here, so one
-                    // list. Two would imply a freedom the phone
-                    // doesn't have.
-                    DevicePicker(
-                        title = "Route",
-                        devices = inputs,
-                        selected = input,
-                        onPick = {
-                            input = it
-                            output = it
-                            devices.selectInput(it)
-                        },
-                    )
-                } else {
-                    DevicePicker(
-                        title = "Microphone",
-                        devices = inputs,
-                        selected = input,
-                        onPick = { input = it; devices.selectInput(it) },
-                    )
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    DevicePicker(
-                        title = "Speaker",
-                        devices = outputs,
-                        selected = output,
-                        onPick = { output = it; devices.selectOutput(it) },
-                    )
-                }
-                if (showCamera) {
-                    // The same rows for cameras; "System default" is the first one found.
-                    val cameras = remember(open) {
-                        videoDevices.cameras().map { io.nisfeb.talon.call.AudioDevice(it.id, it.label) }
-                    }
-                    var camera by remember { mutableStateOf(videoDevices.selectedCamera) }
-                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    DevicePicker(
-                        title = "Camera",
-                        devices = cameras,
-                        selected = camera,
-                        onPick = { id ->
-                            camera = id
-                            if (id == null) videoDevices.selectCamera(null) else onSelectCamera?.invoke(id)
-                        },
-                    )
-                }
-            }
+            if (open) DeviceChoices(devices, videoDevices, if (showCamera) onSelectCamera else null)
         }
+    }
+}
+
+/**
+ * The microphone, speaker and camera lists, for the call bar's pane and
+ * the meeting view's Devices menu alike. Read when shown: each read
+ * crosses into the native device layer. A pick shows what the platform
+ * then reports, so a route it refused is never claimed. [onSelectCamera]
+ * null leaves the camera out.
+ */
+@Composable
+internal fun DeviceChoices(
+    devices: AudioDevices,
+    videoDevices: io.nisfeb.talon.call.VideoDevices,
+    onSelectCamera: ((String) -> Unit)?,
+) {
+    val inputs = remember { devices.inputs() }
+    val outputs = remember { devices.outputs() }
+    var input by remember { mutableStateOf(devices.selectedInput) }
+    var output by remember { mutableStateOf(devices.selectedOutput) }
+
+    if (!devices.supported) {
+        // No audio choice here: only the camera, if any.
+    } else if (devices.unifiedRoute) {
+        // One choice drives both directions here, so one
+        // list. Two would imply a freedom the phone
+        // doesn't have.
+        DevicePicker(
+            title = "Route",
+            devices = inputs,
+            selected = input,
+            onPick = {
+                devices.selectInput(it)
+                input = devices.selectedInput
+                output = input
+            },
+        )
+    } else {
+        DevicePicker(
+            title = "Microphone",
+            devices = inputs,
+            selected = input,
+            onPick = { devices.selectInput(it); input = devices.selectedInput },
+        )
+        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        DevicePicker(
+            title = "Speaker",
+            devices = outputs,
+            selected = output,
+            onPick = { devices.selectOutput(it); output = devices.selectedOutput },
+        )
+    }
+    if (onSelectCamera != null && videoDevices.supported) {
+        // The same rows for cameras; "System default" is the first one found.
+        val cameras = remember {
+            videoDevices.cameras().map { io.nisfeb.talon.call.AudioDevice(it.id, it.label) }
+        }
+        var camera by remember { mutableStateOf(videoDevices.selectedCamera) }
+        if (devices.supported) HorizontalDivider(Modifier.padding(vertical = 4.dp))
+        DevicePicker(
+            title = "Camera",
+            devices = cameras,
+            selected = camera,
+            onPick = { id ->
+                // The camera in use, picked again, restarts nothing.
+                if (id == camera) return@DevicePicker
+                camera = id
+                if (id == null) videoDevices.selectCamera(null) else onSelectCamera(id)
+            },
+        )
     }
 }
 

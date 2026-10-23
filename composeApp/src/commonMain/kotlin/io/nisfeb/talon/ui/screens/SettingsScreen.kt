@@ -2393,7 +2393,7 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
         )
     }
     Spacer(Modifier.height(8.dp))
-    Text("Text size · ${(scale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
+    Text("${if (io.nisfeb.talon.ui.isWholeWindowZoom) "Zoom" else "Text size"} · ${(scale * 100).toInt()}%", style = MaterialTheme.typography.bodyMedium)
     Text(
         "On this device only.",
         style = MaterialTheme.typography.labelSmall,

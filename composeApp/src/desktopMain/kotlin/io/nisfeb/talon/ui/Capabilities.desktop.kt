@@ -63,6 +63,7 @@ actual fun isOnDeviceAiFeatureSupported(
 actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = true
 actual val isWindowFullScreenSupported: Boolean = true
+actual val isWholeWindowZoom: Boolean = true
 
 // Off: closing the window quits Talon (Main.kt's onCloseRequest), so a
 // ring lands only while it is open, minimised or unfocused included.

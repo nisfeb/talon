@@ -42,6 +42,7 @@ actual fun isOnDeviceAiFeatureSupported(
 actual val isCallsSupported: Boolean = true
 actual val isCallRecordingSupported: Boolean = false
 actual val isWindowFullScreenSupported: Boolean = false
+actual val isWholeWindowZoom: Boolean = false
 
 // CallKit/PushKit live in the Xcode target (CallPush.swift): a PushKit
 // VoIP token reaches the relay through IosVoipBridge/IosPushTokenProvider,

@@ -127,7 +127,8 @@ class SettingsScreenTest {
             .performScrollTo()
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(1.5f) }
         assertEquals(1.5f, ui.fontScale.value, 0.001f)
-        assertTrue(shows("Text size · 150%"))
+        // Desktop zooms the whole window (isWholeWindowZoom).
+        assertTrue(shows("Zoom · 150%"))
     }
 
     @Test
