@@ -2339,6 +2339,14 @@ fun App(
                     // The calendar's own page: in-app where there is a
                     // webview, the browser on desktop, which has none.
                     val calendarPageOpener = androidx.compose.ui.platform.LocalUriHandler.current
+                    // Google's authorization endpoint rejects embedded webviews.
+                    // Use the system browser on every platform, retaining the
+                    // ship as the OAuth client and callback destination.
+                    val onOpenGoogleCalendarSettings: () -> Unit = {
+                        val s = sessionStore.active()?.shipUrl
+                        checkNotNull(s) { "Sign into your ship first." }
+                        calendarPageOpener.openUri(s.trimEnd('/') + io.nisfeb.talon.calendar.CalendarApi.APP_PATH + "#google")
+                    }
                     val onOpenCalendarPage: () -> Unit = {
                         val s = sessionStore.active()?.shipUrl
                         if (s != null) {
@@ -2612,6 +2620,7 @@ fun App(
                         twentyFourHour = homeTwentyFourHour,
                         onBack = { showCalendar = false },
                         onOpenWebSettings = onOpenCalendarPage,
+                        onOpenGoogleSettings = onOpenGoogleCalendarSettings,
                         db = db, chat = repo, mail = mailRepo, ourShip = ship,
                     )
                     showBookmarks -> BookmarksScreen(
@@ -3808,6 +3817,7 @@ fun App(
                                         twentyFourHour = homeTwentyFourHour,
                                         onBack = null,
                                         onOpenWebSettings = onOpenCalendarPage,
+                                        onOpenGoogleSettings = onOpenGoogleCalendarSettings,
                                         db = db, chat = repo, mail = mailRepo, ourShip = ship,
                                     )
                                 }
