@@ -153,6 +153,18 @@ done
 # Icon at AppDir root, named to match Icon= in the .desktop file.
 cp "$ICON_SRC" "$APPDIR/talon.png"
 
+# The theme sizes too. Desktop integration (AppImageLauncher) installs
+# these, and with only the 1024 px root icon it filed that one under
+# hicolor/1024x1024, a size no icon theme lists. So once the window
+# class matched the desktop entry, KDE's task manager found the entry
+# but not its icon, and drew a generic one. branding/linux holds the
+# sizes, made from $ICON_SRC with ImageMagick:
+#   magick "$ICON_SRC" -filter Lanczos -resize NxN -strip PNG32:branding/linux/talon-N.png
+for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "branding/linux/talon-$size.png" \
+        "$APPDIR/usr/share/icons/hicolor/${size}x${size}/apps/talon.png"
+done
+
 # .desktop file — AppImage spec needs exactly one at the root.
 cat > "$APPDIR/talon.desktop" <<EOF
 [Desktop Entry]
