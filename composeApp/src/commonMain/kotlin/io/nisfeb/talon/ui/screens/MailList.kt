@@ -81,6 +81,7 @@ fun MailList(
     val scope = rememberCoroutineScope()
     val availability by repo.availability.collectAsState()
     val page by repo.page.collectAsState()
+    val inboxUnread by repo.inboxUnreadCount.collectAsState()
     val loading by repo.loading.collectAsState()
     val error by repo.error.collectAsState()
     val unsent by repo.unsent.collectAsState()
@@ -144,6 +145,7 @@ fun MailList(
                     onSelect = { repo.selectFolder(it) },
                     onOrganise = { organising = true },
                     modifier = Modifier.width(158.dp).fillMaxHeight(),
+                    inboxUnread = inboxUnread,
                 )
                 VerticalDivider()
             }
@@ -172,6 +174,9 @@ fun MailList(
                     onCompose = onCompose,
                     onFolders = if (roomForColumn) null else ({ pickingFolder = true }),
                     folderIcon = folderIcon(folder),
+                    // Unread in the inbox while another folder is open: the
+                    // button is the way back to it.
+                    unreadElsewhere = inboxUnread != null && folder != INBOX_FOLDER,
                 )
                 HorizontalDivider()
                 error?.let { MailNotice(it, onDismiss = repo::clearError) }
@@ -222,6 +227,7 @@ fun MailList(
                 onSelect = { repo.selectFolder(it); pickingFolder = false },
                 onOrganise = { pickingFolder = false; organising = true },
                 onDismiss = { pickingFolder = false },
+                inboxUnread = inboxUnread,
             )
         }
     }
@@ -360,6 +366,7 @@ private fun MailToolbar(
     onFolders: (() -> Unit)?,
     /** The open folder's icon, on the button that changes it. */
     folderIcon: androidx.compose.ui.graphics.vector.ImageVector = TalonIcons.Inbox,
+    unreadElsewhere: Boolean = false,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -369,8 +376,14 @@ private fun MailToolbar(
             // Not a hamburger. The app's own is one, and two identical
             // ones stacked down the left of a mail screen is a way of
             // asking somebody to guess which is which.
-            io.nisfeb.talon.ui.IconButton(tip = "Mailboxes", onClick = onFolders) {
-                Icon(folderIcon, contentDescription = "Mailboxes")
+            val tip = if (unreadElsewhere) "Mailboxes, unread mail in Inbox" else "Mailboxes"
+            io.nisfeb.talon.ui.IconButton(tip = tip, onClick = onFolders) {
+                // On the glyph, not the button's touch area, where it floated off.
+                androidx.compose.material3.BadgedBox(
+                    badge = { if (unreadElsewhere) androidx.compose.material3.Badge() },
+                ) {
+                    Icon(folderIcon, contentDescription = tip)
+                }
             }
         }
         var searching by remember(query.isEmpty()) { mutableStateOf(query.isNotEmpty()) }

@@ -197,6 +197,14 @@ class MailRepo(
         pages[PageKey(MailView.INBOX, null, "")]?.threads?.any { it.unread } == true
     }
 
+    /**
+     * The Inbox row's count ([inboxUnreadLabel]), off the same listing as
+     * [inboxUnread]: the poll reads the inbox beside whatever folder is open.
+     */
+    val inboxUnreadCount: StateFlow<String?> = io.nisfeb.talon.util.mapState(pageCache) { pages ->
+        inboxUnreadLabel(pages[PageKey(MailView.INBOX, null, "")])
+    }
+
     /** The last copy of a thread this session read, to show while it is read again. */
     fun cachedThread(id: String): MailThread? = threadCache.value[id]
 
@@ -1198,4 +1206,18 @@ internal fun InboxPage.archived(view: MailView, threadId: String, archived: Bool
     view == MailView.INBOX && archived -> without(threadId)
     view == MailView.ARCHIVED && !archived -> without(threadId)
     else -> editRow(threadId) { it.copy(archived = archived) }
+}
+
+/**
+ * Unread threads on the inbox's first page, as the folder list shows
+ * them, or null for none. "+" when that whole page is unread and more of
+ * the inbox lies past it.
+ * ponytail: counts the first page only; ask the ship for an unread total
+ * if a count past it ever matters.
+ */
+internal fun inboxUnreadLabel(page: InboxPage?): String? {
+    val threads = page?.threads ?: return null
+    val n = threads.count { it.unread }
+    if (n == 0) return null
+    return if (n == threads.size && threads.size < page.total) "$n+" else "$n"
 }
