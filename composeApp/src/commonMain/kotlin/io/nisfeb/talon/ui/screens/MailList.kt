@@ -171,6 +171,7 @@ fun MailList(
                     },
                     onCompose = onCompose,
                     onFolders = if (roomForColumn) null else ({ pickingFolder = true }),
+                    folderIcon = folderIcon(folder),
                 )
                 HorizontalDivider()
                 error?.let { MailNotice(it, onDismiss = repo::clearError) }
@@ -357,6 +358,8 @@ private fun MailToolbar(
     onRefresh: () -> Unit,
     onCompose: (() -> Unit)?,
     onFolders: (() -> Unit)?,
+    /** The open folder's icon, on the button that changes it. */
+    folderIcon: androidx.compose.ui.graphics.vector.ImageVector = TalonIcons.Inbox,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -367,7 +370,7 @@ private fun MailToolbar(
             // ones stacked down the left of a mail screen is a way of
             // asking somebody to guess which is which.
             io.nisfeb.talon.ui.IconButton(tip = "Mailboxes", onClick = onFolders) {
-                Icon(TalonIcons.Inbox, contentDescription = "Mailboxes")
+                Icon(folderIcon, contentDescription = "Mailboxes")
             }
         }
         var searching by remember(query.isEmpty()) { mutableStateOf(query.isNotEmpty()) }

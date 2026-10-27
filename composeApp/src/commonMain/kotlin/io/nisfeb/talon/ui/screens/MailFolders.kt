@@ -102,6 +102,10 @@ fun MailFolderSheet(
     }
 }
 
+/** [f]'s icon, as the folder list draws it: the mail toolbar's button shows the open one. */
+internal fun folderIcon(f: MailFolder): ImageVector =
+    FOLDERS.firstOrNull { it.first == f }?.second ?: TalonIcons.Label
+
 private val FOLDERS: List<Pair<MailFolder, ImageVector>> = listOf(
     MailFolder.View(MailView.INBOX) to TalonIcons.Inbox,
     MailFolder.Drafts to Icons.Filled.Edit,
