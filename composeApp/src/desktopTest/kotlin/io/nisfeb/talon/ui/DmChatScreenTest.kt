@@ -859,6 +859,23 @@ class DmChatScreenTest {
         onNodeWithText("Add to contacts").performClick()
     }
 
+    // A user report: clicking an avatar no longer showed the profile. It
+    // did in the first chat; the desktop pane keeps this screen, and after
+    // a switch the tap wrote the first chat's state.
+    @Test
+    fun `an avatar opens the profile after the pane switches chats`() {
+        // msg() files every message under ~bus: open on an empty chat first.
+        val host = Host("~nec")
+        chat(seed = sam, host = host) { _, _ ->
+            waitForIdle()
+            host.whom = "~bus"
+            waitForIdle()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() }
+            onAllNodesWithText("SB").onFirst().performClick()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
+        }
+    }
+
     @Test
     fun `adding a contact the ship refuses says so`() = chat(seed = sam, prepare = { refuse = { if (it.app == "contacts") "nope" else null } }) { _, _ ->
         addSam()

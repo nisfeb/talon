@@ -824,10 +824,13 @@ fun DmChatScreen(
             }
         }
     }
-    val onMentionTap: (String) -> Unit = remember {
+    // Keyed on the chat as the sheet's state is: remembered once, these
+    // kept the first chat's state, so after a switch in the desktop pane
+    // a tap set a state no sheet read, and no profile opened.
+    val onMentionTap: (String) -> Unit = remember(whom) {
         { patp -> profileSheetShip = patp }
     }
-    val onAvatarTap: (String) -> Unit = remember {
+    val onAvatarTap: (String) -> Unit = remember(whom) {
         { patp -> profileSheetShip = patp }
     }
     val onLinkTap: (String) -> Unit = io.nisfeb.talon.ui.rememberLinkOpener()
