@@ -51,6 +51,8 @@ fun MailFolderColumn(
     onSelect: (MailFolder) -> Unit,
     onOrganise: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The Inbox row's unread count, or null for none. */
+    inboxUnread: String? = null,
 ) {
     Column(
         modifier
@@ -59,7 +61,7 @@ fun MailFolderColumn(
             .padding(vertical = 6.dp),
     ) {
         FOLDERS.forEach { (f, icon) ->
-            FolderRow(folderName(f), icon, selected == f) { onSelect(f) }
+            FolderRow(folderName(f), icon, selected == f, count = inboxUnread.takeIf { f == INBOX_FOLDER }) { onSelect(f) }
         }
         if (labels.isNotEmpty()) {
             HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
@@ -75,7 +77,7 @@ fun MailFolderColumn(
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
-        FolderRow("Filters and lists", TalonIcons.Tune, false, onOrganise)
+        FolderRow("Filters and lists", TalonIcons.Tune, false, onClick = onOrganise)
     }
 }
 
@@ -88,6 +90,7 @@ fun MailFolderSheet(
     onSelect: (MailFolder) -> Unit,
     onOrganise: () -> Unit,
     onDismiss: () -> Unit,
+    inboxUnread: String? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).padding(bottom = 24.dp)) {
@@ -97,6 +100,7 @@ fun MailFolderSheet(
                 onSelect = onSelect,
                 onOrganise = onOrganise,
                 modifier = Modifier.fillMaxWidth(),
+                inboxUnread = inboxUnread,
             )
         }
     }
@@ -105,6 +109,8 @@ fun MailFolderSheet(
 /** [f]'s icon, as the folder list draws it: the mail toolbar's button shows the open one. */
 internal fun folderIcon(f: MailFolder): ImageVector =
     FOLDERS.firstOrNull { it.first == f }?.second ?: TalonIcons.Label
+
+internal val INBOX_FOLDER: MailFolder = MailFolder.View(MailView.INBOX)
 
 private val FOLDERS: List<Pair<MailFolder, ImageVector>> = listOf(
     MailFolder.View(MailView.INBOX) to TalonIcons.Inbox,
@@ -119,6 +125,8 @@ private fun FolderRow(
     label: String,
     icon: ImageVector,
     selected: Boolean,
+    /** Unread here, shown at the row's end with the name in bold; null for none. */
+    count: String? = null,
     onClick: () -> Unit,
 ) {
     val ground =
@@ -142,11 +150,20 @@ private fun FolderRow(
         Text(
             label,
             style = (if (touch) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodySmall).copy(
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (selected || count != null) FontWeight.SemiBold else FontWeight.Normal,
             ),
             color = ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
+        if (count != null) {
+            Text(
+                count,
+                style = (if (touch) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium)
+                    .copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
