@@ -238,8 +238,12 @@ internal suspend fun MessageDao.softDeleteWithMedia(
     whom: String,
     id: String,
 ) {
-    softDelete(whom, id)
-    media.replaceForMessage(whom = whom, messageId = id, rows = emptyList())
+    // The ship drops a deleted post's thread with it; so does the device.
+    for (gone in listOf(id) + replyIds(whom, id)) {
+        softDelete(whom, gone)
+        dropEmbedding(whom, gone)
+        media.replaceForMessage(whom = whom, messageId = gone, rows = emptyList())
+    }
 }
 
 /**
