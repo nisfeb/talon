@@ -233,6 +233,20 @@ class DisappearingMessagesTest {
         waitUntil(timeoutMillis = 5_000) { shows("Custom (3 days)") }
     }
 
+    /** A Talon with a newer hook than the ship holds: it is edited in place, not added twice. */
+    @Test
+    fun `an older hook on the ship is brought up to date`() = host(prepare = { src = "an older hook" }) { ship, hooks ->
+        waitUntil(timeoutMillis = 5_000) { shows("1 day") }
+        choose("1 day")
+        waitUntil(timeoutMillis = 5_000) { shows("Turn on") }
+        onNodeWithText("Turn on").performClick()
+        waitUntil(timeoutMillis = 10_000) { hookPokes(ship).any { "cron" in it && pics in it } }
+        val src = runBlocking { Disappearing.source() }
+        assertEquals(Disappearing.edit(hooks.id, src).toString(), hookPokes(ship).first())
+        assertTrue(hookPokes(ship).none { it.startsWith("{\"add\"") })
+        assertEquals(src, hooks.src)
+    }
+
     @Test
     fun `channels set apart are said to differ`() = host(prepare = { src = "old"; config[general] = week; order[general] = listOf(id) }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { shows("The channels differ.") }
