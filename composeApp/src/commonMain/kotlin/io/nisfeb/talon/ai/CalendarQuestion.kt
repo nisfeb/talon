@@ -4,6 +4,8 @@ import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.overdue
+import io.nisfeb.talon.calendar.dueIsDate
 import io.nisfeb.talon.orrery.DecideSettings
 import io.nisfeb.talon.orrery.Decider
 import io.nisfeb.talon.orrery.OpenRouterDecider
@@ -175,10 +177,14 @@ object CalendarQuestion {
         val rows = (if (covered) calendar.rows.value else null) ?: calendar.windowRows(b.first, b.last + 1) ?: return null
         val tasks = calendar.tasks.value.orEmpty()
         seen.events(rows, span.from, span.to)
-        seen.tasks(tasks.filter { t -> t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true })
+        seen.tasks(tasks.filter { t -> dueIn(t, span, today, now, zone) })
         log("calendar answered with no model in ${io.nisfeb.talon.util.nowMs() - t0} ms (${span.said}${if (covered) "" else ", asked the ship"})")
         return answer(span, rows, tasks, zone, now, twentyFour)
     }
+
+    /** Due in [span], or late when the span takes in today. */
+    private fun dueIn(t: CalendarTask, span: Span, today: LocalDate, nowMs: Long, zone: TimeZone): Boolean =
+        t.dueDate(zone)?.let { it in span.from..span.to } == true || (span.from <= today && t.overdue(nowMs, zone))
 
     /** The span as moments, for asking the calendar. */
     fun bounds(span: Span, zone: TimeZone): LongRange =
@@ -192,7 +198,7 @@ object CalendarQuestion {
     fun answer(span: Span, rows: List<CalendarRow>, tasks: List<CalendarTask>, zone: TimeZone, nowMs: Long, twentyFour: Boolean): String {
         val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         val events = rows.filter { !it.isTask && daysOf(it, zone).any { d -> d in span.from..span.to } }.sortedBy { it.l }
-        val due = tasks.count { t -> !t.done && t.dueDate()?.let { it in span.from..span.to || (span.from <= today && it < today) } == true }
+        val due = tasks.count { t -> !t.done && dueIn(t, span, today, nowMs, zone) }
         fun at(r: CalendarRow): String {
             if (r.all) return "all day"
             val day = Instant.fromEpochMilliseconds(r.l).toLocalDateTime(zone).date

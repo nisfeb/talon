@@ -94,6 +94,7 @@ import io.nisfeb.talon.calendar.ANSWERS
 import io.nisfeb.talon.calendar.VideoCall
 import io.nisfeb.talon.calendar.answerWords
 import io.nisfeb.talon.calendar.callOf
+import io.nisfeb.talon.calendar.overdue
 import io.nisfeb.talon.calendar.editAtBody
 import io.nisfeb.talon.calendar.guestText
 import io.nisfeb.talon.calendar.isCopy
@@ -227,12 +228,14 @@ fun CalendarScreen(
 
     // Read again on a slow tick: a screen left open past midnight must
     // not go on calling yesterday "today".
-    val today by produceState(initialValue = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date) {
+    // The minute, for what is late now: a task due at a time is late once it has gone by.
+    val clock by produceState(initialValue = nowMs()) {
         while (true) {
-            value = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(TimeZone.currentSystemDefault()).date
+            value = nowMs()
             delay(60_000L)
         }
     }
+    val today = remember(clock) { Instant.fromEpochMilliseconds(clock).toLocalDateTime(TimeZone.currentSystemDefault()).date }
     var year by remember { mutableStateOf(today.year) }
     var month by remember { mutableStateOf(today.month.number) }
     var selected by remember { mutableStateOf(today) }
@@ -687,6 +690,7 @@ fun CalendarScreen(
                 tasks = tasks?.filter { it.cal !in hidden && tagged(it.tags) }
                     ?.map { t -> pendingTicks[t.id]?.let { t.copy(done = it) } ?: t },
                 today = today,
+                nowMs = clock,
                 calendars = calendars.filter { it.id !in hidden && it.id !in readOnly },
                 defaultCal = newEventCalendar(),
                 readOnly = readOnly,
@@ -695,7 +699,7 @@ fun CalendarScreen(
                 onTick = ::tick,
                 onOpen = { t ->
                     // The row's day is midnight UTC, as the window feed has it.
-                    val dayMs = t.dueDate()?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds() ?: 0L
+                    val dayMs = t.dueDate(TimeZone.currentSystemDefault())?.atTime(0, 0)?.toInstant(TimeZone.UTC)?.toEpochMilliseconds() ?: 0L
                     view(CalendarRow(id = t.id, cal = t.cal, meta = t.meta, cat = "todo", kind = "todo", all = true, l = dayMs, r = dayMs, done = t.done, priority = t.priority))
                 },
                 pending = pendingTasks,
@@ -2051,6 +2055,8 @@ private fun InviteRow(inv: CalendarInvite, writable: List<CalendarInfo>, onAnswe
 private fun TasksView(
     tasks: List<CalendarTask>?,
     today: LocalDate,
+    /** The minute it is, for what is late; [today] is its date here. */
+    nowMs: Long,
     calendars: List<CalendarInfo>,
     defaultCal: String?,
     readOnly: Set<String>,
@@ -2093,9 +2099,10 @@ private fun TasksView(
     // out when the tasks or the words change, in one walk over them:
     // every keystroke in the new-task field recomposes this screen.
     val all = tasks.orEmpty()
-    val counts = remember(all, query, today) {
+    val zone = TimeZone.currentSystemDefault()
+    val counts = remember(all, query, nowMs) {
         val found = all.filter { it.matches(query) }
-        io.nisfeb.talon.calendar.TaskFilter.entries.associateWith { f -> found.count { it.inFilter(f, today) } }
+        io.nisfeb.talon.calendar.TaskFilter.entries.associateWith { f -> found.count { it.inFilter(f, nowMs, zone) } }
     }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2192,11 +2199,11 @@ private fun TasksView(
             Text("Looking…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
             return@Column
         }
-        val shown = remember(all, filter, query, today) {
-            groupTasks(all.filter { it.inFilter(filter, today) && it.matches(query) }, today)
+        val shown = remember(all, filter, query, nowMs) {
+            groupTasks(all.filter { it.inFilter(filter, nowMs, zone) && it.matches(query) }, nowMs, zone)
         }
         LazyColumn(Modifier.fillMaxSize()) {
-            items(pending, key = { it.id }) { t -> TaskLine(t, today, colourOf(t), false, onTick, {}, pending = true) }
+            items(pending, key = { it.id }) { t -> TaskLine(t, today, t.overdue(nowMs, zone), colourOf(t), false, onTick, {}, pending = true) }
             if (shown.isEmpty() && pending.isEmpty()) {
                 item {
                     Text(
@@ -2220,7 +2227,7 @@ private fun TasksView(
                     )
                 }
                 items(group.tasks, key = { it.id }) { t ->
-                    TaskLine(t, today, colourOf(t), t.cal !in readOnly, onTick, onOpen)
+                    TaskLine(t, today, t.overdue(nowMs, zone), colourOf(t), t.cal !in readOnly, onTick, onOpen)
                 }
             }
         }
@@ -2242,12 +2249,15 @@ private fun TasksView(
 
 @Composable
 private fun TaskLine(
-    t: CalendarTask, today: LocalDate, colour: Color?, editable: Boolean,
+    t: CalendarTask, today: LocalDate,
+    /** Late now, by [overdue]: a day gone by, or a time. */
+    overdue: Boolean,
+    colour: Color?, editable: Boolean,
     onTick: (String, Boolean) -> Unit, onOpen: (CalendarTask) -> Unit,
     pending: Boolean = false,
 ) {
-    val dueDay = t.dueDate()
-    val late = !t.done && dueDay != null && dueDay < today
+    val dueDay = t.dueDate(TimeZone.currentSystemDefault())
+    val late = !t.done && overdue
     Row(
         Modifier.fillMaxWidth().clickable(enabled = !pending) { onOpen(t) }
             .alpha(if (pending) 0.45f else 1f)

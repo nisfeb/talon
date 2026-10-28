@@ -682,6 +682,8 @@ class CalendarRepo(
         val undo: () -> Unit = {},
         val action: String? = null,
         val placed: Boolean = false,
+        /** Why it was not taken, where something other than the calendar said. */
+        val why: String? = null,
     )
 
     /**
@@ -692,6 +694,7 @@ class CalendarRepo(
      * A task is changed in the task list at once, and put back if refused.
      */
     suspend fun writeEvent(body: JsonObject, readBack: Boolean = true): Written = carry {
+        orreryActionOf(body)?.let { action -> dismissing(body, action)?.let { return@carry it } }
         val since = nowMs()
         val action = (body["action"] as? kotlinx.serialization.json.JsonPrimitive)?.content
         val reach = reachOf(body)
@@ -724,6 +727,73 @@ class CalendarRepo(
             kotlinx.coroutines.CompletableDeferred<String?>().also { it.complete(null) }
         }
         Written(ok, shown, undo, action, placed = unadd != null)
+    }
+
+    /**
+     * The orrery action behind the todo a del-event takes away, if orrery
+     * placed it (meta.orrery holds the action's id). From the task list,
+     * or before the list is read from the event itself.
+     */
+    private suspend fun orreryActionOf(body: JsonObject): String? {
+        fun str(k: String) = (body[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        if (str("action") != "del-event") return null
+        val id = str("id") ?: return null
+        val listed = _tasks.value
+        val meta = when {
+            listed != null -> listed.firstOrNull { it.id == id }?.meta ?: return null
+            else -> eventDetail(id)?.takeIf { (it["cat"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "todo" }?.get("meta") as? JsonObject
+        }
+        return meta?.metaStr("orrery")?.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Take away a todo orrery placed by dismissing its action: orrery takes
+     * the todo off itself. A del-event alone was put back on orrery's next
+     * pass, the task being still open. Through the owner's own login, so
+     * it needs no orrery set up in Talon. Null where the action is gone or
+     * already closed (404, 409): the todo will not come back, and the
+     * calendar is asked to delete it as any other.
+     */
+    private suspend fun dismissing(body: JsonObject, action: String): Written? {
+        val id = (body["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return null
+        val putBack = dropDeleted(body)
+        val unlist = assumeTask(body)
+        val undo = { putBack(); unlist(); dismissed.update { it - id } }
+        dismissed.update { it + (id to nowMs()) }
+        val outcome = runSuspendCatching { dismissOrrery(action) }
+        val refused = outcome.exceptionOrNull() as? io.nisfeb.talon.orrery.OrreryError.Refused
+        if (refused != null && (refused.status == 404 || refused.status == 409)) { undo(); return null }
+        if (outcome.isFailure) {
+            undo()
+            val why = "That task was not removed: orrery did not take it (${outcome.exceptionOrNull()?.message ?: "no answer"})."
+            _unheard.value = why
+            return Written(false, kotlinx.coroutines.CompletableDeferred<String?>().also { it.complete(null) }, {}, "del-event", why = why)
+        }
+        // Read back behind, as for any task write: orrery's mirror takes the todo off within seconds.
+        val reach = reachOf(body)
+        val shown = scope.async { afterItemWrite(reach); null }
+        return Written(true, shown, undo, "del-event")
+    }
+
+    /** Dismiss orrery's action [id]; replaced in tests. */
+    internal var dismissOrrery: suspend (id: String) -> Unit = { id ->
+        val url = shipUrl ?: error("not attached to a ship")
+        io.nisfeb.talon.orrery.OrreryApi(http, http, url).transition(null, id, "dismissed", DISMISS_NOTE)
+    }
+
+    /**
+     * Todos taken away by dismissing their action, by id, with when: kept
+     * off the list until a read no longer has them, as orrery's mirror
+     * takes a few seconds and a read in between brought them back.
+     */
+    private val dismissed = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    /** [read] as the ship gave it, less what was dismissed and is still on its way off. */
+    private fun shipTasks(read: List<CalendarTask>): List<CalendarTask> {
+        val now = nowMs()
+        dismissed.update { m -> m.filter { (id, at) -> now - at < DISMISS_HOLD_MS && read.any { it.id == id } } }
+        val gone = dismissed.value.keys
+        return if (gone.isEmpty()) read else read.filterNot { it.id in gone }
     }
 
     /**
@@ -1034,7 +1104,7 @@ class CalendarRepo(
             pause *= 2
         }
         // The ship's own word, moved or not: a write it never applied goes.
-        if (tasks) got?.let { _tasks.value = it }
+        if (tasks) got?.let { _tasks.value = shipTasks(it) }
         window?.let { _rows.value = it }
         if (range == span) month?.let { _rangeRows.value = it }
         // So a phone closed straight after a tick opens on the tick.
@@ -1178,7 +1248,7 @@ class CalendarRepo(
     suspend fun refreshTasks(): Result<Unit> = gate.withLock {
         val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a ship."))
         runSuspendCatching {
-            _tasks.value = a.tasks()
+            _tasks.value = shipTasks(a.tasks())
             _availability.value = CalendarAvailability.PRESENT
             _error.value = null
         }.onFailure { e ->
@@ -1203,7 +1273,7 @@ class CalendarRepo(
             // one event before now is: the assistant reads through here too.
             details.clear()
             if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
-            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull() ?: _tasks.value
+            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull()?.let(::shipTasks) ?: _tasks.value
             if (full && rarely) readRarely(a)
             keep()
             val config = if (full) runSuspendCatching { a.config() }.getOrNull() else null
@@ -1279,5 +1349,11 @@ class CalendarRepo(
         const val FULL_READ_EVERY_MS = 60 * 60 * 1000L
         /** Read-backs after a write before taking the ship at its word: about 30s of waiting. */
         const val AFTER_WRITE_READS = 6
+
+        /** What orrery is told of an action whose todo was taken away. */
+        const val DISMISS_NOTE = "Removed from the calendar."
+
+        /** How long a dismissed todo is kept off the list while orrery takes it off the calendar. */
+        const val DISMISS_HOLD_MS = 5 * 60 * 1000L
     }
 }

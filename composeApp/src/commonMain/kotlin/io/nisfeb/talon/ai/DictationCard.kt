@@ -4,6 +4,8 @@ import io.nisfeb.talon.calendar.CalendarRow
 import io.nisfeb.talon.calendar.CalendarTask
 import io.nisfeb.talon.calendar.daysOf
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.overdue
+import io.nisfeb.talon.calendar.dueIsDate
 import kotlinx.datetime.DateTimeUnit
 import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
@@ -111,11 +113,11 @@ object DictationCards {
     fun tasks(tasks: List<CalendarTask>, zone: TimeZone, nowMs: Long): List<CardTask> {
         val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         return tasks.filterNot { it.done }
-            .sortedWith(compareBy(nullsLast()) { it.dueDate() })
+            .sortedWith(compareBy(nullsLast()) { it.dueDate(zone) })
             .take(MAX_TASKS)
             .map { t ->
-                val due = t.dueDate()
-                CardTask(t.name.ifBlank { "(untitled)" }, due?.let { dayLabel(it, today, short = true) }, due != null && due < today)
+                val due = t.dueDate(zone)
+                CardTask(t.name.ifBlank { "(untitled)" }, due?.let { dayLabel(it, today, short = true) }, t.overdue(nowMs, zone))
             }
     }
 

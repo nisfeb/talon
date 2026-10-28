@@ -138,6 +138,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         @Volatile var rows = "[]"
         @Volatile var calendars = """[{"id":"default","name":"Personal","kind":"local"}]"""
         @Volatile var zones = """["UTC"]"""
+        /** events.json: the task listing, a JSON array. */
+        @Volatile var tasks = "[]"
         /** event.json, by id; one not here is a 404. */
         val events = ConcurrentHashMap<String, String>()
         /** invites.json; null for a calendar older than invitations (34), which answers 404. */
@@ -373,7 +375,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                 when (path.removePrefix("/apps/calendar")) {
                     "/window.json" -> json("""{"rows":${c.rows}}""")
                     "/calendars.json" -> json(c.calendars)
-                    "/events.json", "/tags.json", "/google/conflicts.json", "/caldav/subscriptions.json" -> json("[]")
+                    "/events.json" -> json(c.tasks)
+                    "/tags.json", "/google/conflicts.json", "/caldav/subscriptions.json" -> json("[]")
                     "/config.json" -> json("""{"title":"Calendar","zone":"UTC","ball":"cal"}""")
                     "/zones.json" -> json(c.zones)
                     "/google.json" -> json("""{"connected":true,"linked":{}}""")
