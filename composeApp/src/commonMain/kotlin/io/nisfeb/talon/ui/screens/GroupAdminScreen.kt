@@ -861,7 +861,9 @@ private fun AdminBody(
         // ───────── Disappearing messages ─────────
         // The host's own channels-server does the deleting, and takes
         // hook pokes from no other ship, so it is the host's to set.
-        if (me.isNotEmpty() && me == flag.substringBefore('/')) {
+        // The group on show must be the one asked for: between one group and
+        // the next, the last one's record is still here for a moment.
+        if (me.isNotEmpty() && group.flag == flag && me == group.flag.substringBefore('/')) {
             DisappearingSection(repo, group, onChanged = onChannelChanged, onReportError = onReportError)
             HorizontalDivider()
         }
@@ -1629,17 +1631,17 @@ private fun DisappearingSection(
 ) {
     val d = io.nisfeb.talon.urbit.Disappearing
     val scope = rememberCoroutineScope()
-    val nests = remember(group) { repo.disappearingNests(group) }
-    var hooks by remember(group.flag) { mutableStateOf<io.nisfeb.talon.urbit.Disappearing.Hooks?>(null) }
+    var state by remember(group.flag) { mutableStateOf<TlonChatRepo.DisappearingState?>(null) }
     var readFailed by remember(group.flag) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
-    var reads by remember { mutableStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
-    var confirming by remember { mutableStateOf<Long?>(null) }
-    var custom by remember { mutableStateOf(false) }
+    // All of it the group's: a choice waiting to be confirmed never carries to another group.
+    var reads by remember(group.flag) { mutableStateOf(0) }
+    var busy by remember(group.flag) { mutableStateOf(false) }
+    var confirming by remember(group.flag) { mutableStateOf<Long?>(null) }
+    var custom by remember(group.flag) { mutableStateOf(false) }
 
     LaunchedEffect(group.flag, reads) {
-        runCatching { repo.disappearingHooks() }
-            .onSuccess { hooks = it; readFailed = null }
+        runCatching { repo.disappearingState(group) }
+            .onSuccess { state = it; readFailed = null }
             .onFailure { readFailed = io.nisfeb.talon.util.problemOf("Couldn't read disappearing messages", it) }
     }
 
@@ -1648,14 +1650,16 @@ private fun DisappearingSection(
         busy = true
         scope.launch {
             runCatching { repo.setDisappearing(group, seconds) }
-                .onSuccess { hooks = it; custom = false; onChanged() }
+                .onSuccess { state = it; custom = false; onChanged() }
                 .onFailure { onReportError(io.nisfeb.talon.util.problemOf("Couldn't change disappearing messages", it)); reads++ }
             busy = false
         }
     }
 
     SectionHeader("Disappearing messages")
-    val h = hooks
+    val h = state?.hooks
+    val nests = state?.nests.orEmpty()
+    val flag = group.flag
     val failed = readFailed
     when {
         failed != null -> {
@@ -1669,16 +1673,25 @@ private fun DisappearingSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         else -> {
-            val now = nests.map { h.delayOn(it) }.distinct()
-            val current = now.singleOrNull()
-            val mixed = now.size > 1
+            val now = nests.map { h.delayOn(it, flag) }.distinct()
+            // Half on is never shown as off: it may still be deleting.
+            val unfinished = nests.any { h.unfinished(it, flag) }
+            val mixed = now.size > 1 || unfinished
+            val current = now.singleOrNull().takeUnless { unfinished }
             Text(
                 "Deletes every message, for everyone, once it is older than the time you pick. " +
                     "Members' notifications and their ships' logs can keep copies.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (mixed) {
+            if (unfinished) {
+                Text(
+                    "Disappearing messages are only partly set up here, so messages may still be deleted. " +
+                        "Pick a time, or Off, to finish.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else if (mixed) {
                 Text(
                     "The channels differ. Pick a time to set them all.",
                     style = MaterialTheme.typography.bodySmall,
@@ -1707,7 +1720,7 @@ private fun DisappearingSection(
             if (missed.isNotEmpty()) {
                 Text(
                     "Not covered: ${missed.joinToString(", ") { it.title.ifBlank { it.nest.substringAfterLast('/') } }}. " +
-                        "Your ship can only delete in chats and galleries it hosts.",
+                        "Your ship can only delete in chats and galleries it hosts for this group.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1718,7 +1731,7 @@ private fun DisappearingSection(
     confirming?.let { seconds ->
         AlertDialog(
             onDismissRequest = { confirming = null },
-            title = { Text("Delete messages after ${d.label(seconds)}?") },
+            title = { Text("Delete messages in ${group.title?.takeIf { it.isNotBlank() } ?: group.flag} after ${d.label(seconds)}?") },
             text = {
                 Text(
                     "Every message in this group's channels, from every member, is deleted for everyone once it is " +
@@ -1728,7 +1741,7 @@ private fun DisappearingSection(
             },
             confirmButton = {
                 io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirming = null; set(seconds) }) {
-                    Text(if (hooks?.let { h -> nests.any { h.delayOn(it) != null } } == true) "Change" else "Turn on")
+                    Text(if (state?.let { st -> st.nests.any { st.hooks.delayOn(it, group.flag) != null } } == true) "Change" else "Turn on")
                 }
             },
             dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },

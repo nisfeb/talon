@@ -6,8 +6,9 @@
 
 Makes a group with a chat, posts 120 messages, lets them age, then turns
 the hook on at 30 seconds: the history goes a hundred at a time, a new
-post goes on its own timer, and once off nothing more is deleted. About
-three minutes. Fake ships only: it refuses any URL that is not localhost.
+post goes on its own timer, and once off nothing more is deleted. Then a
+second group's chat is given the first group's config, as a listing or a
+template could, and keeps its posts. About four minutes. Fake ships only: it refuses any URL that is not localhost.
 After a change to the hook, run this, then update the hash in
 DisappearingMessagesTest.
 """
@@ -50,15 +51,33 @@ def hook(payload):
 UW = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-~"
 
 
-def delay(seconds):
-    """(scot %uw (jam (mul seconds ~s1))), as Disappearing.delayNoun."""
-    a = seconds << 64
+def jam(a):
+    """(scot %uw (jam a)) for an atom, as Disappearing does it."""
+    if a == 0:
+        return "0w2"
     b = a.bit_length(); c = b.bit_length()
     n = ((1 << c) | (((b & ((1 << (c - 1)) - 1)) | (a << (c - 1))) << (c + 1))) << 1
     ds = []
     while n:
         ds.append(UW[n & 63]); n >>= 6
     return "0w" + ".".join(reversed(["".join(reversed(ds[i:i + 5])) for i in range(0, len(ds), 5)]))
+
+
+def delay(seconds):
+    return jam(seconds << 64)
+
+
+def cord(text):
+    return jam(int.from_bytes(text.encode(), "little"))
+
+
+def make_group(slug):
+    nest = f"chat/{SHIP}/{slug}-chat"
+    req("PUT", f"{BASE}/spider/groups/group-create-thread/group-create-1/group-ui-2.json", {
+        "groupId": f"{SHIP}/{slug}", "meta": {"title": slug, "description": "", "image": "", "cover": ""}, "guestList": [],
+        "channels": [{"channelId": nest, "meta": {"title": "General", "description": "", "image": "", "cover": ""}}]})
+    time.sleep(3)
+    return nest
 
 
 def post(nest, n):
@@ -85,13 +104,10 @@ def wait(nest, want, within):
 
 def main():
     assert delay(30) == "0wY000.00000.000I0" and delay(7 * 86400) == "0w4D.k0000.00000.002A0"
+    assert cord("~bel/dmtest") == "0wWe.raWdH.8nJza.NfOY0"
     req("POST", f"{BASE}/~/login", f"password={CODE}".encode(), "application/x-www-form-urlencoded")
     slug = f"hc{random.randrange(1 << 20):x}"
-    nest = f"chat/{SHIP}/{slug}-chat"
-    req("PUT", f"{BASE}/spider/groups/group-create-thread/group-create-1/group-ui-2.json", {
-        "groupId": f"{SHIP}/{slug}", "meta": {"title": slug, "description": "", "image": "", "cover": ""}, "guestList": [],
-        "channels": [{"channelId": nest, "meta": {"title": "General", "description": "", "image": "", "cover": ""}}]})
-    time.sleep(3)
+    nest = make_group(slug)
     post(nest, 120)
     wait(nest, 120, 20)
     print("120 posted; letting them age past 30 s")
@@ -108,7 +124,7 @@ def main():
     h = ours()
     assert h and h["src"] == SRC and h["compiled"], "the ship did not build the hook"
     hid = h["id"]
-    cfg = {"delay": delay(30)}
+    cfg = {"delay": delay(30), "group": cord(f"{SHIP}/{slug}")}
     order = [i for i in scry("channels-server", "/v0/hooks")["order"].get(nest, []) if i != hid] + [hid]
     hook({"config": {"id": hid, "nest": nest, "config": cfg}})
     hook({"order": {"nest": nest, "seq": order}})
@@ -126,12 +142,29 @@ def main():
 
     post(nest, 2)
     hooks = scry("channels-server", "/v0/hooks")
-    hook({"order": {"nest": nest, "seq": [i for i in hooks["order"].get(nest, []) if i != hid]}})
+    # As Talon does it: what deletes first, then out of the order.
     hook({"config": {"id": hid, "nest": nest, "config": {}}})
     hook({"rest": {"id": hid, "origin": nest}})
+    hook({"order": {"nest": nest, "seq": [i for i in hooks["order"].get(nest, []) if i != hid]}})
     time.sleep(40)
     assert live(nest) == 2, "a post went after the setting was off"
-    print("off: posts stay\nPASS")
+    print("off: posts stay")
+
+    other = make_group(slug + "x")
+    post(other, 2)
+    wait(other, 2, 20)
+    time.sleep(32)
+    order = [i for i in scry("channels-server", "/v0/hooks")["order"].get(other, []) if i != hid] + [hid]
+    hook({"config": {"id": hid, "nest": other, "config": cfg}})
+    hook({"order": {"nest": other, "seq": order}})
+    hook({"cron": {"id": hid, "origin": other, "schedule": "~d1", "config": cfg}})
+    post(other, 1)
+    time.sleep(40)
+    assert live(other) == 3, "another group's chat lost posts to this group's setting"
+    hook({"config": {"id": hid, "nest": other, "config": {}}})
+    hook({"rest": {"id": hid, "origin": other}})
+    hook({"order": {"nest": other, "seq": [i for i in order if i != hid]}})
+    print("another group's chat, given this group's config, keeps its posts\nPASS")
 
 
 main()
