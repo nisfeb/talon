@@ -33,6 +33,8 @@ object Notifications {
     const val CHANNEL_LOOPS = "loops"
     /** The ship's own pushes (grubbery web push): calendar reminders and the like. */
     const val CHANNEL_SHIP = "ship"
+    /** Orrery's daily reminder to do the evening review (orrery 130): its own, to mute apart. */
+    const val CHANNEL_EVENING = "orrery_evening"
     /** Time to leave: the ship's leave push, and the alarm kept in case it does not come. */
     const val CHANNEL_LEAVE = "leave"
     /** A trip under way: silent, ongoing, while the phone tells the ship where it is each minute. */
@@ -90,6 +92,8 @@ object Notifications {
     const val EXTRA_OPEN_MAIL = "open_mail"
     /** Set by a tapped orrery notification: the app opens Actions. */
     const val EXTRA_OPEN_ACTIONS = "open_actions"
+    /** The evening review, from the ship's reminder. */
+    const val EXTRA_OPEN_EVENING = "open_evening"
     /** A leave alert's thing ("activity/slug"): the tap opens Orrery on it. */
     const val EXTRA_OPEN_ORRERY = "open_orrery"
     /** A calendar reminder's push tag: TalonApp opens the Calendar on its occurrence. */
@@ -207,6 +211,12 @@ object Notifications {
                 }
             )
         }
+        if (mgr.getNotificationChannel(CHANNEL_EVENING) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(CHANNEL_EVENING, "Evening review", NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = "Your ship's reminder to organize the day's tasks" },
+            )
+        }
         if (mgr.getNotificationChannel(CHANNEL_SHIP) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_SHIP, "From your ship", NotificationManager.IMPORTANCE_DEFAULT)
@@ -259,6 +269,10 @@ object Notifications {
         io.nisfeb.talon.orrery.actionIdOfTag(push.tag)?.let {
             return showAction(context, it, push.title, push.body, late = io.nisfeb.talon.orrery.isOverdueTag(push.tag))
         }
+        // The evening reminder: its own channel, and the tap opens the review.
+        if (push.tag == io.nisfeb.talon.orrery.EVENING_TAG) {
+            return post(context, push.tag, CHANNEL_EVENING, push.title, push.body, alarm = false, openEvening = true)
+        }
         // A leave push or a running-late one: the alert channel, and the tap opens its appointment.
         val item = io.nisfeb.talon.orrery.alertItemOf(push.tag)
         post(context, push.tag ?: "ship:${push.title.hashCode()}", if (item != null) CHANNEL_LEAVE else CHANNEL_SHIP, push.title, push.body, item != null,
@@ -278,6 +292,7 @@ object Notifications {
         whenMs: Long = System.currentTimeMillis(),
         openItem: String? = null,
         openCalendar: String? = null,
+        openEvening: Boolean = false,
     ) {
         val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
         val tap = PendingIntent.getActivity(
@@ -286,6 +301,7 @@ object Notifications {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 if (openItem != null) putExtra(EXTRA_OPEN_ORRERY, openItem)
                 if (openCalendar != null) putExtra(EXTRA_OPEN_CALENDAR, openCalendar)
+                if (openEvening) putExtra(EXTRA_OPEN_EVENING, true)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

@@ -513,6 +513,22 @@ class OrreryRepo(
     /** The last daily brief the ship sent; null before the first. */
     suspend fun briefLast(): Result<Brief?> = runCatching { attached().briefLast() }
 
+    /** The week's review, read in lattice and here since 130, never mailed. */
+    suspend fun reviewLast(): Result<Brief?> = runCatching { attached().reviewLast() }
+
+    /**
+     * Move action [id]'s due (orrery 130): a "YYYY-MM-DD" day, an ISO time,
+     * or null for none. The due the ship keeps. On this repo's scope.
+     */
+    suspend fun setDue(id: String, due: String?): Result<String?> = scope.async { runCatching {
+        attached().due(keyToken(), id, due).also { scope.launch { refreshActions() } }
+    } }.await()
+
+    /** When the ship reminds the owner to do the evening review: "HH:MM", "" for never. */
+    suspend fun reviewAt(): Result<String> = runCatching { attached().reviewAt() }
+
+    suspend fun setReviewAt(at: String): Result<Unit> = scope.async { runCatching { attached().setReviewAt(at) } }.await()
+
     /** Orrery's flight and page watches, with what each last found; the flight API key masked. */
     suspend fun readWatches(): Result<JsonObject> = runCatching { attached().watches() }
 

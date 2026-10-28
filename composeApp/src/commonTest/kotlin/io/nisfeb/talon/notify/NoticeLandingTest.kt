@@ -34,7 +34,7 @@ class NoticeLandingTest {
     fun `the evening review's push is not an action`() {
         assertNull(io.nisfeb.talon.orrery.actionIdOfTag("orrery-evening"))
         assertEquals("evening-walk", io.nisfeb.talon.orrery.actionIdOfTag("orrery-evening-walk"), "an action named so is still one")
-        assertEquals(null, noticeLanding("orrery-evening"))
+        assertEquals(NoticeLanding.EveningReview, noticeLanding("orrery-evening"), "it opens the review")
     }
 
     @Test

@@ -34,6 +34,8 @@ sealed interface NoticeLanding {
     /** A calendar reminder: the calendar, on its occurrence. */
     data class Calendar(val tag: String) : NoticeLanding
     data object Actions : NoticeLanding
+    /** Orrery's daily push to organize the day's tasks (orrery 130). */
+    data object EveningReview : NoticeLanding
     data object Loops : NoticeLanding
     data object Invites : NoticeLanding
     data object Assistant : NoticeLanding
@@ -50,6 +52,7 @@ sealed interface NoticeLanding {
 fun noticeLanding(tag: String): NoticeLanding? = when {
     tag.startsWith(io.nisfeb.talon.calendar.CALENDAR_PUSH_PREFIX) -> NoticeLanding.Calendar(tag)
     tag.startsWith("orrery:") -> NoticeLanding.Actions
+    tag == io.nisfeb.talon.orrery.EVENING_TAG -> NoticeLanding.EveningReview
     // The ship's own push about an action, a late one's nag among them
     // (iOS hands its tag here when tapped): Actions, where it leads.
     io.nisfeb.talon.orrery.actionIdOfTag(tag) != null -> NoticeLanding.Actions

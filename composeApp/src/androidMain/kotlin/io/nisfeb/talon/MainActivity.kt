@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private val deepLinkOpenMail = mutableStateOf(false)
     /** Set by a tapped orrery notification (EXTRA_OPEN_ACTIONS): TalonApp opens Actions. */
     private val deepLinkOpenActions = mutableStateOf(false)
+    /** Set by the ship's tapped evening reminder (EXTRA_OPEN_EVENING): TalonApp opens the review. */
+    private val deepLinkOpenEvening = mutableStateOf(false)
     /** Set by a tapped leave alert (EXTRA_OPEN_ORRERY): TalonApp opens Orrery on its thing. */
     private val deepLinkOpenOrrery = mutableStateOf<String?>(null)
     /** Set by a tapped calendar reminder (EXTRA_OPEN_CALENDAR): its push tag. */
@@ -106,6 +108,7 @@ class MainActivity : ComponentActivity() {
             val threadAnchor by deepLinkThreadAnchor
             val openMail by deepLinkOpenMail
             val openActions by deepLinkOpenActions
+            val openEvening by deepLinkOpenEvening
             val openOrrery by deepLinkOpenOrrery
             val openCalendar by deepLinkOpenCalendar
             val share by pendingShare
@@ -136,6 +139,7 @@ class MainActivity : ComponentActivity() {
                         initialThreadAnchor = threadAnchor,
                         initialOpenMail = openMail,
                         initialOpenActions = openActions,
+                        initialOpenEvening = openEvening,
                         initialOpenOrreryItem = openOrrery,
                         initialOpenCalendarTag = openCalendar,
                         pendingShare = share,
@@ -157,6 +161,7 @@ class MainActivity : ComponentActivity() {
                             deepLinkThreadAnchor.value = null
                             deepLinkOpenMail.value = false
                             deepLinkOpenActions.value = false
+                            deepLinkOpenEvening.value = false
                             deepLinkOpenOrrery.value = null
                             deepLinkOpenCalendar.value = null
                         },
@@ -255,6 +260,10 @@ class MainActivity : ComponentActivity() {
             deepLinkOpenActions.value = true
             consumedDeepLink = true
         }
+        if (intent.getBooleanExtra(Notifications.EXTRA_OPEN_EVENING, false)) {
+            deepLinkOpenEvening.value = true
+            consumedDeepLink = true
+        }
         intent.getStringExtra(Notifications.EXTRA_OPEN_ORRERY)?.let {
             deepLinkOpenOrrery.value = it
             consumedDeepLink = true
@@ -323,6 +332,7 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Notifications.EXTRA_THREAD_ANCHOR)
             intent.removeExtra(Notifications.EXTRA_OPEN_MAIL)
             intent.removeExtra(Notifications.EXTRA_OPEN_ACTIONS)
+            intent.removeExtra(Notifications.EXTRA_OPEN_EVENING)
             intent.removeExtra(Notifications.EXTRA_OPEN_ORRERY)
             intent.removeExtra(Notifications.EXTRA_OPEN_CALENDAR)
             setIntent(intent)

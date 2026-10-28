@@ -152,6 +152,8 @@ fun HomeScreen(
     onOpenAssistant: ((listen: Boolean) -> Unit)? = null,
     /** Starts a spoken check-in with Archie on the dictation card. Null where there is no such card. */
     onTalk: (() -> Unit)? = null,
+    /** Opens the evening review; null where orrery is too old for it (before 130) or off. */
+    onEveningReview: (() -> Unit)? = null,
     contacts: ContactMap,
     ourShip: String,
     /** Where the dial thinks you are, or null before anyone has said. */
@@ -291,6 +293,8 @@ fun HomeScreen(
                     TextButton(onClick = { editing = false }) { Text("Done") }
                 }
             }
+
+            if (onEveningReview != null && calendar != null && !editing) EveningReviewEntry(calendar, onEveningReview)
 
             if (layout.shown.isEmpty()) {
                 Text(

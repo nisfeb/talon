@@ -101,6 +101,7 @@ actual val isArmillaryPurchaseSupported: Boolean = true
 actual val isRelayNotificationSetupNeeded: Boolean = false
 
 actual val isAppIconBadgeSupported: Boolean = false
+actual val isShipNoticeSupported: Boolean = false
 
 /** Brave on a computer has Leo's Bring your own model form. */
 actual val isBraveLeoSupported: Boolean = true

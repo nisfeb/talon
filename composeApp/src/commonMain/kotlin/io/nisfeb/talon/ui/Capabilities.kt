@@ -39,6 +39,7 @@ package io.nisfeb.talon.ui
  *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
  *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
+ *  - isShipNoticeSupported — A (TalonMessagingReceiver), i (the relay): the ship's %trunk notices, orrery's evening reminder among them, reach the device. D: %trunk pushes only to phones, so the desktop reminds of nothing; its evening review opens on demand.
  *  - isArmillaryPurchaseSupported — A, D; i on the US App Store storefront only. Apple allows a button to an outside checkout there and nowhere else (guideline 3.1.1(a)), so elsewhere buying, its pitch and every "top up" go. The card, the balance and the history do not depend on it.
  *  - isPhoneDialSupported — A, i on an iPhone: the assistant's call_place opens the dialer at a number. D, iPad: no phone to dial, and tel: links go nowhere.
  *  - isBraveLeoSupported: D, i, where Brave takes a model of your own (Settings > Leo > Bring your own model; iOS since Brave 1.88). A: Brave for Android has no such form yet (brave-browser#59722).
@@ -428,6 +429,13 @@ expect val isRelayNotificationSetupNeeded: Boolean
 
 /** The unread count on the app icon, by the owner's choice (iOS). */
 expect val isAppIconBadgeSupported: Boolean
+
+/**
+ * Whether the ship's %trunk notices reach this device: orrery's evening
+ * reminder, its leave alerts and the rest. Where they do not (desktop),
+ * the review's time is said to be your phone's reminder, not this one's.
+ */
+expect val isShipNoticeSupported: Boolean
 
 /**
  * Whether Brave on this platform takes a model of the owner's own, so

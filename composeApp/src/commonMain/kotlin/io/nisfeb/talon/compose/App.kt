@@ -405,6 +405,7 @@ fun App(
     var showStatusFeed by remember { sections.flag() }
     var showInvites by remember { sections.flag() }
     var showActions by remember { sections.flag() }
+    var showEvening by remember { sections.flag() }
     var showBookmarks by remember { sections.flag() }
     var showCalendar by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
@@ -546,6 +547,7 @@ fun App(
                     showCalendar = true
                 }
                 io.nisfeb.talon.notify.NoticeLanding.Actions -> leaveAllFor { showActions = true }
+                io.nisfeb.talon.notify.NoticeLanding.EveningReview -> leaveAllFor { showEvening = true }
                 io.nisfeb.talon.notify.NoticeLanding.Loops -> leaveAllFor { showLoops = true }
                 io.nisfeb.talon.notify.NoticeLanding.Invites -> leaveAllFor { showInvites = true }
                 io.nisfeb.talon.notify.NoticeLanding.Assistant -> leaveAllFor { showAssistant = true }
@@ -2718,12 +2720,19 @@ fun App(
                         onOpenContact = { patp -> profileSheetShip = patp },
                         onBack = { showContacts = false },
                     )
+                    // Before Actions: opened from the Orrery page, back returns there.
+                    showEvening -> io.nisfeb.talon.ui.screens.EveningReviewScreen(
+                        calendar = calendarRepo,
+                        onBack = { showEvening = false },
+                    )
                     showActions -> io.nisfeb.talon.ui.screens.OrreryRepoScreen(
                         orreryRepo = orreryRepo,
                         actions = orreryActions,
                         twentyFourHour = uiSettings.homeTwentyFourHour.collectAsState().value,
                         onBack = { showActions = false },
                         onOpenAction = { a -> openAction = a },
+                        calendar = calendarRepo,
+                        onEveningReview = { showEvening = true },
                     )
                     openGroupAdminFlag != null -> GroupAdminScreen(
                         db = db,
@@ -3703,13 +3712,16 @@ fun App(
                             // only on narrow (where DesktopShell stacks it).
                             // The assistant outranks the two tabs that take the
                             // whole area; opened over either, it used to show nothing.
-                            content = if (activeRailTab == RailTab.Home && !showAssistant) {
+                            content = if (activeRailTab == RailTab.Home && !showAssistant && !showEvening) {
                                 {
                                     io.nisfeb.talon.ui.screens.HomeScreen(
                                         db = db,
                                         mail = mailRepo,
                                         calendar = calendarRepo,
                                         onOpenCalendar = onOpenCalendar,
+                                        onEveningReview = if ((orreryRepo.version.collectAsState().value ?: 0) >= io.nisfeb.talon.orrery.EVENING_VERSION) {
+                                            { showEvening = true }
+                                        } else null,
                                         onInstallCalendar = calendarInstall,
                                         onOpenAssistant = if (assistantEnabled) {
                                             { listen -> assistantListen = listen; openAssistantAction() }
@@ -3763,7 +3775,7 @@ fun App(
                                         onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
                                     )
                                 }
-                            } else if (activeRailTab == RailTab.Mail && !showAssistant) {
+                            } else if (activeRailTab == RailTab.Mail && !showAssistant && !showEvening) {
                                 {
                                     // What a mail cannot carry, the ship's own
                                     // storage can: the same upload chat images take.
@@ -3801,7 +3813,7 @@ fun App(
                                         )
                                     }
                                 }
-                            } else if (activeRailTab == RailTab.Calendar && !showAssistant) {
+                            } else if (activeRailTab == RailTab.Calendar && !showAssistant && !showEvening) {
                                 {
                                     io.nisfeb.talon.ui.screens.CalendarScreen(
                                         repo = calendarRepo,
