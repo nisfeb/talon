@@ -2102,7 +2102,52 @@ class TlonChatRepo(
         // The group's channels read again, so the new one is listed here
         // even if its fact went by while the stream was down.
         scope.launch { runCatching { refreshGroups() }.onFailure { Log.w(TAG, "groups not read after a new channel", it) } }
+        if (groupFlag.substringBefore('/') == ourPatp) inheritDisappearing(ch, groupFlag, nest)
         nest
+    }
+
+    /**
+     * A new channel in a group whose channels disappear disappears too,
+     * or the setting would quietly stop holding for the group. Where it
+     * fails the admin screen shows the channels differ.
+     */
+    private suspend fun inheritDisappearing(ch: UrbitChannel, flag: String, nest: String) {
+        runCatching {
+            val hooks = Disappearing.read(ch)
+            if (hooks.id == null) return
+            val siblings = fetchGroupAdmin(flag)?.let(::disappearingNests).orEmpty() - nest
+            siblings.map { hooks.delayOn(it) }.distinct().singleOrNull()?.let { Disappearing.apply(ch, listOf(nest), it) }
+        }.onFailure { Log.w(TAG, "disappearing messages not carried to $nest", it) }
+    }
+
+    /** The channels of [group] the setting reaches: ours, and run by channels-server (a notebook is %notes). */
+    fun disappearingNests(group: AdminGroup): List<String> = group.channels.map { it.nest }.filter {
+        it.substringBefore('/') in setOf("chat", "heap", "diary") && it.split('/').getOrNull(1) == ourPatp
+    }
+
+    /** What our channels-server holds of the setting. */
+    suspend fun disappearingHooks(): Disappearing.Hooks = Disappearing.read(channel ?: error("not connected"))
+
+    /**
+     * Put [group]'s channels at [seconds], or off for null, then write the
+     * line in its description and say so in its chats when that changed
+     * anything. On the repo's scope: an admin who leaves the screen does
+     * not leave half the channels on.
+     */
+    suspend fun setDisappearing(group: AdminGroup, seconds: Long?): Disappearing.Hooks = carry {
+        val ch = channel ?: error("not connected")
+        val nests = disappearingNests(group)
+        val before = Disappearing.read(ch).let { h -> nests.map { h.delayOn(it) } }
+        val after = Disappearing.apply(ch, nests, seconds)
+        val desc = Disappearing.descriptionWith(group.description.orEmpty(), seconds)
+        if (desc != group.description.orEmpty()) {
+            updateGroupMeta(group.flag, group.title.orEmpty(), desc, group.image.orEmpty(), group.cover.orEmpty())
+        }
+        if (before.any { it != seconds }) {
+            for (nest in nests.filter { it.startsWith("chat/") }) send(nest, Disappearing.notice(seconds))
+        }
+        adminGroupsFetchedMs = 0L
+        after
     }
 
     /** What this ship's %channels says of who may post in a channel. */

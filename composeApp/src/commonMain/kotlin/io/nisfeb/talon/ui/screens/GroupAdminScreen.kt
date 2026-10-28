@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -857,6 +858,14 @@ private fun AdminBody(
             HorizontalDivider()
         }
 
+        // ───────── Disappearing messages ─────────
+        // The host's own channels-server does the deleting, and takes
+        // hook pokes from no other ship, so it is the host's to set.
+        if (me.isNotEmpty() && me == flag.substringBefore('/')) {
+            DisappearingSection(repo, group, onChanged = onChannelChanged, onReportError = onReportError)
+            HorizontalDivider()
+        }
+
         // ───────── Members ─────────
         //
         // Paged rather than lazy: this whole screen is one
@@ -1603,6 +1612,167 @@ private fun Audience(verb: String, roles: Map<String, String>, current: Set<Stri
                 Text(roles[id] ?: id, style = MaterialTheme.typography.bodyMedium)
             }
         }
+    }
+}
+
+/**
+ * Disappearing messages, for the group's host: every message in the
+ * channels it hosts is deleted for everyone once it is older than the
+ * time picked. See [io.nisfeb.talon.urbit.Disappearing].
+ */
+@Composable
+private fun DisappearingSection(
+    repo: TlonChatRepo,
+    group: AdminGroup,
+    onChanged: () -> Unit,
+    onReportError: (io.nisfeb.talon.util.Problem) -> Unit,
+) {
+    val d = io.nisfeb.talon.urbit.Disappearing
+    val scope = rememberCoroutineScope()
+    val nests = remember(group) { repo.disappearingNests(group) }
+    var hooks by remember(group.flag) { mutableStateOf<io.nisfeb.talon.urbit.Disappearing.Hooks?>(null) }
+    var readFailed by remember(group.flag) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    var reads by remember { mutableStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf<Long?>(null) }
+    var custom by remember { mutableStateOf(false) }
+
+    LaunchedEffect(group.flag, reads) {
+        runCatching { repo.disappearingHooks() }
+            .onSuccess { hooks = it; readFailed = null }
+            .onFailure { readFailed = io.nisfeb.talon.util.problemOf("Couldn't read disappearing messages", it) }
+    }
+
+    // The write runs on the repo's scope; this one only waits to show it.
+    fun set(seconds: Long?) {
+        busy = true
+        scope.launch {
+            runCatching { repo.setDisappearing(group, seconds) }
+                .onSuccess { hooks = it; custom = false; onChanged() }
+                .onFailure { onReportError(io.nisfeb.talon.util.problemOf("Couldn't change disappearing messages", it)); reads++ }
+            busy = false
+        }
+    }
+
+    SectionHeader("Disappearing messages")
+    val h = hooks
+    val failed = readFailed
+    when {
+        failed != null -> {
+            io.nisfeb.talon.ui.ProblemLine(failed)
+            TextButton(onClick = { reads++ }) { Text("Try again") }
+        }
+        h == null -> Text("Reading…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        nests.isEmpty() -> Text(
+            "Your ship hosts none of this group's chats or galleries, so there is nothing here it can delete.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> {
+            val now = nests.map { h.delayOn(it) }.distinct()
+            val current = now.singleOrNull()
+            val mixed = now.size > 1
+            Text(
+                "Deletes every message, for everyone, once it is older than the time you pick. " +
+                    "Members' notifications and their ships' logs can keep copies.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (mixed) {
+                Text(
+                    "The channels differ. Pick a time to set them all.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            fun pick(seconds: Long?) {
+                custom = false
+                when {
+                    !mixed && seconds == current -> {}
+                    seconds == null -> set(null)
+                    else -> confirming = seconds
+                }
+            }
+            for (o in listOf<Long?>(null) + d.CHOICES) {
+                DelayChoice(o?.let(d::label) ?: "Off", selected = !mixed && !custom && current == o, enabled = !busy) { pick(o) }
+            }
+            val isCustom = !mixed && current != null && current !in d.CHOICES
+            DelayChoice(
+                if (isCustom) "Custom (${d.label(current!!)})" else "Custom",
+                selected = custom || isCustom,
+                enabled = !busy,
+            ) { custom = true }
+            if (custom) CustomDelay(busy, onSet = ::pick)
+            val missed = group.channels.filter { it.nest !in nests }
+            if (missed.isNotEmpty()) {
+                Text(
+                    "Not covered: ${missed.joinToString(", ") { it.title.ifBlank { it.nest.substringAfterLast('/') } }}. " +
+                        "Your ship can only delete in chats and galleries it hosts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+
+    confirming?.let { seconds ->
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text("Delete messages after ${d.label(seconds)}?") },
+            text = {
+                Text(
+                    "Every message in this group's channels, from every member, is deleted for everyone once it is " +
+                        "${d.label(seconds)} old. Messages already older than that are deleted now. " +
+                        "Members' notifications and their ships' logs can still hold copies.",
+                )
+            },
+            confirmButton = {
+                io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirming = null; set(seconds) }) {
+                    Text(if (hooks?.let { h -> nests.any { h.delayOn(it) != null } } == true) "Change" else "Turn on")
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun DelayChoice(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** A time of the admin's own: a number and a unit, up to a year. */
+@Composable
+private fun CustomDelay(busy: Boolean, onSet: (Long) -> Unit) {
+    val d = io.nisfeb.talon.urbit.Disappearing
+    var amount by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf(d.DAY) }
+    val seconds = amount.toLongOrNull()?.takeIf { it > 0 }?.let { it * unit }?.takeIf { it <= d.MAX_SECONDS }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(
+            value = amount,
+            onValueChange = { amount = it.filter(Char::isDigit).take(4) },
+            label = { Text("How many") },
+            singleLine = true,
+            modifier = Modifier.weight(1f),
+        )
+        Button(enabled = seconds != null && !busy, onClick = { seconds?.let(onSet) }) { Text("Set") }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for ((name, s) in listOf("minutes" to d.MINUTE, "hours" to d.HOUR, "days" to d.DAY, "weeks" to d.WEEK)) {
+            androidx.compose.material3.FilterChip(selected = unit == s, onClick = { unit = s }, label = { Text(name) })
+        }
+    }
+    if (amount.isNotEmpty() && seconds == null) {
+        Text("Up to a year.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
     }
 }
 

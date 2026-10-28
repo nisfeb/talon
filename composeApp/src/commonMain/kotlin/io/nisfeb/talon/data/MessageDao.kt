@@ -92,8 +92,21 @@ abstract class MessageDao {
         for (m in messages) media.replaceForMessage(m.whom, m.id, io.nisfeb.talon.urbit.MediaClassifier.extractMedia(m))
     }
 
-    @Query("UPDATE messages SET isDeleted = 1 WHERE whom = :whom AND id = :id")
+    /**
+     * The row stays, as the tombstone the ship keeps, but none of what was
+     * said: a post deleted for everyone, by its author, an admin or a
+     * group's disappearing messages, is not left readable on the device.
+     */
+    @Query("UPDATE messages SET isDeleted = 1, contentJson = '[]', searchText = '', title = NULL, image = NULL WHERE whom = :whom AND id = :id")
     abstract suspend fun softDelete(whom: String, id: String)
+
+    /** A post's live replies: its thread, which goes when it does. */
+    @Query("SELECT id FROM messages WHERE whom = :whom AND parentId = :id AND isDeleted = 0")
+    abstract suspend fun replyIds(whom: String, id: String): List<String>
+
+    /** A deleted post's embedding: semantic search must not find what it said. */
+    @Query("DELETE FROM message_embeddings WHERE whom = :whom AND id = :id")
+    abstract suspend fun dropEmbedding(whom: String, id: String)
 
     /**
      * Top-level messages in one conversation sent from [fromMs] on, oldest

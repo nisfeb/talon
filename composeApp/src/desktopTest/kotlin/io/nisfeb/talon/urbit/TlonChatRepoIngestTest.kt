@@ -7,6 +7,7 @@ import io.nisfeb.talon.data.ChannelGroupEntity
 import io.nisfeb.talon.data.GroupEntity
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.ReactionPalette
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -168,6 +169,34 @@ class TlonChatRepoIngestTest {
             fact(channel(nest, id, rPost))
             assertTrue(db.messages().getOne(nest, id)!!.isDeleted, rPost)
         }
+    }
+
+    /**
+     * A post deleted for everyone, as a group's disappearing messages
+     * delete it, leaves nothing readable here: not in the chat, its
+     * thread, search, the chat list or semantic search.
+     */
+    @Test
+    fun `a tombstoned post keeps no words, and its thread goes with it`() = runBlocking<Unit> {
+        val id = "170141184506"
+        val reply = "170141184600"
+        db.messages().upsert(MessageEntity(nest, id, "~bus", 1_000, """[{"inline":["secret plans"]}]""", "/chat", title = "Plans"))
+        db.messages().upsert(MessageEntity(nest, reply, "~nec", 2_000, """[{"inline":["secret reply"]}]""", "/chat", parentId = id))
+        db.messages().upsert(MessageEntity(nest, "170141184700", "~bus", 3_000, """[{"inline":["kept"]}]""", "/chat"))
+        for (m in listOf(id, reply)) db.embeddings().upsert(io.nisfeb.talon.data.MessageEmbeddingEntity(nest, m, ByteArray(4), 1, 0))
+        fact(channel(nest, id, """{"set":{"type":"tombstone"}}"""))
+        for (m in listOf(id, reply)) {
+            val row = db.messages().getOne(nest, m)!!
+            assertTrue(row.isDeleted, m)
+            assertEquals("[]", row.contentJson, m)
+            assertEquals("", row.searchText, m)
+            assertNull(row.title, m)
+            assertNull(db.embeddings().get(nest, m), m)
+        }
+        assertEquals(listOf("170141184700"), db.messages().stream(nest).first().map { it.id })
+        assertEquals(emptyList(), db.messages().streamReplies(nest, id).first())
+        assertEquals(emptyList(), db.messages().search(io.nisfeb.talon.data.escapeLikeNeedle("secret")).first())
+        assertEquals("170141184700", db.messages().conversationLatest().first().single { it.whom == nest }.id)
     }
 
     @Test
