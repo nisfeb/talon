@@ -2108,25 +2108,47 @@ class TlonChatRepo(
 
     /**
      * A new channel in a group whose channels disappear disappears too,
-     * or the setting would quietly stop holding for the group. Where it
-     * fails the admin screen shows the channels differ.
+     * or the setting would quietly stop holding for the group. Only from
+     * a group fully on, every channel at one time. Where it fails the
+     * admin screen shows the channels differ.
      */
     private suspend fun inheritDisappearing(ch: UrbitChannel, flag: String, nest: String) {
         runCatching {
             val hooks = Disappearing.read(ch)
             if (hooks.id == null) return
-            val siblings = fetchGroupAdmin(flag)?.let(::disappearingNests).orEmpty() - nest
-            siblings.map { hooks.delayOn(it) }.distinct().singleOrNull()?.let { Disappearing.apply(ch, listOf(nest), it) }
+            val group = fetchGroupAdmin(flag) ?: return
+            val siblings = disappearingNests(ch, group) - nest
+            // The new channel was made in [flag] just now; the hook checks its group again on the ship.
+            siblings.map { hooks.delayOn(it, flag) }.distinct().singleOrNull()?.let { Disappearing.apply(ch, flag, listOf(nest), it) }
         }.onFailure { Log.w(TAG, "disappearing messages not carried to $nest", it) }
     }
 
-    /** The channels of [group] the setting reaches: ours, and run by channels-server (a notebook is %notes). */
-    fun disappearingNests(group: AdminGroup): List<String> = group.channels.map { it.nest }.filter {
-        it.substringBefore('/') in setOf("chat", "heap", "diary") && it.split('/').getOrNull(1) == ourPatp
-    }
+    /**
+     * The channels of [group] the setting reaches: ours, run by
+     * channels-server (a notebook is %notes), and of this group by the
+     * channel's own record. Any admin may list another group's channel
+     * in a group, and the setting must never reach one: that would delete
+     * another group's messages. A channel whose group can't be read is
+     * left out, and a read that fails stops it all.
+     */
+    private suspend fun disappearingNests(ch: UrbitChannel, group: AdminGroup): List<String> =
+        group.channels.map { it.nest }.filter {
+            it.substringBefore('/') in setOf("chat", "heap", "diary") && it.split('/').getOrNull(1) == ourPatp
+        }.filter { nest ->
+            val perm = runCatching { ch.scry("channels", "/v5/$nest/perm") }.getOrElse { e ->
+                // ponytail: the status read off our own scry error, as fetchChannelWriters does.
+                if ("HTTP 404" in e.message.orEmpty()) return@filter false else throw e
+            }
+            ((perm as? JsonObject)?.get("group") as? JsonPrimitive)?.content == group.flag
+        }
 
-    /** What our channels-server holds of the setting. */
-    suspend fun disappearingHooks(): Disappearing.Hooks = Disappearing.read(channel ?: error("not connected"))
+    /** What our ship holds of [group]'s setting, and the channels it reaches. */
+    data class DisappearingState(val hooks: Disappearing.Hooks, val nests: List<String>)
+
+    suspend fun disappearingState(group: AdminGroup): DisappearingState {
+        val ch = channel ?: error("not connected")
+        return DisappearingState(Disappearing.read(ch), disappearingNests(ch, group))
+    }
 
     /**
      * Put [group]'s channels at [seconds], or off for null, then write the
@@ -2134,14 +2156,14 @@ class TlonChatRepo(
      * anything. On the repo's scope: an admin who leaves the screen does
      * not leave half the channels on.
      */
-    suspend fun setDisappearing(group: AdminGroup, seconds: Long?): Disappearing.Hooks = carry {
+    suspend fun setDisappearing(group: AdminGroup, seconds: Long?): DisappearingState = carry {
         val ch = channel ?: error("not connected")
-        val nests = disappearingNests(group)
+        val nests = disappearingNests(ch, group)
         val was = Disappearing.read(ch)
-        val before = nests.map { was.delayOn(it) }
+        val before = nests.map { was.delayOn(it, group.flag) }
         // Left half done, it may have told the group it was on and never that it went off.
-        val unfinished = nests.any { was.unfinished(it) }
-        val after = Disappearing.apply(ch, nests, seconds)
+        val unfinished = nests.any { was.unfinished(it, group.flag) }
+        val after = Disappearing.apply(ch, group.flag, nests, seconds)
         val desc = Disappearing.descriptionWith(group.description.orEmpty(), seconds)
         if (desc != group.description.orEmpty()) {
             updateGroupMeta(group.flag, group.title.orEmpty(), desc, group.image.orEmpty(), group.cover.orEmpty())
@@ -2150,7 +2172,7 @@ class TlonChatRepo(
             for (nest in nests.filter { it.startsWith("chat/") }) send(nest, Disappearing.notice(seconds))
         }
         adminGroupsFetchedMs = 0L
-        after
+        DisappearingState(after, nests)
     }
 
     /** What this ship's %channels says of who may post in a channel. */

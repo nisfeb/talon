@@ -7,7 +7,9 @@
 ::    the delay grows. One run deletes at most 100 posts and wakes
 ::    again in 15 seconds while more are due, so turning this on over a
 ::    long history does not flood the members' ships. With no 'delay'
-::    it does nothing.
+::    it does nothing, and nothing either on a channel whose group is
+::    not the config's 'group': a group's record can list a channel of
+::    another group, and a Tlon template copies config to any channel.
 ::
 |=  [=event:h bowl:h]
 ^-  outcome:h
@@ -16,6 +18,8 @@
 =/  delay  (~(get by config) 'delay')
 ?.  ?=([~ @] delay)  ~
 ?~  channel  ~
+=*  flag  group.perm.u.channel
+?.  =(`(rap 3 ~[(scot %p p.flag) '/' q.flag]) (~(get by config) 'group'))  ~
 ?:  |(=(0 u.delay) (gth u.delay now))  ~
 ?:  ?=([%on-post %add *] event)
   :_  ~
