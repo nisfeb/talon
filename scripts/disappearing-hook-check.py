@@ -126,9 +126,10 @@ def main():
 
     post(nest, 2)
     hooks = scry("channels-server", "/v0/hooks")
-    hook({"order": {"nest": nest, "seq": [i for i in hooks["order"].get(nest, []) if i != hid]}})
+    # As Talon does it: what deletes first, then out of the order.
     hook({"config": {"id": hid, "nest": nest, "config": {}}})
     hook({"rest": {"id": hid, "origin": nest}})
+    hook({"order": {"nest": nest, "seq": [i for i in hooks["order"].get(nest, []) if i != hid]}})
     time.sleep(40)
     assert live(nest) == 2, "a post went after the setting was off"
     print("off: posts stay\nPASS")

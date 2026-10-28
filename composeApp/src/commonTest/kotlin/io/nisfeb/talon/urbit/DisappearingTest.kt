@@ -97,10 +97,10 @@ class DisappearingTest {
         assertEquals(id, h.id)
         assertEquals(true, h.compiled)
         assertEquals(WEEK, h.delayOn(nest))
-        assertEquals(setOf(nest), h.crons)
+        assertEquals(mapOf(nest to WEEK), h.crons, "the sweep's own copy of the delay")
+        assertEquals(false, h.unfinished(nest))
         assertNull(h.delayOn("chat/~bel/other"))
-        // Configured but out of the order is off: no post sets a timer.
-        assertNull(hooks(on.replace("[\"$id\"]", "[]")).delayOn(nest))
+        assertEquals(false, h.unfinished("chat/~bel/other"))
         // Nothing added yet, or another app's hook only.
         assertNull(hooks("""{"hooks":{},"order":{},"crons":{}}""").id)
         assertNull(hooks(on.replace("Talon disappearing messages", "word filter")).id)
@@ -128,6 +128,31 @@ class DisappearingTest {
         assertNull(Disappearing.delaySeconds("0w0.00000.00000.00000"))
     }
 
+    /**
+     * Anything that can still delete is not off. Timers already set read
+     * the config when they fire, and a sweep keeps its own copy.
+     */
+    @Test
+    fun `half on is neither on nor off`() {
+        val outOfOrder = hooks(on.replace("[\"$id\"]", "[]"))
+        val noConfig = hooks(on.replace("\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0w4D.k0000.00000.002A0\"}}", "\"config\": {}"))
+        val noSweep = hooks(on.replace("\"crons\": {\"$id\"", "\"crons\": {\"0vother\""))
+        val sweepDiffers = hooks(on.replaceFirst("\"delay\": \"0w4D.k0000.00000.002A0\"}}}}}", "\"delay\": \"0wY000.00000.000I0\"}}}}}"))
+        for ((what, h) in listOf("out of the order" to outOfOrder, "no config" to noConfig, "no sweep" to noSweep, "the sweep's delay differs" to sweepDiffers)) {
+            assertNull(h.delayOn(nest), what)
+            assertEquals(true, h.unfinished(nest), what)
+        }
+        assertEquals(30L, sweepDiffers.crons[nest], "the fixture's sweep was changed")
+        // Left only in the order: it deletes nothing, but an off is not done until it goes.
+        val orderOnly = hooks(
+            on.replace("\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0w4D.k0000.00000.002A0\"}}", "\"config\": {}")
+                .replace("\"crons\": {\"$id\"", "\"crons\": {\"0vother\""),
+        )
+        assertEquals(true, orderOnly.unfinished(nest))
+        assertEquals(listOf("""{"order":{"nest":"$nest","seq":[]}}"""), Disappearing.pokes(orderOnly, listOf(nest), null).map { it.toString() })
+        assertEquals(false, hooks(on.replace("[\"$id\"]", "[\"0vother\"]").replace("\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0w4D.k0000.00000.002A0\"}}", "\"config\": {}").replace("\"crons\": {\"$id\"", "\"crons\": {\"0vother\"")).unfinished(nest), "another hook in the order is not ours")
+    }
+
     @Test
     fun `turning on sends config, order and cron, keeping other hooks`() {
         val h = hooks(on.replace("[\"$id\"]", "[\"0vother\"]"))
@@ -142,15 +167,25 @@ class DisappearingTest {
     }
 
     @Test
-    fun `turning off takes it out of the order, empties its config and rests the cron`() {
+    fun `turning off empties its config, rests the sweep, then leaves the order`() {
         assertEquals(
             listOf(
-                """{"order":{"nest":"$nest","seq":[]}}""",
                 """{"config":{"id":"$id","nest":"$nest","config":{}}}""",
                 """{"rest":{"id":"$id","origin":"$nest"}}""",
+                """{"order":{"nest":"$nest","seq":[]}}""",
             ),
             Disappearing.pokes(hooks(on), listOf(nest), null).map { it.toString() },
         )
+        // What a half-taken off left is all that is sent again.
+        val swept = hooks(on.replace("\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0w4D.k0000.00000.002A0\"}}", "\"config\": {}"))
+        assertEquals(
+            listOf("""{"rest":{"id":"$id","origin":"$nest"}}""", """{"order":{"nest":"$nest","seq":[]}}"""),
+            Disappearing.pokes(swept, listOf(nest), null).map { it.toString() },
+        )
+        // A delay this Talon cannot read is emptied all the same.
+        val odd = hooks(on.replace("\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0w4D.k0000.00000.002A0\"}}", "\"config\": {\"chat/~bel/dmtest-chat\": {\"delay\": \"0wc\"}}"))
+        assertEquals("""{"config":{"id":"$id","nest":"$nest","config":{}}}""", Disappearing.pokes(odd, listOf(nest), null).first().toString())
+        assertEquals(true, odd.unfinished(nest))
         // A channel it never ran on: nothing to send, and no %rest, which
         // would crash on the missing cron.
         assertEquals(emptyList(), Disappearing.pokes(hooks(on), listOf("chat/~bel/other"), null))

@@ -126,13 +126,26 @@ object Disappearing {
         val compiled: Boolean,
         /** Each channel's delay, where the hook has one for it. */
         val delays: Map<String, Long>,
+        /** Channels whose config holds any delay, read or not: what an off must empty. */
+        val configured: Set<String>,
         /** Each channel's hook order: every hook, ours or not. */
         val order: Map<String, List<String>>,
-        /** Channels our hook has a cron on. */
-        val crons: Set<String>,
+        /** Channels our hook has a daily sweep on, and the delay the sweep keeps: its own copy. */
+        val crons: Map<String, Long?>,
     ) {
-        /** The delay in force on [nest]: configured, and in its order. */
-        fun delayOn(nest: String): Long? = id?.takeIf { it in order[nest].orEmpty() }?.let { delays[nest] }
+        /** The delay fully in force on [nest]: in its config, its order and its sweep, the same in each. */
+        fun delayOn(nest: String): Long? =
+            delays[nest]?.takeIf { d -> id != null && id in order[nest].orEmpty() && crons[nest] == d }
+
+        /**
+         * Some of it is left on [nest] without being fully on. A delay in
+         * the config still deletes, as timers already set read it when they
+         * fire, and so does a sweep, which keeps its own copy. A switch-off
+         * the ship half took leaves this, and so can a Tlon channel
+         * template. Never shown as off.
+         */
+        fun unfinished(nest: String): Boolean =
+            delayOn(nest) == null && (nest in configured || nest in crons || (id != null && id in order[nest].orEmpty()))
 
         companion object {
             fun parse(json: JsonElement): Hooks {
@@ -145,15 +158,17 @@ object Disappearing {
                 // Two adds that raced leave two: the one a channel runs, if any.
                 val hook = ours.firstOrNull { h -> order.values.any { h["id"].asStr() in it } } ?: ours.firstOrNull()
                 val id = hook?.get("id").asStr()
-                val delays = (hook?.get("config") as? JsonObject).orEmpty().mapNotNull { (nest, cfg) ->
-                    ((cfg as? JsonObject)?.get("delay").asStr())?.let(::delaySeconds)?.let { nest to it }
-                }.toMap()
-                val crons = ((root["crons"] as? JsonObject)?.get(id ?: "") as? JsonObject)?.keys.orEmpty()
+                val config = (hook?.get("config") as? JsonObject).orEmpty()
+                fun delayIn(cfg: JsonElement?) = ((cfg as? JsonObject)?.get("delay").asStr())?.let(::delaySeconds)
+                val delays = config.mapNotNull { (nest, cfg) -> delayIn(cfg)?.let { nest to it } }.toMap()
+                val crons = ((root["crons"] as? JsonObject)?.get(id ?: "") as? JsonObject).orEmpty()
+                    .mapValues { (_, job) -> delayIn((job as? JsonObject)?.get("config")) }
                 return Hooks(
                     id = id,
                     src = hook?.get("src").asStr(),
                     compiled = (hook?.get("compiled") as? JsonPrimitive)?.booleanOrNull == true,
                     delays = delays,
+                    configured = config.filterValues { (it as? JsonObject)?.containsKey("delay") == true }.keys,
                     order = order,
                     crons = crons,
                 )
@@ -194,8 +209,10 @@ object Disappearing {
      * The pokes that put [nests] at [seconds], or off for null, given
      * what the ship holds now ([hooks] with our hook's id). On, config
      * goes first so a post arriving between pokes finds its delay. Off,
-     * order goes first so no new post sets a timer, then the config is
-     * emptied, which leaves any timer still out with nothing to do.
+     * what deletes goes first: the config is emptied, which leaves new
+     * posts and any timer still out with nothing to do, then the sweep
+     * is rested, then it leaves the order. Each is sent only where it is
+     * there, so an off the ship half took is finished by another.
      */
     internal fun pokes(hooks: Hooks, nests: List<String>, seconds: Long?): List<JsonObject> {
         val id = hooks.id ?: return emptyList()
@@ -206,10 +223,10 @@ object Disappearing {
                 order(nest, seq.filter { it != id } + id),
                 cron(id, nest, seconds),
             ) else listOfNotNull(
-                order(nest, seq.filter { it != id }).takeIf { id in seq },
-                config(id, nest, null).takeIf { nest in hooks.delays },
+                config(id, nest, null).takeIf { nest in hooks.configured },
                 // ho-rest crashes on a cron that isn't there.
                 rest(id, nest).takeIf { nest in hooks.crons },
+                order(nest, seq.filter { it != id }).takeIf { id in seq },
             )
         }
     }

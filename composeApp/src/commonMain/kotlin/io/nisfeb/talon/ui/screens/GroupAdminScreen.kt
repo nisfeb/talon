@@ -1632,10 +1632,11 @@ private fun DisappearingSection(
     val nests = remember(group) { repo.disappearingNests(group) }
     var hooks by remember(group.flag) { mutableStateOf<io.nisfeb.talon.urbit.Disappearing.Hooks?>(null) }
     var readFailed by remember(group.flag) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
-    var reads by remember { mutableStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
-    var confirming by remember { mutableStateOf<Long?>(null) }
-    var custom by remember { mutableStateOf(false) }
+    // All of it the group's: a choice waiting to be confirmed never carries to another group.
+    var reads by remember(group.flag) { mutableStateOf(0) }
+    var busy by remember(group.flag) { mutableStateOf(false) }
+    var confirming by remember(group.flag) { mutableStateOf<Long?>(null) }
+    var custom by remember(group.flag) { mutableStateOf(false) }
 
     LaunchedEffect(group.flag, reads) {
         runCatching { repo.disappearingHooks() }
@@ -1670,15 +1671,24 @@ private fun DisappearingSection(
         )
         else -> {
             val now = nests.map { h.delayOn(it) }.distinct()
-            val current = now.singleOrNull()
-            val mixed = now.size > 1
+            // Half on is never shown as off: it may still be deleting.
+            val unfinished = nests.any { h.unfinished(it) }
+            val mixed = now.size > 1 || unfinished
+            val current = now.singleOrNull().takeUnless { unfinished }
             Text(
                 "Deletes every message, for everyone, once it is older than the time you pick. " +
                     "Members' notifications and their ships' logs can keep copies.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (mixed) {
+            if (unfinished) {
+                Text(
+                    "Disappearing messages are only partly set up here, so messages may still be deleted. " +
+                        "Pick a time, or Off, to finish.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else if (mixed) {
                 Text(
                     "The channels differ. Pick a time to set them all.",
                     style = MaterialTheme.typography.bodySmall,

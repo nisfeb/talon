@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -75,7 +76,8 @@ class DisappearingMessagesTest {
         var src: String? = null
         val config = mutableMapOf<String, String>()
         val order = mutableMapOf<String, List<String>>()
-        val crons = mutableSetOf<String>()
+        /** Each channel's sweep, and the delay it keeps: its own copy, as ho-cron stores it. */
+        val crons = mutableMapOf<String, String?>()
         @Volatile var refuse: (String) -> String? = { null }
 
         fun publish() {
@@ -89,7 +91,11 @@ class DisappearingMessagesTest {
                     }
                 })
                 put("order", buildJsonObject { order.forEach { (n, seq) -> put(n, buildJsonArray { seq.forEach { add(JsonPrimitive(it)) } }) } })
-                put("crons", buildJsonObject { if (crons.isNotEmpty()) put(id, buildJsonObject { crons.forEach { put(it, buildJsonObject {}) } }) })
+                put("crons", buildJsonObject {
+                    if (crons.isNotEmpty()) put(id, buildJsonObject {
+                        crons.forEach { (n, d) -> put(n, buildJsonObject { put("config", buildJsonObject { d?.let { put("delay", it) } }) }) }
+                    })
+                })
             }.toString()
         }
 
@@ -103,8 +109,8 @@ class DisappearingMessagesTest {
                 "config" -> body["config"]!!.jsonObject["delay"]?.jsonPrimitive?.content
                     .let { if (it == null) config.remove(str("nest")) else config[str("nest")] = it }
                 "order" -> order[str("nest")] = body["seq"]!!.jsonArray.map { it.jsonPrimitive.content }
-                "cron" -> crons += str("origin")
-                "rest" -> if (!crons.remove(str("origin"))) return "crash: no cron"
+                "cron" -> crons[str("origin")] = body["config"]!!.jsonObject["delay"]?.jsonPrimitive?.content
+                "rest" -> if (!crons.containsKey(str("origin"))) return "crash: no cron" else crons.remove(str("origin"))
             }
             publish()
             return null
@@ -189,18 +195,19 @@ class DisappearingMessagesTest {
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("1 week").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("1 week").assertIsSelected()
 
-        // Off: no confirmation, every channel out of the order, its config emptied, its cron rested.
+        // Off: no confirmation. What deletes goes first, the config and then
+        // the sweep, and then each channel leaves the order.
         val before = hookPokes(ship).size
         choose("Off")
         waitUntil(timeoutMillis = 10_000) { ship.pokesTo("channels").any { "Disappearing messages are off." in it.json.toString() } }
         assertEquals(
             listOf(
-                """{"order":{"nest":"$general","seq":[]}}""",
                 """{"config":{"id":"0v1.hook","nest":"$general","config":{}}}""",
                 """{"rest":{"id":"0v1.hook","origin":"$general"}}""",
-                """{"order":{"nest":"$pics","seq":[]}}""",
+                """{"order":{"nest":"$general","seq":[]}}""",
                 """{"config":{"id":"0v1.hook","nest":"$pics","config":{}}}""",
                 """{"rest":{"id":"0v1.hook","origin":"$pics"}}""",
+                """{"order":{"nest":"$pics","seq":[]}}""",
             ),
             hookPokes(ship).drop(before),
         )
@@ -248,8 +255,57 @@ class DisappearingMessagesTest {
     }
 
     @Test
-    fun `channels set apart are said to differ`() = host(prepare = { src = "old"; config[general] = week; order[general] = listOf(id) }) { _, _ ->
+    fun `channels set apart are said to differ`() = host(prepare = { on(general) }) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { shows("The channels differ.") }
+        assertTrue(!shows("only partly set up"))
+    }
+
+    /** [nest] fully on at a week: its config, its place in the order and its sweep. */
+    private fun Hooks.on(nest: String) {
+        src = "a hook"; config[nest] = week; order[nest] = listOf(id); crons[nest] = week
+    }
+
+    /**
+     * An off the ship half took: the config emptied, the sweep still
+     * running, which deletes every day. It used to read as off, and Off
+     * then did nothing, as it already was.
+     */
+    @Test
+    fun `a switch-off the ship half took is not shown as off, and Off finishes it`() = host(prepare = { on(general); on(pics) }) { ship, hooks ->
+        hooks.refuse = { if (it == "rest") "busy" else null }
+        waitUntil(timeoutMillis = 5_000) { runCatching { onNodeWithText("1 week").assertIsSelected() }.isSuccess }
+        choose("Off")
+        waitUntil(timeoutMillis = 10_000) { shows("Couldn't change disappearing messages") }
+        assertEquals<Map<String, String?>>(mapOf(general to week, pics to week), hooks.crons, "both sweeps still run")
+        waitUntil(timeoutMillis = 5_000) { shows("only partly set up here, so messages may still be deleted") }
+        onNodeWithText("Off").assertIsNotSelected()
+        assertTrue(ship.pokesTo("channels").none { "Disappearing messages" in it.json.toString() }, "not told it is off yet")
+
+        hooks.refuse = { null }
+        val before = hookPokes(ship).size
+        choose("Off")
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("channels").any { "Disappearing messages are off." in it.json.toString() } }
+        assertEquals(
+            listOf(
+                """{"rest":{"id":"0v1.hook","origin":"$general"}}""",
+                """{"order":{"nest":"$general","seq":[]}}""",
+                """{"config":{"id":"0v1.hook","nest":"$pics","config":{}}}""",
+                """{"rest":{"id":"0v1.hook","origin":"$pics"}}""",
+                """{"order":{"nest":"$pics","seq":[]}}""",
+            ),
+            hookPokes(ship).drop(before),
+            "only what was left",
+        )
+        assertTrue(hooks.crons.isEmpty() && hooks.config.isEmpty())
+        waitUntil(timeoutMillis = 5_000) { runCatching { onNodeWithText("Off").assertIsSelected() }.isSuccess }
+        assertTrue(!shows("only partly set up"))
+    }
+
+    /** A Tlon channel template replaces the hook's config, but each sweep keeps its own. */
+    @Test
+    fun `a sweep left without its config is not shown as off`() = host(prepare = { on(general); config.clear() }) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { shows("only partly set up here") }
+        onNodeWithText("Off").assertIsNotSelected()
     }
 
     @Test
@@ -285,9 +341,15 @@ class DisappearingMessagesTest {
         waitUntil(timeoutMillis = 5_000) { shows("Turn on") }
         onNodeWithText("Turn on").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("Couldn't change disappearing messages") }
-        // Configured but in no order: off, as the ship has it, and nothing told.
-        onNodeWithText("Off").assertIsSelected()
+        // Configured but in no order and with no sweep: half on, said so, and nothing told.
+        waitUntil(timeoutMillis = 5_000) { shows("only partly set up here") }
+        onNodeWithText("Off").assertIsNotSelected()
         assertTrue(ship.pokesTo("channels").isEmpty() && ship.pokesTo("groups").isEmpty())
+        // Off clears what the half-on left.
+        hooks.refuse = { null }
+        choose("Off")
+        waitUntil(timeoutMillis = 10_000) { hooks.config.isEmpty() }
+        waitUntil(timeoutMillis = 5_000) { runCatching { onNodeWithText("Off").assertIsSelected() }.isSuccess }
     }
 
     /** Real time, not the composition's clock: a slow ship, and a screen that goes. */
@@ -311,12 +373,45 @@ class DisappearingMessagesTest {
             kotlinx.coroutines.withTimeout(15_000) {
                 while (ship.pokesTo("channels").none { "Disappearing messages are on" in it.json.toString() }) kotlinx.coroutines.delay(20)
             }
-            assertEquals(setOf(general, pics), hooks.crons)
+            assertEquals(setOf(general, pics), hooks.crons.keys)
         } finally {
             events.cancel()
             db.close()
             tmp.deleteRecursively()
         }
+    }
+
+    /** A new channel made in the group, on a ship whose hooks [prepare] sets; what the ship then holds. */
+    private fun newChannel(prepare: Hooks.() -> Unit, check: (Hooks, FakeShip, String) -> Unit) = runBlocking {
+        val tmp = createTempDirectory(prefix = "talon-disappear-").toFile()
+        val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
+            .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
+        val ship = FakeShip("~zod").apply { scries["groups/v2/groups/$flag"] = record }
+        val hooks = Hooks(ship)
+        hooks.src = Disappearing.source()
+        hooks.prepare()
+        hooks.publish()
+        ship.refuse = { p -> if (p.app == "channels-server") hooks.take(p) else null }
+        val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }
+        val events = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        ship.channel.events().launchIn(events)
+        try {
+            check(hooks, ship, repo.createChannel(flag, "chat", "Fresh"))
+        } finally {
+            events.cancel()
+            db.close()
+            tmp.deleteRecursively()
+        }
+    }
+
+    /** Only from a group fully on: a half-on channel is no setting to copy. */
+    @Test
+    fun `a new channel copies nothing from a group partly on`() = newChannel(prepare = {
+        val src = this.src
+        on(general); this.src = src
+        config[pics] = week // half on: configured, not in the order, no sweep
+    }) { _, ship, _ ->
+        assertEquals(emptyList(), hookPokes(ship))
     }
 
     @Test
@@ -327,7 +422,7 @@ class DisappearingMessagesTest {
         val ship = FakeShip("~zod").apply { scries["groups/v2/groups/$flag"] = record }
         val hooks = Hooks(ship)
         hooks.src = Disappearing.source()
-        for (n in listOf(general, pics)) { hooks.config[n] = week; hooks.order[n] = listOf(hooks.id); hooks.crons += n }
+        for (n in listOf(general, pics)) { hooks.config[n] = week; hooks.order[n] = listOf(hooks.id); hooks.crons[n] = week }
         hooks.publish()
         ship.refuse = { p -> if (p.app == "channels-server") hooks.take(p) else null }
         val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod") }

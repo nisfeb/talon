@@ -2137,13 +2137,16 @@ class TlonChatRepo(
     suspend fun setDisappearing(group: AdminGroup, seconds: Long?): Disappearing.Hooks = carry {
         val ch = channel ?: error("not connected")
         val nests = disappearingNests(group)
-        val before = Disappearing.read(ch).let { h -> nests.map { h.delayOn(it) } }
+        val was = Disappearing.read(ch)
+        val before = nests.map { was.delayOn(it) }
+        // Left half done, it may have told the group it was on and never that it went off.
+        val unfinished = nests.any { was.unfinished(it) }
         val after = Disappearing.apply(ch, nests, seconds)
         val desc = Disappearing.descriptionWith(group.description.orEmpty(), seconds)
         if (desc != group.description.orEmpty()) {
             updateGroupMeta(group.flag, group.title.orEmpty(), desc, group.image.orEmpty(), group.cover.orEmpty())
         }
-        if (before.any { it != seconds }) {
+        if (unfinished || before.any { it != seconds }) {
             for (nest in nests.filter { it.startsWith("chat/") }) send(nest, Disappearing.notice(seconds))
         }
         adminGroupsFetchedMs = 0L
