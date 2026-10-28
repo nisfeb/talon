@@ -52,6 +52,17 @@ class AndroidNoticesGuardTest {
         assertTrue("LaunchedEffect(initialOpenEvening)" in talonApp && "NoticeLanding.EveningReview -> eveningOpen = true" in talonApp)
     }
 
+    // The voice card's conversation is built on Android alone (Loops):
+    // without these two, Archie could neither read the week's review nor
+    // answer the brief's actions there. The tools are tested in common.
+    @Test
+    fun `Android's voice card gets the week's review and brief_action`() {
+        val loops = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ai/Loops.kt")
+        val built = loops.substringAfter("return VoiceConversation(").substringBefore("\n            )\n")
+        assertTrue("week = orrery?.let { o -> { o.reviewLast().getOrThrow() } }" in built, built)
+        assertTrue("act = orrery?.let { VoiceConversation.briefAct(it) }" in built, built)
+    }
+
     @Test
     fun `a tapped notice opens its place on Android`() {
         assertTrue("OpenNoticeRequests.requests.collect" in talonApp && "noticeLanding(tag)" in talonApp)
