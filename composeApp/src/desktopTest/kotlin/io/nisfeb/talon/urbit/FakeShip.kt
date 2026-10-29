@@ -235,6 +235,20 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     /** The id of the last event framed so far. */
     val lastEventId: Long get() = nextEventId - 1
 
+    /**
+     * Eyre's keepalive on every open event stream, a bare `:` line each
+     * [everyMs], as a real ship sends one every ~25 s news or not. Off
+     * unless asked for: most tests read the stream for its facts alone.
+     */
+    fun heartbeat(everyMs: Long) {
+        pumps.launch {
+            while (true) {
+                kotlinx.coroutines.delay(everyMs)
+                writing.withLock { pipes.values.forEach { it.queue.trySend(":\n\n") } }
+            }
+        }
+    }
+
     /** End every open event stream, as a dropped connection does. */
     suspend fun endStreams() = writing.withLock {
         pipes.values.forEach { it.queue.close(); it.stream.close() }

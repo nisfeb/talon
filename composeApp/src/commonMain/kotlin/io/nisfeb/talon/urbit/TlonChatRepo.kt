@@ -388,6 +388,27 @@ class TlonChatRepo(
     /** The ship's follows, read as a connect reads them. */
     internal suspend fun bootstrapFollowedThreadsForTest() = bootstrapFollowedThreads(channel!!)
 
+    /** When this run began talking to the ship, for "since" while it has never heard from it. */
+    @Volatile var startedMs: Long = nowMs()
+        private set
+
+    @Volatile private var heardMs = 0L
+
+    /**
+     * When anything last came from the ship on its event stream, eyre's
+     * heartbeats included, across channels (a reconnect's new one starts
+     * at nothing); null before anything has this run. What the chat list's
+     * sync status reads ([io.nisfeb.talon.ui.syncStatus]).
+     */
+    fun lastHeardMs(): Long? {
+        val idle = channel?.streamIdleMs ?: Long.MAX_VALUE
+        if (idle != Long.MAX_VALUE) heardMs = maxOf(heardMs, nowMs() - idle)
+        return heardMs.takeIf { it > 0L }
+    }
+
+    /** Writes waiting for the ship: messages queued in the database and reactions queued here. */
+    val queuedWrites: Flow<Int> by lazy { combine(db.messages().queuedCount(), queuedReacts) { messages, reacts -> messages + reacts.size } }
+
     /** As if the last full pass ran [byMs] ago and the stream last heard anything [heardMs] ago (null: as it is). */
     internal fun ageForTest(byMs: Long, heardMs: Long? = null) {
         lastBootstrapMs -= byMs
@@ -397,6 +418,7 @@ class TlonChatRepo(
     fun start(session: UrbitSession) {
         if (started) return
         started = true
+        startedMs = nowMs()
         ourPatp = session.ourPatp
         // What a ship serves is learnt once a login, not again on every
         // reconnect: a new login may be another ship, or this one upgraded.

@@ -18,6 +18,9 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
@@ -76,6 +79,9 @@ object TalonIconSources {
         "CallEnd" to Icons.Filled.CallEnd,
         "Checklist" to Icons.Filled.Checklist,
         "Cloud" to Icons.Filled.Cloud,
+        "CloudDone" to Icons.Filled.CloudDone,
+        "CloudOff" to Icons.Filled.CloudOff,
+        "CloudSync" to Icons.Filled.CloudSync,
         "ContentCopy" to Icons.Filled.ContentCopy,
         "ContentPaste" to Icons.Filled.ContentPaste,
         "Download" to Icons.Filled.Download,

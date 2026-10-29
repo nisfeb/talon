@@ -3145,6 +3145,8 @@ fun TalonApp(
                 },
                 allShips = allShips,
                 activeShip = loggedInShip,
+                // The sync status's Sign in: the lapsed login's form again.
+                onSignIn = { loggedInShip?.let { io.nisfeb.talon.ui.screens.LoginLapses.lapsed(it) } },
                 shipNicknames = app.shipProfiles.nicknames.collectAsState().value,
                 onSwitchShip = { ship ->
                     if (ship != loggedInShip) sections.leave {

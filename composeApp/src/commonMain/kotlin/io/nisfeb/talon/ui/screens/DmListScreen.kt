@@ -177,6 +177,8 @@ fun DmListScreen(
      *  list has more than one entry. */
     allShips: List<String> = emptyList(),
     activeShip: String? = null,
+    /** Signs the lapsed login in again, from the sync status ([io.nisfeb.talon.ui.SyncStatusBanner]); null offers none. */
+    onSignIn: (() -> Unit)? = null,
     /** Per-ship nickname cache, keyed by patp. Used for the header
      *  badge + the switcher drawer rows. Empty by default. */
     shipNicknames: Map<String, String> = emptyMap(),
@@ -835,6 +837,9 @@ fun DmListScreen(
             } else {
                 Spacer(Modifier.weight(1f))
             }
+            // Whether this device hears from its ship: a Windows user's sync
+            // stopped for three days with nothing to say so (2026-10-29).
+            activeShip?.let { io.nisfeb.talon.ui.SyncStatusIcon(repo, it, onSignIn) }
             io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
                 Icon(Icons.Filled.Search, contentDescription = "Search")
             }
@@ -1078,6 +1083,7 @@ fun DmListScreen(
             )
         }
         HorizontalDivider()
+        activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
         batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
         val totalMentions = remember(mentionUnreads) {
