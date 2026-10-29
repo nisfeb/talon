@@ -781,6 +781,7 @@ class CallController(
                 return@launch
             }
             engine = eng
+            _cameraFailed.value = false
             watchMedia(eng, target)
             runCatching { eng.createOffer() }
                 .onSuccess { offer ->
@@ -859,6 +860,7 @@ class CallController(
                 return@launch
             }
             engine = eng
+            _cameraFailed.value = false
             // A mute tapped while "Connecting…" hit a null engine and
             // only flipped the UI flag, so the strip showed MicOff with
             // a live mic. The strip is interactive for the whole offer
@@ -942,11 +944,35 @@ class CallController(
     fun setCamera(on: Boolean) {
         val eng = engine ?: return
         scope.launch {
-            if (!eng.setCameraEnabled(on) && on) {
-                Log.w(TAG, "the camera would not start")
-            }
+            val ok = eng.setCameraEnabled(on)
+            if (!ok && on) Log.w(TAG, "the camera would not start")
+            if (eng === engine) _cameraFailed.value = on && !ok
         }
     }
+
+    /**
+     * Reopen a running camera on the one now chosen
+     * ([VideoDevices.selectCamera]). Off and on in one go: as two
+     * [setCamera] calls they could land in either order. A camera that
+     * is off, or has given way to a share, opens on the choice when it
+     * next starts.
+     */
+    fun restartCamera() {
+        val eng = engine ?: return
+        scope.launch {
+            val v = eng.video.value
+            if (!v.localOn || v.sharing) return@launch
+            eng.setCameraEnabled(false)
+            val ok = eng.setCameraEnabled(true)
+            if (!ok) Log.w(TAG, "the camera would not start")
+            if (eng === engine) _cameraFailed.value = !ok
+        }
+    }
+
+    private val _cameraFailed = MutableStateFlow(false)
+
+    /** The last try to open the camera on this call failed: no camera, or it was refused. */
+    val cameraFailed: StateFlow<Boolean> = _cameraFailed
 
     /** Flip our camera front to back on the live call, where the platform can. */
     fun switchCamera() {

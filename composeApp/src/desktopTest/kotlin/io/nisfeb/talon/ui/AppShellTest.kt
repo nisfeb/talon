@@ -76,6 +76,8 @@ class AppShellTest {
         notifier: io.nisfeb.talon.notify.Notifier = io.nisfeb.talon.notify.NoopNotifier,
         /** How soon the chat list's sync status says something is wrong. */
         sync: io.nisfeb.talon.ui.SyncThresholds = io.nisfeb.talon.ui.SyncThresholds(),
+        audioDevices: io.nisfeb.talon.call.AudioDevices = io.nisfeb.talon.call.AudioDevices.Noop,
+        videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -115,6 +117,8 @@ class AppShellTest {
                             createUiSettings = { ui },
                             callEngineProvider = calls,
                             notifier = notifier,
+                            audioDevices = audioDevices,
+                            videoDevices = videoDevices,
                         )
                         }
                     }
@@ -1043,14 +1047,16 @@ class AppShellTest {
     }
 
     /** ~bus rings, and the call is answered and live. */
-    private fun ComposeUiTest.liveCallFromBus(ship: FakeShip, engine: RecordedEngine) {
+    private fun ComposeUiTest.liveCallFromBus(ship: FakeShip, engine: RecordedEngine) = liveCallFromBus(ship, engine.state)
+
+    private fun ComposeUiTest.liveCallFromBus(ship: FakeShip, media: kotlinx.coroutines.flow.MutableStateFlow<io.nisfeb.talon.call.MediaState>) {
         waitUntil(timeoutMillis = 10_000) { ship.subIds.containsKey("trunk/calls") }
         fun fact(json: String) = runBlocking { ship.emit("""{"id":${ship.subIds.getValue("trunk/calls")},"response":"diff","json":$json}""") }
         fact("""{"recv":{"from":"~bus","sig":{"ring":{"id":"r1"}}}}""")
         waitUntil(timeoutMillis = 10_000) { onAllNodesWithContentDescription("Answer").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithContentDescription("Answer").performClick()
         fact("""{"recv":{"from":"~bus","sig":{"offer":{"id":"r1","sdp":"v=0\na=fingerprint:sha-256 AA:BB\n","fpr":"sha-256 AA:BB"}}}}""")
-        engine.state.value = io.nisfeb.talon.call.MediaState.Live
+        media.value = io.nisfeb.talon.call.MediaState.Live
         waitUntil(timeoutMillis = 10_000) { showing("· 00:0") }
     }
 
@@ -1795,5 +1801,210 @@ class AppShellTest {
         onNodeWithContentDescription("Connected to ~zod").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Heard from it") }
         assertTrue(!showing("Can't reach") && !showing("Signed out of"))
+    }
+
+    // ---- A 1:1 call's meeting view, cameras and share: what party lines had (sneagan, 2026-10-29) ----
+
+    /** A call's media: a camera that opens or not, and a share, as the test says. */
+    private class VideoEngine : io.nisfeb.talon.call.CallEngine {
+        private val desc = io.nisfeb.talon.call.SessionDesc("v=0\na=fingerprint:sha-256 AA:BB\n", "sha-256 AA:BB")
+        override val state = kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.MediaState.Idle)
+        override val video = kotlinx.coroutines.flow.MutableStateFlow(io.nisfeb.talon.call.VideoState())
+        val tries = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val shares = java.util.concurrent.CopyOnWriteArrayList<io.nisfeb.talon.call.ScreenSource?>()
+        @Volatile var opens = true
+        /** Holds a camera that is closing until completed: a restart caught midway. */
+        @Volatile var closing: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
+            tries += enabled
+            if (!enabled) {
+                closing?.await()
+                video.value = video.value.copy(localOn = false)
+                return true
+            }
+            if (opens) video.value = video.value.copy(localOn = true, sharing = false)
+            return opens
+        }
+        override suspend fun screenSources() = listOf(screen)
+        override suspend fun setScreenShare(source: io.nisfeb.talon.call.ScreenSource?): Boolean {
+            shares += source
+            video.value = video.value.copy(localOn = source != null, sharing = source != null)
+            return true
+        }
+        override suspend fun createOffer() = desc
+        override suspend fun acceptOffer(remote: io.nisfeb.talon.call.SessionDesc) = desc
+        override suspend fun setAnswer(remote: io.nisfeb.talon.call.SessionDesc) = Unit
+        override fun setMuted(muted: Boolean) = Unit
+        override fun close() = Unit
+
+        companion object {
+            val screen = io.nisfeb.talon.call.ScreenSource(1, "Screen", isWindow = false)
+        }
+    }
+
+    private class Desk : io.nisfeb.talon.call.AudioDevices {
+        override val supported = true
+        override fun inputs() = listOf(io.nisfeb.talon.call.AudioDevice("mic", "Desk mic"))
+        override fun outputs() = listOf(io.nisfeb.talon.call.AudioDevice("hp", "Headphones"))
+    }
+
+    private class Cameras : io.nisfeb.talon.call.VideoDevices {
+        override val supported = true
+        override fun cameras() = listOf(
+            io.nisfeb.talon.call.VideoDevice("front", "Front camera"),
+            io.nisfeb.talon.call.VideoDevice("back", "Back camera"),
+        )
+        @Volatile var chosen: String? = "front"
+        override val selectedCamera: String? get() = chosen
+        override fun selectCamera(id: String?) { chosen = id }
+    }
+
+    /** A live call from ~bus on a desktop with a microphone and two cameras. */
+    private fun videoCall(block: ComposeUiTest.(FakeShip, VideoEngine, Cameras) -> Unit) {
+        val engine = VideoEngine()
+        val cameras = Cameras()
+        app(
+            setup = callingShip,
+            calls = io.nisfeb.talon.call.CallEngineProvider { engine },
+            audioDevices = Desk(),
+            videoDevices = cameras,
+        ) { ship ->
+            liveCallFromBus(ship, engine.state)
+            block(ship, engine, cameras)
+        }
+    }
+
+    private fun ComposeUiTest.openCallMeeting() {
+        if (!showing("Meeting view")) onAllNodesWithContentDescription("Call controls")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Meeting view") }
+        onNodeWithText("Meeting view").performClick()
+        waitUntil(timeoutMillis = 5_000) { present("Minimize the call") }
+    }
+
+    private fun ComposeUiTest.pickCamera(label: String) {
+        onAllNodesWithContentDescription("Call controls")[0].performClick()
+        onNodeWithContentDescription("Choose audio devices").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing(label) }
+        onNodeWithText(label).performClick()
+    }
+
+    private fun ComposeUiTest.pickMeetingCamera(label: String) {
+        onNodeWithContentDescription("Devices").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing(label) }
+        onNodeWithText(label).performClick()
+    }
+
+    private fun ComposeUiTest.pictures() = onAllNodes(androidx.compose.ui.test.hasTestTag("call-video")).fetchSemanticsNodes()
+
+    private fun hungUp(ship: FakeShip) = ship.pokesTo("trunk").any { "hangup" in it.json.toString() }
+
+    @Test
+    fun `a call's meeting view fills the window with its picture, and hangs up`() = videoCall { ship, engine, _ ->
+        engine.video.value = io.nisfeb.talon.call.VideoState(localOn = true, remoteOn = true)
+        waitUntil(timeoutMillis = 5_000) { pictures().size == 1 }
+        val strip = pictures().single().boundsInRoot
+        openCallMeeting()
+        waitForIdle()
+        assertEquals(1, pictures().size, "the picture is drawn once, not again under the meeting")
+        val meeting = pictures().single().boundsInRoot
+        assertTrue(meeting.height > strip.height, "the meeting's picture is the larger: $meeting, the strip's $strip")
+        for (control in listOf("Devices", "Full screen", "Share", "Camera off", "Mute")) {
+            assertTrue(present(control), "the meeting has $control")
+        }
+        onAllNodesWithContentDescription("Hang up")[0].performClick()
+        waitUntil(timeoutMillis = 10_000) { hungUp(ship) }
+        waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") }
+    }
+
+    @Test
+    fun `the meeting view minimizes to the strip, and the call goes on`() = videoCall { ship, _, _ ->
+        openCallMeeting()
+        onNodeWithContentDescription("Minimize the call").performClick()
+        waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") && present("Call controls") }
+        assertTrue(showing("· 00:0"), "still on the call")
+        assertTrue(!hungUp(ship))
+    }
+
+    // With the camera off there is no picture above the strip, which
+    // would push its device list below this short test window.
+    @Test
+    fun `a camera picked on the call's strip is the one that opens`() = videoCall { _, engine, cameras ->
+        pickCamera("Back camera")
+        waitUntil(timeoutMillis = 5_000) { cameras.chosen == "back" }
+        Thread.sleep(300)
+        assertEquals(emptyList(), engine.tries.toList(), "choosing a camera did not open it")
+    }
+
+    @Test
+    fun `a camera picked in the meeting view reopens on it`() = videoCall { _, engine, cameras ->
+        openCallMeeting()
+        onNodeWithContentDescription("Camera").performClick()
+        waitUntil(timeoutMillis = 5_000) { engine.tries.toList() == listOf(true) }
+        pickMeetingCamera("Back camera")
+        waitUntil(timeoutMillis = 5_000) { engine.tries.size == 3 }
+        assertEquals("back", cameras.chosen)
+        assertEquals(listOf(true, false, true), engine.tries.toList(), "closed, then opened on the new one")
+    }
+
+    @Test
+    fun `a camera that won't start says so on the call`() = videoCall { _, engine, _ ->
+        engine.opens = false
+        onNodeWithContentDescription("Turn the camera on").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("The camera wouldn't start") }
+        engine.opens = true
+        onNodeWithContentDescription("Turn the camera on").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("The camera wouldn't start") }
+    }
+
+    @Test
+    fun `the meeting view shares a screen, and stops`() = videoCall { _, engine, _ ->
+        openCallMeeting()
+        onNodeWithContentDescription("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { engine.shares.size == 1 && present("Stop sharing") }
+        onNodeWithContentDescription("Stop sharing").performClick()
+        waitUntil(timeoutMillis = 5_000) { engine.shares.size == 2 }
+        assertEquals(listOf(VideoEngine.screen, null), engine.shares.toList())
+    }
+
+    // A camera being switched when the meeting view closes still comes
+    // back, on the new one: the switch is the call's, not the view's.
+    @Test
+    fun `a camera picked in the meeting view reopens after the view is closed`() = videoCall { _, engine, cameras ->
+        openCallMeeting()
+        onNodeWithContentDescription("Camera").performClick()
+        waitUntil(timeoutMillis = 5_000) { engine.tries.toList() == listOf(true) }
+        val held = kotlinx.coroutines.CompletableDeferred<Unit>()
+        engine.closing = held
+        pickMeetingCamera("Back camera")
+        waitUntil(timeoutMillis = 5_000) { engine.tries.size == 2 }
+        // The device menu stays open while picking; a click outside it shuts it first.
+        repeat(2) {
+            if (present("Minimize the call")) onNodeWithContentDescription("Minimize the call").performClick()
+            waitForIdle()
+        }
+        assertTrue(!present("Minimize the call"), "the meeting view closed")
+        held.complete(Unit)
+        waitUntil(timeoutMillis = 5_000) { engine.tries.size == 3 }
+        assertEquals(listOf(true, false, true), engine.tries.toList())
+        assertTrue(engine.video.value.localOn, "the camera is back on")
+        assertEquals("back", cameras.chosen)
+    }
+
+    // The consent dialog rides with the call's controls, so the meeting
+    // view asks it too: the DM tells them before any audio is tapped.
+    @Test
+    fun `the meeting view records only after the DM tells them`() {
+        lateinit var engine: RecordedEngine
+        app(setup = { callingShip(); engine = RecordedEngine(this) }, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine)
+            openCallMeeting()
+            onNodeWithContentDescription("Record").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("in your chat with") }
+            onNodeWithText("Start recording").performClick()
+            waitUntil(timeoutMillis = 10_000) { engine.remote != null }
+            assertTrue(chatSaid(ship, io.nisfeb.talon.call.CallController.RECORDING_ON))
+            assertEquals(1, engine.chatAtTap, "the DM went, and was taken, before any audio was tapped")
+            waitUntil(timeoutMillis = 5_000) { present("Stop") }
+        }
     }
 }

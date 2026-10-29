@@ -1938,7 +1938,13 @@ fun App(
             LaunchedEffect(partyLive) {
                 if (!partyLive) meetingOpen = false
             }
-            val callFloats = !inlineCallUiShown.value &&
+            // The same for a 1:1 call.
+            var callMeetingOpen by remember { mutableStateOf(false) }
+            val callLive = callUi is io.nisfeb.talon.call.CallUiState.Active
+            LaunchedEffect(callLive) {
+                if (!callLive) callMeetingOpen = false
+            }
+            val callFloats = !inlineCallUiShown.value && !callMeetingOpen &&
                 (callUi is io.nisfeb.talon.call.CallUiState.Active ||
                     callUi is io.nisfeb.talon.call.CallUiState.Ended)
             val partyFloats = !inlineCallUiShown.value &&
@@ -2064,10 +2070,13 @@ fun App(
                             // renders under its header, beside the
                             // party-line bar. Showing it here as well
                             // would put the same call in two places.
-                            stripShownInline = inlineCallUiShown.value,
+                            // Nor under its own meeting view.
+                            stripShownInline = inlineCallUiShown.value || callMeetingOpen,
                             onMessage = jumpToChat,
                             http = http,
                             aiConfig = aiSettings.state.value,
+                            videoDevices = videoDevices,
+                            onOpenMeeting = { callMeetingOpen = true },
                         )
                     }
                     val notifyShip = loggedInShip
@@ -2122,6 +2131,20 @@ fun App(
                     videoDevices = videoDevices,
                     onClose = { meetingOpen = false },
                     onMessage = { who -> meetingOpen = false; jumpToChat(who) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(1f)
+                        .pointerInput(Unit) { detectTapGestures { } },
+                )
+            }
+            if (callMeetingOpen && callController != null) {
+                io.nisfeb.talon.ui.CallMeeting(
+                    controller = callController,
+                    nameFor = { ship -> callContacts.displayName(ship) },
+                    audioDevices = audioDevices,
+                    videoDevices = videoDevices,
+                    onClose = { callMeetingOpen = false },
+                    onMessage = { who -> callMeetingOpen = false; jumpToChat(who) },
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(1f)
@@ -3197,12 +3220,16 @@ fun App(
                                                 }
                                             }
                                         }
-                                        callController?.let { c ->
+                                        // Not under its own meeting view: the
+                                        // picture would be drawn twice.
+                                        if (!callMeetingOpen) callController?.let { c ->
                                             io.nisfeb.talon.ui.CallStrip(
                                                 c,
                                                 nameFor = { partyContacts.displayName(it) },
                                                 audioDevices = audioDevices,
+                                                videoDevices = videoDevices,
                                                 onMessage = jumpToChat,
+                                                onOpenMeeting = { callMeetingOpen = true },
                                             )
                                         }
                                         // Only while the line is actually

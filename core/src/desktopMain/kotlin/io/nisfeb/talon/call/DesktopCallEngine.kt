@@ -281,9 +281,15 @@ class DesktopCallEngine(
      * side. Answering left our camera on a second, unassociated
      * transceiver that no m-line ever pointed at, so the callee could
      * never send video at all — video worked caller-to-callee only.
+     *
+     * The share and a change of camera go out on [cameraSender], so it
+     * moves here too: left on the first transceiver, a callee's share
+     * and new camera reached nobody. That transceiver stays, unsent.
+     * A restart offer comes here again mid-call, and puts back what
+     * goes out now: a running share, not the stopped camera.
      */
     private fun adoptVideoTransceiver() {
-        val cam = localVideo ?: return
+        val sending = share.track ?: localVideo ?: return
         runCatching {
             val videos = pc.transceivers.orEmpty().filter { t ->
                 t.receiver?.track?.kind == MediaStreamTrack.VIDEO_TRACK_KIND ||
@@ -296,8 +302,9 @@ class DesktopCallEngine(
             val video = videos.firstOrNull { !it.mid.isNullOrEmpty() }
                 ?: videos.firstOrNull()
                 ?: return@runCatching
-            if (video.sender?.track !== cam) video.sender?.replaceTrack(cam)
+            if (video.sender?.track !== sending) video.sender?.replaceTrack(sending)
             video.direction = RTCRtpTransceiverDirection.SEND_RECV
+            cameraSender = video.sender
         }.onFailure { Log.w("Trunk", "could not adopt the video transceiver", it) }
     }
 
