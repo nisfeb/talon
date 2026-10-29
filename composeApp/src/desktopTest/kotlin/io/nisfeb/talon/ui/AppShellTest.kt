@@ -74,6 +74,8 @@ class AppShellTest {
         relay: io.nisfeb.talon.notify.RelaySettings = io.nisfeb.talon.notify.InMemoryRelaySettings(),
         drafts: DraftStore = InMemoryDraftStore(),
         notifier: io.nisfeb.talon.notify.Notifier = io.nisfeb.talon.notify.NoopNotifier,
+        /** How soon the chat list's sync status says something is wrong. */
+        sync: io.nisfeb.talon.ui.SyncThresholds = io.nisfeb.talon.ui.SyncThresholds(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -96,6 +98,7 @@ class AppShellTest {
             runComposeUiTest {
                 setContent {
                     Box(Modifier.size(width = width, height = 800.dp)) {
+                        androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalSyncThresholds provides sync) {
                         App(
                             http = ship.http,
                             sessionStore = store,
@@ -113,6 +116,7 @@ class AppShellTest {
                             callEngineProvider = calls,
                             notifier = notifier,
                         )
+                        }
                     }
                 }
                 waitUntil(timeoutMillis = 10_000) {
@@ -1737,5 +1741,59 @@ class AppShellTest {
         Thread.sleep(1_500)
         waitForIdle()
         assertTrue(!showing("Evening review"))
+    }
+
+    // ---- The sync status (2026-10-29) ----
+    // A Windows user's Talon stopped syncing for three days and said
+    // nothing. The chat list's header says now whether the ship is heard
+    // from, and says it plainly when it is not. Short thresholds here, real
+    // time, and a ship that sends eyre's heartbeat.
+
+    private val quickSync = io.nisfeb.talon.ui.SyncThresholds(heardRecentlyMs = 3_000, connectGraceMs = 2_000)
+
+    @Test
+    fun `the header says the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
+        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+        Thread.sleep(4_000)
+        waitForIdle()
+        assertTrue(present("Connected to ~zod") && !showing("Can't reach"), "the heartbeat keeps it connected on a quiet ship")
+        // The network goes: the stream drops and every new one is refused.
+        ship.refuseStream = true
+        kotlinx.coroutines.runBlocking { ship.endStreams() }
+        waitUntil(timeoutMillis = 15_000) { showing("Can't reach ~zod since") }
+        assertTrue(showing("Talon keeps trying."))
+        assertTrue(onAllNodesWithContentDescription("Can't reach ~zod since", substring = true).fetchSemanticsNodes().isNotEmpty(), "the mark says it too")
+        // Back, and asked at once.
+        ship.refuseStream = false
+        onNodeWithText("Try now").performClick()
+        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") && !showing("Can't reach") }
+    }
+
+    // The reporter's case, as far as the code shows one: the ship refused
+    // the login, the form was put off with Cancel, and nothing said the
+    // app was no longer hearing anything.
+    @Test
+    fun `a lapsed login put off with Cancel is said, and Sign in brings the form back`() {
+        val store = twoShips()
+        app(sessions = { store }, sync = quickSync, setup = { heartbeat(500) }) { ship ->
+            waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+            ship.signedOut = true
+            kotlinx.coroutines.runBlocking { ship.endStreams() }
+            waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
+            onNodeWithText("Cancel").performClick()
+            home()
+            waitUntil(timeoutMillis = 15_000) { showing("Signed out of ~zod") }
+            assertTrue(showing("New messages wait until you sign in again.") && !showing("Connect"))
+            onNodeWithText("Sign in").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("You were signed out of ~zod. Sign in again") }
+        }
+    }
+
+    @Test
+    fun `while all is well there is no banner, only the mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
+        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+        onNodeWithContentDescription("Connected to ~zod").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Heard from it") }
+        assertTrue(!showing("Can't reach") && !showing("Signed out of"))
     }
 }

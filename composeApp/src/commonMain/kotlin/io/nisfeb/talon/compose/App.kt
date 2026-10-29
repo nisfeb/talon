@@ -3517,6 +3517,12 @@ fun App(
                                             showSidebarSettings = true
                                         },
                                         activeShip = ship,
+                                        // The sync status's Sign in: the form again, though
+                                        // it was put off with Cancel (lapseHeldOff).
+                                        onSignIn = {
+                                            lapseHeldOff = lapseHeldOff - ship
+                                            io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship)
+                                        },
                                         allShips = remember(loggedInShip) {
                                             sessionStore.all().map { it.ship }
                                         },
