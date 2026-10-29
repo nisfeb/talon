@@ -519,7 +519,8 @@ fun PartyLineBarContent(
         // Behind the same expander as the roster: picking a headset is
         // a thing you do once, not something worth a permanent row over
         // the conversation. Renders nothing where the OS owns routing.
-        if (onOpenMeeting != null && !immersive && partyVideoSupported && headline == null) {
+        // A 1:1 call (headline) has its picture in the meeting, not tiles.
+        if (onOpenMeeting != null && !immersive && (partyVideoSupported || headline != null)) {
             io.nisfeb.talon.ui.TextButton(
                 onClick = onOpenMeeting,
                 modifier = Modifier.padding(horizontal = 8.dp),

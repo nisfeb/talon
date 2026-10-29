@@ -85,6 +85,9 @@ fun CallOverlay(
     /** For a recorded call's publish and save; null leaves the finished recording unoffered. */
     http: io.ktor.client.HttpClient? = null,
     aiConfig: io.nisfeb.talon.ai.AiSettings.Config? = null,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
+    /** Desktop: open the meeting view that fills the window. */
+    onOpenMeeting: (() -> Unit)? = null,
 ) {
     TrunkInstallPrompt(controller)
 
@@ -151,7 +154,7 @@ fun CallOverlay(
             // underneath, header and back button included. App composes
             // CallOverlay in a slot above the screens, so the strip
             // just takes its space there.
-            if (!stripShownInline) CallStrip(controller, modifier, nameFor, audioDevices, onMessage)
+            if (!stripShownInline) CallStrip(controller, modifier, nameFor, audioDevices, videoDevices, onMessage, onOpenMeeting)
         }
 
         CallUiState.None -> {}
@@ -173,27 +176,20 @@ fun CallStrip(
     nameFor: (String) -> String = { it },
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     /** Open a DM with the person on the other end. */
     onMessage: ((String) -> Unit)? = null,
+    /** Desktop: open the meeting view that fills the window. */
+    onOpenMeeting: (() -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
-    val engine = controller.mediaEngine
-    val video by (engine?.video ?: remember { MutableStateFlow(VideoState()) })
-        .collectAsState()
-    val camera = rememberCameraPermission()
-    val shareControl = remember(controller) {
-        ScreenShareControl({ controller.screenSources() }, { controller.setScreenShare(it) })
-    }
-    // Recording: on the controller, so the strip can come and go.
-    val recording by controller.callRecording.collectAsState()
-    var askRecord by remember { mutableStateOf<String?>(null) }
-    var recordProblem by remember { mutableStateOf<String?>(null) }
     when (val s = state) {
         is CallUiState.Active -> Column(modifier) {
+            val w = rememberCallWiring(controller, s, nameFor, videoDevices)
             // Pictures above the strip, so the controls stay in the
             // same place whether or not anyone has a camera on.
-            if (isVideoCallsSupported && engine != null && video.anyOn) {
-                CallVideoPane(engine, video, Modifier.fillMaxWidth())
+            if (w.pane != null && w.engine != null) {
+                CallVideoPane(w.engine, w.video, Modifier.fillMaxWidth())
             }
             // Open the full screen once per call, from whichever strip
             // composes first; a strip that recomposes elsewhere after a
@@ -204,45 +200,25 @@ fun CallStrip(
             }
             PartyLineBarContent(
             autoOpenKey = autoOpen,
-            state = PartyState.Live(
-                room = s.peer,
-                members = listOf(PartyMember(id = s.peer, ship = s.peer)),
-                muted = s.muted,
-                media = s.media,
-            ),
+            state = w.live,
             onToggleMute = { controller.setMuted(it) },
             onLeave = { controller.hangup() },
             nameFor = nameFor,
             audioDevices = audioDevices,
-            // "1 on the line" is the wrong sentence for a phone call.
-            headline = when (s.media) {
-                MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.connectedAtMs)}" + if (recording) " · ● Recording" else ""
-                else -> "Connecting to ${nameFor(s.peer)}…"
-            },
-            recording = recording,
-            recordedBy = if (recording) setOfNotNull(controller.ourShip) else emptySet(),
-            // Only once live, and only where the peer can be told in the chat.
-            onToggleRecord = if (isCallRecordingSupported && controller.recordingNotice != null && (recording || s.media == MediaState.Live)) {
-                { if (recording) controller.stopRecordingCall() else askRecord = s.peer }
-            } else null,
-            cameraOn = video.localOn,
-            onToggleCamera = if (isVideoCallsSupported && engine != null) {
-                {
-                    // Ask the first time; the tap that grants is not
-                    // the tap that turns the camera on, which is how
-                    // every permission-gated control behaves.
-                    if (!camera.granted) camera.request()
-                    else controller.setCamera(!video.localOn)
-                }
-            } else null,
-            onSwitchCamera = if (isVideoCallsSupported && isCameraSwitchSupported && engine != null) {
-                { controller.switchCamera() }
-            } else null,
-            screenShare = if (isScreenShareSupported && engine != null) shareControl else null,
-            sharing = video.sharing,
-            videoPane = if (isVideoCallsSupported && engine != null && video.anyOn) {
-                { CallVideoPane(engine, video, Modifier.fillMaxWidth()) }
-            } else null,
+            videoDevices = videoDevices,
+            headline = w.headline,
+            recording = w.recording,
+            recordedBy = w.recordedBy,
+            onToggleRecord = w.onToggleRecord,
+            cameraOn = w.cameraOn,
+            cameraError = w.cameraError,
+            onToggleCamera = w.onToggleCamera,
+            onSwitchCamera = w.onSwitchCamera,
+            onSelectCamera = w.onSelectCamera,
+            screenShare = w.screenShare,
+            sharing = w.sharing,
+            videoPane = w.pane,
+            onOpenMeeting = onOpenMeeting?.takeIf { isVideoCallsSupported },
             onMessage = onMessage,
         )
         }
@@ -263,8 +239,100 @@ fun CallStrip(
 
         else -> Unit
     }
+}
+
+/**
+ * A 1:1 call's meeting view, as [PartyLineMeeting] is a line's: the
+ * call over the whole window, its picture as large as fits, with the
+ * window's own Full screen control. It closes when the call does.
+ */
+@Composable
+fun CallMeeting(
+    controller: CallController,
+    nameFor: (String) -> String,
+    audioDevices: io.nisfeb.talon.call.AudioDevices,
+    videoDevices: io.nisfeb.talon.call.VideoDevices,
+    onClose: () -> Unit,
+    onMessage: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val state by controller.state.collectAsState()
+    val s = state as? CallUiState.Active
+    LaunchedEffect(s == null) { if (s == null) onClose() }
+    if (s == null) return
+    val w = rememberCallWiring(controller, s, nameFor, videoDevices)
+    Box(modifier.fillMaxSize()) {
+        PartyLineFullScreen(
+            state = w.live,
+            roomName = w.headline,
+            directCall = true,
+            nameFor = nameFor,
+            selfShip = controller.ourShip.orEmpty(),
+            onToggleMute = { controller.setMuted(it) },
+            onLeave = { controller.hangup(); onClose() },
+            onMinimize = onClose,
+            audioDevices = audioDevices,
+            videoDevices = videoDevices,
+            onSelectCamera = w.onSelectCamera,
+            onMessage = onMessage,
+            recording = w.recording,
+            recordedBy = w.recordedBy,
+            onToggleRecord = w.onToggleRecord,
+            cameraOn = w.cameraOn,
+            onToggleCamera = w.onToggleCamera,
+            screenShare = w.screenShare,
+            sharing = w.sharing,
+            onSwitchCamera = w.onSwitchCamera,
+            videoPane = w.pane,
+            canFillWindow = true,
+        )
+    }
+}
+
+/** What a live 1:1 call's strip and meeting view take from the controller, as [PartyWiring] is a line's. */
+internal class CallWiring(
+    val live: PartyState.Live,
+    val headline: String,
+    val recording: Boolean,
+    val recordedBy: Set<String>,
+    val onToggleRecord: (() -> Unit)?,
+    val cameraOn: Boolean,
+    val cameraError: Boolean,
+    val onToggleCamera: (() -> Unit)?,
+    val onSwitchCamera: (() -> Unit)?,
+    /** Null where cameras can't be chosen (phones flip instead). */
+    val onSelectCamera: ((String) -> Unit)?,
+    val screenShare: ScreenShareControl?,
+    val sharing: Boolean,
+    val engine: io.nisfeb.talon.call.CallEngine?,
+    val video: VideoState,
+    /** The picture as large as its place allows, or null while nobody's camera is on. */
+    val pane: (@Composable () -> Unit)?,
+)
+
+/** The record consent dialog rides with it, so whichever view asked shows it, and it goes with the call. */
+@Composable
+internal fun rememberCallWiring(
+    controller: CallController,
+    s: CallUiState.Active,
+    nameFor: (String) -> String,
+    videoDevices: io.nisfeb.talon.call.VideoDevices,
+): CallWiring {
+    val engine = controller.mediaEngine
+    val video by (engine?.video ?: remember { MutableStateFlow(VideoState()) })
+        .collectAsState()
+    val camera = rememberCameraPermission()
+    val shareControl = remember(controller) {
+        ScreenShareControl({ controller.screenSources() }, { controller.setScreenShare(it) })
+    }
+    // Recording: on the controller, so the strip can come and go.
+    val recording by controller.callRecording.collectAsState()
+    val cameraFailed by controller.cameraFailed.collectAsState()
+    var askRecord by remember { mutableStateOf<String?>(null) }
+    var recordProblem by remember { mutableStateOf<String?>(null) }
+    val videoCalls = isVideoCallsSupported && engine != null
     // Asked of the call it was asked on, and gone with it.
-    askRecord?.takeIf { (state as? CallUiState.Active)?.peer == it }?.let { peer ->
+    askRecord?.takeIf { s.peer == it }?.let { peer ->
         RecordConsentDialog(
             show = true,
             onDismiss = { askRecord = null },
@@ -285,6 +353,52 @@ fun CallStrip(
             confirmButton = { TextButton(onClick = { recordProblem = null }) { Text("OK") } },
         )
     }
+    return CallWiring(
+        live = PartyState.Live(
+            room = s.peer,
+            members = listOf(PartyMember(id = s.peer, ship = s.peer)),
+            muted = s.muted,
+            media = s.media,
+        ),
+        // "1 on the line" is the wrong sentence for a phone call.
+        headline = when (s.media) {
+            MediaState.Live -> "${nameFor(s.peer)} · ${liveDuration(s.connectedAtMs)}" + if (recording) " · ● Recording" else ""
+            else -> "Connecting to ${nameFor(s.peer)}…"
+        },
+        recording = recording,
+        recordedBy = if (recording) setOfNotNull(controller.ourShip) else emptySet(),
+        // Only once live, and only where the peer can be told in the chat.
+        onToggleRecord = if (isCallRecordingSupported && controller.recordingNotice != null && (recording || s.media == MediaState.Live)) {
+            { if (recording) controller.stopRecordingCall() else askRecord = s.peer }
+        } else null,
+        cameraOn = video.localOn,
+        cameraError = cameraFailed,
+        onToggleCamera = if (videoCalls) {
+            {
+                // Ask the first time; the tap that grants is not
+                // the tap that turns the camera on, which is how
+                // every permission-gated control behaves.
+                if (!camera.granted) camera.request()
+                else controller.setCamera(!video.localOn)
+            }
+        } else null,
+        onSwitchCamera = if (videoCalls && isCameraSwitchSupported) {
+            { controller.switchCamera() }
+        } else null,
+        onSelectCamera = if (videoCalls && videoDevices.supported) {
+            { id ->
+                videoDevices.selectCamera(id)
+                controller.restartCamera()
+            }
+        } else null,
+        screenShare = if (isScreenShareSupported && engine != null) shareControl else null,
+        sharing = video.sharing,
+        engine = engine,
+        video = video,
+        pane = if (engine != null && isVideoCallsSupported && video.anyOn) {
+            { CallVideoPane(engine, video, Modifier.fillMaxSize(), fill = true) }
+        } else null,
+    )
 }
 
 /** How long "call ended" lingers before clearing itself. */
@@ -524,6 +638,8 @@ private fun CallVideoPane(
     engine: io.nisfeb.talon.call.CallEngine,
     video: VideoState,
     modifier: Modifier = Modifier,
+    /** As large as its place, not capped: the full-screen and meeting views, where the picture is the point. */
+    fill: Boolean = false,
 ) {
     var remoteAspect by remember { mutableStateOf<Float?>(null) }
     // The pane is sized to fit both the width it is given and its height
@@ -531,9 +647,10 @@ private fun CallVideoPane(
     // taller than the cap on a wide window, the cap gave way, and the
     // pane spilled over the call's controls and the chat (sneagan,
     // 2026-10-09).
-    BoxWithConstraints(modifier, contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(modifier, contentAlignment = if (fill) Alignment.Center else Alignment.TopCenter) {
+    val cap = if (fill) maxHeight else MAX_VIDEO_PANE_HEIGHT
     Surface(
-        modifier = Modifier.size(fitVideoPane(maxWidth, remoteAspect ?: (16f / 9f))).testTag("call-video"),
+        modifier = Modifier.size(fitVideoPane(maxWidth, remoteAspect ?: (16f / 9f), cap)).testTag("call-video"),
         color = Color.Black,
         shape = RoundedCornerShape(12.dp),
     ) {
@@ -560,7 +677,7 @@ private fun CallVideoPane(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(8.dp)
-                        .size(width = 84.dp, height = 112.dp),
+                        .then(if (fill) Modifier.size(160.dp) else Modifier.size(width = 84.dp, height = 112.dp)),
                     color = Color.DarkGray,
                     shape = RoundedCornerShape(8.dp),
                 ) {

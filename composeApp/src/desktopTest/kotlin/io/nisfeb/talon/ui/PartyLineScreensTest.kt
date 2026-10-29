@@ -1,6 +1,12 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.performKeyInput
@@ -628,5 +634,50 @@ class PartyLineScreensTest {
         onNodeWithTag("filled-video").performMouseInput { moveTo(x) }
         mainClock.advanceTimeBy(CONTROLS_FADE_MS * 3)
         assertTrue(onAllNodesWithContentDescription("Back to the meeting").fetchSemanticsNodes().isNotEmpty(), "the X stays under a resting pointer")
+    }
+
+    // A 1:1 call's full screen (the phone's, and desktop's meeting view):
+    // its picture had a 480dp cap over a "roster" of the one other person
+    // that took the rest. The picture takes the room now, and the row that
+    // names them and offers Message stays under it.
+    private fun directCall(picture: Boolean, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.size(width = 400.dp, height = 760.dp)) {
+                    PartyLineFullScreen(
+                        state = PartyState.Live(room = "~bus", members = listOf(PartyMember(id = "~bus", ship = "~bus")), muted = false, media = MediaState.Live),
+                        roomName = "Bus · 01:02", directCall = true, nameFor = { names[it] ?: it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = { did += "hang up" }, onMinimize = {},
+                        onMessage = { did += "message:$it" },
+                        videoPane = if (picture) {
+                            { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().testTag("picture")) }
+                        } else null,
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        block()
+    }
+
+    @Test
+    fun `a call's picture takes the full screen, over the row that names them`() = directCall(picture = true) {
+        val picture = onNodeWithTag("picture").getBoundsInRoot()
+        val hangUp = onNodeWithContentDescription("Hang up").getBoundsInRoot()
+        assertTrue(picture.height > MAX_VIDEO_PANE_HEIGHT, "the picture has more than the strip's cap: $picture")
+        assertTrue(hangUp.top > picture.bottom, "the controls stay below it: $hangUp")
+        assertTrue(!shows("1 person on the line"), "a call is not a line")
+        assertTrue(shows("Bus"), "who it is, under the picture")
+        onNodeWithContentDescription("Options for Bus").performClick()
+        onNodeWithText("Message").performClick()
+        assertEquals(listOf("message:~bus"), did)
+    }
+
+    @Test
+    fun `a call with no picture lists who it is`() = directCall(picture = false) {
+        assertTrue(onAllNodesWithTag("picture").fetchSemanticsNodes().isEmpty())
+        assertTrue(shows("Bus"))
+        onNodeWithContentDescription("Hang up").performClick()
+        assertEquals(listOf("hang up"), did)
     }
 }

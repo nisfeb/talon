@@ -336,6 +336,18 @@ fun PartyLineFullScreen(
             }
         }
     }
+    val participant: @Composable (PartyMember) -> Unit = { m ->
+        ParticipantRow(
+            member = m,
+            nameFor = nameFor,
+            isSelf = m.ship == selfShip,
+            showOps = state.ops && m.ship != selfShip &&
+                onRevokeSpeaking != null && onRestoreSpeaking != null,
+            onRevokeSpeaking = onRevokeSpeaking,
+            onRestoreSpeaking = onRestoreSpeaking,
+            onMessage = onMessage,
+        )
+    }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -415,12 +427,14 @@ fun PartyLineFullScreen(
             }
 
             // ─── Participants ───
-            videoPane?.invoke()
-            // Tiles only for people sharing video; everyone is in the
-            // roster below regardless. A box per non-video member said
-            // nothing the list doesn't, and crowded the cameras out.
             val anyVideo = state.members.any { it.ship in videoOnShips }
-            if (partyVideoSupported && anyVideo) {
+            if (directCall && videoPane != null) {
+                // A 1:1 call's picture is what there is to look at: it
+                // takes the room, over the one row that names who it is
+                // and offers Message.
+                Box(Modifier.weight(1f).fillMaxWidth()) { videoPane() }
+                state.members.forEach { participant(it) }
+            } else if (partyVideoSupported && anyVideo) {
                 PartyVideoGrid(
                     members = state.members,
                     selfShip = selfShip,
@@ -442,36 +456,15 @@ fun PartyLineFullScreen(
                     modifier = Modifier.weight(0.6f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(state.members, key = { it.ship }) { m ->
-                        ParticipantRow(
-                            member = m,
-                            nameFor = nameFor,
-                            isSelf = m.ship == selfShip,
-                            showOps = state.ops && m.ship != selfShip &&
-                                onRevokeSpeaking != null && onRestoreSpeaking != null,
-                            onRevokeSpeaking = onRevokeSpeaking,
-                            onRestoreSpeaking = onRestoreSpeaking,
-                            onMessage = onMessage,
-                        )
-                    }
+                    items(state.members, key = { it.ship }) { participant(it) }
                 }
             } else {
+                videoPane?.invoke()
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    items(state.members, key = { it.ship }) { m ->
-                        ParticipantRow(
-                            member = m,
-                            nameFor = nameFor,
-                            isSelf = m.ship == selfShip,
-                            showOps = state.ops && m.ship != selfShip &&
-                                onRevokeSpeaking != null && onRestoreSpeaking != null,
-                            onRevokeSpeaking = onRevokeSpeaking,
-                            onRestoreSpeaking = onRestoreSpeaking,
-                            onMessage = onMessage,
-                        )
-                    }
+                    items(state.members, key = { it.ship }) { participant(it) }
                 }
             }
 
