@@ -114,8 +114,6 @@ import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.ai.AiClient
 import io.nisfeb.talon.ai.AiFeatures
 import io.nisfeb.talon.ai.AiSettingsRepository
-import io.nisfeb.talon.ai.kMeansAssign
-import io.nisfeb.talon.ai.unpackEmbedding
 import io.nisfeb.talon.data.AppDatabase
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.data.NotifyLevel
@@ -222,10 +220,13 @@ fun DmChatScreen(
      * wired info yet (icon stays hidden).
      */
     onOpenGroupInfo: (() -> Unit)? = null,
-    /** Optional embedder client. When non-null the topic-clusters
-     *  empty state surfaces live indexer progress instead of the
-     *  generic "check back" placeholder. */
-    searchEmbedder: io.nisfeb.talon.ai.SearchEmbedderClient? = null,
+    /**
+     * A phone, or a window under [io.nisfeb.talon.ui.ExpandedThreshold]:
+     * the header keeps room for the chat's name, and a channel's party
+     * line and followed threads move to its Info. A DM has no Info, so
+     * its threads stay here.
+     */
+    compact: Boolean = false,
     /** Scroll position + first-anchor flag, optionally hoisted by the
      *  caller so they survive this screen being unmounted. On compact,
      *  opening a thread swaps DmChatScreen out for a full-screen
@@ -254,7 +255,6 @@ fun DmChatScreen(
     // without this the banner reoffered (and would re-spend an AI call
     // on) the exact content the user just dismissed.
     var caughtUp by remember(whom) { mutableStateOf(false) }
-    var topicsSheetOpen by remember(whom) { mutableStateOf(false) }
     // The threads the owner follows here: the way back to one that
     // scrolled away, from the chip over the chat or the header.
     var threadsSheetOpen by remember(whom) { mutableStateOf(false) }
@@ -889,7 +889,9 @@ fun DmChatScreen(
                     Icon(Icons.Filled.Call, contentDescription = "Voice call")
                 }
             }
-            if (onPartyLine != null) {
+            val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
+            val toInfo = compact && hasInfoPane
+            if (onPartyLine != null && !toInfo) {
                 androidx.compose.material3.BadgedBox(
                     badge = {
                         if (partyPresent > 0) {
@@ -913,30 +915,14 @@ fun DmChatScreen(
                     }
                 }
             }
-            if (followedHere.isNotEmpty()) {
+            if (followedHere.isNotEmpty() && !toInfo) {
                 io.nisfeb.talon.ui.IconButton(tip = "Threads you follow", onClick = { threadsSheetOpen = true }) {
                     Icon(TalonIcons.Reply, contentDescription = "Threads you follow")
                 }
             }
-            val hasInfoPane = onOpenGroupInfo != null && whom.startsWith("chat/")
             if (hasInfoPane) {
                 io.nisfeb.talon.ui.IconButton(tip = "Info", onClick = onOpenGroupInfo) {
                     Icon(Icons.Filled.Info, contentDescription = "Info")
-                }
-            }
-            // Hide the topic icon entirely on platforms where the
-            // on-device embedder isn't supported — otherwise the
-            // user gets an icon that opens a sheet stuck saying
-            // "Indexer hasn't started yet" forever. The flag also
-            // gates Settings rendering, so feature stays
-            // discoverable on platforms that do support it.
-            if (aiConfigured.smartFeaturesEnabled &&
-                io.nisfeb.talon.ui.isOnDeviceAiFeatureSupported(
-                    io.nisfeb.talon.ai.AiSettings.Feature.SmartFeatures,
-                )
-            ) {
-                io.nisfeb.talon.ui.IconButton(tip = "Topics in this chat", onClick = { topicsSheetOpen = true }) {
-                    Icon(TalonIcons.Topic, contentDescription = "Topics in this chat")
                 }
             }
             // For group channels, the Info pane already exposes the
@@ -1645,32 +1631,6 @@ fun DmChatScreen(
                 row.lastReplyId?.let { onOpenThreadAt(row.parentPostId, it) } ?: onOpenThread(row.parentPostId)
             },
             onDismiss = { threadsSheetOpen = false },
-        )
-    }
-
-    if (topicsSheetOpen) {
-        TopicsSheet(
-            whom = whom,
-            db = db,
-            searchEmbedder = searchEmbedder,
-            onDismiss = { topicsSheetOpen = false },
-            onTapMessage = { msgId, parentId ->
-                topicsSheetOpen = false
-                if (parentId != null) onOpenThreadAt(parentId, msgId)
-                else {
-                    val idx = displayRows.indexOfFirst {
-                        it is ChatListItem.Message && it.row.m.id == msgId
-                    }
-                    if (idx >= 0) {
-                        val reverseIdx = displayRows.size - 1 - idx
-                        scope.launch { listState.scrollToItem(reverseIdx) }
-                        flashMessageId = msgId
-                    } else {
-                        pendingJump = msgId
-                        scope.launch { reach(msgId) }
-                    }
-                }
-            },
         )
     }
 }
@@ -2607,276 +2567,6 @@ private fun MessageActionMenu(
                 )
             }
     }
-}
-
-private enum class TopicWindow(val label: String, val ms: Long?) {
-    Week("Week", 7L * 24 * 3600_000L),
-    Month("Month", 30L * 24 * 3600_000L),
-    All("All", null),
-}
-
-private data class TopicClusterRow(
-    val representativeId: String,
-    val representativeParentId: String?,
-    val representativeText: String,
-    val count: Int,
-)
-
-private data class TopicsResult(
-    val clusters: List<TopicClusterRow>,
-    val fellBackToAllTime: Boolean,
-    /** Total embeddings indexed for this chat. Lets the empty-state
-     *  copy distinguish "indexer is still working / not enough chat
-     *  yet" from "index is fine, no clusters in this window". */
-    val embeddingCount: Int,
-)
-
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun TopicsSheet(
-    whom: String,
-    db: AppDatabase,
-    searchEmbedder: io.nisfeb.talon.ai.SearchEmbedderClient?,
-    onDismiss: () -> Unit,
-    onTapMessage: (id: String, parentId: String?) -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState()
-    var window by remember(whom) { mutableStateOf(TopicWindow.Month) }
-    var loading by remember(whom) { mutableStateOf(true) }
-    var result by remember(whom) {
-        mutableStateOf(TopicsResult(emptyList(), fellBackToAllTime = false, embeddingCount = 0))
-    }
-
-    // Re-cluster every time the indexer makes progress so the empty
-    // state actually moves on its own — the previous "check back in
-    // a moment" copy lied because the sheet only re-ran when the
-    // user changed window. Now we recompute as embeddings land.
-    val indexProgress by (searchEmbedder?.progress?.collectAsState()
-        ?: remember { mutableStateOf(io.nisfeb.talon.ai.IndexProgress()) })
-
-    LaunchedEffect(whom, window, indexProgress.indexed) {
-        loading = true
-        result = withContext(Dispatchers.Default) {
-            buildTopicClusters(whom, db, window.ms)
-        }
-        loading = false
-    }
-
-    val clusters = result.clusters
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val headerText = when {
-                result.fellBackToAllTime ->
-                    "Topics in this chat (all time — recent window was too thin)"
-                window == TopicWindow.All -> "Topics in this chat"
-                else -> "Topics in the last ${window.label.lowercase()}"
-            }
-            Text(headerText, style = MaterialTheme.typography.titleMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TopicWindow.values().forEach { w ->
-                    FilterChip(
-                        selected = w == window,
-                        onClick = { window = w },
-                        label = { Text(w.label) },
-                    )
-                }
-            }
-            when {
-                loading -> Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CircularProgressIndicator(
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text("Clustering…", style = MaterialTheme.typography.bodyMedium)
-                }
-                clusters.isEmpty() -> {
-                    // Empty state — surface real indexer state when
-                    // embeddings are still landing. The previous
-                    // "check back in a moment" copy lied: the sheet
-                    // only re-ran when the user changed window, so
-                    // even if the indexer made progress while the
-                    // sheet was open, the message stayed there
-                    // forever. Now we re-key on indexProgress.indexed
-                    // (above) so each new batch retriggers
-                    // buildTopicClusters, and the copy below shows
-                    // the live counter / running flag.
-                    if (result.embeddingCount < 6) {
-                        IndexerStatusRow(
-                            progress = indexProgress,
-                            embeddedHere = result.embeddingCount,
-                        )
-                    } else {
-                        Text(
-                            "No distinct topics in this window — try a longer time range.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                else -> clusters.forEach { c ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onTapMessage(c.representativeId, c.representativeParentId) }
-                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            "${c.count}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        )
-                        Text(
-                            c.representativeText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 2,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun IndexerStatusRow(
-    progress: io.nisfeb.talon.ai.IndexProgress,
-    embeddedHere: Int,
-) {
-    // Three states the user actually cares about:
-    //  - running with a counter (indexing in motion)
-    //  - finished but this chat hasn't accumulated enough yet
-    //    (e.g. brand new chat, sparse history)
-    //  - never started or zero progress for too long (likely
-    //    embedder failure — surface a hint rather than spinning)
-    val running = progress.running
-    val total = progress.total
-    val indexed = progress.indexed
-    val pct = if (total > 0) (indexed * 100 / total).coerceIn(0, 100) else 0
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (running) {
-                CircularProgressIndicator(
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-            val headline = when {
-                running && total > 0 -> "Indexing — $indexed / $total ($pct%)"
-                running -> "Indexing — starting up"
-                indexed == 0 && total == 0 ->
-                    "Indexer hasn't started yet."
-                else -> "Indexing complete — $indexed messages embedded."
-            }
-            Text(headline, style = MaterialTheme.typography.bodyMedium)
-        }
-        val sub = when {
-            embeddedHere == 0 ->
-                "This chat needs at least 6 indexed messages before topics can be " +
-                    "built. None have been embedded for this conversation yet."
-            embeddedHere < 6 ->
-                "This chat has $embeddedHere indexed message" +
-                    (if (embeddedHere == 1) "" else "s") +
-                    "; topics need 6. Wait for indexing or send more in this chat."
-            else -> ""
-        }
-        if (sub.isNotEmpty()) {
-            Text(
-                sub,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-private suspend fun buildTopicClusters(
-    whom: String,
-    db: AppDatabase,
-    windowMs: Long?,
-): TopicsResult {
-    // Embedding count is independent of windowing — pull it once so
-    // the sheet can show the right empty-state copy regardless of
-    // which time window is selected.
-    val embeddingCount = db.embeddings().forWhom(whom).size
-    val initial = clusterTopicsWithin(whom, db, windowMs)
-    if (initial.isNotEmpty() || windowMs == null) {
-        return TopicsResult(initial, fellBackToAllTime = false, embeddingCount = embeddingCount)
-    }
-    val fallback = clusterTopicsWithin(whom, db, windowMs = null)
-    return TopicsResult(
-        clusters = fallback,
-        fellBackToAllTime = fallback.isNotEmpty(),
-        embeddingCount = embeddingCount,
-    )
-}
-
-private suspend fun clusterTopicsWithin(
-    whom: String,
-    db: AppDatabase,
-    windowMs: Long?,
-): List<TopicClusterRow> {
-    val embeddings = db.embeddings().forWhom(whom)
-    if (embeddings.size < 6) return emptyList()
-    val cutoffMs = windowMs?.let { nowMs() - it }
-    data class Row(
-        val embedding: io.nisfeb.talon.data.MessageEmbeddingEntity,
-        val message: io.nisfeb.talon.data.MessageEntity,
-        val text: String,
-    )
-    val rows = embeddings.mapNotNull { e ->
-        val msg = db.messages().getOne(e.whom, e.id) ?: return@mapNotNull null
-        if (msg.isDeleted) return@mapNotNull null
-        if (cutoffMs != null && msg.sentMs < cutoffMs) return@mapNotNull null
-        val text = io.nisfeb.talon.urbit.StoryCache
-            .textFor(msg.id, msg.contentJson)
-            .replace('\n', ' ')
-            .trim()
-        val wordCount = text.split(Regex("\\s+")).count { it.isNotBlank() }
-        if (text.length < 20 || wordCount < 4) return@mapNotNull null
-        Row(e, msg, text)
-    }
-    if (rows.size < 6) return emptyList()
-
-    val vectors = rows.map { unpackEmbedding(it.embedding.vector, it.embedding.dim) }
-    val k = (rows.size / 8).coerceIn(3, 6)
-    val assignment = kMeansAssign(vectors, k)
-
-    val out = mutableListOf<TopicClusterRow>()
-    for (c in 0 until k) {
-        val members = rows.indices.filter { assignment[it] == c }
-        if (members.size < 2) continue
-        val longest = members.maxByOrNull { rows[it].text.length } ?: continue
-        val pick = rows[longest]
-        out += TopicClusterRow(
-            representativeId = pick.message.id,
-            representativeParentId = pick.message.parentId,
-            representativeText = pick.text.take(160),
-            count = members.size,
-        )
-    }
-    return out.sortedByDescending { it.count }
 }
 
 /**

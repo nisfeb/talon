@@ -1414,37 +1414,6 @@ object TalonIcons {
         }
     }
 
-    val Topic: ImageVector by lazy {
-        materialIcon(name = "Filled.Topic") {
-            materialPath() {
-                moveTo(20.0f, 6.0f)
-                horizontalLineToRelative(-8.0f)
-                lineToRelative(-2.0f, -2.0f)
-                horizontalLineTo(4.0f)
-                curveTo(2.9f, 4.0f, 2.01f, 4.9f, 2.01f, 6.0f)
-                lineTo(2.0f, 18.0f)
-                curveToRelative(0.0f, 1.1f, 0.9f, 2.0f, 2.0f, 2.0f)
-                horizontalLineToRelative(16.0f)
-                curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
-                verticalLineTo(8.0f)
-                curveTo(22.0f, 6.9f, 21.1f, 6.0f, 20.0f, 6.0f)
-                close()
-                moveTo(14.0f, 16.0f)
-                horizontalLineTo(6.0f)
-                verticalLineToRelative(-2.0f)
-                horizontalLineToRelative(8.0f)
-                verticalLineTo(16.0f)
-                close()
-                moveTo(18.0f, 12.0f)
-                horizontalLineTo(6.0f)
-                verticalLineToRelative(-2.0f)
-                horizontalLineToRelative(12.0f)
-                verticalLineTo(12.0f)
-                close()
-            }
-        }
-    }
-
     val Tune: ImageVector by lazy {
         materialIcon(name = "Filled.Tune") {
             materialPath() {
@@ -1848,7 +1817,6 @@ object TalonIcons {
         "Schedule" to Schedule,
         "Stop" to Stop,
         "Thunderstorm" to Thunderstorm,
-        "Topic" to Topic,
         "Tune" to Tune,
         "Videocam" to Videocam,
         "VideocamOff" to VideocamOff,

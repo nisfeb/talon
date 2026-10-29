@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Thunderstorm
-import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
@@ -105,7 +104,6 @@ object TalonIconSources {
         "Schedule" to Icons.Filled.Schedule,
         "Stop" to Icons.Filled.Stop,
         "Thunderstorm" to Icons.Filled.Thunderstorm,
-        "Topic" to Icons.Filled.Topic,
         "Tune" to Icons.Filled.Tune,
         "Videocam" to Icons.Filled.Videocam,
         "VideocamOff" to Icons.Filled.VideocamOff,

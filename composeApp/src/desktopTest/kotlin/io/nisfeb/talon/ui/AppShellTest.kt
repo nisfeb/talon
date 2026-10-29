@@ -1510,4 +1510,45 @@ class AppShellTest {
         assertTrue(!showing("Image, sent with your message"), "staged with nothing in it")
         assertTrue(nothingSent(ship))
     }
+
+    // ---- The chat header on a phone (2026-10-28) ----
+    // "You can't see what chat you're in on a phone": the header lost
+    // its name to its buttons. Below the wide layout a channel's
+    // followed threads (and party line) are in its Info.
+
+    private val channelWithThread: suspend AppDatabase.() -> Unit = {
+        val nest = "chat/~bus/general"
+        groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null)))
+        groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest, "~bus/crew")))
+        messages().upsert(MessageEntity(nest, "170141184506", "~bus", 1_000, """[{"inline":["lunch plans"]}]""", "/chat"))
+        messages().upsert(MessageEntity(nest, "170141184507", "~nec", 2_000, """[{"inline":["count me in"]}]""", "/chat", parentId = "170141184506"))
+        followedThreads().upsert(io.nisfeb.talon.data.FollowedThreadEntity(nest, "170141184506", follow = true, sent = true, atMs = 1))
+    }
+
+    @Test
+    fun `in a phone-width window a channel's threads are in Info, which opens one`() = app(width = 600.dp, seed = channelWithThread) {
+        io.nisfeb.talon.notify.OpenChatRequests.request("chat/~bus/general", null)
+        waitUntil(timeoutMillis = 10_000) { showing("lunch plans") && present("Info") }
+        assertTrue(!present("Threads you follow") && !present("Topics in this chat"), "the header is the name and Info")
+        onNodeWithContentDescription("Info").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Threads you follow (1)") }
+        onNodeWithText("Threads you follow (1)").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Threads you follow here") }
+        onAllNodesWithText("lunch plans", substring = true).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+        // The thread, its reply on show, and Info gone from under it.
+        waitUntil(timeoutMillis = 5_000) { showing("count me in") }
+        assertTrue(!showing("Threads you follow (1)") && !showing("This channel"))
+    }
+
+    @Test
+    fun `in a wide window the header keeps them and Info beside the chat does not repeat them`() = app(seed = channelWithThread) {
+        io.nisfeb.talon.notify.OpenChatRequests.request("chat/~bus/general", null)
+        waitUntil(timeoutMillis = 10_000) { showing("lunch plans") && present("Info") }
+        assertTrue(present("Threads you follow") && !present("Topics in this chat"))
+        onNodeWithContentDescription("Info").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("This channel") }
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!showing("Threads you follow ("), "beside the chat, the header has them")
+    }
 }

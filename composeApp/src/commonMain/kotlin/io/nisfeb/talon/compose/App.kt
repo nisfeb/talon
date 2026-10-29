@@ -2778,11 +2778,21 @@ fun App(
                         )
                     }
                     groupInfoOpenFor != null && !expanded -> {
+                        // The party line and followed threads the compact chat header left here.
+                        val infoParty = io.nisfeb.talon.ui.rememberPartyLineHere(
+                            whom = groupInfoOpenFor, callController = callController, partyLine = partyLine,
+                            db = db, repo = repo, ourShip = ship,
+                            title = { callContacts.conversationLabel(it) }, scope = loopScope,
+                        )
                         GroupInfoScreen(
                             db = db,
                             repo = repo,
                             whom = groupInfoOpenFor!!,
                             onBack = { closeRightPaneAction() },
+                            // Opening a thread closes Info (RightPaneStateReducer.openThread).
+                            party = infoParty,
+                            onOpenThread = { parent, reply -> openThreadAction(parent, reply) },
+                            contactMap = callContacts,
                             onOpenCategory = { openCategoryAction(it) },
                             onOpenMembers = {
                                 val whom = groupInfoOpenFor
@@ -2947,61 +2957,22 @@ fun App(
                             // so the chat list doesn't unmount when the
                             // user opens a thread.
                             openChat != null -> ({
-                                // The group line this chat belongs to,
-                                // and only if it actually exists — the
-                                // party icon is gated on it below. One
-                                // line per group, so every channel in a
-                                // group resolves to the same room.
-                                val hostedRooms by (
-                                    callController?.rooms
-                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                                    ).collectAsState()
-                                val knownInvites by (
-                                    callController?.invites
-                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                                    ).collectAsState()
-                                val groupRoom by androidx.compose.runtime.produceState<
-                                    Pair<String, String>?
-                                    >(null, openChat) {
-                                    value = openChat?.let {
-                                        io.nisfeb.talon.call.PartyLineHost.roomFor(db, it)
-                                    }
-                                }
                                 // Nicknames for the party-line roster:
                                 // the @p is the identity, the nickname
                                 // is what a reader actually recognises.
                                 val partyContacts = callContacts
-                                // Ask the host once per group whether a
-                                // line exists, when we hold no invite.
-                                // A member whose ship had no %trunk when
-                                // the host announced never heard about
-                                // it, and before this the only cure was
-                                // an admin toggling the line off and on.
-                                LaunchedEffect(groupRoom) {
-                                    val (h, n) = groupRoom ?: return@LaunchedEffect
-                                    callController?.lookForLine(h, n)
-                                }
-                                val partyRoomHere = groupRoom?.takeIf { (h, n) ->
-                                    hostedRooms.containsKey("$h/$n") ||
-                                        knownInvites.containsKey("$h/$n")
-                                }
-                                // Live occupancy (wire 6). Ask the host on
-                                // open and refresh on a timer, so the party
-                                // affordance shows "N on the line" before
-                                // you join. Stale hosts nack and it stays 0.
-                                val presenceFlow = remember(callController) {
-                                    callController?.presence
-                                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                                }
-                                val presence by presenceFlow.collectAsState()
-                                val partyPresent = partyRoomHere?.let { (h, n) ->
-                                    presence["$h/$n"]
-                                } ?: 0
-                                // While we are on this line the roster we can see is the floor:
-                                // a member on a build that does not heartbeat is still there.
-                                val partyLiveHere = (partyLine?.state?.collectAsState()?.value as? io.nisfeb.talon.call.PartyState.Live)
-                                    ?.takeIf { it.room == partyRoomHere?.second }?.members?.size ?: 0
-                                val partyShown = maxOf(partyPresent, partyLiveHere)
+                                // The group line this chat belongs to,
+                                // and only if it actually exists. One
+                                // line per group, so every channel in a
+                                // group resolves to the same room.
+                                val partyHere = io.nisfeb.talon.ui.rememberPartyLineHere(
+                                    whom = openChat, callController = callController, partyLine = partyLine,
+                                    db = db, repo = repo, ourShip = ship,
+                                    title = { partyContacts.conversationLabel(it) }, scope = loopScope,
+                                )
+                                val groupRoom = partyHere.groupRoom
+                                val partyRoomHere = partyHere.room
+                                val partyShown = partyHere.present
                                 // `/party` roll call (wire 8): our own roster
                                 // while on the line, else the host's answer.
                                 val onLineFlow = remember(callController) {
@@ -3107,34 +3078,7 @@ fun App(
                                     // turn it on, and the call icon
                                     // follows that rather than offering
                                     // something the ship would refuse.
-                                    onPartyLine =
-                                        if (callController != null && partyLine != null &&
-                                            partyRoomHere != null
-                                        ) {
-                                            {
-                                                val whom = openChat!!
-                                                val host = partyRoomHere!!.first
-                                                if (host == ship) {
-                                                    loopScope.launch {
-                                                        io.nisfeb.talon.call.PartyLineHost.startLine(
-                                                            callController, repo, db, whom,
-                                                            // The room title everyone
-                                                            // sees — the conversation's
-                                                            // human label, not the raw
-                                                            // channel key.
-                                                            partyContacts.conversationLabel(whom),
-                                                        )
-                                                    }
-                                                } else {
-                                                    loopScope.launch {
-                                                        io.nisfeb.talon.call.PartyLineHost
-                                                            .joinLine(callController, db, whom)
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            null
-                                        },
+                                    onPartyLine = partyHere.join,
                                     voiceComposer = voiceComposerFor(micTrigger),
                                     onSlashMic = if (io.nisfeb.talon.ui.isVoiceMessagesSupported) { { micTrigger.tryEmit(Unit) } } else null,
                                     voicePlayer = voicePreviewPlayer,
@@ -3264,7 +3208,8 @@ fun App(
                                     onOpenGroupInfo = {
                                         openChat?.let { openGroupInfoAction(it) }
                                     },
-                                    searchEmbedder = searchEmbedderClient,
+                                    // Info is a screen of its own here, with room for what the header has not.
+                                    compact = !expanded,
                                     scrollState = chatScrollState,
                                     scrollAnchored = chatScrollAnchored,
                                 )

@@ -2527,6 +2527,15 @@ fun TalonApp(
                 repo = app.repo,
                 whom = groupInfoOpenFor!!,
                 onBack = { closeRightPaneAction() },
+                // The party line and followed threads the phone's chat header leaves here.
+                party = rememberPartyLineHere(
+                    whom = groupInfoOpenFor, callController = callController, partyLine = partyLine,
+                    db = app.db, repo = app.repo, ourShip = loggedInShip,
+                    title = { contactMap.conversationLabel(it) }, scope = appScope,
+                ),
+                // Opening a thread closes Info (RightPaneStateReducer.openThread).
+                onOpenThread = { parent, reply -> openThreadAction(parent, reply) },
+                contactMap = contactMap,
                 onOpenCategory = { openCategoryAction(it) },
                 onOpenMembers = {
                     // Resolve channel-nest → group-flag because
@@ -2706,46 +2715,15 @@ fun TalonApp(
                 }
                 // The group line this chat belongs to, and only if it
                 // exists: one line per group, gated on the group's
-                // admins having enabled it. Same gate as App.kt.
-                val hostedRooms by (
-                    callController?.rooms
-                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                    ).collectAsState()
-                val knownInvites by (
-                    callController?.invites
-                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                    ).collectAsState()
-                val groupRoom by androidx.compose.runtime.produceState<
-                    Pair<String, String>?
-                    >(null, openWhom) {
-                    value = openWhom?.let {
-                        io.nisfeb.talon.call.PartyLineHost.roomFor(app.db, it)
-                    }
-                }
-                // Ask the host once per group whether a line exists,
-                // when we hold no invite. A member whose ship had no
-                // %trunk when the host announced never heard about it,
-                // and before this the only cure was an admin toggling
-                // the line off and on. Mirrors App.kt.
-                LaunchedEffect(groupRoom) {
-                    val (h, n) = groupRoom ?: return@LaunchedEffect
-                    callController?.lookForLine(h, n)
-                }
-                val partyRoomHere = groupRoom?.takeIf { (h, n) ->
-                    hostedRooms.containsKey("$h/$n") || knownInvites.containsKey("$h/$n")
-                }
-                // Live occupancy (wire 6) — see App.kt for the rationale.
-                val presenceFlow = remember(callController) {
-                    callController?.presence
-                        ?: kotlinx.coroutines.flow.MutableStateFlow(emptyMap())
-                }
-                val presence by presenceFlow.collectAsState()
-                val partyPresent = partyRoomHere?.let { (h, n) -> presence["$h/$n"] } ?: 0
-                // While we are on this line the roster we can see is the floor:
-                // a member on a build that does not heartbeat is still there.
-                val partyLiveHere = (partyLine?.state?.collectAsState()?.value as? io.nisfeb.talon.call.PartyState.Live)
-                    ?.takeIf { it.room == partyRoomHere?.second }?.members?.size ?: 0
-                val partyShown = maxOf(partyPresent, partyLiveHere)
+                // admins having enabled it. Shared with App.kt.
+                val partyHere = rememberPartyLineHere(
+                    whom = openWhom, callController = callController, partyLine = partyLine,
+                    db = app.db, repo = app.repo, ourShip = loggedInShip,
+                    title = { contactMap.conversationLabel(it) }, scope = appScope,
+                )
+                val groupRoom = partyHere.groupRoom
+                val partyRoomHere = partyHere.room
+                val partyShown = partyHere.present
                 // `/party` roll call (wire 8) — see App.kt.
                 val onLineFlow = remember(callController) {
                     callController?.onLine
@@ -2821,6 +2799,8 @@ fun TalonApp(
                     onOpenGroupInfo = {
                         openWhom?.let { openGroupInfoAction(it) }
                     },
+                    // A phone: Info has room for what the header has not.
+                    compact = true,
                     onOpenImage = { viewerImageUrl = it },
                     onOpenSelfProfile = { editingProfile = true },
                     onTopUp = openTopUp,
@@ -2831,33 +2811,7 @@ fun TalonApp(
                             null
                         },
                     // No line, no button — see the same gate in App.kt.
-                    onPartyLine =
-                        if (callController != null && partyLine != null &&
-                            partyRoomHere != null
-                        ) {
-                            {
-                                val whom = openWhom!!
-                                val host = partyRoomHere!!.first
-                                if (host == loggedInShip) {
-                                    appScope.launch {
-                                        io.nisfeb.talon.call.PartyLineHost.startLine(
-                                            callController, app.repo, app.db, whom,
-                                            // The room title everyone sees —
-                                            // the conversation's human label,
-                                            // not the raw channel key.
-                                            contactMap.conversationLabel(whom),
-                                        )
-                                    }
-                                } else {
-                                    appScope.launch {
-                                        io.nisfeb.talon.call.PartyLineHost
-                                            .joinLine(callController, app.db, whom)
-                                    }
-                                }
-                            }
-                        } else {
-                            null
-                        },
+                    onPartyLine = partyHere.join,
                     partyPresent = partyShown,
                     partyStatus = partyStatus,
                     onSlashParty = {
@@ -2963,7 +2917,6 @@ fun TalonApp(
                             }
                         }
                     },
-                    searchEmbedder = app.searchEmbedderClient,
                     scrollState = chatScrollState,
                     scrollAnchored = chatScrollAnchored,
                     // Android-only platform widgets — desktop hosts pass null
