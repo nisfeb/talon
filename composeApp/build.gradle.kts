@@ -274,6 +274,8 @@ kotlin {
             dependencies {
                 implementation(libs.ktor.client.darwin)
                 implementation(libs.coil.network.ktor)
+                // Back: Compose's own left-edge swipe delivers to these handlers.
+                implementation(libs.navigationevent.compose)
             }
         }
         // commonTest carries shared kotlin.test assertions. Tests

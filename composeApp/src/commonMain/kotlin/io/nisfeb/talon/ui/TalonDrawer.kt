@@ -10,11 +10,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalFocusManager
@@ -33,35 +29,8 @@ import kotlinx.coroutines.launch
  */
 val LocalDrawerOpener = staticCompositionLocalOf<(() -> Unit)?> { null }
 
-/**
- * Whether a drawer is open over the app, for a host that draws its own
- * furniture on top of everything.
- *
- * iOS puts a strip down the left edge for the back gesture, and a
- * pointer input over the sheet's own left edge: a tap on the icon side
- * of a drawer row went to the strip, which wants drags, and the row
- * heard nothing. The section simply did not open, which is how it read.
- */
-object DrawerOverlay {
-    private var opens by mutableStateOf(0)
-
-    /** Whether any drawer is open. */
-    val open: Boolean get() = opens > 0
-
-    /**
-     * Follows one drawer for as long as it is on screen. Both shells
-     * used to assign the flag, so whichever composed last decided it:
-     * with an open drawer read as closed, the back gesture went to the
-     * screen underneath it.
-     */
-    @Composable
-    fun Follow(isOpen: Boolean) {
-        DisposableEffect(isOpen) {
-            if (isOpen) opens++
-            onDispose { if (isOpen) opens-- }
-        }
-    }
-}
+/** Whether a swipe moves the sections drawer: when it is open, or at the top of the back stack ([BackDepth]). */
+internal fun drawerSwipes(open: Boolean, backDepth: Int): Boolean = open || backDepth == 0
 
 /**
  * Wraps the app in its sections drawer, where the platform has one.
@@ -82,7 +51,9 @@ fun TalonDrawer(
     }
     val state = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
-    DrawerOverlay.Follow(state.isOpen)
+    // Back over an open drawer shuts it. Registered when it opens, so it
+    // is the innermost handler and the screen under it stays put.
+    if (state.isOpen) PlatformBackHandler { scope.launch { state.close() } }
     // A text selection's handles and its copy menu are not drawn with
     // the app: the handles sit in a layer of their own above it, and
     // on iOS the menu is UIKit's. The drawer is drawn with the app, so
@@ -98,6 +69,12 @@ fun TalonDrawer(
     }
     ModalNavigationDrawer(
         drawerState = state,
+        // The menu button opens it anywhere; a swipe only at the top of
+        // the back stack, where there is nowhere to go back to. Below it
+        // the swipe is the way back, and the drawer opening instead was
+        // what iOS users met (2026-10-28). Material gates the scrim's tap
+        // on this flag too, so an open drawer keeps it on.
+        gesturesEnabled = drawerSwipes(state.isOpen, BackDepth.depth),
         drawerContent = {
             ModalDrawerSheet { drawer { scope.launch { state.close() } } }
         },

@@ -27,7 +27,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import io.nisfeb.talon.ui.leftwardDrag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1747,22 +1747,22 @@ private fun MessageRow(
             // right-click instead.
             .then(
                 if (io.nisfeb.talon.ui.isTouchSwipeNavSupported) {
-                    Modifier.pointerInput(m.id) {
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
-                                offsetX.value = 0f
-                                if (fired) onSwipe(m)
-                            },
-                            onDragCancel = {
-                                offsetX.value = 0f
-                            },
-                            onHorizontalDrag = { _, dx ->
-                                offsetX.value = (offsetX.value + dx)
-                                    .coerceIn(-SWIPE_REPLY_MAX_PX, 0f)
-                            },
-                        )
-                    }
+                    // Leftward only: a drag to the right is the swipe back.
+                    Modifier.leftwardDrag(
+                        m.id,
+                        onDrag = { dx ->
+                            offsetX.value = (offsetX.value + dx)
+                                .coerceIn(-SWIPE_REPLY_MAX_PX, 0f)
+                        },
+                        onEnd = {
+                            val fired = offsetX.value < -SWIPE_REPLY_THRESHOLD_PX
+                            offsetX.value = 0f
+                            if (fired) onSwipe(m)
+                        },
+                        onCancel = {
+                            offsetX.value = 0f
+                        },
+                    )
                 } else Modifier,
             )
             .padding(top = if (row.showHeader) 12.dp else 2.dp),
