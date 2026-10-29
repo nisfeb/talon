@@ -57,6 +57,9 @@ val OrreryAction.shipCarriesOut: Boolean get() = eventToAdd() != null || message
 /** The orrery that keeps a priority and a snooze on an action, and nags about a late one. */
 const val MARKS_VERSION = 110
 
+/** Orrery's evening review, its due route and review_at (orrery 130): gates every way into the review. */
+const val EVENING_VERSION = 130
+
 /** How long Snooze 1 h holds the nags, as orrery's own page does. */
 const val SNOOZE_MINUTES = 60
 

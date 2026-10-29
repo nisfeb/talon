@@ -37,6 +37,32 @@ class AndroidNoticesGuardTest {
         assertTrue("\"loop-result\"" in showLoop && ".notices()" in showLoop, showLoop)
     }
 
+    // Orrery 130's daily reminder: on a channel of its own, to mute apart
+    // from the ship's other pushes, and its tap opens the review.
+    @Test
+    fun `the evening reminder has its own channel and its tap opens the review`() {
+        val notifications = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/Notifications.kt")
+        val ship = notifications.substringAfter("fun showShipPush(").substringBefore("\n    }\n")
+        assertTrue("push.tag == io.nisfeb.talon.orrery.EVENING_TAG" in ship && "CHANNEL_EVENING" in ship && "openEvening = true" in ship, ship)
+        assertTrue("if (openEvening) putExtra(EXTRA_OPEN_EVENING, true)" in notifications)
+        val main = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/MainActivity.kt")
+        for (wired in listOf("getBooleanExtra(Notifications.EXTRA_OPEN_EVENING", "initialOpenEvening = openEvening", "deepLinkOpenEvening.value = false", "removeExtra(Notifications.EXTRA_OPEN_EVENING)")) {
+            assertTrue(wired in main, "MainActivity lacks $wired")
+        }
+        assertTrue("LaunchedEffect(initialOpenEvening)" in talonApp && "NoticeLanding.EveningReview -> eveningOpen = true" in talonApp)
+    }
+
+    // The voice card's conversation is built on Android alone (Loops):
+    // without these two, Archie could neither read the week's review nor
+    // answer the brief's actions there. The tools are tested in common.
+    @Test
+    fun `Android's voice card gets the week's review and brief_action`() {
+        val loops = read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ai/Loops.kt")
+        val built = loops.substringAfter("return VoiceConversation(").substringBefore("\n            )\n")
+        assertTrue("week = orrery?.let { o -> { o.reviewLast().getOrThrow() } }" in built, built)
+        assertTrue("act = orrery?.let { VoiceConversation.briefAct(it) }" in built, built)
+    }
+
     @Test
     fun `a tapped notice opens its place on Android`() {
         assertTrue("OpenNoticeRequests.requests.collect" in talonApp && "noticeLanding(tag)" in talonApp)

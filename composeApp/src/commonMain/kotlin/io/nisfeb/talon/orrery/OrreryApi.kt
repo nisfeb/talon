@@ -138,6 +138,40 @@ class OrreryApi(
     suspend fun briefLast(): Brief? =
         briefOf(Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/brief/last")).jsonObject)
 
+    /**
+     * The week's review (orrery 74, Sunday 18:00), the owner's route: read
+     * there and in lattice since 130, never mailed. Null before the first.
+     */
+    suspend fun reviewLast(): Brief? =
+        briefOf(Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/review/last")).jsonObject)
+
+    /**
+     * Move an open action's due (orrery 130, serve-due): [due] a
+     * "YYYY-MM-DD" day (kept as midnight UTC, the calendar's mark of a
+     * day), an ISO 8601 UTC time, or null for none. Its todo follows at
+     * the mirror's next pass. The ship's answer is the due it keeps, null
+     * for none; it refuses a bad due (400), no such action (404), a key
+     * that only reads (403), and an action not open (409).
+     */
+    suspend fun due(token: String?, id: String, due: String?): String? {
+        val body = buildJsonObject { put("due", due) }.toString()
+        val text = if (token != null) {
+            request(bare, HttpMethod.Post, "/api/actions/$id/due", body) { header(HttpHeaders.Authorization, "Bearer $token") }
+        } else {
+            request(owner, HttpMethod.Post, "/api/actions/$id/due", body)
+        }
+        return reading { (Json.parseToJsonElement(text).jsonObject["due"] as? JsonPrimitive)?.contentOrNull }
+    }
+
+    /** When the ship reminds the owner to do the evening review (orrery 130 rhythm review_at): "HH:MM", "" for never. */
+    suspend fun reviewAt(): String =
+        reading { (Json.parseToJsonElement(request(owner, HttpMethod.Get, "/api/rhythm")).jsonObject["review_at"] as? JsonPrimitive)?.contentOrNull.orEmpty() }
+
+    /** Set it; the rhythm PUT merges, so only review_at is sent. */
+    suspend fun setReviewAt(at: String) {
+        request(owner, HttpMethod.Put, "/api/rhythm", buildJsonObject { put("review_at", at) }.toString())
+    }
+
     /** The generator's settings, the owner's route; its key is only ever said to be set. */
     suspend fun generatorSettings(): GeneratorSettings? {
         val text = runCatching { request(owner, HttpMethod.Get, "/api/generator") }.getOrNull() ?: return null

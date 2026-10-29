@@ -75,6 +75,11 @@ class OrreryAiRowsTest {
     @Volatile private var putDelayMs = 0L
     private val sent = CopyOnWriteArrayList<JsonObject>()
     private val decided = MutableStateFlow(DecideSettings())
+    /** Orrery's version, null for a ship that does not say (the evening review's row needs 130). */
+    @Volatile private var version: Int? = null
+    @Volatile private var reviewAt = "20:00"
+    @Volatile private var rhythmStatus = HttpStatusCode.OK
+    private val rhythmPuts = CopyOnWriteArrayList<String>()
 
     private val http = HttpClient(MockEngine { req ->
         val path = req.url.encodedPath.substringAfter("/apps/orrery")
@@ -93,6 +98,14 @@ class OrreryAiRowsTest {
             }
             path == "/api/generator" -> json(HttpStatusCode.OK, generator)
             path == "/api/generator/last" -> json(HttpStatusCode.NotFound, "")
+            path == "/api/version" && version != null -> json(HttpStatusCode.OK, """{"version":$version}""")
+            path == "/api/rhythm" && req.method == HttpMethod.Put -> {
+                val body = req.body.toByteArray().decodeToString()
+                rhythmPuts += body
+                if (rhythmStatus == HttpStatusCode.OK) reviewAt = Json.parseToJsonElement(body).jsonObject["review_at"]!!.jsonPrimitive.content
+                json(rhythmStatus, """{"quiet_from":"21:00","review_at":"$reviewAt"}""")
+            }
+            path == "/api/rhythm" -> json(HttpStatusCode.OK, """{"quiet_from":"21:00","review_at":"$reviewAt"}""")
             path == "/api/chat" || path == "/api/mail" -> json(HttpStatusCode.OK, """{"enabled":false}""")
             else -> json(HttpStatusCode.OK, "{}")
         }
@@ -246,4 +259,42 @@ class OrreryAiRowsTest {
         assertFalse(shows("llama"), "an own server from before is not offered")
     }
 
+    // ---- The evening review's reminder (orrery 130's rhythm review_at) ----
+
+    @Test
+    fun `the evening reminder is the ship's time, set alone, and Off turns it off`() {
+        version = 130
+        rows { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Each evening at 20:00") || shows("reminded each evening at 20:00") }
+            onAllNodesWithText("Change")[0].performScrollTo().performClick()
+            onNodeWithText("21:30").performClick()
+            waitUntil(timeoutMillis = 5_000) { rhythmPuts.isNotEmpty() }
+            assertEquals(listOf("""{"review_at":"21:30"}"""), rhythmPuts.toList(), "only review_at: the PUT merges, so quiet hours are kept")
+            assertTrue(shows("at 21:30"))
+            onAllNodesWithText("Change")[0].performScrollTo().performClick()
+            onNodeWithText("Off").performClick()
+            waitUntil(timeoutMillis = 5_000) { rhythmPuts.size == 2 }
+            assertEquals("""{"review_at":""}""", rhythmPuts.last())
+            waitUntil(timeoutMillis = 5_000) { shows("Off. You can still open the review from Home or Orrery.") }
+        }
+    }
+
+    @Test
+    fun `a time the ship refuses goes back, said, and an orrery before 130 has no row`() {
+        version = 130
+        rhythmStatus = HttpStatusCode.InternalServerError
+        rows { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("at 20:00") }
+            onAllNodesWithText("Change")[0].performScrollTo().performClick()
+            onNodeWithText("21:30").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not take the new time.") }
+            assertTrue(shows("at 20:00") && !shows("at 21:30"))
+        }
+        version = 129
+        rows { _, o ->
+            waitUntil(timeoutMillis = 5_000) { o.version.value == 129 }
+            waitForIdle()
+            assertFalse(shows("Evening review reminder"))
+        }
+    }
 }

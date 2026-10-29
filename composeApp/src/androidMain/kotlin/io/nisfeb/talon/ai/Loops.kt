@@ -414,6 +414,8 @@ class Loops(
                 locked = locked,
                 unlock = unlock,
                 memory = mind,
+                week = orrery?.let { o -> { o.reviewLast().getOrThrow() } },
+                act = orrery?.let { VoiceConversation.briefAct(it) },
             )
         }
 

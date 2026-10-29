@@ -536,6 +536,29 @@ class CalendarRepo(
     }
 
     /**
+     * Give [task] a new due, [dueMs] (midnight UTC for a day, as the
+     * calendar marks one), or none for null: edited whole, as edit-event
+     * wants a todo, on this repo's scope. A todo orrery placed too: the
+     * mirror takes the calendar's due for its action (orrery 130
+     * +due-ops, the side that moved wins). What failed, in words, or null.
+     */
+    suspend fun setTaskDue(task: CalendarTask, dueMs: Long?): String? = carry {
+        val body = buildJsonObject {
+            put("action", "edit-event")
+            put("id", task.id)
+            put("cat", "todo")
+            put("meta", task.meta)
+            dueMs?.let { put("due_ms", it) }
+        }
+        val since = nowMs()
+        val w = writeEvent(body)
+        when {
+            !w.ok -> w.why ?: failedLine("The calendar did not take the new due.")
+            else -> refusal(task.id, since, "edit-event")?.also { w.undo() }?.let { "The due was not moved: $it" }
+        }
+    }
+
+    /**
      * A new task, on the list at once and written behind it. The write
      * runs here, not in a screen, so leaving the screen does not lose it;
      * the stand-in stays until the refresh after the write brings the

@@ -143,6 +143,8 @@ fun TalonApp(
     /** A tapped mail notification: open Mail on arrival. */
     initialOpenMail: Boolean = false,
     initialOpenActions: Boolean = false,
+    /** A tapped evening-review reminder (orrery 130): open the review. */
+    initialOpenEvening: Boolean = false,
     /** A tapped leave alert: open Orrery on the thing it is about ("activity/slug"). */
     initialOpenOrreryItem: String? = null,
     /** A tapped calendar reminder: open the Calendar on its occurrence (the push's tag). */
@@ -767,6 +769,7 @@ fun TalonApp(
     var adminGroupFlag by remember { sections.page<String>() }
     var invitesOpen by remember { sections.flag() }
     var actionsOpen by remember { sections.flag() }
+    var eveningOpen by remember { sections.flag() }
     /** The thing Orrery opens on, from a leave alert; taken when shown. */
     var orreryItem by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
@@ -862,6 +865,14 @@ fun TalonApp(
             onDeepLinkConsumed()
         }
     }
+    // The ship's evening reminder: straight to the review.
+    LaunchedEffect(initialOpenEvening) {
+        if (initialOpenEvening) {
+            closeSections()
+            eveningOpen = true
+            onDeepLinkConsumed()
+        }
+    }
     // A tapped calendar reminder: the Calendar, on its occurrence.
     var calendarPushTag by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(initialOpenCalendarTag) {
@@ -884,6 +895,7 @@ fun TalonApp(
                 when (to) {
                     is io.nisfeb.talon.notify.NoticeLanding.Calendar -> { calendarPushTag = to.tag; calendarOpen = true }
                     io.nisfeb.talon.notify.NoticeLanding.Actions -> actionsOpen = true
+                    io.nisfeb.talon.notify.NoticeLanding.EveningReview -> eveningOpen = true
                     io.nisfeb.talon.notify.NoticeLanding.Loops -> loopsOpen = true
                     io.nisfeb.talon.notify.NoticeLanding.Invites -> invitesOpen = true
                     io.nisfeb.talon.notify.NoticeLanding.Assistant -> assistantOpen = true
@@ -2207,6 +2219,9 @@ fun TalonApp(
                     mail = mailRepo,
                     calendar = calendarRepo,
                     onOpenCalendar = { homeOpen = false; calendarOpen = true },
+                    onEveningReview = if ((orreryRepo.version.collectAsState().value ?: 0) >= io.nisfeb.talon.orrery.EVENING_VERSION) {
+                        { homeOpen = false; eveningOpen = true }
+                    } else null,
                     onOpenAssistant = if (isAssistantSupported && aiState.assistantOn() && aiState.hasModelFor(io.nisfeb.talon.ai.AiFeature.Assistant)) {
                         { listen -> homeOpen = false; assistantListen = listen; assistantOpen = true }
                     } else null,
@@ -2280,6 +2295,13 @@ fun TalonApp(
                 modifier = mod,
             )
 
+            // Before Actions: opened from the Orrery page, back returns there.
+            eveningOpen -> io.nisfeb.talon.ui.screens.EveningReviewScreen(
+                calendar = calendarRepo,
+                onBack = { eveningOpen = false },
+                modifier = mod,
+            )
+
             actionsOpen -> io.nisfeb.talon.ui.screens.OrreryRepoScreen(
                 orreryRepo = orreryRepo,
                 actions = orreryActions,
@@ -2289,6 +2311,8 @@ fun TalonApp(
                 modifier = mod,
                 openItem = orreryItem,
                 onOpenedItem = { orreryItem = null },
+                calendar = calendarRepo,
+                onEveningReview = { eveningOpen = true },
             )
 
             openGroupFlag != null -> GroupHomeScreen(

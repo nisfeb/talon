@@ -141,6 +141,88 @@ class VoiceConversationTest {
         assertEquals("There is no brief for today yet.", result)
     }
 
+    // The evening review by voice (orrery 130): "approve A1", "A2 due
+    // Friday", and the week's review read out as the brief is.
+    private val acted = mutableListOf<Triple<String, String?, String?>>()
+    private fun actTool(fault: String? = null) = VoiceConversation.briefActionTool({ brief }) { id, status, due -> acted += Triple(id, status, due); fault }
+    private fun JsonObject.with(vararg kv: Pair<String, String>) = buildJsonObject { kv.forEach { (k, v) -> put(k, JsonPrimitive(v)) } }
+
+    @Test
+    fun `brief_action answers an action by its tag, its status or its due or both`() = runBlocking {
+        assertEquals("A1 marked approved.", actTool().execute(JsonObject(emptyMap()).with("tag" to "a1", "status" to "Approved")))
+        assertEquals("A1 due 2026-10-30.", actTool().execute(JsonObject(emptyMap()).with("tag" to "A1", "due" to "2026-10-30")))
+        assertEquals("A1 marked done, no due now.", actTool().execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "done", "due" to "none")))
+        actTool().execute(JsonObject(emptyMap()).with("tag" to "A1", "due" to "2026-10-30T22:00:00Z"))
+        assertEquals(
+            listOf(Triple("a-1", "approved", null), Triple("a-1", null, "2026-10-30"), Triple("a-1", "done", "none"), Triple("a-1", null, "2026-10-30T22:00:00Z")),
+            acted.toList(),
+            "the brief's id for the tag, never the tag",
+        )
+    }
+
+    @Test
+    fun `brief_action refuses what orrery would, and says what failed`() = runBlocking {
+        val bad = listOf(
+            JsonObject(emptyMap()).with("status" to "done") to "Error: tag is required.",
+            JsonObject(emptyMap()).with("tag" to "A1") to "Error: give a status or a due.",
+            JsonObject(emptyMap()).with("tag" to "A1", "status" to "maybe") to "Error: status is approved, dismissed or done.",
+            JsonObject(emptyMap()).with("tag" to "A1", "due" to "friday") to "Error: due is YYYY-MM-DD, an ISO 8601 UTC time, or none.",
+            JsonObject(emptyMap()).with("tag" to "A9", "status" to "done") to "Today's brief has no A9.",
+        )
+        for ((args, said) in bad) assertEquals(said, actTool().execute(args), args.toString())
+        assertTrue(acted.isEmpty(), "nothing sent: $acted")
+        assertEquals("Orrery did not take that for A1: HTTP 409: only an open action is moved", actTool("HTTP 409: only an open action is moved").execute(JsonObject(emptyMap()).with("tag" to "A1", "due" to "2026-10-30")))
+        val noBrief = VoiceConversation.briefActionTool({ null }) { _, _, _ -> error("not asked") }
+        assertEquals("Today's brief has no A1.", noBrief.execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "done")))
+        val unread = VoiceConversation.briefActionTool({ error("ship down") }) { _, _, _ -> error("not asked") }
+        assertEquals("Could not read the brief from orrery: ship down", unread.execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "done")))
+        val throws = VoiceConversation.briefActionTool({ brief }) { _, _, _ -> error("HTTP 500: boom") }
+        assertEquals("Orrery did not take that for A1: HTTP 500: boom", throws.execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "done")))
+    }
+
+    @Test
+    fun `an empty field is no field to brief_action`() = runBlocking {
+        assertEquals("Error: tag is required.", actTool().execute(JsonObject(emptyMap()).with("tag" to " ", "status" to "done")))
+        assertEquals("A1 due 2026-10-30.", actTool().execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "", "due" to "2026-10-30")))
+        assertEquals("A1 marked done.", actTool().execute(JsonObject(emptyMap()).with("tag" to "A1", "status" to "done", "due" to "")))
+        assertEquals(listOf(Triple("a-1", null, "2026-10-30"), Triple("a-1", "done", null)), acted.toList())
+    }
+
+    @Test
+    fun `brief_action is offered with Orrery on, and not to a locked phone`() {
+        var locked = false
+        val t = VoiceConversation(Model().completer, listOf(tool("list_events", false)), tell = null, brief = { brief }, locked = { locked }, act = { _, _, _ -> null })
+        assertEquals(listOf("list_events", "read_brief", "brief_action"), t.toolNames)
+        locked = true
+        assertEquals(listOf("list_events", "read_brief"), t.toolNames, "whoever holds a locked phone answers nothing of orrery's")
+        assertEquals(listOf("list_events", "orrery_read", "read_brief"), talk(Model(), tell = null).toolNames, "no act, no brief_action")
+        assertTrue("brief_action" in VoiceConversation.prompt && "list_tasks" in VoiceConversation.prompt)
+    }
+
+    @Test
+    fun `the week's review is read out as the brief is, and none is said so`() = runBlocking {
+        val week = Brief("2026-10-25", null, false, emptyMap(), "The week\n\nWork ran long.")
+        val model = Model(AgentTurn.Calls(null, listOf(call("read_brief", "aloud" to true, "which" to "week"))))
+        val t = VoiceConversation(model.completer, emptyList(), tell = null, brief = { brief }, week = { week })
+        val read = t.next("Read me the week's review") as VoiceConversation.Next.Say
+        assertEquals(VoiceConversation.WEEK_READING, read.line)
+        assertEquals(listOf("The week", "Work ran long."), read.inFull)
+        val none = Model(AgentTurn.Calls(null, listOf(call("read_brief", "which" to "week"))), AgentTurn.Final("None yet."))
+        VoiceConversation(none.completer, emptyList(), tell = null, brief = { brief }, week = { null }).next("and the week?")
+        assertEquals("There is no week's review yet.", (none.calls.last().second.last() as AgentMessage.ToolResults).results.single().content)
+        val failing = VoiceConversation.briefTool({ brief }, week = { error("ship down") })
+        assertEquals("Could not read the week's review from orrery: ship down", failing.execute(JsonObject(emptyMap()).with("which" to "week")))
+        // Offered with the week's reader, and said so; aloud only where it can be read out.
+        val both = VoiceConversation.briefTool({ brief }, week = { week }) { _, _ -> }
+        assertTrue("which" in both.spec.parameters.toString() && "aloud" in both.spec.parameters.toString(), both.spec.parameters.toString())
+        assertTrue("week's review" in both.spec.description && "aloud true" in both.spec.description, both.spec.description)
+        // Without the week's reader, which is not offered, and today's brief is what is read.
+        val today = VoiceConversation.briefTool({ brief })
+        assertTrue("week" !in today.spec.description && "aloud" !in today.spec.parameters.toString(), today.spec.toString())
+        assertTrue("which" !in today.spec.parameters.toString(), today.spec.parameters.toString())
+        assertEquals(brief.text, today.execute(JsonObject(emptyMap()).with("which" to "week")))
+    }
+
     // "Read me my unread messages" (sneagan, 2026-10-16): read out as
     // list_unread gives them, but not the ids it gives the model.
     private val unreadText = "Andrea:\ncan you grab milk?\nand eggs.\n\nIn Family · General:\nNec: lunch anyone?\n\n" +

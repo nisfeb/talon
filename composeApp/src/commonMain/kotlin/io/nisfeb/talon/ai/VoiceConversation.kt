@@ -42,6 +42,14 @@ class VoiceConversation(
     private val unlock: suspend () -> Boolean = { false },
     /** The owner's lattice ([LatticeMind]): the index and a recall each turn, neither while the phone is locked. */
     private val memory: LatticeMind = LatticeMind.NONE,
+    /** The week's review from orrery (Sunday 18:00), null before the first; null with Orrery off. */
+    private val week: (suspend () -> Brief?)? = null,
+    /**
+     * Answer action [id] of the brief, from its tag: a status (approved,
+     * dismissed, done) and or a new due ("YYYY-MM-DD", an ISO time, "none").
+     * What failed, or null. Null with Orrery off; [briefAct] makes it.
+     */
+    private val act: (suspend (id: String, status: String?, due: String?) -> String?)? = null,
 ) {
     /** What comes after a turn. */
     sealed interface Next {
@@ -70,7 +78,7 @@ class VoiceConversation(
 
     private val offered: List<Tool> =
         tools.filterNot { it.spec.name in NOT_OFFERED }.map { if (it.spec.name == UNREAD_TOOL) readsOut(it) else it } +
-            listOfNotNull(tell?.let(::instructTool), briefTool())
+            listOfNotNull(tell?.let(::instructTool), briefTool(), act?.let { briefActionTool(brief, it) })
 
     /** The tools a turn may call now, for a test and the log. */
     val toolNames: List<String> get() = turnTools().map { it.spec.name }
@@ -168,9 +176,9 @@ class VoiceConversation(
         }
     }
 
-    private fun briefTool() = briefTool(brief) { text ->
+    private fun briefTool() = briefTool(brief, week = week) { text, weekly ->
         reading = text
-        readingLine = READING
+        readingLine = if (weekly) WEEK_READING else READING
     }
 
     companion object {
@@ -193,16 +201,67 @@ class VoiceConversation(
          * aloud, and the text is given to it where the owner asked to hear
          * it; the Assistant's has none.
          */
-        fun briefTool(brief: suspend () -> Brief?, aloud: ((String) -> Unit)? = null) = Tool(
+        fun briefTool(
+            brief: suspend () -> Brief?,
+            /** The week's review, offered under which "week" where given. */
+            week: (suspend () -> Brief?)? = null,
+            aloud: ((text: String, week: Boolean) -> Unit)? = null,
+        ) = Tool(
             spec = ToolSpec(
                 BRIEF_TOOL,
                 "Today's brief from orrery: the day's calendar, the actions waiting for the owner under tags such as A1, when to leave, and orrery's few lines." +
+                    (if (week != null) " With which \"week\", the week's review instead, made on Sunday evening." else "") +
                     if (aloud != null) " With aloud true it is read out to the owner word for word as it is, so say only a short line after it." else "",
-                if (aloud != null) toolSchema("aloud" to ("boolean" to "true when the owner asked to hear the brief"), required = emptyList())
-                else toolSchema(required = emptyList()),
+                toolSchema(
+                    *listOfNotNull(
+                        aloud?.let { "aloud" to ("boolean" to "true when the owner asked to hear it") },
+                        week?.let { "which" to ("string" to "\"today\" for today's brief (the default), \"week\" for the week's review") },
+                    ).toTypedArray(),
+                    required = emptyList(),
+                ),
             ),
             write = false,
         ) { args ->
+            val weekly = week != null && args["which"].asText() == "week"
+            val b = try {
+                if (weekly) week!!() else brief()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                return@Tool "Could not read the ${if (weekly) "week's review" else "brief"} from orrery: ${e.message}"
+            }
+            if (b == null) return@Tool if (weekly) "There is no week's review yet." else "There is no brief for today yet."
+            if (aloud != null && args["aloud"].asText() == "true") aloud(b.text, weekly)
+            b.text
+        }
+
+        const val BRIEF_ACTION_TOOL = "brief_action"
+
+        /**
+         * brief_action: answer one of the brief's waiting actions by its tag
+         * (A1), or move its due, "A1 due friday" by voice. The tag is the
+         * brief's own (its tags, tag to action id); [act] does the rest.
+         */
+        fun briefActionTool(brief: suspend () -> Brief?, act: suspend (id: String, status: String?, due: String?) -> String?) = Tool(
+            spec = ToolSpec(
+                BRIEF_ACTION_TOOL,
+                "Answer an action in today's brief by its tag (A1, A2): approve it, dismiss it, mark it done, or move its due. " +
+                    "Give status, due, or both. Read the brief first if you do not know the tag.",
+                toolSchema(
+                    "tag" to ("string" to "The tag as the brief gives it, such as A1."),
+                    "status" to ("string" to "approved, dismissed or done; omit to leave it."),
+                    "due" to ("string" to "The new due: YYYY-MM-DD for a day, an ISO 8601 UTC time for a moment, or none to clear it; omit to leave it."),
+                    required = listOf("tag"),
+                ),
+            ),
+            write = true,
+        ) { args ->
+            val tag = args["tag"].asText()?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: return@Tool "Error: tag is required."
+            val status = args["status"].asText()?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+            val due = args["due"].asText()?.trim()?.takeIf { it.isNotEmpty() }
+            if (status == null && due == null) return@Tool "Error: give a status or a due."
+            if (status != null && status !in setOf("approved", "dismissed", "done")) return@Tool "Error: status is approved, dismissed or done."
+            if (due != null && due != "none" && !BRIEF_DUE.matches(due)) return@Tool "Error: due is YYYY-MM-DD, an ISO 8601 UTC time, or none."
             val b = try {
                 brief()
             } catch (e: CancellationException) {
@@ -210,10 +269,34 @@ class VoiceConversation(
             } catch (e: Throwable) {
                 return@Tool "Could not read the brief from orrery: ${e.message}"
             }
-            if (b == null) return@Tool "There is no brief for today yet."
-            if (aloud != null && args["aloud"].asText() == "true") aloud(b.text)
-            b.text
+            val id = b?.tags?.get(tag) ?: return@Tool "Today's brief has no $tag."
+            val fault = try {
+                act(id, status, due)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                e.message ?: "no reason given"
+            }
+            fault?.let { "Orrery did not take that for $tag: $it" }
+                ?: listOfNotNull(status?.let { "marked $it" }, due?.let { if (it == "none") "no due now" else "due $it" }).joinToString(", ").let { "$tag $it." }
         }
+
+        /**
+         * brief_action's act on [o]: the status, then the due, the first
+         * failure said. Done on a proposal goes through approve, as the
+         * Actions screen's does. A due before orrery 130 is a 404, said.
+         */
+        fun briefAct(o: io.nisfeb.talon.orrery.OrreryRepo): suspend (String, String?, String?) -> String? = { id, status, due ->
+            val proposed = o.actions.value.firstOrNull { it.id == id }?.status == "proposed"
+            status?.let { o.setAction(id, it, proposed = proposed).exceptionOrNull() }?.let { it.message ?: "no reason given" }
+                ?: due?.let { o.setDue(id, it.takeIf { d -> d != "none" }).exceptionOrNull() }?.let { it.message ?: "no reason given" }
+        }
+
+        /** A due brief_action takes: a day, or a UTC moment. */
+        private val BRIEF_DUE = Regex("""\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?Z)?""")
+
+        const val WEEK_READING = "Here's the week's review."
+
         const val UNREAD_TOOL = "list_unread"
 
         /** The tools whose text is read out as it is. */
@@ -255,7 +338,13 @@ class VoiceConversation(
             on the calendar with create_event, and a to-do with create_task.
             When they want today's brief read, call read_brief with aloud
             true; it is read to them as it is. Their unread messages are
-            list_unread's, read to them the same way with aloud true.
+            list_unread's, read to them the same way with aloud true. The
+            week's review is read_brief's too, with which "week". Answer or
+            move one of the brief's actions by its tag with brief_action
+            ("approve A1", "A2 due Friday"). For their evening review, what
+            is late, due today or has no date: list_tasks, then
+            complete_task, update_event for a new due, or delete_event to
+            drop one.
 
             ${AgentPrompt.nearby}
         """.trimIndent()

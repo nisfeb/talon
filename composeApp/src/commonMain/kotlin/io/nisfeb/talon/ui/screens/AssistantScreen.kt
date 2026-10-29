@@ -495,7 +495,13 @@ fun AssistantScreen(
                         Briefing.countsLine(d.mail, d.chats, d.questions, d.mailLate) + "\n" +
                             Briefing.openerDigest(io.nisfeb.talon.ai.nowHere(zoneFor(calendarZone)), d.firstEvent, openerBrief())
                     } +
-                    listOfNotNull(orrery?.let { o -> VoiceConversation.briefTool({ o.briefLast().getOrThrow()?.let { Briefing.todays(it, today()) } }) }) +
+                    orrery?.let { o ->
+                        val todays = suspend { o.briefLast().getOrThrow()?.let { Briefing.todays(it, today()) } }
+                        listOf(
+                            VoiceConversation.briefTool(todays, week = { o.reviewLast().getOrThrow() }),
+                            VoiceConversation.briefActionTool(todays, VoiceConversation.briefAct(o)),
+                        )
+                    }.orEmpty() +
                     orrery?.let { o ->
                         // What orrery leaves waiting is put to the owner here,
                         // as the voice card puts it, and answered the same way.

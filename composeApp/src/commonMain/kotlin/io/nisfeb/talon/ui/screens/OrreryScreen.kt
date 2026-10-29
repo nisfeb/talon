@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -75,6 +76,9 @@ fun OrreryRepoScreen(
     modifier: Modifier = Modifier,
     openItem: String? = null,
     onOpenedItem: () -> Unit = {},
+    /** The calendar the evening review organizes, and the way to it; the entry shows on orrery 130 or later. */
+    calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
+    onEveningReview: (() -> Unit)? = null,
 ) {
     val told by orreryRepo.told.collectAsState()
     val failed by orreryRepo.failed.collectAsState()
@@ -97,6 +101,9 @@ fun OrreryRepoScreen(
         onOpenedItem = onOpenedItem,
         turnOn = if (on) null else orreryRepo::ensureEnabled,
         setUpAgain = orreryRepo::setUpAgain,
+        eveningReview = if (calendar != null && onEveningReview != null && (version ?: 0) >= io.nisfeb.talon.orrery.EVENING_VERSION) {
+            { EveningReviewEntry(calendar, onEveningReview) }
+        } else null,
     ) {
         OrreryActionsScreen(
             actions = actions,
@@ -148,6 +155,8 @@ fun OrreryScreen(
     turnOn: (suspend () -> Result<Unit>)? = null,
     /** A new key for this device, offered where the ship refused the one it has. */
     setUpAgain: (suspend () -> Result<Unit>)? = null,
+    /** The evening review's way in, above the tabs; null where orrery is older than 130. */
+    eveningReview: (@Composable () -> Unit)? = null,
     actionsTab: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -203,6 +212,7 @@ fun OrreryScreen(
                 }
             }
         }
+        if (stack.isEmpty()) eveningReview?.let { Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { it() } }
         io.nisfeb.talon.ui.AdaptiveTabRow(
             labels = OrreryTab.entries.map { it.label },
             selected = tab.ordinal,

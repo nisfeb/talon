@@ -286,12 +286,64 @@ fun OrrerySettingsSection(
     Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
     if (orrery != null) ReadingRow(orrery, orreryHere, spend[AiFeature.OrreryTriage.name])
+    if (orrery != null && orreryHere) EveningReminderRow(orrery)
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
     // Until the owner flips it here, the decision model is what this device had.
     DecisionRow(profile, profile.jev ?: decide.on, spend[AiSpend.JEV]) { v -> edit { it.copy(jev = v) } }
     if (orrery != null && orreryHere) MoreOrreryRow(orrery, inApp)
 }
+
+/**
+ * When the ship reminds the owner to do the evening review (orrery 130's
+ * rhythm review_at): a time, or never. It is the ship's, so every phone
+ * follows it; the desktop gets no reminder of its own ([isShipNoticeSupported]).
+ */
+@Composable
+private fun EveningReminderRow(orrery: OrreryRepo) {
+    val version by orrery.version.collectAsState()
+    if ((version ?: 0) < io.nisfeb.talon.orrery.EVENING_VERSION) return
+    val scope = rememberCoroutineScope()
+    var at by remember { mutableStateOf<String?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { orrery.reviewAt().onSuccess { at = it }.onFailure { problem = "Your ship did not say when it reminds you." } }
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Evening review reminder", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+            Quiet(
+                when {
+                    at == null -> "Asking your ship…"
+                    at == "" -> "Off. You can still open the review from Home or Orrery."
+                    io.nisfeb.talon.ui.isShipNoticeSupported -> "Each evening at $at, when there is something to organize."
+                    else -> "Your phone is reminded each evening at $at, when there is something to organize."
+                },
+            )
+            problem?.let { Quiet(it, error = true) }
+        }
+        androidx.compose.foundation.layout.Box {
+            TextButton(enabled = at != null, onClick = { menu = true }) { Text(if (at.isNullOrEmpty()) "Set" else "Change") }
+            androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                for (choice in REMINDER_TIMES + "") {
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(if (choice == "") "Off" else choice) },
+                        onClick = {
+                            menu = false
+                            problem = null
+                            val was = at
+                            at = choice
+                            scope.launch { orrery.setReviewAt(choice).onFailure { at = was; problem = "Your ship did not take the new time." } }
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The times offered for the evening reminder; orrery's own default is 20:00. */
+private val REMINDER_TIMES = listOf("18:00", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00")
 
 /** What Orrery is and what turning it on allows, for someone who has never heard of it. */
 @Composable

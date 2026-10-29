@@ -1551,4 +1551,191 @@ class AppShellTest {
         waitForIdle()
         assertTrue(!showing("Threads you follow ("), "beside the chat, the header has them")
     }
+
+    // ---- The evening review (orrery 130) ----
+
+    private fun dayMs(plusDays: Long) = java.time.LocalDate.now().plusDays(plusDays).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+    private fun dayIso(plusDays: Long) = java.time.LocalDate.now().plusDays(plusDays).toString()
+
+    /**
+     * Orrery [version] with one approved task, "Call the dentist" (a1),
+     * whose todo is late a day; the owner's own "Pay rent" due today and
+     * "Buy milk" with no date. The calendar applies the pokes the review
+     * sends to its tasks, and refuses each one [refuse] says.
+     */
+    private fun evening(version: Int = 130, refuse: (String) -> Boolean = { false }): FakeShip.() -> Unit = {
+        val tasks = java.util.concurrent.ConcurrentHashMap<String, kotlinx.serialization.json.JsonObject>()
+        fun put(id: String, name: String, due: Long?, orrery: String? = null) {
+            tasks[id] = kotlinx.serialization.json.buildJsonObject {
+                put("id", kotlinx.serialization.json.JsonPrimitive(id)); put("cal", kotlinx.serialization.json.JsonPrimitive("default"))
+                put("cat", kotlinx.serialization.json.JsonPrimitive("todo"))
+                put("meta", kotlinx.serialization.json.buildJsonObject {
+                    put("name", kotlinx.serialization.json.JsonPrimitive(name))
+                    orrery?.let { put("orrery", kotlinx.serialization.json.JsonPrimitive(it)) }
+                })
+                due?.let { put("due_ms", kotlinx.serialization.json.JsonPrimitive(it)) }
+            }
+        }
+        put("t-orr", "Call the dentist", dayMs(-1), orrery = "a1")
+        put("t-rent", "Pay rent", dayMs(0))
+        put("t-milk", "Buy milk", null)
+        calendar = FakeShip.FakeCalendar().apply {
+            fun render() { this.tasks = kotlinx.serialization.json.JsonArray(tasks.values.toList()).toString() }
+            render()
+            refusePoke = refuse
+            onPoke = { body ->
+                val poke = kotlinx.serialization.json.Json.parseToJsonElement(body).jsonObject
+                val id = poke["id"]?.jsonPrimitive?.content
+                when (poke["action"]?.jsonPrimitive?.content) {
+                    "del-event" -> tasks.remove(id)
+                    "done-event" -> tasks.computeIfPresent(id!!) { _, t -> kotlinx.serialization.json.JsonObject(t + ("done" to kotlinx.serialization.json.JsonPrimitive(true))) }
+                    "edit-event" -> tasks.computeIfPresent(id!!) { _, t ->
+                        kotlinx.serialization.json.JsonObject(t - "due_ms" + listOfNotNull(poke["due_ms"]?.let { "due_ms" to it }))
+                    }
+                }
+                render()
+            }
+        }
+        answerApi = { method, path, _ ->
+            when {
+                path == "/apps/orrery/api/state" -> "{}"
+                path == "/apps/orrery/api/version" -> """{"version":$version}"""
+                path == "/apps/orrery/api/actions" -> """[{"id":"a1","kind":"task","title":"Call the dentist","payload":{},"due":"${dayIso(-1)}T00:00:00Z","status":"approved"}]"""
+                method == "POST" && path == "/apps/orrery/api/actions/a1" -> """{"ok":true}"""
+                else -> null
+            }
+        }
+    }
+
+    /** A menu's item, not a row's label that says the same ("Today"). */
+    private fun ComposeUiTest.pick(item: String) =
+        onNode(androidx.compose.ui.test.hasText(item) and androidx.compose.ui.test.hasClickAction()).performClick()
+
+    /** The review's rows have a Drop each; nothing else in the app says it. */
+    private fun ComposeUiTest.reviewOpen() = onAllNodesWithText("Drop").fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.openReviewFromHome() {
+        onNodeWithContentDescription("Home").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("1 overdue, 1 due today, 1 with no date") }
+        onNodeWithText("Evening review").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Overdue") && showing("No date") }
+    }
+
+    @Test
+    fun `the evening review opens from Home, and a day given there reaches the calendar and orrery`() = app(ai = orreryOn, setup = evening()) { ship ->
+        openReviewFromHome()
+        assertTrue(showing("Call the dentist") && showing("Pay rent") && showing("Buy milk") && showing("Yesterday"))
+        // The owner's own: an edit on the calendar, whole, with the new day.
+        onNodeWithText("Set a day").performClick()
+        pick("Tomorrow")
+        waitUntil(timeoutMillis = 10_000) { !showing("Buy milk") }
+        val edit = ship.calendar!!.pokes.single { "edit-event" in it }.let { kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject }
+        assertEquals("t-milk", edit["id"]!!.jsonPrimitive.content)
+        assertEquals(dayMs(1), edit["due_ms"]!!.jsonPrimitive.content.toLong())
+        assertEquals("todo", edit["cat"]!!.jsonPrimitive.content)
+        // Orrery's: edited on the calendar the same, its action's id kept;
+        // orrery's mirror takes the calendar's due (130 +due-ops).
+        onAllNodesWithText("Move")[0].performClick()
+        pick("Today")
+        waitUntil(timeoutMillis = 10_000) { ship.calendar!!.pokes.any { "edit-event" in it && "t-orr" in it } }
+        val moved = ship.calendar!!.pokes.single { "edit-event" in it && "t-orr" in it }.let { kotlinx.serialization.json.Json.parseToJsonElement(it).jsonObject }
+        assertEquals(dayMs(0), moved["due_ms"]!!.jsonPrimitive.content.toLong())
+        assertEquals("a1", moved["meta"]!!.jsonObject["orrery"]!!.jsonPrimitive.content)
+        assertTrue(ship.api.none { "/due" in it }, "nothing to tell orrery: ${ship.api}")
+        waitUntil(timeoutMillis = 10_000) { showing("2 due today") && !showing("Overdue") }
+        // Back is the home page, whose entry says the same.
+        onNodeWithContentDescription("Back").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("2 due today") && !reviewOpen() }
+        assertTrue(!showing("overdue,") && !showing("with no date"), "Home's entry agrees with the review")
+    }
+
+    @Test
+    fun `a drop waits for Undo, and goes through though the review is left`() = app(ai = orreryOn, setup = evening()) { ship ->
+        openReviewFromHome()
+        // Pay rent is the second row: Overdue, then Due today.
+        onAllNodesWithText("Drop")[1].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Dropped \"Pay rent\".") }
+        onNodeWithText("Undo").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Pay rent") && !showing("Dropped") }
+        Thread.sleep(6_000)
+        assertTrue(ship.calendar!!.pokes.none { "del-event" in it }, "taken back: ${ship.calendar!!.pokes}")
+        onAllNodesWithText("Drop")[1].performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Dropped \"Pay rent\".") }
+        onNodeWithContentDescription("Back").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.calendar!!.pokes.any { "del-event" in it } }
+        assertTrue(ship.calendar!!.pokes.single { "del-event" in it }.contains("t-rent"))
+    }
+
+    @Test
+    fun `dropping orrery's todo dismisses its action, and ticking one off is done on the calendar`() = app(ai = orreryOn, setup = evening()) { ship ->
+        openReviewFromHome()
+        onAllNodes(androidx.compose.ui.test.isToggleable())[1].performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.calendar!!.pokes.any { "done-event" in it && "t-rent" in it } }
+        waitUntil(timeoutMillis = 10_000) { !showing("Pay rent") }
+        onAllNodesWithText("Drop")[0].performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.api.any { it.startsWith("POST /apps/orrery/api/actions/a1 ") } }
+        assertEquals(listOf("POST /apps/orrery/api/actions/a1 {\"status\":\"dismissed\",\"note\":\"Removed from the calendar.\"}"), ship.api.filter { it.startsWith("POST /apps/orrery/api/actions/a1 ") })
+        assertTrue(ship.calendar!!.pokes.none { "del-event" in it })
+    }
+
+    @Test
+    fun `a move the calendar refuses says so and leaves it late`() = app(ai = orreryOn, setup = evening(refuse = { "edit-event" in it })) {
+        openReviewFromHome()
+        onAllNodesWithText("Move")[0].performClick()
+        pick("Tomorrow")
+        waitUntil(timeoutMillis = 10_000) { showing("The calendar did not take the new due.") }
+        assertTrue(showing("Overdue") && onAllNodesWithText("Call the dentist").fetchSemanticsNodes().isNotEmpty(), "back where it was")
+        assertTrue(showing("1 overdue, 1 due today, 1 with no date"), "the counts as they were")
+    }
+
+    @Test
+    fun `the review opens from Orrery and back returns there`() = app(ai = orreryOn, setup = evening()) {
+        openOrrery()
+        waitUntil(timeoutMillis = 10_000) { showing("1 overdue, 1 due today, 1 with no date") }
+        onNodeWithText("Evening review").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Overdue") && showing("No date") }
+        onNodeWithContentDescription("Back").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("1 overdue, 1 due today, 1 with no date") && !reviewOpen() }
+    }
+
+    // The daily push's tap (orrery-evening), over whatever was open; and
+    // it can be left, by Escape and for another section, as every
+    // section must (rule 7).
+    @Test
+    fun `the evening push opens the review over an open section, and it can be left`() = app(ai = orreryOn, setup = evening()) {
+        onNodeWithContentDescription("My profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Edit profile") }
+        io.nisfeb.talon.notify.OpenNoticeRequests.request(io.nisfeb.talon.orrery.EVENING_TAG)
+        waitUntil(timeoutMillis = 10_000) { showing("Overdue") && showing("No date") }
+        assertTrue(!showing("Edit profile"))
+        press(Key.Escape)
+        home()
+        assertTrue(!reviewOpen())
+        io.nisfeb.talon.notify.OpenNoticeRequests.request(io.nisfeb.talon.orrery.EVENING_TAG)
+        waitUntil(timeoutMillis = 10_000) { reviewOpen() }
+        press(Key.Comma, ctrl = true)
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        assertTrue(!reviewOpen(), "put down for Settings")
+        press(Key.Escape)
+        home()
+        Thread.sleep(500)
+        waitForIdle()
+        assertTrue(!reviewOpen(), "and does not come back")
+    }
+
+    @Test
+    fun `an orrery older than 130 offers no evening review`() = app(ai = orreryOn, setup = evening(version = 129)) { ship ->
+        openOrrery()
+        waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/orrery/api/version" in it } }
+        Thread.sleep(1_000)
+        waitForIdle()
+        assertTrue(!showing("Evening review"))
+        onNodeWithContentDescription("Back").performClick()
+        home()
+        onNodeWithContentDescription("Home").performClick()
+        waitUntil(timeoutMillis = 5_000) { !present("New message") }
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(!showing("Evening review"))
+    }
 }
