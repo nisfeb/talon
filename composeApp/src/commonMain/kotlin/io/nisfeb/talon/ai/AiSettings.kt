@@ -76,9 +76,9 @@ object AiSettings {
         // the explicit value, so the new defaults only apply when the
         // SharedPreferences key is absent.
         val catchMeUpEnabled: Boolean = true,
-        // One switch for the on-device embedder features: search-by-meaning,
-        // topic clustering, and bookmark-similarity highlighting. They all
-        // share the same on-device index, so they're enabled together.
+        // One switch for the on-device embedder features: search-by-meaning
+        // and bookmark-similarity highlighting. They share the same
+        // on-device index, so they're enabled together.
         val smartFeaturesEnabled: Boolean = true,
         // On, like the others: paying for Armillary turns everything on
         // (Armillary-only, 2026-10-16), and it runs only with a key. The
@@ -229,13 +229,13 @@ object AiSettings {
             "Offers a summary when you open a chat with unread messages.",
             requiresCloudKey = true,
         ),
-        // One toggle for the on-device embedder suite — search by meaning,
-        // topic clusters, and important-message highlighting. They share
-        // the same on-device index, so they live and die together.
+        // One toggle for the on-device embedder suite — search by meaning
+        // and important-message highlighting. They share the same
+        // on-device index, so they live and die together.
         SmartFeatures(
             "feat_smart_features",
             "Search by meaning",
-            "Find messages by what they mean, group a chat by topic, and highlight messages like ones you bookmarked. Runs on this device only.",
+            "Find messages by what they mean, and highlight messages like ones you bookmarked. Runs on this device only.",
             requiresCloudKey = false,
         ),
         // One unified assistant (was Ask + Act). It answers questions

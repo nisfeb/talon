@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.map
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -73,8 +74,32 @@ fun GroupInfoPane(
     onOpenCategory: (MediaCategory) -> Unit,
     onOpenMembers: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * What the chat's header leaves to Info where it has no room (a
+     * phone): the group's party line, and the threads followed here,
+     * opened at [onOpenThread]'s reply. Null for each keeps it off Info,
+     * as beside a wide window's chat, whose header has it.
+     */
+    party: io.nisfeb.talon.ui.PartyLineHere? = null,
+    onOpenThread: ((parentId: String, replyId: String?) -> Unit)? = null,
+    contactMap: io.nisfeb.talon.ui.ContactMap = io.nisfeb.talon.ui.ContactMap(),
 ) {
     val scope = rememberCoroutineScope()
+    val followed by remember(whom) {
+        db.followedThreads().streamThreads(whom).map { io.nisfeb.talon.data.threadsInOrder(it) }
+    }.collectAsState(initial = emptyList())
+    var threadsOpen by remember(whom) { mutableStateOf(false) }
+    if (threadsOpen && onOpenThread != null) {
+        io.nisfeb.talon.ui.FollowedThreadsSheet(
+            rows = followed,
+            contactMap = contactMap,
+            onOpen = { row ->
+                threadsOpen = false
+                onOpenThread(row.parentPostId, row.lastReplyId)
+            },
+            onDismiss = { threadsOpen = false },
+        )
+    }
 
     // What the pane learns of the group, as one state. As three, the
     // count landed and the header went on without it: the list's rows
@@ -243,6 +268,24 @@ fun GroupInfoPane(
         }
 
         item { PaneHeading(if (groupFlag != null) "This channel" else "This chat") }
+        party?.join?.let { join ->
+            item {
+                InfoActionRow(
+                    icon = TalonIcons.Groups,
+                    label = "Party line",
+                    detail = party.present.takeIf { it > 0 }?.let { "$it on the line" },
+                    onClick = join,
+                )
+            }
+        }
+        if (onOpenThread != null && followed.isNotEmpty()) item {
+            InfoActionRow(
+                icon = TalonIcons.Reply,
+                label = "Threads you follow (${followed.size})",
+                detail = followed.count { it.unread > 0 }.takeIf { it > 0 }?.let { "$it with new replies" },
+                onClick = { threadsOpen = true },
+            )
+        }
         item {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 NotifyHeading(off = effectiveLevel(ownLevel, groupPref?.level) == NotifyLevel.NONE, text = "Notifications")
@@ -565,5 +608,28 @@ private fun NotifyHeading(off: Boolean, text: String) {
         Icon(if (off) TalonIcons.NotificationsOff else Icons.Filled.Notifications, contentDescription = null)
         Spacer(Modifier.size(12.dp))
         Text(text, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+    }
+}
+
+/** One of the pane's tappable rows: an icon, what it does, and a line under it. */
+@Composable
+private fun InfoActionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, detail: String?, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .pressable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null)
+        Spacer(Modifier.size(12.dp))
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(label)
+            detail?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
     }
 }

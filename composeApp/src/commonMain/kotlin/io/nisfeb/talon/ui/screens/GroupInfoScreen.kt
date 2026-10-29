@@ -31,6 +31,10 @@ fun GroupInfoScreen(
     onOpenCategory: (MediaCategory) -> Unit,
     onOpenMembers: () -> Unit,
     modifier: Modifier = Modifier,
+    /** What the phone's chat header leaves to Info; see [GroupInfoPane]. */
+    party: io.nisfeb.talon.ui.PartyLineHere? = null,
+    onOpenThread: ((parentId: String, replyId: String?) -> Unit)? = null,
+    contactMap: io.nisfeb.talon.ui.ContactMap = io.nisfeb.talon.ui.ContactMap(),
 ) {
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
@@ -53,6 +57,9 @@ fun GroupInfoScreen(
             whom = whom,
             onOpenCategory = onOpenCategory,
             onOpenMembers = onOpenMembers,
+            party = party,
+            onOpenThread = onOpenThread,
+            contactMap = contactMap,
         )
     }
 }
