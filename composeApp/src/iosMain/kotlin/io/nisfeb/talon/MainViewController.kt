@@ -1,8 +1,5 @@
 package io.nisfeb.talon
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.window.ComposeUIViewController
 import androidx.compose.ui.uikit.OnFocusBehavior
 import io.nisfeb.talon.ai.createAiSettings
@@ -119,7 +116,7 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
     // a controller that ALSO lifted the view made room twice: the space
     // it left behind is the white band under a dismissed keyboard.
     return ComposeUIViewController(configure = { onFocusBehavior = OnFocusBehavior.DoNothing }) {
-        Box(Modifier.fillMaxSize()) {
+        io.nisfeb.talon.ui.IosBackSwipeHost(themePreference) {
         App(
             http = http,
             sessionStore = sessionStore,

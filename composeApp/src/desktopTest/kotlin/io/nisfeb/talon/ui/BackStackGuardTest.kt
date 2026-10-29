@@ -1,13 +1,7 @@
 package io.nisfeb.talon.ui
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
 import java.io.File
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -17,46 +11,38 @@ import kotlin.test.assertTrue
  * had no handler, and a swipe past the strip opened the sections drawer.
  * Back is now Compose's navigation events on iOS, and the drawer swipes
  * only at the top of the back stack. Neither gesture runs on desktop, so
- * the wiring is guarded by its source and the count by a run.
+ * the wiring is guarded by its source (BackDepthTest runs the count).
  */
-@OptIn(ExperimentalTestApi::class)
 class BackStackGuardTest {
     private val root = generateSequence(File("").absoluteFile) { it.parentFile }
         .first { File(it, "settings.gradle.kts").exists() }
     private fun read(path: String) = File(root, path).readText()
 
     @Test
-    fun `each enabled handler counts while it is on, and none once gone`() = runComposeUiTest {
-        var a by mutableStateOf(true)
-        var b by mutableStateOf(false)
-        var shown by mutableStateOf(true)
-        val base = BackDepth.depth
-        setContent {
-            if (shown) {
-                BackDepth.Count(a)
-                BackDepth.Count(b)
-            }
-        }
-        waitForIdle()
-        assertEquals(base + 1, BackDepth.depth)
-        b = true
-        waitForIdle()
-        assertEquals(base + 2, BackDepth.depth)
-        a = false
-        waitForIdle()
-        assertEquals(base + 1, BackDepth.depth)
-        shown = false
-        waitForIdle()
-        assertEquals(base, BackDepth.depth, "a screen that leaves takes its handlers' count with it")
+    fun `iOS back is Compose's own edge swipe, and the strip is gone`() {
+        val actual = read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/PlatformBackHandler.ios.kt")
+        assertTrue("NavigationBackHandler(" in actual && "isBackEnabled = enabled" in actual, actual)
+        val completed = actual.substringAfter("onBackCompleted = {").substringBefore("},")
+        assertTrue("IosBackSwipe.done()" in completed && "onBack()" in completed, completed)
+        assertTrue("onBackCancelled = { IosBackSwipe.settle() }" in actual, "a swipe let go short of the mark springs back")
+        assertTrue("BackDepth.Count(enabled)" in actual)
+        assertTrue("IosBackSwipe.follow(swipe.latestEvent.progress)" in actual, "the screen follows its own handler's swipe")
+        val root = read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/MainViewController.kt")
+        assertFalse("detectHorizontalDragGestures" in root || "EDGE_SWIPE" in root, "a strip of our own takes touches from the native recognizer")
+        assertTrue("IosBackSwipeHost(themePreference)" in root)
     }
 
     @Test
-    fun `iOS back is Compose's own edge swipe, and the strip is gone`() {
-        val actual = read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/PlatformBackHandler.ios.kt")
-        assertTrue("NavigationBackHandler(" in actual && "isBackEnabled = enabled" in actual && "onBackCompleted = onBack" in actual, actual)
-        assertTrue("BackDepth.Count(enabled)" in actual)
-        val root = read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/MainViewController.kt")
-        assertFalse("detectHorizontalDragGestures" in root || "EDGE_SWIPE" in root, "a strip of our own takes touches from the native recognizer")
+    fun `iOS's swipe from anywhere leaves the edge to iOS and the top to the drawer`() {
+        val host = read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/IosBackSwipe.kt")
+        // One swipe never starts two backs: the edge band is the native recognizer's.
+        assertTrue("down.position.x < EDGE_BAND.toPx()" in host && "private val EDGE_BAND = 32.dp" in host)
+        assertTrue("BackDepth.depth == 0" in host, "at the top the swipe is the drawer's")
+        assertTrue("DirectNavigationEventInput()" in host && "dispatcher?.addInput(input)" in host, "it goes through the same dispatcher as iOS's own")
+        // Read the finger before the layer moves the screen, or the screen chases its own offset.
+        val reads = host.indexOf(".swipeBackAnywhere(input, width)")
+        assertTrue(reads >= 0 && reads < host.indexOf(".graphicsLayer { translationX"))
+        assertTrue("backSwipeCommits(" in host)
     }
 
     @Test

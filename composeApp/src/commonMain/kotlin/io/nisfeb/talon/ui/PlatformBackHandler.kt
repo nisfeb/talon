@@ -39,3 +39,19 @@ object BackDepth {
         }
     }
 }
+
+/**
+ * Whether a back swipe that let go at [progress] (0 to 1 of the screen's
+ * width), moving at [velocityDpPerSec] (rightward positive), goes back:
+ * a flick either way decides, else past [BACK_COMMIT_FRACTION] of the
+ * way. Below it the screen springs back, as a reply swipe short of its
+ * mark does.
+ */
+fun backSwipeCommits(progress: Float, velocityDpPerSec: Float): Boolean = when {
+    velocityDpPerSec <= -BACK_FLICK_DP_PER_SEC -> false
+    velocityDpPerSec >= BACK_FLICK_DP_PER_SEC -> progress > 0f
+    else -> progress >= BACK_COMMIT_FRACTION
+}
+
+const val BACK_COMMIT_FRACTION = 0.35f
+const val BACK_FLICK_DP_PER_SEC = 500f
