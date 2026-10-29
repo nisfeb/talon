@@ -17,6 +17,7 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -106,7 +107,7 @@ class DmChatScreenTest {
                     }
                 }
                 waitForIdle()
-                block(ship, db)
+                dumpingScreenOnFailure(ship) { block(ship, db) }
             }
         } finally {
             stream.cancel()
@@ -126,6 +127,14 @@ class DmChatScreenTest {
 
     private fun msg(id: String, author: String, text: String, sent: Long, deleted: Boolean = false, parent: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", isDeleted = deleted, parentId = parent)
+
+    /**
+     * The control's own click. A pointer goes where the node was when it
+     * was found, and a chat still settling under a loaded CI runner moved
+     * it: the click landed off the button, and nothing opened (2026-10-29).
+     */
+    private fun androidx.compose.ui.test.SemanticsNodeInteraction.clickAction() =
+        performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
 
     private fun ComposeUiTest.send(text: String) {
         onNode(hasSetTextAction()).performTextInput(text)
@@ -258,7 +267,7 @@ class DmChatScreenTest {
         messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, story, "/chat"))
     }) { _, _ ->
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Show more").fetchSemanticsNodes().isNotEmpty() }
-        onNodeWithText("Show more").performClick()
+        onNodeWithText("Show more").clickAction()
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Show less").fetchSemanticsNodes().isNotEmpty() }
     }
 
@@ -286,25 +295,21 @@ class DmChatScreenTest {
     private fun ComposeUiTest.menuOf(text: String) {
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
         // Desktop's way in (a phone taps the row; the words' own selection
-        // takes a right-click): the Message actions button beside them. In
-        // a cold JVM the list is still settling and the first click can be
-        // lost, as a person's would be; they click again, and so does this.
-        val opened = { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
-        for (attempt in 1..3) {
-            // A message's button sits at the top of its block, so it is the
-            // lowest one at or above the words: the nearest could be the next
-            // message's. Measured once the list is still, not mid-scroll.
-            waitForIdle()
+        // takes a right-click): the Message actions button beside them. A
+        // message's button sits at the top of its block, so it is the
+        // lowest one at or above the words: the nearest could be the next
+        // message's. Under load the list can still be laying out, with no
+        // button yet. Its click action, not a pointer, so a list that moves
+        // meanwhile can't lose it (three pointer tries still lost it once).
+        val buttons = onAllNodesWithContentDescription("Message actions")
+        fun nearest(): Int? {
             val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y
-            val buttons = onAllNodesWithContentDescription("Message actions")
-            // Under load the list can still be laying out; no button yet is
-            // another try, not a failure.
-            val nearest = buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
-                .maxByOrNull { buttons[it].fetchSemanticsNode().boundsInRoot.top } ?: continue
-            buttons[nearest].performClick()
-            if (runCatching { waitUntil(timeoutMillis = 1_500) { opened() } }.isSuccess) return
+            return buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
+                .maxByOrNull { buttons[it].fetchSemanticsNode().boundsInRoot.top }
         }
-        waitUntil(timeoutMillis = 1_000) { opened() }
+        waitUntil(timeoutMillis = 20_000) { nearest() != null }
+        buttons[nearest()!!].clickAction()
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -854,7 +859,7 @@ class DmChatScreenTest {
 
     private fun ComposeUiTest.addSam() {
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() }
-        onAllNodesWithText("SB").onFirst().performClick()
+        onAllNodesWithText("SB").onFirst().clickAction()
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("Add to contacts").performClick()
     }
@@ -871,7 +876,7 @@ class DmChatScreenTest {
             host.whom = "~bus"
             waitForIdle()
             waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() }
-            onAllNodesWithText("SB").onFirst().performClick()
+            onAllNodesWithText("SB").onFirst().clickAction()
             waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
         }
     }
