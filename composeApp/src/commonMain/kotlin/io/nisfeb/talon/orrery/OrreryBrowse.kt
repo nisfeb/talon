@@ -131,18 +131,25 @@ fun leaveByOf(last: JsonObject?): LeaveBy? {
  */
 const val OVERDUE_TAG_PREFIX = "orrery-overdue-"
 
+/** The ship's daily push to do the evening review (orrery 130): not about one action. */
+const val EVENING_TAG = "orrery-evening"
+
 /**
  * The action a ship push is about, from its tag: orrery tags a proposed
  * or filed action `orrery-<id>`, and a late one `orrery-overdue-<id>`,
- * beside its leave, late and nudge tags and the review. Talon shows that
- * action under its own slot, so the pushed copy and the app's own
- * replace each other, each nag replaces the last, and answering it
- * anywhere takes back both. Null for anything else.
+ * beside its leave, late and nudge tags, the review and the evening
+ * review. Talon shows that action under its own slot, so the pushed copy
+ * and the app's own replace each other, each nag replaces the last, and
+ * answering it anywhere takes back both. Null for anything else.
+ *
+ * ponytail: the words orrery keeps for itself are listed by hand, so a
+ * new one reads as an action id until it is added here ("evening" was,
+ * and showed as an action under Actions).
  */
 fun actionIdOfTag(tag: String?): String? {
     val rest = tag?.takeIf { it.startsWith("orrery-") }?.removePrefix("orrery-") ?: return null
     if (tag.startsWith(OVERDUE_TAG_PREFIX)) return tag.removePrefix(OVERDUE_TAG_PREFIX).takeIf { it.isNotBlank() }
-    if (rest.isBlank() || rest == "review") return null
+    if (rest.isBlank() || rest == "review" || tag == EVENING_TAG) return null
     if (listOf("leave-", "late-", "nudge-").any { rest.startsWith(it) }) return null
     return rest
 }

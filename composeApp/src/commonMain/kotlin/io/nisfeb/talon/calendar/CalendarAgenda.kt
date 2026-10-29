@@ -62,8 +62,38 @@ fun taskOrder(tasks: List<CalendarTask>): List<CalendarTask> =
 /** Where a task goes by priority: 1 first, 9 after, none last, as the calendar's page sorts. */
 val CalendarTask.priorityRank: Int get() = priority?.takeIf { it in 1..9 } ?: 10
 
-/** The task's due day, as the calendar's page reads it: the UTC date of due_ms. */
-fun CalendarTask.dueDate(): LocalDate? = dueMs?.let { Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date }
+private const val DAY_MS = 24 * HOUR_MS
+
+/**
+ * Whether the task is due on a day rather than at a moment: the calendar
+ * marks a day as midnight UTC. Orrery (version 130) can give one a time.
+ */
+val CalendarTask.dueIsDate: Boolean get() = dueMs?.let { it % DAY_MS == 0L } == true
+
+/**
+ * The task's due day: a day's own date, as the calendar's page reads it,
+ * or for a due with a time the date it falls on in [zone]. Read as UTC,
+ * 02:00 UTC on the 30th was the 30th in New York, where it is 22:00 on
+ * the 29th.
+ */
+fun CalendarTask.dueDate(zone: TimeZone): LocalDate? = dueMs?.let {
+    Instant.fromEpochMilliseconds(it).toLocalDateTime(if (dueIsDate) TimeZone.UTC else zone).date
+}
+
+private fun dayOf(nowMs: Long, zone: TimeZone): LocalDate = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+
+/**
+ * Late at [nowMs], as orrery counts it for the evening review
+ * (+evening-counts): a day before today in [zone], or a time gone by.
+ */
+fun CalendarTask.overdue(nowMs: Long, zone: TimeZone): Boolean {
+    val due = dueMs ?: return false
+    return if (dueIsDate) dueDate(zone)!! < dayOf(nowMs, zone) else due < nowMs
+}
+
+/** Due today in [zone] and not late: today's date, or a time still to come before midnight. */
+fun CalendarTask.dueToday(nowMs: Long, zone: TimeZone): Boolean =
+    dueMs != null && !overdue(nowMs, zone) && dueDate(zone) == dayOf(nowMs, zone)
 
 /**
  * The open tasks the widget shows for [range]: due on a day the
@@ -79,5 +109,5 @@ fun tasksInRange(tasks: List<CalendarTask>, range: CalendarRange, nowMs: Long, z
         null -> Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
         else -> Instant.fromEpochMilliseconds(end - 1).toLocalDateTime(zone).date
     }
-    return taskOrder(tasks.filter { !it.done && (it.dueDate()?.let { d -> d <= lastDay } ?: false) })
+    return taskOrder(tasks.filter { !it.done && (it.overdue(nowMs, zone) || it.dueDate(zone)?.let { d -> d <= lastDay } == true) })
 }

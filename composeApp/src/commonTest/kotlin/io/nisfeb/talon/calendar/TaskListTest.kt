@@ -13,8 +13,10 @@ import kotlin.test.assertTrue
 
 /** Searching and bucketing a task list. */
 class TaskListTest {
-    // A Wednesday.
+    // A Wednesday, at noon in UTC, where these days are dates.
     private val today = LocalDate(2026, 9, 23)
+    private val utc = TimeZone.UTC
+    private val noon = today.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds() + 12 * 3_600_000L
 
     private fun task(
         name: String,
@@ -49,7 +51,7 @@ class TaskListTest {
                 task("finished", done = true),
                 task("today", today),
             ),
-            today,
+            noon, utc,
         )
         assertEquals(listOf("Overdue", "Today", "This week", "Later", "No date", "Done"), groups.map { it.label })
         assertEquals(listOf("yesterday"), groups[0].tasks.map { it.name })
@@ -68,7 +70,7 @@ class TaskListTest {
                 task("high", today, priority = 1), task("odd three", today, priority = 3), task("medium", today, priority = 5),
                 task("tomorrow's", tomorrow),
             ),
-            today,
+            noon, utc,
         )
         assertEquals(listOf("Today", "Tomorrow"), groups.map { it.label })
         assertEquals(listOf("high", "odd three", "medium", "low", "a none", "b none"), groups[0].tasks.map { it.name })
@@ -83,7 +85,7 @@ class TaskListTest {
         val fri = LocalDate(2026, 9, 25)
         val week = groupTasks(
             listOf(task("a sunday", sun, priority = 5), task("z friday", fri, priority = 5), task("high sunday", sun, priority = 1)),
-            today,
+            noon, utc,
         ).single { it.label == "This week" }
         assertEquals(listOf("high sunday", "z friday", "a sunday"), week.tasks.map { it.name })
     }
@@ -97,7 +99,7 @@ class TaskListTest {
 
     @Test
     fun `an empty heading is not shown at all`() {
-        val groups = groupTasks(listOf(task("nothing")), today)
+        val groups = groupTasks(listOf(task("nothing")), noon, utc)
         assertEquals(listOf("No date"), groups.map { it.label })
     }
 
@@ -123,19 +125,19 @@ class TaskListTest {
         val none = task("none")
         val did = task("did", done = true)
 
-        assertTrue(late.inFilter(TaskFilter.OVERDUE, today))
-        assertFalse(now.inFilter(TaskFilter.OVERDUE, today), "today is not late yet")
+        assertTrue(late.inFilter(TaskFilter.OVERDUE, noon, utc))
+        assertFalse(now.inFilter(TaskFilter.OVERDUE, noon, utc), "today is not late yet")
         // Today means what is on the plate today, which includes what
         // should already have been done.
-        assertTrue(now.inFilter(TaskFilter.TODAY, today))
-        assertTrue(late.inFilter(TaskFilter.TODAY, today))
-        assertTrue(soon.inFilter(TaskFilter.WEEK, today))
-        assertFalse(far.inFilter(TaskFilter.WEEK, today))
-        assertTrue(none.inFilter(TaskFilter.UNDATED, today))
-        assertFalse(none.inFilter(TaskFilter.TODAY, today), "no date is not due today")
-        assertTrue(did.inFilter(TaskFilter.DONE, today))
-        assertFalse(did.inFilter(TaskFilter.OPEN, today))
-        assertTrue(listOf(late, now, did, none).all { it.inFilter(TaskFilter.ALL, today) })
+        assertTrue(now.inFilter(TaskFilter.TODAY, noon, utc))
+        assertTrue(late.inFilter(TaskFilter.TODAY, noon, utc))
+        assertTrue(soon.inFilter(TaskFilter.WEEK, noon, utc))
+        assertFalse(far.inFilter(TaskFilter.WEEK, noon, utc))
+        assertTrue(none.inFilter(TaskFilter.UNDATED, noon, utc))
+        assertFalse(none.inFilter(TaskFilter.TODAY, noon, utc), "no date is not due today")
+        assertTrue(did.inFilter(TaskFilter.DONE, noon, utc))
+        assertFalse(did.inFilter(TaskFilter.OPEN, noon, utc))
+        assertTrue(listOf(late, now, did, none).all { it.inFilter(TaskFilter.ALL, noon, utc) })
     }
 
     @Test

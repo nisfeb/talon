@@ -82,6 +82,8 @@ import io.nisfeb.talon.calendar.agendaHeading
 import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.tasksInRange
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.overdue
+import io.nisfeb.talon.calendar.dueIsDate
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -1384,8 +1386,8 @@ private fun CalendarPanel(
                 } else {
                     val calColors = calendars.associate { it.id to it.color }
                     due.forEach { t ->
-                        val dueDay = t.dueDate()
-                        val late = dueDay != null && dueDay < today
+                        val dueDay = t.dueDate(zone)
+                        val late = t.overdue(tick, zone)
                         Row(
                             Modifier.fillMaxWidth().combinedClickableWithSecondary(onClick = onOpen ?: {}, onLongClick = onLongPress).padding(start = 6.dp, end = 14.dp),
                             verticalAlignment = Alignment.CenterVertically,

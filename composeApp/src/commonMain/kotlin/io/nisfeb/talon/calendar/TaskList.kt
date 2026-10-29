@@ -1,6 +1,9 @@
 package io.nisfeb.talon.calendar
 
 import kotlinx.datetime.DayOfWeek
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.plus
@@ -26,16 +29,18 @@ enum class TaskFilter(val label: String) {
     ALL("All"),
 }
 
-/** Whether one task is what [filter] asks for, on [today]. */
-fun CalendarTask.inFilter(filter: TaskFilter, today: LocalDate): Boolean {
-    val due = dueDate()
+/** Whether one task is what [filter] asks for at [nowMs] in [zone]. */
+fun CalendarTask.inFilter(filter: TaskFilter, nowMs: Long, zone: TimeZone): Boolean {
+    val due = dueDate(zone)
+    val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+    val late = overdue(nowMs, zone)
     return when (filter) {
         TaskFilter.ALL -> true
         TaskFilter.DONE -> done
         TaskFilter.OPEN -> !done
-        TaskFilter.OVERDUE -> !done && due != null && due < today
-        TaskFilter.TODAY -> !done && due != null && due <= today
-        TaskFilter.WEEK -> !done && due != null && due <= endOfWeek(today)
+        TaskFilter.OVERDUE -> !done && late
+        TaskFilter.TODAY -> !done && (late || dueToday(nowMs, zone))
+        TaskFilter.WEEK -> !done && (late || (due != null && due <= endOfWeek(today)))
         TaskFilter.UNDATED -> !done && due == null
     }
 }
@@ -65,17 +70,20 @@ data class TaskGroup(val label: String, val tasks: List<CalendarTask>)
  * none last), then the soonest due, then by name: the calendar's own
  * page sorts them so, and the two should agree.
  */
-fun groupTasks(tasks: List<CalendarTask>, today: LocalDate): List<TaskGroup> {
+fun groupTasks(tasks: List<CalendarTask>, nowMs: Long, zone: TimeZone): List<TaskGroup> {
     val (finished, open) = tasks.partition { it.done }
+    val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
     val tomorrow = today.plus(1, DateTimeUnit.DAY)
-    fun of(pick: (LocalDate?) -> Boolean) =
-        open.filter { pick(it.dueDate()) }.sortedWith(compareBy({ it.priorityRank }, { it.dueMs ?: Long.MAX_VALUE }, { it.name.lowercase() }))
-    val overdue = of { it != null && it < today }
-    val now = of { it == today }
-    val next = of { it == tomorrow }
-    val week = of { it != null && it > tomorrow && it <= endOfWeek(today) }
-    val later = of { it != null && it > maxOf(tomorrow, endOfWeek(today)) }
-    val undated = of { it == null }
+    // A time gone by today is late, as orrery counts it; one still to come is today's.
+    val (late, onTime) = open.partition { it.overdue(nowMs, zone) }
+    fun of(from: List<CalendarTask>, pick: (LocalDate?) -> Boolean) =
+        from.filter { pick(it.dueDate(zone)) }.sortedWith(compareBy({ it.priorityRank }, { it.dueMs ?: Long.MAX_VALUE }, { it.name.lowercase() }))
+    val overdue = of(late) { true }
+    val now = of(onTime) { it == today }
+    val next = of(onTime) { it == tomorrow }
+    val week = of(onTime) { it != null && it > tomorrow && it <= endOfWeek(today) }
+    val later = of(onTime) { it != null && it > maxOf(tomorrow, endOfWeek(today)) }
+    val undated = of(onTime) { it == null }
     return buildList {
         if (overdue.isNotEmpty()) add(TaskGroup("Overdue", overdue))
         if (now.isNotEmpty()) add(TaskGroup("Today", now))

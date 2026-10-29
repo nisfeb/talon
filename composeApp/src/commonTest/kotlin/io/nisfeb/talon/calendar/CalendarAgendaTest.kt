@@ -61,7 +61,7 @@ class CalendarAgendaTest {
         assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.NEXT_3_HOURS, evening - 6 * h, utc).map { it.id }, "at 16:00 it does not")
         assertEquals(listOf("late", "today", "soon"), tasksInRange(ts, CalendarRange.NEXT_DAY, evening, utc).map { it.id })
         assertEquals(listOf("late", "today"), tasksInRange(ts, CalendarRange.NEXT_ONLY, evening, utc).map { it.id })
-        assertEquals(today, task("today", tomorrow - day).dueDate())
+        assertEquals(today, task("today", tomorrow - day).dueDate(utc))
     }
 
     @Test fun `next only at exactly utc midnight still means today`() {

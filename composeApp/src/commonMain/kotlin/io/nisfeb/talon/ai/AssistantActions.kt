@@ -14,6 +14,8 @@ import io.nisfeb.talon.calendar.bounds
 import io.nisfeb.talon.calendar.eventBody
 import io.nisfeb.talon.calendar.editAtBody
 import io.nisfeb.talon.calendar.dueDate
+import io.nisfeb.talon.calendar.overdue
+import io.nisfeb.talon.calendar.dueIsDate
 import io.nisfeb.talon.calendar.taskOrder
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.PartyLineHost
@@ -632,7 +634,14 @@ fun actionTools(a: AssistantActions): List<Tool> = buildList {
             // is opaque to the model and the user alike.
             val names = cal.calendars.value.associate { it.id to it.name.ifBlank { it.id } }
             if (all.isEmpty()) (if (withDone) "No tasks." else "No open tasks.")
-            else all.joinToString("\n") { t -> "task=${t.id} ${t.dueDate()?.let { "due $it " } ?: ""}${t.name}${if (t.done) " (done)" else ""} (calendar ${names[t.cal] ?: t.cal})" }
+            else all.joinToString("\n") { t ->
+                // A due with a time says it: orrery (version 130) gives some one.
+                val due = t.dueDate(a.zone())?.let { d ->
+                    val at = if (t.dueIsDate) "" else " " + Instant.fromEpochMilliseconds(t.dueMs!!).toLocalDateTime(a.zone()).time.toString().take(5)
+                    "due $d$at${if (!t.done && t.overdue(nowMs(), a.zone())) " (overdue)" else ""} "
+                }.orEmpty()
+                "task=${t.id} $due${t.name}${if (t.done) " (done)" else ""} (calendar ${names[t.cal] ?: t.cal})"
+            }
         })
         add(Tool(
             spec = ToolSpec(
@@ -911,7 +920,7 @@ internal fun describeRow(r: CalendarRow, zone: TimeZone, calNames: Map<String, S
 private suspend fun CalendarRepo.wrote(body: JsonObject, readBack: Boolean = true): String? {
     val since = nowMs()
     val w = writeEvent(body, readBack)
-    if (!w.ok) return "The calendar did not take it."
+    if (!w.ok) return w.why ?: "The calendar did not take it."
     // An add's refusal is recorded with the id "", having none of its own.
     val why = refusal((body["id"] as? JsonPrimitive)?.contentOrNull.orEmpty(), since, w.action) ?: return null
     // What the write put on show goes with it: the home page's today kept
