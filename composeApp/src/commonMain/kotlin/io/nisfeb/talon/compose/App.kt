@@ -2259,7 +2259,8 @@ fun App(
                 // render at full width without entering ChatPaneScaffold.
                 // Only DmList + chat-detail screens (chat, thread, notebook,
                 // gallery) participate in the list/detail split.
-                io.nisfeb.talon.ui.DrawerOverlay.Follow(drawerState.isOpen)
+                // Back over the open switcher shuts it, not the screen under it.
+                if (drawerState.isOpen) io.nisfeb.talon.ui.PlatformBackHandler { drawerScope.launch { drawerState.close() } }
                 androidx.compose.material3.ModalNavigationDrawer(
                     drawerState = drawerState,
                     // Desktop opens the ship switcher only via the Talon

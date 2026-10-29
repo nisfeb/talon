@@ -24,6 +24,7 @@ zxingCore = "3.5.4"
 zxingAndroidEmbedded = "4.3.0"
 mediapipeTasksText = "0.10.35"
 composeMultiplatform = "1.11.1"  # 1.12.1 throws measuring a popup it disposed mid-measure (AppShellTest)
+navigationEvent = "1.1.0"  # what composeMultiplatform's own back gesture runs on (androidx 1.1.1); move with it
 junit = "4.13.2"
 djl = "0.38.0"
 webrtcJava = "0.17.0"  # 0.18 and 0.19 leave the audio module unable to record after a call closes (set, init, start and stop all fail; DesktopAudioDevicesTest), against a 0.3 MB per call leak here (2026-10-09)
@@ -117,6 +118,7 @@ ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serializatio
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
+navigationevent-compose = { group = "org.jetbrains.androidx.navigationevent", name = "navigationevent-compose", version.ref = "navigationEvent" }
 ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
 ktor-client-websockets = { group = "io.ktor", name = "ktor-client-websockets", version.ref = "ktor" }
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqliteJdbc" }

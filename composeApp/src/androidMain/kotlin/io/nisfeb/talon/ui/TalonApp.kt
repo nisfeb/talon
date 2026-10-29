@@ -4,7 +4,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import io.nisfeb.talon.data.notifyLevelOf
 import io.nisfeb.talon.ai.triagePrivateSlot
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1681,14 +1680,14 @@ fun TalonApp(
         // all, with no handler of its own for any: one each outranked the
         // newest (Contacts, then Mail from a profile: back closed the
         // Contacts hidden under Mail).
-        BackHandler(enabled = sections.anyOpen) { sections.closeLast() }
+        PlatformBackHandler(enabled = sections.anyOpen) { sections.closeLast() }
         // The sections are drawn over the chat and all that goes with it,
         // whose handlers come later and so would win: they wait while one
         // is up, or a section opened from a chat took two backs and lost
         // the chat. Search and New message are drawn under the chat they
         // open, so the chat's back still comes before theirs.
         val sectionOnTop = sections.anyOpenExcept(searchSection, newDmSection)
-        BackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
+        PlatformBackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
             notebookComposeOpen = false
             notebookEditPostId = null
         }
@@ -1714,31 +1713,31 @@ fun TalonApp(
                 }
             }
         }
-        BackHandler(enabled = openNotebookPostId != null && !sectionOnTop) { openNotebookPostId = null }
-        BackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
-        BackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
-        BackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
+        PlatformBackHandler(enabled = openNotebookPostId != null && !sectionOnTop) { openNotebookPostId = null }
+        PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
+        PlatformBackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
+        PlatformBackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
         // Phase 3 right-pane back-stack — drilldown above group-info so
         // back from a media list returns to the group-info pane, not
         // straight to the chat.
-        BackHandler(enabled = groupInfoDrilldown != null && !sectionOnTop) {
+        PlatformBackHandler(enabled = groupInfoDrilldown != null && !sectionOnTop) {
             closeDrilldownAction()
         }
-        BackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null && !sectionOnTop) {
+        PlatformBackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null && !sectionOnTop) {
             closeRightPaneAction()
         }
-        BackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
+        PlatformBackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
         // After the chat handler: an open note is *inside* a notes/
         // channel, so both are enabled and the later registration has to
         // be this one or back would close the whole notebook.
-        BackHandler(enabled = openNoteId != null && !sectionOnTop) { openNoteId = null }
+        PlatformBackHandler(enabled = openNoteId != null && !sectionOnTop) { openNoteId = null }
         // The share picker is drawn over the chat: its back, after the
         // chat's, cancels the share and leaves the chat where it was.
-        BackHandler(enabled = pendingShare != null && !sectionOnTop) { onShareConsumed() }
+        PlatformBackHandler(enabled = pendingShare != null && !sectionOnTop) { onShareConsumed() }
         // Registered last so it wins over the chat handler when an
         // image is opened from inside a chat.
-        BackHandler(enabled = viewerImageList != null) { viewerImageList = null }
-        BackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
+        PlatformBackHandler(enabled = viewerImageList != null) { viewerImageList = null }
+        PlatformBackHandler(enabled = viewerImageUrl != null && viewerImageList == null) {
             viewerImageUrl = null
         }
 

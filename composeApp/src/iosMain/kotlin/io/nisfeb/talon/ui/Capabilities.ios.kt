@@ -58,7 +58,7 @@ actual val isPartyVideoSupported: Boolean = true
 actual val isScreenShareSupported: Boolean = false
 actual val isCameraSwitchSupported: Boolean = true
 
-// Supplied by MainViewController's edge strip -> IosBackDispatcher.
+// Compose's own left-edge pan, through PlatformBackHandler's navigation events.
 actual val isEdgeSwipeBackSupported: Boolean = true
 
 // Apple Color Emoji is the system default; the span was a no-op

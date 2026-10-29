@@ -27,7 +27,7 @@ package io.nisfeb.talon.ui
  *  - isPartyVideoSupported — A, D, i: PeerLink publishes and renders cameras on all three.
  *  - isCameraSwitchSupported — A, i; D: a webcam has one lens and no switch.
  *  - isScreenShareSupported — D (webrtc-java captures a screen or window). A: port pending (MediaProjection behind a foreground service). i: port pending (a ReplayKit broadcast extension).
- *  - isEdgeSwipeBackSupported — i (Compose gets none of UIKit's gesture); A: the system back owns the edge; D: no touch edge.
+ *  - isEdgeSwipeBackSupported — i (Compose's own left-edge pan is the back gesture); A: the system back owns the edge; D: no touch edge.
  *  - isDrawerNavigation — A, i (no room for a rail); D: the permanent rail is already one click from anywhere.
  *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
  *  - needsEmojiFontSpans — D (a bundled emoji family does the work); A/i: colour emoji render in the default family.
@@ -303,10 +303,10 @@ expect val isCameraSwitchSupported: Boolean
  * A swipe in from the left edge navigates *back* rather than opening
  * the ship switcher.
  *
- * True on iOS: a Compose view controller gets none of UIKit's
- * navigation gesture, so the app supplies it — and going back is far
- * more frequent than switching ships, which keeps its tap affordance
- * on the Talon logo. False on Android, where the system back gesture
+ * True on iOS: Compose's view controller turns a pan in from the left
+ * edge into back (PlatformBackHandler) — and going back is far more
+ * frequent than switching ships, which keeps its tap affordance on the
+ * Talon logo. False on Android, where the system back gesture
  * already owns the edge and the drawer can have the in-app swipe;
  * false on desktop, which has no touch edge at all.
  */
