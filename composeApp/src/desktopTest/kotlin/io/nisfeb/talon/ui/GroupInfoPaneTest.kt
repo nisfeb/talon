@@ -7,6 +7,9 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
@@ -264,6 +267,29 @@ class GroupInfoPaneTest {
         onNodeWithText("Copy").performClick()
         assertEquals(listOf("copied /1/group/$flag"), opened)
         showing("Copied")
+    }
+
+    /**
+     * A user could not tell at first sight what in the pane could be
+     * pressed: rows of plain text, and counts with an emoji. Each control
+     * stands on a raised surface now, its colour just inside its edge not
+     * the pane's just outside it.
+     */
+    @Test
+    fun `everything that can be pressed stands out from the pane`() = pane(media = listOf("Photo")) { _, _ ->
+        showing("Group members (3)")
+        val controls = listOf("Same as the group", "Mentions only", "Group members (3)", "Invite someone to the group", "Leave group", "📷")
+        for (label in controls) {
+            onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(androidx.compose.ui.test.hasText(label, substring = true))
+            waitForIdle()
+            val node = onAllNodesWithText(label, substring = true)[0]
+            val b = node.fetchSemanticsNode().boundsInRoot
+            val shot = onRoot().captureToImage().toPixelMap()
+            val y = b.center.y.toInt()
+            val inside = shot[b.left.toInt() + 3, y]
+            val outside = shot[b.left.toInt() - 3, y]
+            assertTrue(inside != outside, "$label: $inside inside, $outside beside it")
+        }
     }
 
     @Test

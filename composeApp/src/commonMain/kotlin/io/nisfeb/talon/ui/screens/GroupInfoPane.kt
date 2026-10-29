@@ -1,7 +1,7 @@
 package io.nisfeb.talon.ui.screens
 
 import io.nisfeb.talon.ui.submitOnEnter
-import androidx.compose.foundation.clickable
+import io.nisfeb.talon.ui.pressable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -317,8 +317,9 @@ fun GroupInfoPane(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onOpenMembers)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp)
+                        .pressable(onClick = onOpenMembers)
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(TalonIcons.People, contentDescription = null)
@@ -332,7 +333,6 @@ fun GroupInfoPane(
                         contentDescription = "Open members",
                     )
                 }
-                HorizontalDivider()
             }
             // Any member may try to invite. The group's host decides:
             // a group that lets members invite accepts the poke, one
@@ -341,8 +341,9 @@ fun GroupInfoPane(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = { inviteOpen = true })
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 8.dp)
+                        .pressable(onClick = { inviteOpen = true })
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(TalonIcons.PersonAdd, contentDescription = null)
@@ -389,8 +390,9 @@ fun GroupInfoPane(
                         .fillMaxWidth()
                         // Destructive — confirm via dialog rather than
                         // firing on a single tap of a list row.
-                        .clickable { pendingLeave = true }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(8.dp)
+                        .pressable { pendingLeave = true }
+                        .padding(horizontal = 8.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -491,7 +493,7 @@ private fun StatCell(
         modifier = Modifier
             .size(width = 64.dp, height = 64.dp)
             .padding(2.dp)
-            .clickable(onClick = onClick),
+            .pressable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -503,8 +505,9 @@ private fun StatCell(
 
 /**
  * One row in the notification-level picker. Compact text + checkmark
- * affordance — matches the in-pane style and stays narrow enough for
- * the 360-dp right column on desktop.
+ * on a raised surface, so it reads as a choice to press — matches the
+ * in-pane style and stays narrow enough for the 360-dp right column on
+ * desktop.
  */
 @Composable
 private fun NotifyLevelOption(
@@ -516,8 +519,9 @@ private fun NotifyLevelOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 8.dp),
+            .padding(vertical = 2.dp)
+            .pressable(enabled = enabled, selected = selected, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
