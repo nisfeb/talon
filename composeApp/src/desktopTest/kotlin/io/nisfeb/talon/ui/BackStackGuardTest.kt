@@ -62,4 +62,32 @@ class BackStackGuardTest {
         val app = read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt")
         assertTrue("if (drawerState.isOpen) io.nisfeb.talon.ui.PlatformBackHandler { drawerScope.launch { drawerState.close() } }" in app)
     }
+
+    // The last enabled handler wins, so one drawn over another must come
+    // after it. Android's Info and media-list handlers came before the
+    // chat's: back over Info closed the chat hidden under it, and the
+    // next went two levels up (sneagan, 2026-10-29). App.kt had them in
+    // order; both shells are held to it here.
+    @Test
+    fun `back over Info and its media lists closes them, not the chat under them`() {
+        fun assertAfter(source: String, shell: String, over: String, under: String) {
+            val o = source.indexOf(over)
+            val u = source.indexOf(under)
+            assertTrue(o >= 0 && u >= 0, "$shell: a handler is missing: ${if (o < 0) over else under}")
+            assertTrue(o > u, "$shell: \"$over\" is registered before \"$under\", which it is drawn over")
+        }
+        val shells = mapOf(
+            "TalonApp" to (read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt") to
+                "PlatformBackHandler(enabled = openThread == null && openWhom != null"),
+            "App" to (read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt") to
+                "PlatformBackHandler(enabled = openChat != null && openThreadParent == null)"),
+        )
+        for ((shell, pair) in shells) {
+            val (source, chat) = pair
+            for (over in listOf("PlatformBackHandler(enabled = groupInfoDrilldown != null", "PlatformBackHandler(enabled = groupInfoOpenFor != null")) {
+                assertAfter(source, shell, over, chat)
+                assertAfter(source, shell, over, "PlatformBackHandler(enabled = openNoteId != null")
+            }
+        }
+    }
 }

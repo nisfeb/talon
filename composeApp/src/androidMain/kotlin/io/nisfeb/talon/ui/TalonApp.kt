@@ -1729,20 +1729,22 @@ fun TalonApp(
         PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
         PlatformBackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
         PlatformBackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
-        // Phase 3 right-pane back-stack — drilldown above group-info so
-        // back from a media list returns to the group-info pane, not
-        // straight to the chat.
+        PlatformBackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
+        // After the chat handler: an open note is *inside* a notes/
+        // channel, so both are enabled and the later registration has to
+        // be this one or back would close the whole notebook.
+        PlatformBackHandler(enabled = openNoteId != null && !sectionOnTop) { openNoteId = null }
+        // Group info and its media lists are drawn over the chat and its
+        // note, so their back comes after them and wins. Before them, back
+        // over Info closed the chat hidden under it, and the next back
+        // went two levels up (sneagan, 2026-10-29). A media list's back
+        // returns to Info; the two are never both enabled.
         PlatformBackHandler(enabled = groupInfoDrilldown != null && !sectionOnTop) {
             closeDrilldownAction()
         }
         PlatformBackHandler(enabled = groupInfoOpenFor != null && groupInfoDrilldown == null && !sectionOnTop) {
             closeRightPaneAction()
         }
-        PlatformBackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
-        // After the chat handler: an open note is *inside* a notes/
-        // channel, so both are enabled and the later registration has to
-        // be this one or back would close the whole notebook.
-        PlatformBackHandler(enabled = openNoteId != null && !sectionOnTop) { openNoteId = null }
         // The share picker is drawn over the chat: its back, after the
         // chat's, cancels the share and leaves the chat where it was.
         PlatformBackHandler(enabled = pendingShare != null && !sectionOnTop) { onShareConsumed() }
