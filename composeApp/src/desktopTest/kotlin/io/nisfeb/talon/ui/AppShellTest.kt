@@ -2030,6 +2030,7 @@ class AppShellTest {
         val stockApps = listOf("lattice", "auspex", "calendar", "armillary", "orrery")
         val missing = setOf("armillary", "orrery")
         app(defaultApps = true, setup = {
+            scries["groups/v2/groups"] = "{}"
             val asked = { n: String -> api.any { it == """POST /apps/grubbery/desks/sync {"name":"$n"}""" } }
             answerApi = { m, p, _ ->
                 when {
@@ -2058,7 +2059,7 @@ class AppShellTest {
     @Test
     fun `a ship without Grubbery has it installed from ricsul on the way in`() = quickDefaultApps {
         // eyre's 404 for every Grubbery path: the desk is not there.
-        app(defaultApps = true) { ship ->
+        app(defaultApps = true, setup = { scries["groups/v2/groups"] = "{}" }) { ship ->
             waitUntil(timeoutMillis = 20_000) { ship.pokesTo("hood").isNotEmpty() }
             val install = ship.pokesTo("hood").single()
             assertEquals("kiln-install", install.mark)
@@ -2068,4 +2069,25 @@ class AppShellTest {
             )
         }
     }
+
+    @Test
+    fun `a ship without Groups has it installed on the way in, and its chats are read once it is there`() = quickDefaultApps {
+        app(defaultApps = true, setup = {
+            answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") """[{"name":"lattice","synced":true}]""" else null }
+            // %groups answers once the install has come.
+            answerScry = { p -> if (p == "groups/v2/groups" && pokesTo("hood").isNotEmpty()) "{}" else null }
+        }) { ship ->
+            waitUntil(timeoutMillis = 20_000) { ship.pokesTo("hood").isNotEmpty() }
+            val install = ship.pokesTo("hood").first()
+            assertEquals("kiln-install", install.mark)
+            assertEquals(
+                listOf("groups", "~nisfeb", "groups"),
+                listOf("local", "ship", "desk").map { install.json.jsonObject[it]!!.jsonPrimitive.content },
+            )
+            val streams = ship.streamsOpened.size
+            // The chats it had nothing to read from before: a new channel reads them.
+            waitUntil(timeoutMillis = 20_000) { ship.streamsOpened.size > streams }
+        }
+    }
 }
+

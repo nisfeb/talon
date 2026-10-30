@@ -146,7 +146,7 @@ class TlonChatRepo(
      */
     val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
         io.nisfeb.talon.notify.NotificationHealth(),
-    /** Add Grubbery and its stock apps where the ship lacks them ([DefaultApps]). The apps pass true; tests mostly do not. */
+    /** Add %groups, Grubbery and its stock apps where the ship lacks them ([DefaultApps]). The apps pass true; tests mostly do not. */
     private val installDefaultApps: Boolean = false,
 ) {
 
@@ -494,8 +494,13 @@ class TlonChatRepo(
             delay(DefaultApps.afterStartMs)
             val h = http ?: return@launch
             val url = baseUrl ?: return@launch
-            val asked = DefaultApps.ensure(h, url, poke = { app, mark, body -> runCatching { pokeRaw(app, mark, body) }.isSuccess })
-            if (asked.isNotEmpty()) Log.i(TAG, "asked Grubbery for ${asked.joinToString()}")
+            val asked = DefaultApps.ensure(
+                h, url,
+                poke = { app, mark, body -> runCatching { pokeRaw(app, mark, body) }.isSuccess },
+                // Chat read nothing without it: read it all again now.
+                onGroups = { forceReconnect() },
+            )
+            if (asked.isNotEmpty()) Log.i(TAG, "added to the ship: ${asked.joinToString()}")
         }
     }
 

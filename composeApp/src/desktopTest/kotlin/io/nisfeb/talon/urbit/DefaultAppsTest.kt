@@ -17,7 +17,8 @@ import kotlin.test.assertTrue
  * `(jstr jon 'name')`; GET /desks/stock is `[{name, synced, …}]`.
  */
 class DefaultAppsTest {
-    private val ship = FakeShip("~zod")
+    // %groups is there unless a test takes it away.
+    private val ship = FakeShip("~zod").apply { scries["groups/v2/groups"] = "{}" }
     private val url = "https://ship.test"
     private val pokes = mutableListOf<FakeShip.Poke>()
     private var takePoke = true
@@ -39,12 +40,16 @@ class DefaultAppsTest {
 
     private val lacksTwo = stock("lattice" to true, "auspex" to true, "calendar" to true, "armillary" to false, "orrery" to false)
 
+    private var reread = 0
+
     private fun ensure(): List<String> = runBlocking {
         DefaultApps.ensure(ship.http, url, poke = { app, mark, body ->
             pokes += FakeShip.Poke(app, mark, body, "~zod")
             takePoke
-        })
+        }, onGroups = { reread++ })
     }
+
+    private val everyApp = stock("lattice" to true, "armillary" to true, "orrery" to true)
 
     private fun syncs() = ship.api.filter { it.startsWith("POST /apps/grubbery/desks/sync ") }
 
@@ -179,5 +184,68 @@ class DefaultAppsTest {
         }
         ensure()
         assertEquals(before, DefaultApps.asked.value)
+    }
+
+    @Test
+    fun `no Groups installs it from nisfeb, and chat is read again once it answers`() {
+        ship.scries.remove("groups/v2/groups")
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        val install = { pokes.firstOrNull { it.mark == "kiln-install" } }
+        ship.answerScry = { p -> if (p == "groups/v2/groups" && install() != null) "{}" else null }
+        assertEquals(listOf("groups"), ensure())
+        val o = install()!!.json.jsonObject
+        assertEquals("hood", install()!!.app)
+        assertEquals(listOf("groups", "~nisfeb", "groups"), listOf("local", "ship", "desk").map { o[it]!!.jsonPrimitive.content })
+        assertEquals(1, reread, "the chats it could not read before")
+        assertTrue(pokes.none { it.mark == "kiln-revive" }, "one that comes at once is not revived: only halfway through a wait")
+    }
+
+    @Test
+    fun `a Groups the owner uninstalled is revived halfway through the wait`() {
+        ship.scries.remove("groups/v2/groups")
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        // A suspended desk: installing it again does not start it; reviving does.
+        ship.answerScry = { p -> if (p == "groups/v2/groups" && pokes.any { it.mark == "kiln-revive" }) "{}" else null }
+        assertEquals(listOf("groups"), ensure())
+        val revive = pokes.single { it.mark == "kiln-revive" }
+        assertEquals("hood", revive.app)
+        assertEquals("groups", revive.json.jsonPrimitive.content)
+        assertEquals(1, reread)
+    }
+
+    @Test
+    fun `a Groups that never comes is not read for`() {
+        ship.scries.remove("groups/v2/groups")
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        assertEquals(emptyList(), ensure())
+        assertEquals(listOf("kiln-install", "kiln-revive"), pokes.map { it.mark }, "installed, revived once, no more")
+        assertEquals(0, reread)
+    }
+
+    @Test
+    fun `Groups is put back every time it is missing, not once`() {
+        ship.scries.remove("groups/v2/groups")
+        DefaultApps.waitMs = 100
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        ensure()
+        ensure()
+        assertEquals(2, pokes.count { it.mark == "kiln-install" })
+    }
+
+    @Test
+    fun `a Groups the ship cannot say about is left alone`() {
+        ship.scries.remove("groups/v2/groups")
+        ship.failScry = { it == "groups/v2/groups" }
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        assertEquals(emptyList(), ensure())
+        assertTrue(pokes.isEmpty(), "a 500 is not a ship without Groups")
+    }
+
+    @Test
+    fun `a ship with Groups is not asked to install it`() {
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") everyApp else null }
+        assertEquals(emptyList(), ensure())
+        assertTrue(pokes.isEmpty())
+        assertEquals(0, reread)
     }
 }

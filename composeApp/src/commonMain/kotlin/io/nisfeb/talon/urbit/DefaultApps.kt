@@ -8,6 +8,8 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -32,6 +35,8 @@ import kotlinx.serialization.json.put
  * Only what is missing, by name. The shell's "sync all" points a desk that
  * follows somewhere else (~nisfeb's own armillary) back at the published
  * one, and the shell's list counts a desk with any source as there.
+ *
+ * And %groups, which chat itself runs on, whenever it is plainly missing.
  */
 object DefaultApps {
     private val _asked = MutableStateFlow(0)
@@ -40,16 +45,56 @@ object DefaultApps {
     val asked: StateFlow<Int> = _asked.asStateFlow()
 
     /**
-     * Ask [shipUrl] for what it is missing; the names asked for. [http]
-     * is the session's, which carries the owner's cookie. Anything short
-     * of a clear answer (signed out, a 5xx, no answer) asks for nothing.
+     * Ask [shipUrl] for what it is missing; the names asked for, "groups"
+     * once it answers. [http] is the session's, which carries the owner's
+     * cookie. Anything short of a clear answer (signed out, a 5xx, no
+     * answer) asks for nothing. [onGroups] once %groups has come.
      */
     suspend fun ensure(
         http: HttpClient,
         shipUrl: String,
         poke: suspend (String, String, JsonElement) -> Boolean,
+        onGroups: suspend () -> Unit = {},
         pollMs: Long = this.pollMs,
         waitMs: Long = this.waitMs,
+    ): List<String> = coroutineScope {
+        val groups = async { ensureGroups(http, shipUrl, poke, pollMs, waitMs).also { if (it) onGroups() } }
+        val apps = grubberyApps(http, shipUrl, poke, pollMs, waitMs)
+        (if (groups.await()) listOf(GroupsInstall.DESK) else emptyList()) + apps
+    }
+
+    /**
+     * %groups where the ship plainly has none, every time: without it
+     * there are no chats at all. A desk the owner uninstalled stays
+     * suspended, and installing it again does not start it, so halfway
+     * through the wait it is revived, as %trunk is. True once it answers.
+     */
+    internal suspend fun ensureGroups(
+        http: HttpClient,
+        shipUrl: String,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+        pollMs: Long,
+        waitMs: Long,
+    ): Boolean {
+        if (GroupsInstall.installedOrUnknown(http, shipUrl) != false) return false
+        val (app, mark, body) = LatticeInstall.installPoke(GroupsInstall.DESK, GroupsInstall.PUBLISHER)
+        if (!poke(app, mark, body)) return false
+        var revived = false
+        return waitFor(pollMs, waitMs) { waited ->
+            if (!revived && waited >= waitMs / 2) {
+                revived = true
+                poke("hood", "kiln-revive", JsonPrimitive(GroupsInstall.DESK))
+            }
+            GroupsInstall.isInstalled(http, shipUrl).takeIf { it }
+        } == true
+    }
+
+    private suspend fun grubberyApps(
+        http: HttpClient,
+        shipUrl: String,
+        poke: suspend (String, String, JsonElement) -> Boolean,
+        pollMs: Long,
+        waitMs: Long,
     ): List<String> {
         var stock = stockOf(http, shipUrl)
         if (stock is Stock.Absent) {
@@ -128,12 +173,13 @@ object DefaultApps {
         false
     }
 
-    private suspend fun <T : Any> waitFor(pollMs: Long, waitMs: Long, read: suspend () -> T?): T? {
+    /** [read] every [pollMs], told how long it has waited, until it has something or [waitMs] is up. */
+    private suspend fun <T : Any> waitFor(pollMs: Long, waitMs: Long, read: suspend (waited: Long) -> T?): T? {
         var waited = 0L
         while (waited < waitMs) {
             delay(pollMs)
             waited += pollMs
-            read()?.let { return it }
+            read(waited)?.let { return it }
         }
         return null
     }
