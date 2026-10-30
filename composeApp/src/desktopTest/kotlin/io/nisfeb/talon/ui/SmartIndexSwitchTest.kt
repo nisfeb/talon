@@ -81,6 +81,7 @@ class SmartIndexSwitchTest {
                         App(
                             http = ship.http,
                             sessionStore = ship.session,
+                            installDefaultApps = false,
                             aiSettings = switch,
                             createDb = { key ->
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)

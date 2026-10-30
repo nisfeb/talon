@@ -86,6 +86,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
 
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
+    /** An API answer that is not JSON: its status and content type, as a 403, a 502 or eyre's login page. Before [answerApi]. */
+    @Volatile var answerApiOther: (method: String, path: String) -> Pair<HttpStatusCode, String>? = { _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
     /** How long a scry waits before it is answered: a busy ship, by path. */
@@ -423,10 +425,14 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                     }
                 }
             }
-            // An app's own HTTP API (%notes' v1, orrery's reads, …): recorded, and answered by [answerApi].
-            req.method != HttpMethod.Get || path.startsWith("/notes/") || path.startsWith("/apps/orrery/") -> {
+            // An app's own HTTP API (%notes' v1, orrery's reads, Grubbery's shell, …): recorded, and answered by [answerApi].
+            req.method != HttpMethod.Get || path.startsWith("/notes/") || path.startsWith("/apps/orrery/") ||
+                path.startsWith("/apps/grubbery/") -> {
                 val body = req.body.toByteArray().decodeToString()
                 api += "${req.method.value} $path $body"
+                answerApiOther(req.method.value, path)?.let { (status, type) ->
+                    return@MockEngine respond("<html></html>", status, headersOf(HttpHeaders.ContentType, type))
+                }
                 answerApi(req.method.value, path, body)
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }
                     ?: respond("", HttpStatusCode.NotFound)

@@ -137,6 +137,8 @@ import io.nisfeb.talon.ai.hasModelFor
 fun App(
     http: HttpClient,
     sessionStore: SessionStore,
+    /** Add %groups, Grubbery and its stock apps where the ship lacks them, once a sign-in. Off in tests of other things. */
+    installDefaultApps: Boolean = true,
     /** Deletes a ship's cached data when somebody asks for it to go.
      *  Noop where the host stores nothing per ship. */
     shipDataEraser: io.nisfeb.talon.data.ShipDataEraser =
@@ -801,6 +803,7 @@ fun App(
                 db = db,
                 settingsSync = settingsSync,
                 notificationHealth = notificationHealth,
+                installDefaultApps = installDefaultApps,
             ).also { r -> r.readListener = { whom -> notifier.clear(whom) } }
         }
         // Let user-shaped preferences ride %settings to this user's

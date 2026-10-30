@@ -557,6 +557,7 @@ class TalonApplication : Application() {
             db = db,
             settingsSync = settingsSync,
             notificationHealth = notificationHealth,
+            installDefaultApps = true,
         ).also { r ->
             // Here, for the app's lifetime: the screens come and go, and a
             // chat read elsewhere should leave no notification behind.

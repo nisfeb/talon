@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,7 +86,10 @@ fun PermitsBanner(http: HttpClient?, shipUrl: String?, inApp: Boolean = isUrbWeb
     var reviewed by remember(shipUrl) { mutableStateOf(0) }
     val focused = LocalWindowInfo.current
     val review = rememberPermitsPage(shipUrl, inApp) { checkedAt = 0L; reviewed++ }
-    LaunchedEffect(http, shipUrl, reviewed) {
+    // Apps Talon just added ask for approvals of their own: read at once.
+    val appsAdded by io.nisfeb.talon.urbit.DefaultApps.asked.collectAsState()
+    LaunchedEffect(http, shipUrl, reviewed, appsAdded) {
+        if (appsAdded > 0) checkedAt = 0L
         suspend fun check() {
             checkedAt = nowMs()
             fetchPendingPermits(http, shipUrl)?.let { pending = it.size }
