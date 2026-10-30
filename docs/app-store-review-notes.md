@@ -10,10 +10,10 @@ DEMO ACCOUNT
 A demo ship is provided for review. Its Ship URL and access code are in the Sign-In Information fields. It holds direct messages and group channels with threads, reactions and media.
 
 ACCOUNT CREATION / DELETION (Guideline 5.1.1(v))
-Talon creates no accounts. Sign out (Settings) removes all local credentials and cache. The ship belongs to the user independently of Talon, as a mailbox does. The one account involved is optional: adding the Armillary AI provider opens a credit account for the user's ship at a vendor ship. The user deletes it in the app (Settings > AI > the Armillary card > More > Delete account); the vendor then deletes the account, its ledger, checkouts and keys, and cancels any subscription.
+Talon creates no accounts. Sign out (Settings) removes all local credentials and cache. The one account involved is optional: adding the Armillary AI provider opens a credit account for the user's ship at a vendor ship. The user deletes it in the app (Settings > AI > the Armillary card > More > Delete account); the vendor then deletes the account, its ledger, checkouts and keys, and cancels any subscription.
 
 USER-GENERATED CONTENT (Guideline 1.2)
-All content lives on users' own servers. There is no public feed, and the developer hosts nothing. Users can report any message in a group channel (long-press, Report, confirm), and the report goes to the group's admins. Admins can delete messages, group hosts can kick and ban members, and users can block ships. Groups are private and invitation-based, like a self-hosted IRC or Matrix server.
+All content lives on users' own servers. There is no public feed, and the developer hosts nothing. Users can report any message in a group channel (long-press, Report, confirm), and the report goes to the group's admins. Admins can delete messages, group hosts can kick and ban members, and users can block ships. Groups are private and invitation-based, like a self-hosted Matrix server.
 
 ENCRYPTION
 Standard HTTPS/TLS only. ITSAppUsesNonExemptEncryption is false.
@@ -25,7 +25,7 @@ OPTIONAL AI FEATURES
 Inert until the user's ship has Armillary credit. Paying turns the features on, and the top-up sheet says what they send. Each has its own switch to turn it off. Every call asks the model provider for endpoints that keep nothing (zero data retention).
 
 APPS ON THE USER'S SHIP
-Armillary and its Grubbery shell are apps on the user's own ship, not code in Talon. Where the ship lacks them, Settings > Apps adds them at the user's tap. The owner approves what Armillary may reach.
+Chat runs on the Groups app and the AI on Armillary in the Grubbery shell, apps on the user's own ship, not code in Talon. Where the ship lacks one, Talon has the ship add it at sign-in, as it does for its calling app. The owner approves what each Grubbery app may reach before it runs.
 
 ARMILLARY AI CREDIT (Guidelines 3.1.1, 3.1.1(a), 3.1.3(b))
 Settings > AI. Credit is sold by the Urbit vendor ship the user chooses (the default, ~nisfeb, is run by the developer) through the vendor's web checkout (Stripe or BTCPay Server), not In-App Purchase. The Top up and Subscribe buttons, the card introducing Armillary, and every line that suggests buying appear only when the App Store storefront is the United States (StoreKit storefront countryCode "USA"). Elsewhere they are hidden and the app names no other place to pay.

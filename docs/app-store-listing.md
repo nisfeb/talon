@@ -1,6 +1,6 @@
-# App Store listing, version 1.8.0
+# App Store listing, version 1.8.34
 
-The description and What's New sent to App Store Connect for version 1.8.0 (en-US), through nomac's set_metadata `fields`. The review notes are in app-store-review-notes.md. What's New covers everything since the live 1.7.9.
+The description and What's New sent to App Store Connect for version 1.8.34 (en-US), through nomac's update_store (a PATCH naming only these fields). The review notes are in app-store-review-notes.md. What's New covers everything since the live 1.7.9.
 
 ## Description
 
@@ -42,6 +42,7 @@ Talon requires an Urbit ship to sign in. New to Urbit? Learn more and get a ship
 New: Orrery, an optional personal assistant that runs on your ship.
 
 • Simpler AI: Armillary on your ship picks the models
+• The apps Talon needs are added to your ship at sign-in
 • Disappearing messages for group hosts
 • Turn a message into a calendar event or task
 • Reply to and select text in a message from its menu
