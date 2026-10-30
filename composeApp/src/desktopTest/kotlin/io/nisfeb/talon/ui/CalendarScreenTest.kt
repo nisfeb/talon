@@ -123,6 +123,8 @@ class CalendarScreenTest {
 
     private fun calendar(
         pushTag: String? = null,
+        /** What shows once the screen is up: today's Dentist, unless [pushTag] opens another day. */
+        ready: String = "Dentist",
         /** The app's own link handler, as the shells provide one; the platform's where null. */
         links: androidx.compose.ui.platform.UriHandler? = null,
         block: ComposeUiTest.(CalendarRepo) -> Unit,
@@ -141,7 +143,7 @@ class CalendarScreenTest {
                         }
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Dentist", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(ready, substring = true).fetchSemanticsNodes().isNotEmpty() }
                 block(repo)
             }
         } finally {
@@ -902,7 +904,9 @@ class CalendarScreenTest {
             val today = java.time.LocalDate.now()
             val l = today.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
             moreRows = """,{"id":"a1","cal":"default","cat":"allday","all":true,"meta":{"name":"Fair"},"l":$l,"r":${l + 86_400_000L}}"""
-            calendar(pushTag = "cal-a1-0") {
+            // Not Dentist: that is today where the machine is, and from 8 pm
+            // in New York UTC is already tomorrow (CI, 2026-10-30 00:26 UTC).
+            calendar(pushTag = "cal-a1-0", ready = "Fair") {
                 waitUntil(timeoutMillis = 15_000) { onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty() }
                 assertTrue(shows("Fair"))
                 assertTrue(!shows(header(today.minusDays(1))), "not the day before")
