@@ -67,6 +67,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -167,7 +168,30 @@ class TlonChatRepo(
      */
     val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     @Volatile private var started = false
-    @Volatile private var channel: UrbitChannel? = null
+    private val channelNow = MutableStateFlow<UrbitChannel?>(null)
+    private var channel: UrbitChannel?
+        get() = channelNow.value
+        set(v) { channelNow.value = v }
+
+    /** How long a write waits for a channel being opened; see [liveChannel]. */
+    internal var channelWaitMs = 10_000L
+
+    /**
+     * The channel to write on. While the session starts there is none
+     * for a moment, and the screens are up before it: an action then (a
+     * contact added, a call's recording notice) failed at once as "slow
+     * or out of reach" with the ship fine. A running repo waits for its
+     * channel, up to [channelWaitMs]; a stopped one says so at once.
+     */
+    private suspend fun liveChannel(): UrbitChannel {
+        channel?.let { return it }
+        if (!started) error("not connected")
+        return kotlinx.coroutines.withTimeoutOrNull(channelWaitMs) { channelNow.filterNotNull().first() }
+            ?: error("not connected")
+    }
+
+    /** Running, as [start] makes it, but with no session: a channel comes from [attachForTest] when the test says. */
+    internal fun startedForTest() { started = true }
     @Volatile private var http: HttpClient? = null
     @Volatile private var baseUrl: String? = null
     @Volatile private var ourPatp: String = ""
@@ -1169,7 +1193,7 @@ class TlonChatRepo(
     }
 
     suspend fun trunkWire(): Int {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         return runCatching {
             io.nisfeb.talon.call.TrunkWire.parseWireVersion(ch.scry(io.nisfeb.talon.call.TrunkWire.AGENT, "/version"))
         }.getOrDefault(0)
@@ -1180,7 +1204,7 @@ class TlonChatRepo(
         mark: String,
         payload: kotlinx.serialization.json.JsonElement,
     ): Long {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         return ch.poke(app = app, mark = mark, payload = payload)
     }
 
@@ -1766,7 +1790,7 @@ class TlonChatRepo(
     }
 
     suspend fun addContact(ship: String, nickname: String? = null) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
         val name = nickname?.trim()?.takeIf { it.isNotBlank() }
         // Confirmed, both: the screen says the contact was added, and a
@@ -1822,7 +1846,7 @@ class TlonChatRepo(
      * may still be in /v1/all.
      */
     suspend fun removeContact(ship: String) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         require(ship.startsWith("~")) { "removeContact: $ship isn't a patp" }
         // Confirmed, as an add is: the screen says they were removed, and
         // a ship that never answered was taken for one that had.
@@ -1838,7 +1862,7 @@ class TlonChatRepo(
     }
 
     suspend fun setPetName(ship: String, name: String) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         require(ship.startsWith("~")) { "setPetName: $ship isn't a patp" }
         ch.poke(
             app = "contacts",
@@ -1949,7 +1973,7 @@ class TlonChatRepo(
      * raw one-shot fetch.
      */
     suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val body = scryNewest(ch, "groups", "/v3/groups", "/v2/groups") as? JsonObject
             ?: error("The ship's list of groups could not be read.")
         val me = ourPatp
@@ -2006,7 +2030,7 @@ class TlonChatRepo(
      * the whole directory after a poke.
      */
     suspend fun fetchGroupAdmin(flag: String): AdminGroup? {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val body = scryNewest(ch, "groups", "/v3/groups/$flag", "/v2/groups/$flag") as? JsonObject ?: return null
         return parseAdminGroup(flag, body)
     }
@@ -2018,7 +2042,7 @@ class TlonChatRepo(
      * name for the same map. Empty when the group can't be read.
      */
     suspend fun fetchGroupRoles(flag: String): Map<String, String> {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val body = scryNewest(ch, "groups", "/v3/groups/$flag", "/v2/groups/$flag") as? JsonObject
             ?: error("the group's record was not readable")
         val roles = (body["roles"] ?: body["cabals"]) as? JsonObject ?: return emptyMap()
@@ -2036,7 +2060,7 @@ class TlonChatRepo(
      * channel. Returns the new group's flag (`~host/slug`).
      */
     suspend fun createGroup(title: String, description: String = ""): String = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val slug = "v" + randomBase32(7)
         val groupId = "$ourPatp/$slug"
         val channelSlug = "v" + randomBase32(7)
@@ -2101,7 +2125,7 @@ class TlonChatRepo(
             return@carry notes.createGroupNotebook(groupFlag, title)
                 ?: error("couldn't create notebook")
         }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val slug = "v" + randomBase32(7)
         val nest = "$kind/$ourPatp/$slug"
         ch.poke(
@@ -2170,7 +2194,7 @@ class TlonChatRepo(
     data class DisappearingState(val hooks: Disappearing.Hooks, val nests: List<String>)
 
     suspend fun disappearingState(group: AdminGroup): DisappearingState {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         return DisappearingState(Disappearing.read(ch), disappearingNests(ch, group))
     }
 
@@ -2181,7 +2205,7 @@ class TlonChatRepo(
      * not leave half the channels on.
      */
     suspend fun setDisappearing(group: AdminGroup, seconds: Long?): DisappearingState = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val nests = disappearingNests(ch, group)
         val was = Disappearing.read(ch)
         val before = nests.map { was.delayOn(it, group.flag) }
@@ -2232,7 +2256,7 @@ class TlonChatRepo(
      * role to another was open to every member in between.
      */
     suspend fun setChannelWriters(nest: String, was: Set<String>, now: Set<String>) = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         (now - was).takeIf { it.isNotEmpty() }?.let {
             ch.poke(app = "channels", mark = "channel-action-2", payload = channelWriters(nest, true, it), confirm = true)
         }
@@ -2289,7 +2313,7 @@ class TlonChatRepo(
      * the other ship.
      */
     suspend fun inviteToGroup(flag: String, ship: String): Boolean = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // Repo scope: leaving the invite screen must not cancel the invite.
         pokeGroupAction(ch, groupAction4InviteAdd(flag, ship))
         true
@@ -2397,7 +2421,7 @@ class TlonChatRepo(
      * but we only read `foreigns` here.
      */
     suspend fun refreshInvites(notify: Boolean = false) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // Flags we already knew about, so a live refresh only toasts
         // genuinely new invites — not the whole pending set every time
         // %groups republishes it. Null (never loaded) counts as "knew
@@ -2527,7 +2551,7 @@ class TlonChatRepo(
      * invite it came from is back to be answered, or declined.
      */
     suspend fun cancelJoin(flag: String): Unit = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(app = "groups", mark = "group-cancel", payload = JsonPrimitive(flag))
         _joining.update { list -> list.filterNot { it.flag == flag } }
         runCatching { refreshInvites() }.onFailure { Log.w(TAG, "invites not read after a cancelled join", it) }
@@ -2538,7 +2562,7 @@ class TlonChatRepo(
      * group anyone may join, such as one whose code was scanned.
      */
     suspend fun joinGroup(flag: String): Unit = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(
             app = "groups",
             mark = "group-join",
@@ -2573,7 +2597,7 @@ class TlonChatRepo(
 
     /** Reject an inbound group invite via `invite-decline`. */
     suspend fun rejectInvite(flag: String): Unit = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(
             app = "groups",
             mark = "invite-decline",
@@ -2589,7 +2613,7 @@ class TlonChatRepo(
      * `requestGroupInvitation`.
      */
     suspend fun knockGroup(flag: String) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(
             app = "groups",
             mark = "group-knock",
@@ -2613,7 +2637,7 @@ class TlonChatRepo(
      * for one, the screen closed and the group stayed in the list.
      */
     suspend fun leaveGroup(flag: String): Unit = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(app = "groups", mark = "group-leave", payload = JsonPrimitive(flag), confirm = true)
         db.groups().deleteChannelsForGroup(flag)
         db.groups().deleteGroup(flag)
@@ -2692,7 +2716,7 @@ class TlonChatRepo(
      * role) go through this helper.
      */
     private suspend fun pokeAGroup(flag: String, aGroup: JsonObject) = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // Every one of these is an admin acting on somebody else's
         // membership and being shown the result: a kick, a ban, an ask
         // resolved. None of them may report a silence as done (confirm).
@@ -2743,7 +2767,7 @@ class TlonChatRepo(
         /** Color as `#RRGGBB`; null = don't change, empty = clear. */
         color: String? = null,
     ) = carry {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // Modern %contacts uses `contact-action-1` with a kip-scoped
         // typed-field map (matches what `parseContact` reads back —
         // %text for nickname/bio/status, %look for avatar, %tint for
@@ -2882,7 +2906,7 @@ class TlonChatRepo(
     val activityFeedFlow: StateFlow<ActivityFeed?> = _activityFeed.asStateFlow()
 
     suspend fun fetchActivityFeed(): ActivityFeed {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // The feed's version namespace shifted under us in Tlon v11.4.0:
         // what /v6 now serves is what /v5 used to, and /v5 became the
         // down-converted view that silently drops every %react and
@@ -3048,7 +3072,7 @@ class TlonChatRepo(
      * without it.
      */
     suspend fun refreshConversation(whom: String, count: Int = 100, fromMs: Long? = null) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val newest = db.messages().newestIdFor(whom)
         // In path form Urbit @ud atoms need dotted-decimal (3-digit groups).
         val dottedCursor = newest?.let {
@@ -3141,7 +3165,7 @@ class TlonChatRepo(
      *   Channel: %channels /v5/chat/~host/name/posts/older/{cursor}/{count}/outline
      */
     suspend fun loadOlder(whom: String, count: Int = 30): Boolean {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         if (paginationExhausted.contains(whom)) return false
         val cursor = db.messages().oldestIdFor(whom) ?: return false
 
@@ -3227,7 +3251,7 @@ class TlonChatRepo(
         require(bytes.isNotEmpty()) {
             "the file came back empty — if it lives in cloud storage, download it to the device first"
         }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val client = http ?: error("not connected")
 
         // Neither route learns the file's name or what the photo knows
@@ -3489,7 +3513,7 @@ class TlonChatRepo(
             forgetUnsent(it)
             return@carry
         }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         if (whomNeedsOptimisticDelete(whom)) {
             // Mirror what react/unreact do — apply the local change
             // immediately so the message disappears regardless of
@@ -3659,7 +3683,7 @@ class TlonChatRepo(
         originalContentJson: String? = null,
     ) = carry {
         requireOnShip(postId, parentId)
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         if (!whom.startsWith("chat/")) error("edit only supported on channel chats")
         val content = originalContentJson
             ?.let { editedStory(it, text) }
@@ -3725,7 +3749,7 @@ class TlonChatRepo(
         originalSentMs: Long,
     ) = carry {
         require(nest.startsWith("diary/")) { "not a diary channel: $nest" }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         // The post as the ship has it: cites and image dimensions have
         // no markdown form and come back from here (mergeEdit), and
         // description / cover are not stored locally at all. Without it
@@ -3768,7 +3792,7 @@ class TlonChatRepo(
         originalSentMs: Long,
     ) = carry {
         require(nest.startsWith("heap/")) { "not a heap channel: $nest" }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val essay = buildEssay(content, originalSentMs, kind = "/heap", meta = null)
         ch.poke(
             app = "channels", mark = "channel-action-2",
@@ -3793,7 +3817,7 @@ class TlonChatRepo(
     suspend fun pinPost(nest: String, postId: String): Unit = carry {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
         requireOnShip(postId)
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         val current = db.groups().pinnedPostIdFor(nest)
         // The banner only ever reads order[0]; keeping just [postId]
         // matches behavior and dodges a full scry on every pin.
@@ -3819,7 +3843,7 @@ class TlonChatRepo(
     /** Unpin whatever is currently pinned in [nest]. */
     suspend fun unpinPost(nest: String): Unit = carry {
         require(nest.startsWith("chat/")) { "pin only supported on chat channels: $nest" }
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         Log.i(TAG, "unpinPost nest=$nest")
         val current = db.groups().pinnedPostIdFor(nest)
         ensureChannelGroupRow(nest)
@@ -4749,7 +4773,7 @@ class TlonChatRepo(
     suspend fun declineDmInvite(ship: String) = rsvpDmInvite(ship, accept = false)
 
     private suspend fun rsvpDmInvite(ship: String, accept: Boolean) {
-        val ch = channel ?: error("not connected")
+        val ch = liveChannel()
         ch.poke(
             app = "chat",
             mark = "chat-dm-rsvp",
