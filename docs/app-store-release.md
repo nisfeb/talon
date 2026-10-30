@@ -103,10 +103,12 @@ These cannot be set through nomac (`set_metadata` covers listing text
 and screenshots only — schema verified). One ASC dashboard session,
 ~10 minutes:
 
-- **App Privacy (nutrition labels)**: "Data Not Collected" — truthful
-  per PRIVACY.md: no analytics, no telemetry, no developer backend.
-  (User-configured AI providers and the user's own ship are not
-  developer collection.)
+- **App Privacy (nutrition labels)**: NOT "Data Not Collected" any more. The push relay and ~nisfeb are run by the developer and keep data past the request (PRIVACY.md, checked 2026-10-30). Declare, each for App Functionality, linked to the user, not used for tracking:
+  - Identifiers, User ID: the ship's name (the relay's registration, the Armillary account).
+  - Identifiers, Device ID: the phone's push token, kept by the relay.
+  - Purchases, Purchase History: Armillary checkouts, plan and ledger.
+  - Usage Data, Product Interaction: the ledger's model and token counts per request, the monthly search count.
+  - Not collected: message text, notification previews, prompts, answers and search queries, which pass through without being stored. Card numbers, email and billing address, which Stripe or BTCPay Server take on their own pages outside the app.
 - **Category**: Social Networking.
 - **Age rating questionnaire**: answer None to all content categories;
   select "Unrestricted Web Access" = NO (Talon renders links/previews
