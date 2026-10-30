@@ -155,6 +155,23 @@ class DefaultAppsTest {
     }
 
     @Test
+    fun `apps asked for whose approvals never show leave the banner be`() {
+        val before = DefaultApps.asked.value
+        DefaultApps.waitMs = 200
+        ship.answerApi = { m, p, _ ->
+            when {
+                m == "GET" && p == "/apps/grubbery/desks/stock" -> lacksTwo
+                m == "POST" -> "syncing"
+                p == "/apps/grubbery/asks.json" -> "[]"
+                p == "/apps/grubbery/approved.json" -> "{}"
+                else -> null
+            }
+        }
+        assertEquals(listOf("armillary", "orrery"), ensure())
+        assertEquals(before, DefaultApps.asked.value, "nothing new waits, so nothing to read again")
+    }
+
+    @Test
     fun `nothing asked for leaves the banner be`() {
         val before = DefaultApps.asked.value
         ship.answerApi = { m, p, _ ->
