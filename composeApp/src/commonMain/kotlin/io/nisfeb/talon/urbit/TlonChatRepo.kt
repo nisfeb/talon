@@ -1401,6 +1401,7 @@ class TlonChatRepo(
         // queued", and in a channel, where the ship numbers posts as they
         // arrive, could land ahead of the one written before it.
         if (db.messages().queuedIn(whom) > 0) {
+            Log.i(TAG, "a message to $whom queued behind one already waiting")
             neverSent.add("$whom|$id")
             db.messages().setStatus(whom, id, "queued")
             // Somebody wrote: that is worth asking the ship now. A drain
@@ -1432,6 +1433,7 @@ class TlonChatRepo(
     }.await()
 
     private suspend fun queueMessage(whom: String, id: String, why: Throwable) {
+        Log.w(TAG, "a message to $whom queued: ${why.message}")
         db.messages().setStatus(whom, id, "queued")
         stillSlow(why)
     }

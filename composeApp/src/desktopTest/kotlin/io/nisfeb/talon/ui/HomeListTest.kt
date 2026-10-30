@@ -104,7 +104,7 @@ class HomeListTest {
                     }
                 }
                 waitForIdle()
-                block(ship)
+                dumpingScreenOnFailure(ship) { block(ship) }
             }
         } finally {
             io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
@@ -118,7 +118,7 @@ class HomeListTest {
         MessageEntity(whom, id, author, sent, """[{"inline":["$text"]}]""", "/chat")
 
     private fun ComposeUiTest.shows(text: String, substring: Boolean = false) =
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty() }
 
     /** The list fills from database flows off the UI thread: wait for the target, then tap it. */
     private fun ComposeUiTest.tap(text: String, substring: Boolean = false) {

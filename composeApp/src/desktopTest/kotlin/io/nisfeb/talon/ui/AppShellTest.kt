@@ -126,7 +126,7 @@ class AppShellTest {
                 waitUntil(timeoutMillis = 10_000) {
                     onAllNodesWithContentDescription("New message").fetchSemanticsNodes().isNotEmpty()
                 }
-                block(ship)
+                dumpingScreenOnFailure(ship) { block(ship) }
             }
         } finally {
             scope.cancel()
@@ -146,7 +146,7 @@ class AppShellTest {
     private fun ComposeUiTest.showing(text: String) =
         onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
-    private fun ComposeUiTest.home() = waitUntil(timeoutMillis = 5_000) { present("New message") && present("Chats") }
+    private fun ComposeUiTest.home() = waitUntil(timeoutMillis = 20_000) { present("New message") && present("Chats") }
 
     @Test
     fun `every full-screen section opens from the rail and its Back returns to the list`() = app {
@@ -293,10 +293,12 @@ class AppShellTest {
     @Test
     fun `the rail's tabs switch the list pane and Chats brings the list back`() = app {
         onNodeWithContentDescription("Bookmarks").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("No bookmarks yet") }
+        // Each pane says it is empty once the ship has answered, and the app
+        // is still starting: 5 s ran out on a loaded runner (2026-10-29).
+        waitUntil(timeoutMillis = 20_000) { showing("No bookmarks yet") }
         assertTrue(!present("New message"))
         onNodeWithContentDescription("Activity").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("No activity yet") }
+        waitUntil(timeoutMillis = 20_000) { showing("No activity yet") }
         assertTrue(!showing("No bookmarks yet"), "one tab at a time")
         onNodeWithContentDescription("Chats").performClick()
         home()

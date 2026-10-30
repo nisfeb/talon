@@ -243,8 +243,11 @@ class AssistantSession(internal val scope: kotlinx.coroutines.CoroutineScope) {
 
     /** The transcript cleared: what still asks is left under Actions, and its run goes on. */
     internal fun clear() {
-        transcript.forEach { (it as? Line.Proposals)?.answer(null) }
+        // Cleared before they are answered: an answer wakes its run, which
+        // writes on, and into a transcript still being walked that threw.
+        val waiting = transcript.filterIsInstance<Line.Proposals>()
         transcript.clear()
+        waiting.forEach { it.answer(null) }
     }
     internal fun seen() { shown = true; _news.value = false }
 }
