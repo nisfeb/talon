@@ -146,6 +146,8 @@ class TlonChatRepo(
      */
     val notificationHealth: io.nisfeb.talon.notify.NotificationHealth =
         io.nisfeb.talon.notify.NotificationHealth(),
+    /** Add Grubbery and its stock apps where the ship lacks them ([DefaultApps]). The apps pass true; tests mostly do not. */
+    private val installDefaultApps: Boolean = false,
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
@@ -486,6 +488,14 @@ class TlonChatRepo(
                     db.marks().put(MarkEntity(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK, nowMs()))
                 }
             }.onFailure { Log.w(TAG, "search text fill failed", it) }
+        }
+        // After the first sync, not during it. Ends with the session: stop() cancels the scope.
+        if (installDefaultApps) scope.launch {
+            delay(DefaultApps.afterStartMs)
+            val h = http ?: return@launch
+            val url = baseUrl ?: return@launch
+            val asked = DefaultApps.ensure(h, url, poke = { app, mark, body -> runCatching { pokeRaw(app, mark, body) }.isSuccess })
+            if (asked.isNotEmpty()) Log.i(TAG, "asked Grubbery for ${asked.joinToString()}")
         }
     }
 

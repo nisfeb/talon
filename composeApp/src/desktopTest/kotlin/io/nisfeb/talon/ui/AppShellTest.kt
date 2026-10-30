@@ -78,6 +78,8 @@ class AppShellTest {
         sync: io.nisfeb.talon.ui.SyncThresholds = io.nisfeb.talon.ui.SyncThresholds(),
         audioDevices: io.nisfeb.talon.call.AudioDevices = io.nisfeb.talon.call.AudioDevices.Noop,
         videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
+        /** Grubbery's stock apps added on the way in; off, so other tests' ships hear nothing of it. */
+        defaultApps: Boolean = false,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -104,6 +106,7 @@ class AppShellTest {
                         App(
                             http = ship.http,
                             sessionStore = store,
+                            installDefaultApps = defaultApps,
                             aiSettings = ai,
                             createDb = { key ->
                                 Room.databaseBuilder<AppDatabase>(File(tmp, "$key.db").absolutePath)
@@ -2007,6 +2010,62 @@ class AppShellTest {
             assertTrue(chatSaid(ship, io.nisfeb.talon.call.CallController.RECORDING_ON))
             assertEquals(1, engine.chatAtTap, "the DM went, and was taken, before any audio was tapped")
             waitUntil(timeoutMillis = 5_000) { present("Stop") }
+        }
+    }
+
+    // Grubbery's stock apps on the way in, the whole way through the app.
+    private fun quickDefaultApps(block: () -> Unit) {
+        io.nisfeb.talon.urbit.DefaultApps.afterStartMs = 0
+        io.nisfeb.talon.urbit.DefaultApps.pollMs = 50
+        io.nisfeb.talon.urbit.DefaultApps.waitMs = 10_000
+        try { block() } finally {
+            io.nisfeb.talon.urbit.DefaultApps.afterStartMs = 20_000
+            io.nisfeb.talon.urbit.DefaultApps.pollMs = 20_000
+            io.nisfeb.talon.urbit.DefaultApps.waitMs = 5 * 60_000
+        }
+    }
+
+    @Test
+    fun `a ship without Armillary and Orrery is given them on the way in, and asked to approve them`() = quickDefaultApps {
+        val stockApps = listOf("lattice", "auspex", "calendar", "armillary", "orrery")
+        val missing = setOf("armillary", "orrery")
+        app(defaultApps = true, setup = {
+            val asked = { n: String -> api.any { it == """POST /apps/grubbery/desks/sync {"name":"$n"}""" } }
+            answerApi = { m, p, _ ->
+                when {
+                    m == "GET" && p == "/apps/grubbery/desks/stock" ->
+                        stockApps.joinToString(",", "[", "]") { n -> """{"name":"$n","kind":"github","synced":${n !in missing || asked(n)}}""" }
+                    m == "POST" && p == "/apps/grubbery/desks/sync" -> "syncing"
+                    // Each app asks for its approvals once it is here.
+                    p == "/apps/grubbery/asks.json" ->
+                        missing.filter(asked).joinToString(",", "[", "]") { """{"app":"$it","poke":[],"peek":[],"make":[]}""" }
+                    p == "/apps/grubbery/approved.json" -> "{}"
+                    else -> null
+                }
+            }
+        }) { ship ->
+            waitUntil(timeoutMillis = 20_000) { ship.api.count { it.startsWith("POST /apps/grubbery/desks/sync ") } == 2 }
+            assertEquals(
+                listOf("""POST /apps/grubbery/desks/sync {"name":"armillary"}""", """POST /apps/grubbery/desks/sync {"name":"orrery"}"""),
+                ship.api.filter { it.startsWith("POST /apps/grubbery/") },
+                "the two it lacks, by name, and nothing for the three it has",
+            )
+            assertTrue(ship.pokesTo("hood").isEmpty(), "Grubbery is there: no install")
+            waitUntil(timeoutMillis = 20_000) { showing("2 apps need their permissions approved") }
+        }
+    }
+
+    @Test
+    fun `a ship without Grubbery has it installed from ricsul on the way in`() = quickDefaultApps {
+        // eyre's 404 for every Grubbery path: the desk is not there.
+        app(defaultApps = true) { ship ->
+            waitUntil(timeoutMillis = 20_000) { ship.pokesTo("hood").isNotEmpty() }
+            val install = ship.pokesTo("hood").single()
+            assertEquals("kiln-install", install.mark)
+            assertEquals(
+                listOf("grubbery", "~ricsul-bilwyt", "grubbery"),
+                listOf("local", "ship", "desk").map { install.json.jsonObject[it]!!.jsonPrimitive.content },
+            )
         }
     }
 }
