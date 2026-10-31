@@ -46,6 +46,9 @@ class LocalShipSectionTest {
     ) : LocalShip {
         override val state = MutableStateFlow(initial)
         override val terminal = MutableStateFlow("")
+        override val busy = MutableStateFlow(false)
+        /** False: the ship is working and takes nothing yet, as a new one is for minutes. */
+        var takes = true
         override fun pierExists() = true
         override suspend fun setup() = error("not in these tests")
         override suspend fun start(): LocalShipState.Ready {
@@ -54,7 +57,7 @@ class LocalShipSectionTest {
             return LocalShipState.Ready(comet, "http://localhost:8080", "code").also { state.value = it }
         }
         override suspend fun stop() { did += "stop"; state.value = LocalShipState.Stopped }
-        override fun send(line: String) { did += "send $line"; terminal.value += "~$comet:dojo> $line\n4\n" }
+        override fun send(line: String) { did += "send $line"; if (takes) terminal.value += "~$comet:dojo> $line\n4\n" }
         override fun describe() = LocalShipInfo(ship = comet, pierPath = "/home/me/.talon/comet", runtimeVersion = "3.4")
         override suspend fun pierBytes() = 5L * 1_048_576
         override fun keptCode() = code
@@ -147,5 +150,43 @@ class LocalShipSectionTest {
         tap("Send")
         waitUntil(timeoutMillis = 5_000) { shows("dojo> (add 2 2)") }
         assertEquals(listOf("send (add 2 2)"), did.toList())
+    }
+
+    // A user's comet answered nothing for minutes: it was installing its
+    // first update, and the panel looked dead.
+    @Test
+    fun `a busy ship says so, and a line sent waits until it is taken and answered`() {
+        val ship = FakeComet(running).apply { busy.value = true; takes = false }
+        section(ship) {
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship is busy and will answer when it's done") }
+            assertTrue(shows("A new ship spends its first several minutes installing updates."))
+            onNode(hasSetTextAction()).performScrollTo().performTextInput("(add 2 2)")
+            tap("Send")
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship is busy and will take \"(add 2 2)\" when it's done") }
+            assertEquals(listOf("send (add 2 2)"), did.toList())
+            // Done: dojo takes the line, prints it back and answers.
+            ship.terminal.value += "~$comet:dojo> (add 2 2)\n> (add 2 2)\n4\n"
+            ship.busy.value = false
+            waitUntil(timeoutMillis = 5_000) { !shows("Your ship is busy") && !shows("Sent:") }
+            assertTrue(shows("4"))
+        }
+    }
+
+    @Test
+    fun `a ship that is not busy says nothing more than its answer`() = section(FakeComet(running)) {
+        onNode(hasSetTextAction()).performScrollTo().performTextInput("(add 2 2)")
+        tap("Send")
+        waitUntil(timeoutMillis = 5_000) { shows("dojo> (add 2 2)") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Sent:") }
+        assertTrue(!shows("Your ship is busy"))
+    }
+
+    @Test
+    fun `a stopped ship is not called busy`() {
+        val ship = FakeComet(LocalShipState.Stopped).apply { busy.value = true }
+        section(ship) {
+            assertTrue(shows("The ship is not running."))
+            assertTrue(!shows("Your ship is busy"))
+        }
     }
 }
