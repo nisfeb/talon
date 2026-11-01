@@ -63,6 +63,7 @@ The only third-party servers Talon talks to are:
 - **The user's Urbit ship**, at the URL the user enters.
 - **The user's chosen AI provider** (only if AI is configured and a feature is invoked). See the provider's own privacy policy for what they do with submitted prompts: <https://openai.com/policies/privacy-policy>, <https://www.anthropic.com/privacy>.
 - **The vendor ship the user named in Armillary**, and the payment page that vendor sends the browser to (Stripe, or a BTCPay Server the vendor runs). Only if the user added the Armillary provider. Removing the provider ends it.
+- **OpenFreeMap** (<https://openfreemap.org>), on Android, only while the user has a live share's map open: the map's tiles for the area on screen come from it, with no account and no key. On iOS the map is Apple's MapKit.
 
 ## Children
 

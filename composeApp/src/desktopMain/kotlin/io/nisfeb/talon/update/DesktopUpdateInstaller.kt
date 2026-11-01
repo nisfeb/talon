@@ -49,16 +49,24 @@ fun desktopUpdateFlavor(appImagePath: String?, osName: String): DesktopUpdateFla
  * in double quotes, made with [char]34 so no literal " has to survive
  * the command line Java builds for powershell.exe.
  *
+ * /passive shows the progress and asks nothing: an update walked the
+ * whole installer, and its folder page asked whether to install into
+ * the folder Talon was already in (a user's report, 2026-11-01).
+ * INSTALLDIR, jpackage's folder property, is the folder of [appPath],
+ * so the upgrade lands where Talon is and the relaunch finds it.
+ *
  * Pure so a test can pin the flags without spawning anything. msiexec
  * self-elevates for a per-machine product, so no RunAs is forced on a
  * per-user install.
  */
 internal fun windowsUpdateCommand(pid: Long, msiPath: String, appPath: String): List<String> {
     fun q(s: String) = s.replace("'", "''")
+    val dir = appPath.substringBeforeLast('\\', missingDelimiterValue = "")
+    val into = if (dir.isEmpty()) "" else " + ' INSTALLDIR=' + [char]34 + '${q(dir)}' + [char]34"
     return listOf(
         "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
         "Wait-Process -Id $pid -ErrorAction SilentlyContinue; " +
-            "Start-Process msiexec -Wait -ArgumentList ('/i ' + [char]34 + '${q(msiPath)}' + [char]34 + ' /norestart'); " +
+            "Start-Process msiexec -Wait -ArgumentList ('/i ' + [char]34 + '${q(msiPath)}' + [char]34 + ' /passive /norestart'$into); " +
             "Start-Process -FilePath '${q(appPath)}'",
     )
 }

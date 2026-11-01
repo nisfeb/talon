@@ -86,6 +86,7 @@ actual val needsEmojiFontSpans: Boolean = true
 actual val needsManualImagePaste: Boolean = true
 actual val isImmersiveCallSupported: Boolean = false
 actual val isUrbWebViewSupported: Boolean = false
+actual val isLiveMapSupported: Boolean = false
 
 /** The rail is already there, and there is no swipe to replace a back button with. */
 actual val isDrawerNavigation: Boolean = false

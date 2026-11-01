@@ -34,6 +34,7 @@ package io.nisfeb.talon.ui
  *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
  *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
+ *  - isLiveMapSupported — A (MapLibre, OpenFreeMap tiles), i (MapKit): a live share on a map that follows each fix. D: no map view; Open map hands off to the browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
  *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move; a live share runs LiveShareService), i (IosLocationWatch: significant-change monitoring with Always, standard updates in the background while a share runs). D: a computer does not move with you. Gates Share my location too; seeing a share and stopping one work everywhere.
  *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
@@ -383,6 +384,14 @@ expect val isImmersiveCallSupported: Boolean
  * ship's web session already lives.
  */
 expect val isUrbWebViewSupported: Boolean
+
+/**
+ * Whether a live share can be watched on a map inside Talon, following
+ * each fix (orrery 88): MapLibre on Android, MapKit on iOS. Where false,
+ * Open map hands the point to the platform's maps app or the browser.
+ * See [LiveMapView].
+ */
+expect val isLiveMapSupported: Boolean
 
 /**
  * Whether this device can tell orrery where the owner is when they
