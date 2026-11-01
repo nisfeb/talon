@@ -68,6 +68,25 @@ class DefaultAppsTest {
         assertTrue(ship.api.none { "sync-defaults" in it }, "never all at once: that repoints a desk that follows elsewhere")
     }
 
+    // nisfeb/grubbery#13: a fresh install had no link registry, so the
+    // shell paired no app until its permits page rebuilt it. The shell's
+    // POST /permits/refresh (shell.hoon) reads an optional {full}; with
+    // none it makes missing followers and then the links.
+    @Test
+    fun `a shell that lacks apps is refreshed before they are asked for`() {
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") lacksTwo else if (m == "POST") "syncing" else null }
+        ensure()
+        val posts = ship.api.filter { it.startsWith("POST /apps/grubbery/") }
+        assertEquals("POST /apps/grubbery/permits/refresh {}", posts.first(), posts.toString())
+        assertEquals(1, posts.count { "/permits/refresh" in it }, "once a sign-in")
+    }
+
+    @Test
+    fun `a refresh the shell refuses still lets the apps be asked for`() {
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") lacksTwo else if (m == "POST" && p.endsWith("/desks/sync")) "syncing" else null }
+        assertEquals(listOf("armillary", "orrery"), ensure())
+    }
+
     @Test
     fun `a ship with every app is asked for nothing`() {
         ship.answerApi = { m, p, _ ->
@@ -75,6 +94,7 @@ class DefaultAppsTest {
         }
         assertEquals(emptyList(), ensure())
         assertEquals(emptyList(), syncs())
+        assertTrue(ship.api.none { "/permits/refresh" in it }, "nothing missing, nothing refreshed")
         assertTrue(pokes.isEmpty())
     }
 

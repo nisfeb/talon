@@ -107,6 +107,12 @@ object DefaultApps {
                 ?: return emptyList()
         }
         if (stock !is Stock.Listed) return emptyList()
+        // A fresh install of the Grubbery ricsul publishes has no link
+        // registry, so its shell could pair no app ("shell-pairing-no-forge")
+        // until something rebuilt it, as the permits page does: the first
+        // ship Talon gave Grubbery got none of its apps (2026-11-01,
+        // nisfeb/grubbery#13). Only when an app is missing.
+        if (stock.apps.any { !it.second }) refreshShell(http, shipUrl)
         val before = io.nisfeb.talon.ui.fetchPendingPermits(http, shipUrl)?.size ?: 0
         val asked = stock.apps.filter { (name, synced) -> !synced && sync(http, shipUrl, name) }.map { it.first }
         if (asked.isNotEmpty()) {
@@ -162,6 +168,25 @@ object DefaultApps {
      * /desks/sync reads `name` from the body. It answers "syncing" before
      * it starts, so a 200 is the ask taken; its desk shows in the list.
      */
+    /**
+     * The shell's own rebuild, as its permits page asks for it: POST
+     * /permits/refresh. With an empty body it makes the followers an app
+     * lacks and, when it made one, the link registry the pairing reads.
+     * Quiet: a ship that does not answer it pairs as it would have.
+     */
+    internal suspend fun refreshShell(http: HttpClient, shipUrl: String) {
+        try {
+            http.post("${shipUrl.trimEnd('/')}/apps/grubbery/permits/refresh") {
+                contentType(ContentType.Application.Json)
+                setBody("{}")
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Not sent: the pairing below runs as it would have.
+        }
+    }
+
     internal suspend fun sync(http: HttpClient, shipUrl: String, name: String): Boolean = try {
         http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/sync") {
             contentType(ContentType.Application.Json)
