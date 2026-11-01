@@ -49,11 +49,19 @@ class AiClient(
     var lastCostUsd: Double? = null
         private set
 
-    /** One-shot completion. Throws on transport / HTTP error. */
+    /**
+     * One-shot completion. Throws on transport / HTTP error, and
+     * [NoAnswer] when the model sends back no text.
+     *
+     * The cap is the assistant's ([AGENT_MAX_OUTPUT]) for every call. It
+     * was 512 for a catch-up and 1,024 here, and a model that thinks
+     * first spent it all thinking: a user's catch-ups came back as the
+     * word "null" (2026-10-31).
+     */
     suspend fun complete(
         systemPrompt: String?,
         userPrompt: String,
-        maxOutputTokens: Int = 1024,
+        maxOutputTokens: Int = AGENT_MAX_OUTPUT,
         timeoutMs: Long = 60_000,
     ): String {
         val cfg = settingsProvider()
@@ -131,9 +139,9 @@ class AiClient(
             (body["content"] as? JsonArray)
                 ?.mapNotNull { it as? JsonObject }
                 ?.filter { it["type"]?.jsonPrimitive?.contentOrNull == "text" }
-                ?.joinToString("") { it["text"]?.jsonPrimitive?.content.orEmpty() }
-                ?.takeIf { it.isNotEmpty() }
-                ?: error("no content in response: $body")
+                ?.joinToString("") { it["text"]?.jsonPrimitive?.contentOrNull.orEmpty() }
+                ?.takeIf { it.isNotBlank() }
+                ?: throw NoAnswer(outOfRoom = body["stop_reason"]?.jsonPrimitive?.contentOrNull == "max_tokens")
         }
     }
 
@@ -181,12 +189,14 @@ class AiClient(
         ) { body ->
             usageLine(cfg.provider, cfg.model ?: defaultModel, body)?.let { Log.i("AiClient", it) }
             lastCostUsd = usageCost(cfg.provider, cfg.model ?: defaultModel, body)
-            body["choices"]
-                ?.jsonArray?.firstOrNull()
-                ?.jsonObject?.get("message")
-                ?.jsonObject?.get("content")
-                ?.jsonPrimitive?.content
+            val choice = body["choices"]?.jsonArray?.firstOrNull()?.jsonObject
                 ?: error("no content in response: $body")
+            // contentOrNull: a JSON null read as content is the word
+            // "null", which a catch-up showed as its summary.
+            (choice["message"] as? JsonObject)?.get("content")
+                ?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.isNotBlank() }
+                ?: throw NoAnswer(outOfRoom = choice["finish_reason"]?.jsonPrimitive?.contentOrNull == "length")
         }
     }
 
@@ -295,6 +305,10 @@ fun isOutOfCredit(message: String?): Boolean = message?.contains(OUT_OF_CREDIT) 
  */
 class ModelHttpError(val status: Int, message: String) : IllegalStateException(message)
 
+/** A reply with no text: the model used its whole cap first ([outOfRoom]), or sent none. */
+class NoAnswer(val outOfRoom: Boolean) :
+    IllegalStateException(if (outOfRoom) "the model ran out of room before it answered" else "the model sent no answer")
+
 /**
  * [what] failed at the model, said in words: a busy provider (429) or a
  * failing one (5xx) as something to try again, a key turned away (401,
@@ -305,6 +319,8 @@ class ModelHttpError(val status: Int, message: String) : IllegalStateException(m
 fun modelProblem(what: String, e: Throwable): io.nisfeb.talon.util.Problem {
     val status = (e as? ModelHttpError)?.status
     val why = when {
+        e is NoAnswer && e.outOfRoom -> "the model used all its room before it answered. Try again, or pick a model that thinks less."
+        e is NoAnswer -> "the model sent back no answer. Try again."
         status == 402 -> return io.nisfeb.talon.util.Problem(e.message.orEmpty(), io.nisfeb.talon.util.errorDetailsOf(e))
         status == 429 -> "the model is busy. Try again in a moment."
         status != null && status >= 500 -> "the model's provider is having trouble. Try again later."

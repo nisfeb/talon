@@ -36,6 +36,6 @@ class AiFeatures(
             Use only information in the transcript — don't invent.
         """.trimIndent()
         val user = "Summarize what I missed:\n\n$lines"
-        return client.complete(sys, user, maxOutputTokens = 512)
+        return client.complete(sys, user)
     }
 }

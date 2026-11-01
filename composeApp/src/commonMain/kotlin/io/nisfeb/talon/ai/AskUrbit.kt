@@ -56,7 +56,6 @@ class AskUrbit(
         val text = client.complete(
             AskUrbitPrompt.system,
             AskUrbitPrompt.user(question, excerpts),
-            maxOutputTokens = 700,
         )
         return Answer(text, citedSources(text, hits))
     }
