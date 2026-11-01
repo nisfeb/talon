@@ -2100,7 +2100,12 @@ class AppShellTest {
         }) { ship ->
             waitUntil(timeoutMillis = 20_000) { ship.api.count { it.startsWith("POST /apps/grubbery/desks/sync ") } == 2 }
             assertEquals(
-                listOf("""POST /apps/grubbery/desks/sync {"name":"armillary"}""", """POST /apps/grubbery/desks/sync {"name":"orrery"}"""),
+                listOf(
+                    // The shell rebuilt first, or a fresh one pairs nothing (grubbery#13).
+                    "POST /apps/grubbery/permits/refresh {}",
+                    """POST /apps/grubbery/desks/sync {"name":"armillary"}""",
+                    """POST /apps/grubbery/desks/sync {"name":"orrery"}""",
+                ),
                 ship.api.filter { it.startsWith("POST /apps/grubbery/") },
                 "the two it lacks, by name, and nothing for the three it has",
             )
