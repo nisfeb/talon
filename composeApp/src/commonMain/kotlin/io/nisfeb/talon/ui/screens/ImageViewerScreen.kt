@@ -67,6 +67,9 @@ import coil3.compose.AsyncImage
 import io.nisfeb.talon.ui.LocalImageDownloader
 import io.nisfeb.talon.ui.SaveResult
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
@@ -243,8 +246,18 @@ fun ImageViewerScreen(
                     }
                 }
                 .pointerInput(url) {
+                    // A one-finger pan on a zoomed picture glides on after the
+                    // finger lifts, as photo apps do, held in the same bounds;
+                    // it stopped dead (2026-10-31). A touch stops the glide.
+                    val decay = androidx.compose.animation.splineBasedDecay<androidx.compose.ui.geometry.Offset>(this)
+                    var glide: kotlinx.coroutines.Job? = null
+                    kotlinx.coroutines.coroutineScope {
+                    val glides = this
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
+                        glide?.cancel()
+                        val speed = androidx.compose.ui.input.pointer.util.VelocityTracker()
+                        var pinched = false
                         // Nothing moves until the fingers pass the touch slop, so a
                         // double tap with a wobble still zooms back out; then the
                         // travel so far is applied at once and the picture stays
@@ -254,7 +267,9 @@ fun ImageViewerScreen(
                         var moving = false
                         do {
                             val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } >= 2) pinched = true
                             if (event.changes.count { it.pressed } < 2 && scale <= 1f) continue
+                            event.changes.firstOrNull()?.let { speed.addPointerInputChange(it) }
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
                             val centroid = event.calculateCentroid(useCurrent = false)
@@ -269,6 +284,27 @@ fun ImageViewerScreen(
                             }
                             if (moving) event.changes.forEach { if (it.positionChanged()) it.consume() }
                         } while (event.changes.any { it.pressed })
+                        if (!moving || pinched || scale <= 1f) return@awaitEachGesture
+                        val max = viewConfiguration.maximumFlingVelocity
+                        val v = speed.calculateVelocity(androidx.compose.ui.unit.Velocity(max, max))
+                        glide = glides.launch {
+                            var last = androidx.compose.ui.geometry.Offset.Zero
+                            androidx.compose.animation.core.AnimationState(
+                                androidx.compose.ui.geometry.Offset.VectorConverter,
+                                last,
+                                androidx.compose.ui.geometry.Offset(v.x, v.y),
+                            ).animateDecay(decay) {
+                                val move = value - last
+                                last = value
+                                if (move != androidx.compose.ui.geometry.Offset.Zero) {
+                                    val was = offset
+                                    step(androidx.compose.ui.geometry.Offset.Zero, move, 1f)
+                                    // Both edges reached: nothing left to glide.
+                                    if (offset == was) cancelAnimation()
+                                }
+                            }
+                        }
+                    }
                     }
                 },
         ) {
@@ -280,13 +316,17 @@ fun ImageViewerScreen(
                 onSuccess = { pictureSize = it.painter.intrinsicSize },
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y,
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f),
-                    )
+                    // Read in the layer's block, so a pan or a glide only
+                    // redraws the layer. Passed as values, every move
+                    // recomposed the viewer and its full-size picture,
+                    // and on iOS the picture trailed the finger.
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                    }
                     .testTag("viewer-image"),
             )
         }

@@ -122,10 +122,15 @@ class ImageViewerScreenTest {
         near(200f - 200f * 2.5f, picture().left, "the tapped point stays put")
         near(150f - 150f * 2.5f, picture().top, "the tapped point stays put")
 
-        touch { swipe(Offset(500f, 400f), Offset(400f, 350f), durationMillis = 300) }
+        touch { down(Offset(500f, 400f)); repeat(10) { moveBy(Offset(-10f, -5f)) } }
         waitForIdle()
         near(-400f, picture().left, "moved as far as the finger")
         near(-275f, picture().top, "moved as far as the finger")
+        // Held still, then lifted: nothing to glide.
+        touch { advanceEventTime(200); up() }
+        waitForIdle()
+        near(-400f, picture().left, "stays where the finger left it")
+        near(-275f, picture().top, "stays where the finger left it")
 
         touch { swipe(Offset(100f, 400f), Offset(900f, 400f), durationMillis = 300) }
         waitForIdle()
@@ -134,6 +139,58 @@ class ImageViewerScreenTest {
         touch { doubleClick(Offset(300f, 300f)) }
         waitForIdle()
         assertEquals(whole, picture(), "back where it started")
+    }
+
+    // 2026-10-31: on a phone a zoomed picture "pans too slowly". It
+    // stopped dead the moment the finger lifted.
+    @Test
+    fun `a flick on a zoomed picture glides on after the finger lifts, and stops at its edge`() = viewer(urls = urls.take(1)) {
+        val whole = picture()
+        touch { doubleClick(Offset(200f, 150f)) }
+        waitForIdle()
+        val left = picture().left
+        val top = picture().top
+        touch { swipe(Offset(500f, 400f), Offset(440f, 400f), durationMillis = 60) }
+        waitForIdle()
+        assertTrue(picture().left < left - 60f - 20f, "glided on past the finger's 60 px: ${picture().left} from $left")
+        near(top, picture().top, "a level flick glides level")
+        touch { swipe(Offset(900f, 400f), Offset(300f, 400f), durationMillis = 40) }
+        waitForIdle()
+        near(whole.width - whole.width * 2.5f, picture().left, "a hard flick stops at the picture's right edge")
+        near(top, picture().top, "still level")
+    }
+
+    @Test
+    fun `a touch stops a glide where it is`() = viewer(urls = urls.take(1)) {
+        touch { doubleClick(Offset(200f, 150f)) }
+        waitForIdle()
+        val left = picture().left
+        mainClock.autoAdvance = false
+        touch { swipe(Offset(500f, 400f), Offset(440f, 400f), durationMillis = 60) }
+        mainClock.advanceTimeBy(64)
+        assertTrue(picture().left < left - 60f, "gliding: ${picture().left} from $left")
+        touch { down(Offset(300f, 300f)) }
+        mainClock.advanceTimeBy(32)
+        val held = picture().left
+        mainClock.advanceTimeBy(1_000)
+        near(held, picture().left, "the glide stopped under the finger")
+        touch { up() }
+        mainClock.autoAdvance = true
+        waitForIdle()
+        near(held, picture().left, "a still finger lifted starts no glide")
+    }
+
+    @Test
+    fun `a pinch lets go without a glide`() = viewer(urls = urls.take(1)) {
+        val whole = picture()
+        mainClock.autoAdvance = false
+        // The fingers spread and travel right together, fast.
+        touch { pinch(Offset(250f, 300f), Offset(150f, 300f), Offset(350f, 300f), Offset(650f, 300f), durationMillis = 80) }
+        mainClock.advanceTimeBy(32)
+        val after = picture()
+        assertTrue(after.width > whole.width * 1.5f, "zoomed: ${after.width} from ${whole.width}")
+        mainClock.advanceTimeBy(1_000)
+        assertEquals(after, picture(), "nothing moved once the fingers lifted")
     }
 
     @Test
