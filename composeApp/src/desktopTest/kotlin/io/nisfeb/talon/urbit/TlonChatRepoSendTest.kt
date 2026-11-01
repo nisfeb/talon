@@ -186,6 +186,25 @@ class TlonChatRepoSendTest {
         kotlinx.coroutines.withTimeout(5_000) { while ("groups/v3/groups" !in ship.scried) delay(20) }
     }
 
+    // A short name chosen when it is made ends the channel's id (sneagan,
+    // 2026-11-01). One this ship already hosts for that kind, or one that
+    // is not a term, sends nothing: %channels would refuse it.
+    @Test
+    fun `a channel made with a short name is named by it, and one taken or not a term sends nothing`() = live {
+        ship.scries["groups/v3/groups"] = """{"$flag":{"meta":{"title":"Bus"},"channels":{}}}"""
+        assertEquals("chat/~zod/town-hall", repo.createChannel(flag, "chat", "Town hall", shortName = "town-hall"))
+        assertEquals(
+            """{"create":{"kind":"chat","group":"$flag","name":"town-hall","title":"Town hall","description":"","meta":null,"readers":[],"writers":[]}}""",
+            ship.pokesTo("channels").single().json.toString(),
+        )
+        db.groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~zod/news", flag, title = "news")))
+        assertEquals("chat/~zod/news", repo.shortNameTaken("news", "chat"))
+        assertEquals(null, repo.shortNameTaken("news", "heap"), "a gallery of the same name is another channel")
+        assertEquals(null, repo.shortNameTaken("", "chat"))
+        assertFailsWith<IllegalArgumentException> { repo.createChannel(flag, "chat", "Bad", shortName = "9lives") }
+        assertEquals(1, ship.pokesTo("channels").size, "nothing sent for a name that is not one")
+    }
+
     // Join, accept, decline, stop joining, leave and a new channel ran on
     // the screen's scope: leaving the screen mid-poke cancelled them
     // (review A5-19). Real time via holdPoke.

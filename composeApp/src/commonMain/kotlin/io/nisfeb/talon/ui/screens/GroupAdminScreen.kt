@@ -385,12 +385,18 @@ fun GroupAdminScreen(
                     newChannelError = null
                 }
             },
-            onCreate = { kind, title, description ->
+            ownShip = repo.ownShip,
+            onCreate = { kind, title, description, shortName ->
                 creatingChannel = true
                 newChannelError = null
                 scope.launch {
+                    repo.shortNameTaken(shortName, kind)?.let { id ->
+                        creatingChannel = false
+                        newChannelError = io.nisfeb.talon.util.Problem("$id is already a channel of yours. Choose another short name.")
+                        return@launch
+                    }
                     runCatching {
-                        repo.createChannel(flag, kind, title, description)
+                        repo.createChannel(flag, kind, title, description, shortName)
                     }.onSuccess {
                         creatingChannel = false
                         newChannelOpen = false
@@ -413,12 +419,16 @@ fun GroupAdminScreen(
 private fun NewChannelDialog(
     busy: Boolean,
     onDismiss: () -> Unit,
-    onCreate: (kind: String, title: String, description: String) -> Unit,
+    /** [shortName] is empty for a random one, and for a notebook, which %notes names from its title. */
+    onCreate: (kind: String, title: String, description: String, shortName: String) -> Unit,
     error: io.nisfeb.talon.util.Problem? = null,
+    ownShip: String = "",
 ) {
     var kind by remember { mutableStateOf("chat") }
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var shortName by remember { mutableStateOf("") }
+    val named = kind != "notes"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -468,6 +478,7 @@ private fun NewChannelDialog(
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (named) io.nisfeb.talon.ui.ShortNameField(shortName, { shortName = it }, "$kind/$ownShip/", enabled = !busy)
                 if (busy) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -489,8 +500,8 @@ private fun NewChannelDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = title.trim().isNotEmpty() && !busy,
-                onClick = { onCreate(kind, title.trim(), description.trim()) },
+                enabled = title.trim().isNotEmpty() && !busy && (!named || io.nisfeb.talon.urbit.shortNameProblem(shortName) == null),
+                onClick = { onCreate(kind, title.trim(), description.trim(), if (named) shortName else "") },
             ) { Text("Create") }
         },
         dismissButton = {
