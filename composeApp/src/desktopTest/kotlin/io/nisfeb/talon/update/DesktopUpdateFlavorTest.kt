@@ -30,7 +30,8 @@ class DesktopUpdateFlavorTest {
         assertContains(script, "Wait-Process -Id 4242")
         // runs the installer, and never lets it reboot
         assertContains(script, "Start-Process msiexec")
-        assertContains(script, "('/i ' + [char]34 + 'C:\\Users\\a\\AppData\\Local\\Talon\\updates\\Talon-1.8.26.msi' + [char]34 + ' /norestart')")
+        // asks nothing, and installs into the folder Talon is in
+        assertContains(script, "('/i ' + [char]34 + 'C:\\Users\\a\\AppData\\Local\\Talon\\updates\\Talon-1.8.26.msi' + [char]34 + ' /passive /norestart' + ' INSTALLDIR=' + [char]34 + 'C:\\Program Files\\Talon' + [char]34)")
         // the msi waits, so the relaunch happens after the install
         assertTrue(script.indexOf("Start-Process msiexec") < script.indexOf("Start-Process -FilePath"))
         assertContains(script, "-Wait")
@@ -45,7 +46,7 @@ class DesktopUpdateFlavorTest {
             listOf(
                 "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
                 "Wait-Process -Id 7 -ErrorAction SilentlyContinue; " +
-                    "Start-Process msiexec -Wait -ArgumentList ('/i ' + [char]34 + 'C:\\Users\\Jo Smith\\AppData\\Local\\Talon\\updates\\Talon-1.8.30.msi' + [char]34 + ' /norestart'); " +
+                    "Start-Process msiexec -Wait -ArgumentList ('/i ' + [char]34 + 'C:\\Users\\Jo Smith\\AppData\\Local\\Talon\\updates\\Talon-1.8.30.msi' + [char]34 + ' /passive /norestart' + ' INSTALLDIR=' + [char]34 + 'C:\\Users\\Jo Smith\\AppData\\Local\\Talon' + [char]34); " +
                     "Start-Process -FilePath 'C:\\Users\\Jo Smith\\AppData\\Local\\Talon\\Talon.exe'",
             ),
             windowsUpdateCommand(
@@ -56,6 +57,16 @@ class DesktopUpdateFlavorTest {
         )
         // No literal double quote: none has to get through Java's command line for powershell.exe.
         assertTrue(windowsUpdateCommand(7, "C:\\Users\\Jo Smith\\up.msi", "C:\\T.exe").none { '"' in it })
+    }
+
+    // A reinstall asked whether to install into the folder that was
+    // already there (2026-11-01): an update asks nothing now.
+    @Test fun `an update asks nothing and stays in Talon's folder`() {
+        val script = windowsUpdateCommand(9, "C:\\up.msi", "D:\\Apps\\Talon\\Talon.exe").last()
+        assertContains(script, " /passive ")
+        assertContains(script, "' INSTALLDIR=' + [char]34 + 'D:\\Apps\\Talon' + [char]34")
+        // A launcher path with no folder in it passes no folder.
+        assertTrue("INSTALLDIR" !in windowsUpdateCommand(9, "C:\\up.msi", "Talon.exe").last())
     }
 
     @Test fun `a single quote in a path is doubled for powershell`() {

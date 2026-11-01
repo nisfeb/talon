@@ -531,9 +531,12 @@ compose.desktop {
                 // without it every release is a separate product and
                 // they stack up in Add/Remove Programs.
                 upgradeUuid = "caa028d1-1682-453f-a017-30b7dd8e8419"
-                // Let the user install without admin rights if they
-                // want; the default per-machine install needs elevation.
-                dirChooser = true
+                // No folder to pick. With one, every reinstall over the
+                // last asked whether to install into a folder that already
+                // exists (a user's report, 2026-11-01), which an upgrade
+                // never needs. The in-app update passes the folder Talon
+                // is in (windowsUpdateCommand), so it stays where it was.
+                dirChooser = false
             }
             macOS {
                 // .icns is generated on the macOS CI runner from icon-macos.png
