@@ -141,14 +141,13 @@ class TalonApplication : Application() {
         // Talon holds less. ponytail: half is a guess; Coil names none.
         // Images get ECH where Android does it, like ship traffic.
         coil3.SingletonImageLoader.setSafe { ctx ->
-            coil3.ImageLoader.Builder(ctx)
-                .memoryCacheMaxSizePercentWhileInBackground(0.5)
-                .apply {
-                    io.nisfeb.talon.util.echDnsOrNull()?.let { dns ->
-                        components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { OkHttpClient.Builder().dns(dns).build() })) }
-                    }
+            // GIFs that move: talonImageLoader adds the animated decoder.
+            io.nisfeb.talon.ui.talonImageLoader(ctx) {
+                memoryCacheMaxSizePercentWhileInBackground(0.5)
+                io.nisfeb.talon.util.echDnsOrNull()?.let { dns ->
+                    components { add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { OkHttpClient.Builder().dns(dns).build() })) }
                 }
-                .build()
+            }
         }
         // Module-visible app context for the few leaf helpers that have
         // no Context of their own (e.g. saveWavFile's MediaStore write).
