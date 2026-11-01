@@ -252,6 +252,8 @@ fun App(
      *  restarting for an update) runs it first. See closeAfterWork. */
     onShipWork: ((suspend () -> Unit)?) -> Unit = {},
 ) {
+    // GIFs that move (desktop and iOS; Android's shell sets its own).
+    coil3.compose.setSingletonImageLoaderFactory { ctx -> io.nisfeb.talon.ui.talonImageLoader(ctx) }
     // Derive the initial logged-in ship from sessionStore.active()
     // (the joined SavedSession) rather than activeShip() (just the
     // ship pointer). active() returns null when the pointer is stale

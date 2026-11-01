@@ -75,7 +75,16 @@ kotlin {
     // Force the default source-set hierarchy now (it's applied at the end
     // of the kotlin{} block otherwise) so `iosMain` exists for the
     // `getByName` below.
-    applyDefaultHierarchyTemplate()
+    // skikoMain: desktop and iOS both draw with Skia, which the animated
+    // GIF decoder needs (Coil's own animated decoders are Android's).
+    applyDefaultHierarchyTemplate {
+        common {
+            group("skiko") {
+                withJvm()
+                group("ios")
+            }
+        }
+    }
 
     sourceSets {
         commonMain {
@@ -156,6 +165,8 @@ kotlin {
             // Trunkline call engine: google libwebrtc via getstream's
             // maintained build.
             implementation(libs.webrtc.android)
+            // GIFs that move (AnimatedImageDecoder, GifDecoder before 28).
+            implementation(libs.coil.gif)
             // The live location map: MapLibre over OpenFreeMap's free,
             // keyless tiles (iOS draws MapKit, which needs nothing).
             implementation(libs.maplibre.android)
