@@ -82,6 +82,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, PKPushRegistryDelegate, CXPr
         provider = CXProvider(configuration: config)
         provider.setDelegate(self, queue: nil)
         IosVoipBridge.shared.callKit = self
+        // A significant move relaunches the app with no window: listen
+        // again here, or its fix is lost (IosLocationWatch).
+        IosLocationWatch.shared.resume()
 
         pushRegistry = PKPushRegistry(queue: .main)
         pushRegistry.delegate = self

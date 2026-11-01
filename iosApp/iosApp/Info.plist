@@ -20,11 +20,14 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>location</string>
 		<string>voip</string>
 		<string>remote-notification</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Talon uses your location to show sunrise, sunset and weather for where you are on the home dial. Weather requests send a position rounded to about a kilometre to the Open-Meteo forecast service; the precise fix never leaves this device.</string>
+	<string>Talon uses your location to show sunrise, sunset and weather for where you are on the home dial: weather requests send a position rounded to about a kilometre to the Open-Meteo forecast service. If you turn on Send where I am or share your location with someone, your position goes to Orrery on your own ship, and from there only to the people you share with.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>With Send where I am on, Talon tells Orrery on your own ship where you are when you move, for leave alerts, even with the app closed. While you share your location with someone, your ship passes each position to them until the share ends.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Talon uses your camera for video calls — only while a call is on screen and you have turned your camera on — and to scan the QR code when you log in with one.</string>
 	<key>CFBundleDevelopmentRegion</key>

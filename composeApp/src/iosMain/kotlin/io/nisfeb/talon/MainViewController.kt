@@ -111,6 +111,8 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
     val pushTokenProvider = IosPushTokenProvider()
     val notifier = IosNotifier()
     IosAppLifecycle.observe()
+    // Moves are heard with the app closed: listen again as it starts.
+    io.nisfeb.talon.orrery.IosLocationWatch.resume()
     // The keyboard is the app's business, not the controller's. Every
     // screen pads for safe drawing, which on iOS counts the keyboard, so
     // a controller that ALSO lifted the view made room twice: the space
@@ -158,6 +160,7 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
             // ids, and the drawer's seen dots.
             relaySettings = relaySettings,
             createMenuSeen = { s -> io.nisfeb.talon.ui.StoredMenuSeenStore(io.nisfeb.talon.ui.IosTextStore(io.nisfeb.talon.ui.menuSeenFileName(s))) },
+            locationControl = io.nisfeb.talon.orrery.IosLocationWatch.control,
         )
         }
     }
