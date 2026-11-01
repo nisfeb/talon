@@ -108,6 +108,10 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var refuseWatch: (String) -> String? = { null }
     /** A subscription whose PUT is lost on the way, by `app/path`: what the request fails with, or null to deliver it. */
     @Volatile var loseWatch: (String) -> Throwable? = { null }
+    /** Facts a watch answers with, then its quit, as a one-shot watch does (%channels' said): by `app/path`, null for none. */
+    @Volatile var answerWatch: (String) -> List<String>? = { null }
+    /** Every subscription id an unsubscribe named, in order. */
+    val unsubscribed: MutableList<Long> = java.util.concurrent.CopyOnWriteArrayList()
     /** How long a subscribe's PUT waits to return after its answer is on the stream: eyre's answer can come first. */
     @Volatile var holdWatchAnswer: Long = 0
     /** Every request, "METHOD path", whatever it was for: what an app that must say nothing did say. */
@@ -342,8 +346,13 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                                 if (err == null) """{"id":$id,"response":"subscribe","ok":"ok"}"""
                                 else """{"id":$id,"response":"subscribe","err":${JsonPrimitive(err)}}""",
                             )
+                            if (err == null) answerWatch(watch)?.let { facts ->
+                                for (fact in facts) answer(path, """{"id":$id,"response":"diff","json":$fact}""")
+                                answer(path, """{"id":$id,"response":"quit"}""")
+                            }
                             if (holdWatchAnswer > 0) kotlinx.coroutines.delay(holdWatchAnswer)
                         }
+                        "unsubscribe" -> { o["subscription"]?.jsonPrimitive?.content?.toLongOrNull()?.let { unsubscribed += it } }
                         "delete" -> { deleted += cid; if (holdDelete > 0) kotlinx.coroutines.delay(holdDelete) }
                     }
                 } } catch (t: Throwable) {

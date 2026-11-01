@@ -1842,6 +1842,8 @@ fun App(
           val citeResolver = remember(db, repo) {
               io.nisfeb.talon.ui.TalonCiteResolver(db, repo)
           }
+          // A cite of a post in a channel this ship is not in, open on its own.
+          var outsideCite by remember { mutableStateOf<io.nisfeb.talon.urbit.StoryPart.Citation?>(null) }
           val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
               remember(db, citeResolver) {
                   { cite ->
@@ -1876,6 +1878,7 @@ fun App(
                                   openThreadParent = jump.parentId
                                   openThreadReplyAnchor = jump.replyId
                               }
+                              is io.nisfeb.talon.ui.CiteJump.Outside -> outsideCite = jump.cite
                               null -> Unit
                           }
                       }
@@ -1921,6 +1924,21 @@ fun App(
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
               io.nisfeb.talon.ui.LocalPlaceName provides citePlaceName,
           ) {
+            outsideCite?.let { cite ->
+                io.nisfeb.talon.ui.ReferencedPostDialog(
+                    cite = cite,
+                    resolver = citeResolver,
+                    // The group's own page, with its Join for a non-member, as a group reference opens.
+                    onOpenGroup = { flag ->
+                        outsideCite = null
+                        leaveAllFor {
+                            uiSettings.setActiveRailTab(RailTab.Chats)
+                            openGroupHomeFlag = flag
+                        }
+                    },
+                    onDismiss = { outsideCite = null },
+                )
+            }
             // A live call or party line whose chat slot is gone (the
             // list, settings, a compact thread…) still needs a surface:
             // the mic can be live and unmuted. This used to float as a

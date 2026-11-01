@@ -25,6 +25,14 @@ class TalonCiteResolver(
         postDa: String,
         replyDa: String,
     ): MessageEntity? = repo.fetchCiteReply(whom, postDa, replyDa)
+
+    override suspend fun holds(whom: String): Boolean =
+        !io.nisfeb.talon.urbit.isChannelNest(whom) || db.groups().channelGroupFor(whom) != null
+
+    override suspend fun fetchOutside(whom: String, postDa: String, replyDa: String?) =
+        repo.fetchSaid(whom, postDa, replyDa)
+
+    override suspend fun previewChannel(whom: String) = repo.channelPreview(whom)
 }
 
 /**
@@ -47,6 +55,9 @@ sealed interface CiteJump {
         val messageId: String?,
         val groupFlag: String?,
     ) : CiteJump
+
+    /** A post in a channel this ship is not in: shown on its own ([ReferencedPostDialog]), not as a chat it cannot read. */
+    data class Outside(val cite: StoryPart.Citation) : CiteJump
 
     /** A reply — open [parentId]'s thread, anchored on [replyId] when
      *  the reply itself resolved. */
@@ -78,6 +89,9 @@ suspend fun resolveCiteJump(
 
     val flag = runCatching { groupFlagFor(whom) }.getOrNull()
     val postDa = cite.postDa ?: return CiteJump.Message(whom, null, flag)
+    if (io.nisfeb.talon.urbit.isChannelNest(whom) && !runCatching { resolver.holds(whom) }.getOrDefault(true)) {
+        return CiteJump.Outside(cite)
+    }
 
     suspend fun find(da: String, load: suspend () -> MessageEntity?) =
         runCatching {

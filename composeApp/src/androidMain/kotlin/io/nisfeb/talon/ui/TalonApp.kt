@@ -1513,6 +1513,8 @@ fun TalonApp(
     val citeResolver = remember(loggedInShip, app.db, app.repo) {
         io.nisfeb.talon.ui.TalonCiteResolver(app.db, app.repo)
     }
+    // A cite of a post in a channel this ship is not in, open on its own.
+    var outsideCite by remember { mutableStateOf<io.nisfeb.talon.urbit.StoryPart.Citation?>(null) }
     val openCitation: (io.nisfeb.talon.urbit.StoryPart.Citation) -> Unit =
         remember(citeResolver) {
             { cite ->
@@ -1544,6 +1546,7 @@ fun TalonApp(
                             pendingThreadAnchor = jump.replyId
                             openThread = jump.parentId
                         }
+                        is io.nisfeb.talon.ui.CiteJump.Outside -> outsideCite = jump.cite
                         null -> Unit
                     }
                 }
@@ -1624,6 +1627,15 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
         io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
+    outsideCite?.let { cite ->
+        io.nisfeb.talon.ui.ReferencedPostDialog(
+            cite = cite,
+            resolver = citeResolver,
+            // The group's own page, with its Join for a non-member, as a group reference opens.
+            onOpenGroup = { flag -> outsideCite = null; sections.leave { closeSections(); openGroupFlag = flag } },
+            onDismiss = { outsideCite = null },
+        )
+    }
     // The floating 1:1 strip sits ABOVE the screen content, in a column,
     // the way App.kt lays out its root slot. Emitted beside the Scaffold
     // it was drawn first and covered, so a live call showed no bar until

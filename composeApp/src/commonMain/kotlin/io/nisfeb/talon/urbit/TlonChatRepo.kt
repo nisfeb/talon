@@ -3058,6 +3058,58 @@ class TlonChatRepo(
         return db.messages().getOne(nest, replyDa.replace(".", ""))
     }
 
+    /**
+     * One post of a channel this ship may not be in, asked of its host
+     * (see [Said]). Not kept in the database: the channel is not one of
+     * ours, and its rows would make a conversation of it.
+     */
+    suspend fun fetchSaid(nest: String, postDa: String, replyDa: String?, timeoutMs: Long = OUTSIDE_ANSWER_MS): Said =
+        parseSaid(nest, watchOnce("channels", saidPath(nest, postDa, replyDa), timeoutMs))
+
+    /** Its host's preview of a channel this ship is not in, or null where it gave none. */
+    suspend fun channelPreview(nest: String, timeoutMs: Long = OUTSIDE_ANSWER_MS): ChannelPreview? =
+        parseChannelPreview(watchOnce("groups", channelPreviewPath(nest), timeoutMs)?.takeUnless { it is JsonNull })
+
+    /**
+     * Watches that answer once and are kicked, by request id: their first
+     * fact (JsonNull for a fact whose JSON is null), or null at a refusal
+     * or a quit before any. Kept until the quit, or [ONCE_KEPT_MS]: a quit
+     * on an id the repo does not know is the ship dropping one of its own
+     * watches, which ends the channel.
+     */
+    private val once = ConcurrentMap<Long, CompletableDeferred<JsonElement?>>()
+
+    /** A one-shot watch's first fact, or null for none within [timeoutMs] (see [once]). */
+    internal suspend fun watchOnce(app: String, path: String, timeoutMs: Long): JsonElement? {
+        val ch = channel?.takeIf { !it.gone } ?: return null
+        val answer = CompletableDeferred<JsonElement?>()
+        var sub: Long? = null
+        io.nisfeb.talon.util.runSuspendCatching {
+            // Registered before the PUT returns: the answer can come first.
+            ch.subscribe(app, path) { id -> sub = id; once[id] = answer }
+        }.getOrElse { return null }
+        val got = withTimeoutOrNull(timeoutMs) { answer.await() }
+        sub?.let { id ->
+            // No fact in time: the ship is told to drop it, and nothing
+            // more for it will come.
+            if (!answer.isCompleted) scope.launch { io.nisfeb.talon.util.runSuspendCatching { ch.unsubscribe(id) } }
+            scope.launch { delay(ONCE_KEPT_MS); once.remove(id) }
+        }
+        return got
+    }
+
+    /** True for an event on a [watchOnce] watch, taken here and nowhere else. */
+    private fun takeOnce(outer: JsonObject): Boolean {
+        val id = outer["id"].asLong() ?: return false
+        val answer = once[id] ?: return false
+        when (outer["response"].asStr()) {
+            "diff" -> answer.complete(outer["json"] ?: JsonNull)
+            "subscribe" -> if (outer["err"].let { it != null && it !is JsonNull }) answer.complete(null)
+            "quit" -> { answer.complete(null); once.remove(id) }
+        }
+        return true
+    }
+
     /** Conversations read on opening since this connect; the stream keeps them current after. */
     private val readOnOpen = ConcurrentSet<String>()
 
@@ -4116,6 +4168,7 @@ class TlonChatRepo(
     // internal, not private: repo tests feed it eyre-shaped facts directly.
     internal suspend fun applyEvent(event: JsonElement) {
         val outer = event as? JsonObject ?: return
+        if (takeOnce(outer)) return
         // Urbit's /~/channel/ SSE wraps each fact as:
         //   { id: N, response: "diff"|"poke"|"subscribe", mark: "...", json: {…} }
         // The actual per-agent payload lives in obj["json"]. Acks and
@@ -6180,6 +6233,10 @@ class TlonChatRepo(
         // two days (~ricsul, ~3,400 peers, 2026-10-05), so no one outside
         // the contact book ever got an avatar. Tlon's client waits 60 s.
         private const val DIRECTORY_SCRY_SECS = 60L
+
+        /** How long a host is given to answer for a post or a channel this ship is not in: over ames, a first ask may need its keys. */
+        internal const val OUTSIDE_ANSWER_MS = 15_000L
+        private const val ONCE_KEPT_MS = 60_000L
         private const val DIRECTORY_BUDGET_MS = 90_000L
     }
 

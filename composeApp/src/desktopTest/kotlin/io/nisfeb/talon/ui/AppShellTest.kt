@@ -89,6 +89,8 @@ class AppShellTest {
         // test's opening frame ("pending composition has not been
         // applied"), only in the full suite. HomeListTest does the same.
         io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
+        // Hosts' answers for references outside this ship's groups are kept a session: another test's are not this one's.
+        io.nisfeb.talon.ui.OutsideCites.clear()
         // A ship with nothing yet: an empty feed and no invites, which is
         // not the same as one that does not answer.
         val ship = FakeShip("~zod").apply {
@@ -415,6 +417,89 @@ class AppShellTest {
         onNodeWithText("Referenced post").performClick()
         // The group's own page, in its non-member mode — not a no-op.
         waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+    }
+
+    /** ~bus's chat, holding a reference to a post in ~rud/pubref's chat, which this ship is not in. */
+    private val outsideCite: suspend AppDatabase.() -> Unit = {
+        messages().upsert(
+            MessageEntity(
+                "~bus", "~bus/170141184506", "~bus", 1_000,
+                """[{"block":{"cite":{"chan":{"nest":"chat/~rud/pubchat","where":"/msg/170141184508237593667035039476012285952"}}}}]""", "/chat",
+            ),
+        )
+    }
+    private val outsideSaid = io.nisfeb.talon.urbit.OutsideReferenceTest.SAID_WATCH
+    private val outsidePreview = io.nisfeb.talon.urbit.OutsideReferenceTest.PREVIEW_WATCH
+
+    private fun ComposeUiTest.openBusCite() {
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
+        onAllNodesWithText("~bus")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+    }
+
+    private fun ComposeUiTest.inViewer(text: String) = onAllNodes(
+        androidx.compose.ui.test.hasText(text, substring = true) and
+            androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("referenced-post")),
+    ).fetchSemanticsNodes().isNotEmpty()
+
+    // A user's report (2026-11-01): a reference to a post in a public
+    // group this ship is not in showed only the channel's id. Its host
+    // shows the post to anyone who may read it: the card shows it, and a
+    // tap opens it on its own, with the group's page to join from.
+    @Test
+    fun `a post in a public group this ship is not in shows, and opens on its own with its group to join`() = app(
+        seed = outsideCite,
+        setup = {
+            answerWatch = {
+                when (it) {
+                    outsideSaid -> listOf(io.nisfeb.talon.urbit.OutsideReferenceTest.SAID_POST)
+                    outsidePreview -> listOf(io.nisfeb.talon.urbit.OutsideReferenceTest.PREVIEW)
+                    else -> null
+                }
+            }
+        },
+    ) { ship ->
+        openBusCite()
+        waitUntil(timeoutMillis = 10_000) { showing("Post in Public Ref · Public chat") && showing("hello from the public channel") }
+        onNodeWithText("Post in Public Ref · Public chat").performClick()
+        waitUntil(timeoutMillis = 5_000) { inViewer("hello from the public channel") && inViewer("Public Ref · Public chat") }
+        // Asked once: the viewer had it from the card.
+        assertEquals(1, ship.subscribed.count { it == outsideSaid })
+        assertEquals(1, ship.subscribed.count { it == outsidePreview })
+        assertTrue(ship.deleted.isEmpty(), "the said watch's quit did not end the channel")
+        onNodeWithText("Join group").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("You haven't joined this group") }
+        assertTrue(!inViewer("hello from the public channel"), "the viewer closed for the group's page")
+    }
+
+    // A private group, or a channel only some roles read: the host will
+    // not show the post, and says so. Its preview is not asked for (a
+    // private group's is never answered), so nothing to join is offered.
+    @Test
+    fun `a post its host will not show says only members can see it, and offers nothing to join`() = app(
+        seed = outsideCite,
+        setup = { answerWatch = { if (it == outsideSaid) listOf("null") else null } },
+    ) { ship ->
+        openBusCite()
+        waitUntil(timeoutMillis = 10_000) { showing("Only members of its group can see this post") }
+        assertTrue(showing("Post in a group you're not in"), "not the channel's id")
+        assertTrue(ship.subscribed.none { it == outsidePreview })
+        onNodeWithText("Only members of its group can see this post").performClick()
+        waitUntil(timeoutMillis = 5_000) { inViewer("Only members of this group can see this post.") }
+        assertTrue(!showing("Join group"))
+        onNodeWithText("Close").performClick()
+        waitUntil(timeoutMillis = 5_000) { !inViewer("Only members") }
+    }
+
+    // A post the host no longer has comes back as a stand-in by ~zod.
+    @Test
+    fun `a post its host no longer has says so, not a post by zod`() = app(
+        seed = outsideCite,
+        setup = { answerWatch = { if (it == outsideSaid) listOf(io.nisfeb.talon.urbit.OutsideReferenceTest.SAID_MISSING) else null } },
+    ) {
+        openBusCite()
+        waitUntil(timeoutMillis = 10_000) { showing("This post is no longer there") }
     }
 
     // One Escape closed the image and the chat with it: the image took
