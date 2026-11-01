@@ -138,4 +138,118 @@ class LocalShipPartsTest {
         assertEquals(listOf("vere"), dir.list()!!.toList())
         dir.deleteRecursively()
     }
+
+    // ── TerminalScreen: the dojo panel's view ───────────────────
+
+    private val esc = "\u001b"
+    private val bs7 = "\u0008".repeat(7)
+    private fun spin(vararg frames: String) = frames.joinToString("") { "$it$bs7" }
+    private fun drawn(vararg chunks: String) = TerminalScreen().apply { chunks.forEach(::feed) }
+
+    @Test
+    fun `a prompt redrawn in place, with a command, is drawn once`() {
+        // A user's paste: "~picwyc_samzod:dojo> ~picwyc_samzod:dojo> .^(...)> .^(...)",
+        // every redraw of one line laid side by side.
+        val screen = drawn(
+            "\r\n$esc[?25h$esc[2K~dotwet_binzod:dojo> ",
+            "\r$esc[2K~dotwet_binzod:dojo> (add 2 2)",
+            "\r\n$esc[2K> (add 2 2)\r\n4\r\n$esc[2K~dotwet_binzod:dojo> ",
+        )
+        assertEquals(listOf("", "~dotwet_binzod:dojo> (add 2 2)", "> (add 2 2)", "4", "~dotwet_binzod:dojo>"), screen.text().lines())
+    }
+
+    @Test
+    fun `a real comet's dojo, two lines typed and answered and a busy spell, draws as a terminal does`() {
+        // Cut from vere 4.6's terminal on a new comet, 2026-10-30: each line
+        // typed is redrawn on the prompt, replaced by its "> line" print-back
+        // and answered; then ames lines, and the spinner while an http event
+        // ran, ended by the prompt drawn again.
+        val raw = javaClass.getResource("/comet/dojo-sample.txt")!!.readText()
+        val spinEnds = raw.lastIndexOf("$esc[40;1H$esc[K~dotful_samzod:dojo> $esc[u")
+        val busy = drawn(raw.substring(0, spinEnds))
+        assertTrue(busy.busy(), "the spinner is up")
+        assertEquals("~dotful_samzod:dojo>", busy.text().lines().last(), "and not drawn")
+        val done = drawn(raw)
+        assertFalse(done.busy())
+        assertEquals(
+            listOf("> (add 109 1)", "110", "> (add 110 1)", "111", "ames: packet dropped (1000 total)", "l2-sig-failed", "~dotful_samzod:dojo>"),
+            done.text().lines(),
+        )
+        // Read in pieces, as the pty hands it over.
+        val pieces = TerminalScreen().apply { raw.chunked(37).forEach(::feed) }
+        assertEquals(done.text(), pieces.text())
+    }
+
+    @Test
+    fun `lines drawn on the bottom row and scrolled up read as lines`() {
+        // As vere 4.6 printed a comet's boot: to row 40, erase, the line in
+        // grey, a newline; then back to the row, the cursor put back, and
+        // the next line drawn over it.
+        val screen = drawn(
+            "boot: 1-21\r\n",
+            "$esc[40;1H$esc[K$esc[38;5;244m1-b$esc[0m\n",
+            "$esc[40;1H$esc[K$esc[u$esc[40;1H$esc[K$esc[38;5;244m1-c (compiling compiler, wait a few minutes)$esc[0m\n",
+            "$esc[40;1H$esc[K$esc[u$esc[40;1H$esc[K~dotful_samzod:dojo> ",
+            "$esc[s$esc[40;1H$esc[K$esc[38;5;244mmdns: getaddrinfo error: unknown node or service$esc[0m\n",
+            "$esc[40;1H$esc[K$esc[u$esc[40;1H$esc[K~dotful_samzod:dojo> $esc[40;22H",
+        )
+        assertEquals(
+            listOf("boot: 1-21", "1-b", "1-c (compiling compiler, wait a few minutes)", "mdns: getaddrinfo error: unknown node or service", "~dotful_samzod:dojo>"),
+            screen.text().lines(),
+            "no prompt glued to the front of every line, as the stripped text had",
+        )
+        // Saved and put back: the column, on the prompt's row.
+        assertEquals("ab-Xd", drawn("ab$esc[s-cd$esc[u$esc[1CX").text())
+    }
+
+    @Test
+    fun `the spinner says busy while it turns, and is not drawn`() {
+        val screen = drawn("~dotwet_binzod:dojo> +code\r\n", spin("|«behn»", "/«behn»", "-«behn»"))
+        assertTrue(screen.busy(), "an event is running")
+        assertEquals(listOf("~dotwet_binzod:dojo> +code", ""), screen.text().lines())
+        // The answer overwrites the last frame, as +code's did.
+        screen.feed("hanmec-tirsup-fodpec-sablud\r\n~dotwet_binzod:dojo> ")
+        assertFalse(screen.busy())
+        assertEquals(listOf("~dotwet_binzod:dojo> +code", "hanmec-tirsup-fodpec-sablud", "~dotwet_binzod:dojo>"), screen.text().lines())
+        // On the prompt line too, and a prompt drawn again clears it.
+        screen.feed(spin("\\«clay»"))
+        assertTrue(screen.busy())
+        screen.feed("\r$esc[2K~dotwet_binzod:dojo> ")
+        assertFalse(screen.busy())
+    }
+
+    @Test
+    fun `minutes of spinning keep the lines before it`() {
+        // A raw window filled with frames in two minutes and pushed out what came before.
+        val screen = drawn("kiln: finished downloading update for %groups\r\n~dotwet_binzod:dojo> ")
+        repeat(20_000) { screen.feed(spin("|«behn»", "/«behn»")) }
+        assertEquals(listOf("kiln: finished downloading update for %groups", "~dotwet_binzod:dojo>"), screen.text().lines())
+        assertTrue(screen.busy())
+    }
+
+    @Test
+    fun `an escape cut between two reads still draws`() {
+        val screen = drawn("old text\r$esc[2", "K~dotwet_binzod:dojo> ")
+        assertEquals("~dotwet_binzod:dojo>", screen.text())
+    }
+
+    @Test
+    fun `the cursor moves and erases as vere asks`() {
+        // To a column, right, left, then erase to the end of the line.
+        assertEquals("ab", drawn("abcdef$esc[3G$esc[K").text())
+        assertEquals("abXdef", drawn("abcdef$esc[1G$esc[2CX").text())
+        assertEquals("abcdXf", drawn("abcdef$esc[2DX").text())
+        assertEquals("   def", drawn("abcdef$esc[1G$esc[2C$esc[1K").text())
+        assertEquals("X", drawn("\u0008\u0008X").text(), "no further left than the start")
+        assertEquals("ab", drawn("ab$esc[31mcolour$esc[0m$esc[6D$esc[K").text())
+        assertEquals("abcxyz", drawn("abc$esc(Bxyz").text(), "a character-set choice draws nothing")
+        assertEquals("abcxyz", drawn("abc${esc}7xyz").text(), "nor does a two-character escape")
+    }
+
+    @Test
+    fun `only the newest lines are kept`() {
+        val screen = TerminalScreen(maxLines = 3)
+        (1..10).forEach { screen.feed("line $it\r\n") }
+        assertEquals(listOf("line 9", "line 10", ""), screen.text().lines())
+    }
 }

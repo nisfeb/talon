@@ -46,6 +46,14 @@ class LocalShipE2ETest {
                     ship.terminal.first { it.contains(ready.code) }
                 }
                 assertTrue(echoed != null, "the dojo answered +code on the terminal flow")
+                // Drawn as a terminal draws it: the line printed back, then
+                // its answer, and no prompt glued to the front of a line.
+                ship.send("(add 2 2)")
+                val drawn = withTimeoutOrNull(20 * 60_000) {
+                    ship.terminal.first { t -> t.lines().let { "> (add 2 2)" in it && it.getOrNull(it.indexOf("> (add 2 2)") + 1) == "4" } }
+                }
+                assertTrue(drawn != null, "(add 2 2) drew as a terminal shows it: ${ship.terminal.value.takeLast(600)}")
+                assertTrue(drawn.lines().none { Regex(":dojo> .+").matches(it) && "(add" !in it && "+code" !in it }, "no prompt glued to output: $drawn")
                 assertEquals(ready.ship, ship.describe()?.ship, "describe() knows the ship")
                 assertEquals(ready.code, ship.keptCode(), "the code is kept for later starts")
                 // 4.6 is the newest release at the time of writing; a

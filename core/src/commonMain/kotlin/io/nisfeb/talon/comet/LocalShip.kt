@@ -21,6 +21,11 @@ interface LocalShip {
      *  Settings. */
     val terminal: StateFlow<String>
 
+    /** True while the ship is working through an event and takes no
+     *  input: vere's spinner is up. A new ship is, for minutes, while it
+     *  installs its first updates, and the dojo looks dead without this. */
+    val busy: StateFlow<Boolean> get() = NEVER_BUSY
+
     /** True when a pier exists on disk from an earlier setup. */
     fun pierExists(): Boolean
 
@@ -79,6 +84,8 @@ interface LocalShip {
     companion object {
         /** Where a fresh comet lands: the public Nisfeb Software group. */
         const val LANDING_GROUP = "~darduc-mitfen/v12s6q7e"
+
+        private val NEVER_BUSY: StateFlow<Boolean> = MutableStateFlow(false)
     }
 }
 

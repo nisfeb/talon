@@ -74,6 +74,8 @@ class DesktopLocalShip(
     override val state: StateFlow<LocalShipState> = _state.asStateFlow()
     private val _terminal = MutableStateFlow("")
     override val terminal: StateFlow<String> = _terminal.asStateFlow()
+    private val _busy = MutableStateFlow(false)
+    override val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
     private val pier: File get() = File(dir, "pier")
     private val lockFile: File get() = File(pier, ".vere.lock")
@@ -87,6 +89,8 @@ class DesktopLocalShip(
     private val work = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var process: PtyProcess? = null
     private val transcript = StringBuilder()
+    // The panel's view of it, drawn as a terminal draws ([TerminalScreen]).
+    private var screen = TerminalScreen()
     private val transcriptLock = Any()
 
     override fun pierExists(): Boolean = File(pier, ".urb").isDirectory
@@ -144,6 +148,7 @@ class DesktopLocalShip(
         waitFor(20.seconds) { if (lockFile.exists()) null else true }
         delay(500)
         process = null
+        _busy.value = false
         _state.value = LocalShipState.Stopped
         Log.i(TAG, "the local ship stopped")
     }
@@ -263,8 +268,9 @@ class DesktopLocalShip(
         }
         val env = HashMap(System.getenv())
         env["TERM"] = "xterm-256color"
-        synchronized(transcriptLock) { transcript.setLength(0) }
+        synchronized(transcriptLock) { transcript.setLength(0); screen = TerminalScreen() }
         _terminal.value = ""
+        _busy.value = false
         _state.value = LocalShipState.Booting(firstBoot, "starting the runtime")
         val p = PtyProcessBuilder(cmd.toTypedArray())
             .setDirectory(dir.absolutePath)
@@ -430,18 +436,24 @@ class DesktopLocalShip(
                     runCatching { log?.write(buf, 0, n); log?.flush() }
                     val chunk = String(buf, 0, n, Charsets.UTF_8)
                     val shown: String
+                    val busyNow: Boolean
                     synchronized(transcriptLock) {
                         transcript.append(chunk)
                         // Keep the tail only; the boot log is long and
                         // nothing we parse is more than a screen back.
                         if (transcript.length > 256 * 1024) transcript.delete(0, transcript.length - 128 * 1024)
-                        shown = transcript.takeLast(16 * 1024).toString()
+                        screen.feed(chunk)
+                        shown = screen.text()
+                        busyNow = screen.busy()
                     }
-                    _terminal.value = CometTerminal.clean(shown)
+                    _terminal.value = shown
+                    _busy.value = busyNow
                 }
             } catch (_: Throwable) {
             } finally {
                 runCatching { log?.close() }
+                // A ship that has gone is not busy, whatever its last frame said.
+                _busy.value = false
             }
         }, "Talon-comet-terminal").apply { isDaemon = true }.start()
     }

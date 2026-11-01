@@ -1,0 +1,7 @@
+[s[40;1H[s[K[u~dotful_samzod:dojo> [u[40;22H[s[40;1H[s[K[u~dotful_samzod:dojo> (add 109 1)[u[40;33H[s[40;1H[s[K[u> (add 109 1)[u
+[s[40;1H[s[K[u~dotful_samzod:dojo> [u[40;22H[s[40;1H[s[K[u110[u
+[s[40;1H[s[K[u~dotful_samzod:dojo> [u[40;22H[s[40;1H[s[K[u~dotful_samzod:dojo> (add 110 1)[u[40;33H[s[40;1H[s[K[u> (add 110 1)[u
+[s[40;1H[s[K[u~dotful_samzod:dojo> [u[40;22H[s[40;1H[s[K[u111[u
+[s[40;1H[s[K[u~dotful_samzod:dojo> [u[40;22H[s[40;1H[Kames: packet dropped (1000 total)
+[40;1H[K~dotful_samzod:dojo> [u[40;1H[K[38;5;244ml2-sig-failed[0m
+[40;1H[K~dotful_samzod:dojo> [u|«http»/«http»-«http»\«http»|«http»/«http»-«http»\«http»|«http»/«http»[40;1H[K~dotful_samzod:dojo> [u

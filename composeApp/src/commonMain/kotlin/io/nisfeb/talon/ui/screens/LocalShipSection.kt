@@ -211,6 +211,12 @@ fun LocalShipSection(localShip: LocalShip) {
 @Composable
 private fun DojoPanel(localShip: LocalShip, enabled: Boolean) {
     val terminal by localShip.terminal.collectAsState()
+    val busy by localShip.busy.collectAsState()
+    // A line sent and not yet taken: dojo prints it back when it takes it.
+    var waiting by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    LaunchedEffect(terminal, waiting) {
+        waiting?.let { (cmd, seen) -> if (takenCount(terminal, cmd) > seen) waiting = null }
+    }
     val shown = remember(terminal) {
         // The last screenful, prompt-noise collapsed: vere redraws the
         // prompt line often and a linear transcript repeats it.
@@ -240,11 +246,26 @@ private fun DojoPanel(localShip: LocalShip, enabled: Boolean) {
             )
         }
     }
+    if (enabled && (busy || waiting != null)) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            when {
+                // Not taken yet, and nothing says the ship is busy: it is
+                // on its way, or about to be.
+                !busy -> "Sent: ${waiting?.first}"
+                waiting != null -> "Your ship is busy and will take \"${waiting?.first}\" when it's done. " + BUSY_WHY
+                else -> "Your ship is busy and will answer when it's done. $BUSY_WHY"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     Spacer(Modifier.height(6.dp))
     var line by remember { mutableStateOf("") }
     fun submit() {
         val cmd = line.trim()
         if (cmd.isEmpty()) return
+        waiting = cmd to takenCount(terminal, cmd)
         localShip.send(cmd)
         line = ""
     }
@@ -277,4 +298,18 @@ private fun InfoRow(label: String, value: String) {
         )
         Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(0.75f))
     }
+}
+
+private const val BUSY_WHY = "A new ship spends its first several minutes installing updates."
+
+/** How often [cmd] has been taken: dojo prints a line back as `> cmd` once it takes it. */
+internal fun takenCount(terminal: String, cmd: String): Int {
+    val echo = "> $cmd"
+    var n = 0
+    var at = terminal.indexOf(echo)
+    while (at >= 0) {
+        n++
+        at = terminal.indexOf(echo, at + echo.length)
+    }
+    return n
 }
