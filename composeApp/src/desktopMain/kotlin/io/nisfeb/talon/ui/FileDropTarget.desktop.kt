@@ -11,6 +11,7 @@ import androidx.compose.ui.draganddrop.awtTransferable
 import io.nisfeb.talon.util.Log
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.Transferable
 import java.io.File
 import java.net.URLConnection
 import javax.imageio.ImageIO
@@ -104,10 +105,38 @@ private fun readDroppedFile(file: File): DroppedFile? {
     return DroppedFile(name = file.name, mimeType = mime, bytes = bytes)
 }
 
+private fun clipboardContents(): Transferable? =
+    runCatching { Toolkit.getDefaultToolkit().systemClipboard.getContents(null) }.getOrNull()
+
+/**
+ * The first image among files copied in a file manager. Dolphin,
+ * Nautilus, Finder and Explorer copy a file as a list of files, with its
+ * path or name as text, and no image at all.
+ */
+internal fun copiedImageFile(contents: Transferable): File? {
+    if (!contents.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) return null
+    val files = runCatching { contents.getTransferData(DataFlavor.javaFileListFlavor) as? List<*> }.getOrNull()
+    return files?.filterIsInstance<File>()?.firstOrNull {
+        it.isFile && URLConnection.guessContentTypeFromName(it.name)?.startsWith("image/") == true
+    }
+}
+
+/** [contents]' copied image file, read as a dropped one is: its own bytes, name and type. */
+internal fun readCopiedImageFile(contents: Transferable): DroppedFile? =
+    copiedImageFile(contents)?.let(::readDroppedFile)
+
+// getContents fetches every format the owner offers, an image's bytes
+// too, so it is asked for only once the cheap target list has files.
+actual fun readCopiedImageFileOrNull(): DroppedFile? {
+    val listed = runCatching {
+        Toolkit.getDefaultToolkit().systemClipboard.isDataFlavorAvailable(DataFlavor.javaFileListFlavor)
+    }.getOrDefault(false)
+    return if (listed) clipboardContents()?.let(::readCopiedImageFile) else null
+}
+
 actual fun readClipboardImageOrNull(): DroppedFile? {
-    val clipboard = runCatching { Toolkit.getDefaultToolkit().systemClipboard }
-        .getOrNull() ?: return null
-    val contents = runCatching { clipboard.getContents(null) }.getOrNull() ?: return null
+    val contents = clipboardContents() ?: return null
+    readCopiedImageFile(contents)?.let { return it }
     if (!contents.isDataFlavorSupported(DataFlavor.imageFlavor)) return null
     // AWT hands back the image already decoded, at full size. One too
     // large for that runs out of memory here, and is said so: a crash in
@@ -180,7 +209,10 @@ actual fun clipboardHasImage(): Boolean = clipboardImage.hasImage()
 
 private val clipboardImage = ClipboardWatch(probe = {
     runCatching {
-        Toolkit.getDefaultToolkit().systemClipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)
+        val board = Toolkit.getDefaultToolkit().systemClipboard
+        board.isDataFlavorAvailable(DataFlavor.imageFlavor) ||
+            board.isDataFlavorAvailable(DataFlavor.javaFileListFlavor) &&
+            copiedImageFile(board.getContents(null)) != null
     }.getOrDefault(false)
 })
 
