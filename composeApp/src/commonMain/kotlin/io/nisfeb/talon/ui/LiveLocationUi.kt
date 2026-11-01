@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.nisfeb.talon.orrery.GROUP_SHARE_MAX
 import io.nisfeb.talon.orrery.InShare
 import io.nisfeb.talon.orrery.LocalLiveLocation
 import io.nisfeb.talon.orrery.OrreryError
@@ -47,8 +48,10 @@ fun LiveLocationStrip(ship: String, who: String) {
     WatchShares(ship)
     val inbound = shares?.from(ship)
     val out = shares?.outTo(ship)
-    if (inbound == null && out == null) return
+    val asking = shares?.asking(ship) == true
+    if (inbound == null && out == null && !asking) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (asking) AskRow(ship, who)
         inbound?.let { InboundRow(it, who) }
         out?.let { OutboundRow(it) }
     }
@@ -61,11 +64,42 @@ fun LiveLocationProfileRows(ship: String, who: String) {
     val shares by live.shares.collectAsState()
     WatchShares(ship)
     var asking by remember(ship) { mutableStateOf(false) }
+    if (shares?.asking(ship) == true) AskRow(ship, who)
     shares?.from(ship)?.let { InboundRow(it, who) }
     val out = shares?.outTo(ship)
     if (out != null) OutboundRow(out)
     else if (live.canShare) TextButton(onClick = { asking = true }) { Text("Share my location") }
-    if (asking) ShareLocationDialog(ship, who, onDone = { asking = false })
+    if (asking) ShareLocationDialog(listOf(ship), "Share where you are with $who", exactFirst = true, onDone = { asking = false })
+}
+
+/**
+ * A group's Info: share where we are with its members, each their own
+ * grant, the area by default; and the members we share with, with Stop.
+ * Only for a group of up to [GROUP_SHARE_MAX] members.
+ */
+@Composable
+fun GroupLiveLocationRows(members: List<String>, us: String) {
+    val live = LocalLiveLocation.current ?: return
+    val shares by live.shares.collectAsState()
+    LaunchedEffect(Unit) { live.refresh() }
+    val others = members.filter { it != us }
+    val sharedWith = shares?.out.orEmpty().map { it.ship }.filter { it in others }
+    val scope = rememberCoroutineScope()
+    var asking by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    if (sharedWith.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("You're sharing where you are with ${sharedWith.size} of its members", style = MaterialTheme.typography.bodyMedium)
+            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+        TextButton(onClick = {
+            problem = null
+            scope.launch { live.stop(sharedWith).onFailure { problem = shareProblem("stop", it) } }
+        }) { Text("Stop") }
+    } else if (live.canShare && others.isNotEmpty() && others.size <= GROUP_SHARE_MAX) {
+        TextButton(onClick = { asking = true }) { Text("Share my location with the group") }
+    }
+    if (asking) ShareLocationDialog(others, "Share where you are with the group's ${others.size} members", exactFirst = false, onDone = { asking = false })
 }
 
 /** Settings' list of the shares this ship runs, each with Stop. */
@@ -75,9 +109,33 @@ fun SharingWithList() {
     val shares by live.shares.collectAsState()
     LaunchedEffect(Unit) { live.refresh() }
     val out = shares?.out.orEmpty()
+    // Asks first: a group's member who shared lands here, with no chat to show it in.
+    shares?.asks.orEmpty().forEach { AskRow(it, shipHandle(it)) }
     if (out.isEmpty()) return
     Text("Sharing where you are with", style = MaterialTheme.typography.labelLarge)
     out.forEach { s -> OutboundRow(s, label = shipHandle(s.ship)) }
+}
+
+/** A ship this orrery does not know wants to share where they are: nothing of theirs shows until accepted. */
+@Composable
+private fun AskRow(ship: String, who: String) {
+    val live = LocalLiveLocation.current ?: return
+    val scope = rememberCoroutineScope()
+    var problem by remember(ship) { mutableStateOf<String?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("$who wants to share where they are", style = MaterialTheme.typography.bodyMedium)
+            problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+        TextButton(onClick = {
+            problem = null
+            scope.launch { live.decline(ship).onFailure { problem = shareProblem("decline", it) } }
+        }) { Text("Decline") }
+        TextButton(onClick = {
+            problem = null
+            scope.launch { live.accept(ship).onFailure { problem = shareProblem("accept", it) } }
+        }) { Text("Accept") }
+    }
 }
 
 /** Read on open, then each minute while a share with [ship] runs either way. Real time: a test's virtual clock would spin it. */
@@ -124,23 +182,23 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
         }
         TextButton(onClick = {
             problem = null
-            scope.launch { live.stop(s.ship).onFailure { problem = shareProblem("stop", it) } }
+            scope.launch { live.stop(listOf(s.ship)).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
     }
 }
 
 @Composable
-private fun ShareLocationDialog(ship: String, who: String, onDone: () -> Unit) {
+private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, onDone: () -> Unit) {
     val live = LocalLiveLocation.current ?: return
     val sending = rememberLocationSharing()
     val scope = rememberCoroutineScope()
     var length by remember { mutableStateOf(ShareLength.Hour) }
-    var exact by remember { mutableStateOf(true) }
+    var exact by remember { mutableStateOf(exactFirst) }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDone,
-        title = { Text("Share where you are with $who") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ShareLength.entries.forEach { l ->
@@ -180,7 +238,7 @@ private fun ShareLocationDialog(ship: String, who: String, onDone: () -> Unit) {
                         busy = false
                         return@launch
                     }
-                    live.share(ship, length, exact)
+                    live.share(ships, length, exact)
                         .onSuccess { onDone() }
                         .onFailure { problem = shareProblem("share", it); busy = false }
                 }

@@ -546,28 +546,50 @@ class OrreryRepo(
 
         // Said here at once, so every screen shows it; then read back from the
         // ship, which a failed read leaves as said.
-        override suspend fun share(ship: String, length: ShareLength, exact: Boolean): Result<Unit> = scope.async {
+        override suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit> = scope.async {
             runCatching {
-                attached().shareLocation(ship, length, exact)
-                val until = length.hours?.let { now() + it * 3_600_000L }
-                _shares.update { s ->
-                    val was = s ?: LocationShares(emptyList(), emptyList())
-                    was.copy(out = was.out.filter { it.ship != ship } + OutShare(ship, until, length.hours == null, exact))
+                try {
+                    for (ship in ships) {
+                        attached().shareLocation(ship, length, exact)
+                        val until = length.hours?.let { now() + it * 3_600_000L }
+                        _shares.update { s ->
+                            val was = s ?: LocationShares(emptyList(), emptyList())
+                            was.copy(out = was.out.filter { it.ship != ship } + OutShare(ship, until, length.hours == null, exact))
+                        }
+                    }
+                } finally {
+                    location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                    refresh()
                 }
-                location.live(_shares.value?.let { sendFastUntil(it, now()) })
-                refresh()
             }
         }.await()
 
-        override suspend fun stop(ship: String): Result<Unit> = scope.async {
+        override suspend fun stop(ships: List<String>): Result<Unit> = scope.async {
             runCatching {
-                attached().unshareLocation(ship)
-                _shares.update { s -> s?.copy(out = s.out.filter { it.ship != ship }) }
-                location.live(_shares.value?.let { sendFastUntil(it, now()) })
-                refresh()
+                try {
+                    for (ship in ships) {
+                        attached().unshareLocation(ship)
+                        _shares.update { s -> s?.copy(out = s.out.filter { it.ship != ship }) }
+                    }
+                } finally {
+                    location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                    refresh()
+                }
             }
         }.await()
+
+        override suspend fun accept(ship: String): Result<Unit> = answerAsk(ship, take = true)
+
+        override suspend fun decline(ship: String): Result<Unit> = answerAsk(ship, take = false)
     }
+
+    private suspend fun answerAsk(ship: String, take: Boolean): Result<Unit> = scope.async {
+        runCatching {
+            if (take) attached().acceptLocation(ship) else attached().declineLocation(ship)
+            _shares.update { s -> s?.copy(asks = s.asks - ship) }
+            live.refresh()
+        }
+    }.await()
 
     private suspend fun readShares() {
         val s = locationShares(attached().locationDoc(), now())

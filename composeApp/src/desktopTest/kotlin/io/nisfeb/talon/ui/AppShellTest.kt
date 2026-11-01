@@ -258,7 +258,8 @@ class AppShellTest {
         val now = System.currentTimeMillis()
         fun iso(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toString()
         val doc = """{"out": [{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": true, "since": "${iso(now)}"}],
-            "in": {"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now - 60_000)}", "until": "${iso(now + 3_600_000)}", "home": false}}}"""
+            "in": {"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now - 60_000)}", "until": "${iso(now + 3_600_000)}", "home": false}},
+            "asks": {"~nec": {"lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true}}}"""
         app(
             ai = orreryOn,
             seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
@@ -283,6 +284,8 @@ class AppShellTest {
             // (Appearance lists the rail's items, Orrery among them).
             onAllNodesWithText("Orrery")[0].performClick()
             waitUntil(timeoutMillis = 10_000) { showing("Sharing where you are with") }
+            // A ship with no chat here asks in Settings.
+            assertTrue(showing("~nec wants to share where they are"), "the ask, where there is no chat for it")
             assertTrue(ship.api.none { "/location/" in it }, "reading shares writes none: ${ship.api}")
         }
     }

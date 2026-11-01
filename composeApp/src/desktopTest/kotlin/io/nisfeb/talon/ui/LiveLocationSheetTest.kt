@@ -15,6 +15,7 @@ import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.http.HttpStatusCode
 import io.nisfeb.talon.data.AppDatabase
+import io.nisfeb.talon.orrery.GROUP_SHARE_MAX
 import io.nisfeb.talon.orrery.LocalLiveLocation
 import io.nisfeb.talon.orrery.OrreryApi
 import io.nisfeb.talon.orrery.OrreryAvailability
@@ -33,6 +34,9 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Live location from a person's card (orrery 88), the whole way to a
@@ -48,9 +52,17 @@ class LiveLocationSheetTest {
     private val fileKey = OrreryApi.SCRY_ROOT.removePrefix("/~/scry/") + "/location.json"
 
     /** The location document the fake orrery holds: shares change it, as the real one's routes do. */
-    @Volatile private var out = "[]"
+    /** The shares out, by ship, as orrery's grants. */
+    private val outs: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+    private var out: String
+        get() = outs.values.joinToString(",", "[", "]")
+        set(v) {
+            outs.clear()
+            kotlinx.serialization.json.Json.parseToJsonElement(v).jsonArray.forEach { outs[it.jsonObject["ship"]!!.jsonPrimitive.content] = it.toString() }
+        }
     @Volatile private var inbound = "{}"
-    private val doc get() = """{"out": $out, "in": $inbound}"""
+    @Volatile private var asks = "{}"
+    private val doc get() = """{"out": $out, "in": $inbound, "asks": $asks}"""
     private val live: MutableList<Long?> = java.util.concurrent.CopyOnWriteArrayList()
     private val maps: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
@@ -61,10 +73,25 @@ class LiveLocationSheetTest {
                 method == "GET" && path == "/apps/orrery/api/location" -> doc
                 method == "POST" && path == "/apps/orrery/api/location/share" -> {
                     onShare(body)
-                    out = """[{"ship": "~bus", "until": null, "home": true, "exact": false, "since": "${iso(now)}"}]"""
-                    """{"ship": "~bus"}"""
+                    val asked = kotlinx.serialization.json.Json.parseToJsonElement(body).jsonObject
+                    val to = asked["ship"]!!.jsonPrimitive.content
+                    val hours = asked["hours"]?.jsonPrimitive?.content?.toLong()
+                    val until = hours?.let { "\"${iso(now + it * 3_600_000)}\"" } ?: "null"
+                    val exact = asked["precision"]?.jsonPrimitive?.content == "exact"
+                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}"}"""
+                    """{"ship": "$to"}"""
                 }
-                method == "DELETE" && path == "/apps/orrery/api/location/share/~bus" -> { out = "[]"; """{"ok": true, "told": true}""" }
+                // Orrery 137: accept moves the ask's fix in, decline drops it.
+                method == "POST" && path == "/apps/orrery/api/location/accept" -> {
+                    asks = "{}"
+                    inbound = """{"~bus": {"id": "person/bus", "name": "~bus", "lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true}}"""
+                    """{"ok": true, "id": "person/bus"}"""
+                }
+                method == "POST" && path == "/apps/orrery/api/location/decline" -> { asks = "{}"; """{"ok": true}""" }
+                method == "DELETE" && path.startsWith("/apps/orrery/api/location/share/") -> {
+                    outs.remove(path.substringAfterLast('/'))
+                    """{"ok": true, "told": true}"""
+                }
                 else -> null
             }
         }
@@ -73,6 +100,8 @@ class LiveLocationSheetTest {
     private fun card(
         ship: FakeShip = ship(),
         canShare: Boolean = true,
+        /** A group's members: its Info's rows instead of a person's card. */
+        group: List<String>? = null,
         block: ComposeUiTest.(FakeShip, OrreryRepo, (Boolean) -> Unit) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-live-").toFile()
@@ -96,14 +125,17 @@ class LiveLocationSheetTest {
                         LocalMapsLauncher provides MapsLauncher { lat, lng -> maps += "$lat,$lng" },
                     ) {
                         TalonTheme(darkTheme = false) {
-                            if (shown) ContactProfileSheet(
+                            if (group != null) androidx.compose.foundation.layout.Column {
+                                androidx.compose.material3.Text("Group Info")
+                                if (shown) GroupLiveLocationRows(group, us = "~zod")
+                            } else if (shown) ContactProfileSheet(
                                 ship = bus, self = false, contact = null,
                                 onMessage = {}, onEditSelf = {}, onDismiss = { shown = false },
                             )
                         }
                     }
                 }
-                waitUntil(timeoutMillis = 5_000) { shows("Message") }
+                waitUntil(timeoutMillis = 5_000) { shows(if (group != null) "Group Info" else "Message") }
                 block(ship, repo) { shown = it }
             }
         } finally {
@@ -116,7 +148,10 @@ class LiveLocationSheetTest {
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
     private fun ComposeUiTest.tap(text: String) {
         waitUntil(timeoutMillis = 5_000) { shows(text) }
-        onNodeWithText(text).performScrollTo().performClick()
+        val node = onNodeWithText(text)
+        // The card scrolls; a dialog and the group's rows have nothing to scroll.
+        runCatching { node.performScrollTo() }
+        node.performClick()
     }
 
     @Test
@@ -228,6 +263,92 @@ class LiveLocationSheetTest {
             gate.countDown()
             runBlocking { withTimeout(5_000) { while (repo.live.shares.value?.outTo("~bus") == null) delay(20) } }
             assertTrue(live.lastOrNull() != null, "the phone sends fast for it")
+        }
+    }
+
+    // A group's members, each their own grant (orrery keeps one per ship).
+    private val crew = listOf("~zod", "~bus", "~nec")
+
+    @Test
+    fun `a group share goes to every member but us, the area unless asked, and Stop ends them all`() = card(group = crew) { ship, _, _ ->
+        tap("Share my location with the group")
+        waitUntil(timeoutMillis = 5_000) { shows("Share where you are with the group's 2 members") }
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are with 2 of its members") }
+        assertEquals(
+            listOf(
+                """POST /apps/orrery/api/location/share {"ship":"~bus","hours":1,"precision":"area"}""",
+                """POST /apps/orrery/api/location/share {"ship":"~nec","hours":1,"precision":"area"}""",
+            ),
+            ship.api.filter { "/location/share" in it },
+        )
+        tap("Stop")
+        waitUntil(timeoutMillis = 5_000) { shows("Share my location with the group") }
+        // In the order the ship lists its shares, which is its own.
+        assertEquals(
+            setOf("DELETE /apps/orrery/api/location/share/~bus ", "DELETE /apps/orrery/api/location/share/~nec "),
+            ship.api.filter { it.startsWith("DELETE") }.toSet(),
+        )
+        assertEquals(2, ship.api.count { it.startsWith("DELETE") })
+        assertEquals(null, live.last())
+    }
+
+    @Test
+    fun `a member's refusal stops the share there, says why, and the shares before it stand`() = card(group = crew, ship = ship().apply {
+        answerApiStatus = { method, path, body ->
+            if (method == "POST" && "~nec" in body) HttpStatusCode.Forbidden to """{"error": "no such route"}""" else null
+        }
+    }) { _, repo, _ ->
+        tap("Share my location with the group")
+        waitUntil(timeoutMillis = 5_000) { shows("Share") }
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Couldn't share: no such route") }
+        assertEquals(listOf("~bus"), repo.live.shares.value?.out?.map { it.ship })
+    }
+
+    @Test
+    fun `a group bigger than a family is not offered a share`() =
+        card(group = listOf("~zod") + (1..GROUP_SHARE_MAX + 1).map { "~sampel-$it" }) { _, _, _ ->
+            waitForIdle()
+            assertTrue(!shows("Share my location with the group"))
+        }
+
+    private val anAsk get() = """{"~bus": {"lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true, "asked": "${iso(now)}"}}"""
+
+    @Test
+    fun `an ask shows nothing of theirs until Accept, which makes them a person and shows where they are`() {
+        asks = anAsk
+        card { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("~bus wants to share where they are") }
+            assertTrue(!shows("is sharing where they are"), "nothing of theirs before the owner says yes")
+            tap("Accept")
+            waitUntil(timeoutMillis = 5_000) { shows("~bus is sharing where they are") }
+            assertEquals(listOf("""POST /apps/orrery/api/location/accept {"ship":"~bus"}"""), ship.api.filter { "/accept" in it || "/decline" in it })
+            assertTrue(!shows("wants to share"))
+        }
+    }
+
+    @Test
+    fun `Decline drops the ask`() {
+        asks = anAsk
+        card { ship, _, _ ->
+            tap("Decline")
+            waitUntil(timeoutMillis = 5_000) { !shows("wants to share") }
+            assertEquals(listOf("""POST /apps/orrery/api/location/decline {"ship":"~bus"}"""), ship.api.filter { "/accept" in it || "/decline" in it })
+            assertTrue(!shows("is sharing where they are"))
+        }
+    }
+
+    @Test
+    fun `an ask that went meanwhile says so`() {
+        asks = anAsk
+        card(ship().apply {
+            answerApiStatus = { method, path, _ ->
+                if (method == "POST" && path.endsWith("/accept")) HttpStatusCode.NotFound to """{"error": "no ask from that ship"}""" else null
+            }
+        }) { _, _, _ ->
+            tap("Accept")
+            waitUntil(timeoutMillis = 5_000) { shows("Couldn't accept: no ask from that ship") }
         }
     }
 }

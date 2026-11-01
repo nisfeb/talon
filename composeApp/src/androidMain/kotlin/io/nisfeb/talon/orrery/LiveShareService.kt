@@ -125,7 +125,11 @@ class LiveShareService : Service() {
             val until = runCatching { LiveShares.reread(this@LiveShareService) }.getOrNull()
             LiveShares.set(this@LiveShareService, until)
             if (until == null) end()
-            else handler.postDelayed(due, (until - System.currentTimeMillis()).coerceAtLeast(0))
+            else {
+                // Once: a changed end starts the service again, which posts it too.
+                handler.removeCallbacks(due)
+                handler.postDelayed(due, (until - System.currentTimeMillis()).coerceAtLeast(0))
+            }
         }
     }
 

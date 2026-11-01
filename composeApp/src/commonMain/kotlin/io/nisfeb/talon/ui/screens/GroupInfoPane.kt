@@ -200,7 +200,7 @@ fun GroupInfoPane(
         group = PaneGroup(flag, channelTitle = mapping.title)
         runCatching { repo.fetchGroupAdmin(flag) }
             .getOrNull()
-            ?.let { group = group.copy(members = it.members.size, public = it.privacy == "public") }
+            ?.let { group = group.copy(members = it.members.size, ships = it.members.map { m -> m.ship }, public = it.privacy == "public") }
     }
 
     val groupRowFlow: Flow<io.nisfeb.talon.data.GroupEntity?> =
@@ -393,6 +393,9 @@ fun GroupInfoPane(
                     Spacer(Modifier.size(12.dp))
                     Text("Invite someone to the group", modifier = Modifier.weight(1f).padding(end = 8.dp))
                 }
+                if (group.ships.isNotEmpty()) androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 16.dp)) {
+                    io.nisfeb.talon.ui.GroupLiveLocationRows(group.ships, repo.ownShip)
+                }
                 HorizontalDivider()
             }
             // Tlon's own reference: its join box and Talon's + screen take
@@ -581,6 +584,8 @@ private fun NotifyLevelOption(
 private data class PaneGroup(
     val flag: String? = null,
     val members: Int? = null,
+    /** The members' ships, as the same fetch had them. */
+    val ships: List<String> = emptyList(),
     val public: Boolean = false,
     val channelTitle: String? = null,
 )

@@ -23,9 +23,15 @@ data class LocationShares(
     val out: List<OutShare>,
     /** Ships sharing where their owner is with this one. */
     val inbound: List<InShare>,
+    /**
+     * Ships this orrery does not know that started a share (orrery 137):
+     * nothing of theirs shows until the owner accepts.
+     */
+    val asks: List<String> = emptyList(),
 ) {
     fun outTo(ship: String): OutShare? = out.firstOrNull { it.ship == ship }
     fun from(ship: String): InShare? = inbound.firstOrNull { it.ship == ship }
+    fun asking(ship: String): Boolean = ship in asks
 }
 
 data class OutShare(val ship: String, val untilMs: Long?, val home: Boolean, val exact: Boolean)
@@ -84,8 +90,19 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         if (!live) return@mapNotNull null
         InShare(ship, v["name"].asText().orEmpty(), lat, lon, v["acc"].asText()?.toDoubleOrNull(), at, until, flag(v["home"]))
     }
-    return LocationShares(out, inbound)
+    // An ask holds a fix too, never shown; it lives as a share with no end time does.
+    val asks = when (val a = doc["asks"]) {
+        is JsonObject -> a.entries.mapNotNull { (k, v) -> (v as? JsonObject)?.let { k to it } }
+        is JsonArray -> a.mapNotNull { (it as? JsonObject)?.let { o -> o["ship"].asText() to o } }
+        else -> emptyList()
+    }.mapNotNull { (ship, v) ->
+        ship?.takeIf { it.startsWith("~") && ms(v["at"])?.let { at -> nowMs - at < SHARE_QUIET_MS } == true }
+    }
+    return LocationShares(out, inbound, asks)
 }
+
+/** The body of POST /api/location/accept and /decline (orrery 137). */
+fun askBody(ship: String): String = buildJsonObject { put("ship", ship) }.toString()
 
 /** The body of POST /api/location/share, as orrery's +serve-location-share reads it. */
 fun shareBody(ship: String, length: ShareLength, exact: Boolean): String = buildJsonObject {
@@ -114,11 +131,29 @@ interface LiveLocation {
     /** Read the shares again: cheap, a scry where the ship allows one. */
     suspend fun refresh()
 
-    /** Start sharing with [ship], or replace the share there. Runs to the end on the repo's scope. */
-    suspend fun share(ship: String, length: ShareLength, exact: Boolean): Result<Unit>
+    /**
+     * Start sharing with each of [ships], one grant each (a group's members),
+     * or replace the share there. Runs to the end on the repo's scope; the
+     * first refusal stops it, and the shares made before it stand.
+     */
+    suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit>
 
-    /** Stop sharing with [ship]. Runs to the end on the repo's scope. */
-    suspend fun stop(ship: String): Result<Unit>
+    /** Stop sharing with each of [ships]. Runs to the end on the repo's scope. */
+    suspend fun stop(ships: List<String>): Result<Unit>
+
+    /** Take [ship]'s ask: orrery makes them a person here and shows where they are. On the repo's scope. */
+    suspend fun accept(ship: String): Result<Unit>
+
+    /** Turn [ship]'s ask down: orrery drops their fixes from now on. On the repo's scope. */
+    suspend fun decline(ship: String): Result<Unit>
 }
 
 val LocalLiveLocation = staticCompositionLocalOf<LiveLocation?> { null }
+
+/**
+ * The most members a group share goes to: one grant, and a poke a
+ * minute, per member.
+ * ponytail: a share per member; a trunk "location room" fans out on the
+ * group's own roster if groups get bigger than a family.
+ */
+const val GROUP_SHARE_MAX = 20

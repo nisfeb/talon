@@ -621,6 +621,16 @@ class OrreryApi(
         request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact))
     }
 
+    /** Take a share from a ship orrery did not know (orrery 137): it makes them a person here. */
+    suspend fun acceptLocation(ship: String) {
+        request(owner, HttpMethod.Post, "/api/location/accept", askBody(ship))
+    }
+
+    /** Turn a ship's share down (orrery 137): their fixes are dropped from now on. */
+    suspend fun declineLocation(ship: String) {
+        request(owner, HttpMethod.Post, "/api/location/decline", askBody(ship))
+    }
+
     /** Stop sharing with [ship]. One the ship no longer shares with (404) is already stopped. */
     suspend fun unshareLocation(ship: String) {
         try {
