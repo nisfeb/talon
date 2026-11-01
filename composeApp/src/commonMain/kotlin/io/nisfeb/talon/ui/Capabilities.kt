@@ -35,7 +35,7 @@ package io.nisfeb.talon.ui
  *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).
- *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings).
+ *  - isLocationSharingSupported — A (LocationManager wakes a receiver on a significant move; a live share runs LiveShareService). D: a computer does not move with you. i: port pending (CLLocationManager significant-change monitoring, Always authorization, Info.plist strings, Apple's 5.1.5 review). Gates Share my location too; seeing a share and stopping one work everywhere.
  *  - isHealthSharingSupported — A (Health Connect: steps, exercise, sleep). D: a computer holds no health data. i: port pending (HealthKit statistics and sample queries, the HealthKit entitlement, Info.plist strings).
  *  - isRelayNotificationSetupNeeded — i: the app is suspended in the background, so the relay's push is its only notification. A: a foreground service keeps the ship's stream. D: notifies while it runs.
  *  - isAppIconBadgeSupported — i: the unread count on the app icon, a switch in Settings (off until turned on). A: launchers draw their own dot from the notifications. D: no icon to badge.
@@ -388,7 +388,9 @@ expect val isUrbWebViewSupported: Boolean
  * Whether this device can tell orrery where the owner is when they
  * move: the phone in their pocket, woken by the platform on a move of
  * a few hundred metres, with the app closed. Gates the switch under
- * the orrery triage row. See [LocationSharing].
+ * the orrery triage row, and Share my location on a person's card
+ * (orrery 88), since a share sends this device's fixes. See
+ * [LocationSharing] and [io.nisfeb.talon.orrery.LiveLocation].
  */
 expect val isLocationSharingSupported: Boolean
 

@@ -330,6 +330,11 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <service
+            android:name="io.nisfeb.talon.orrery.LiveShareService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
         <receiver
             android:name="io.nisfeb.talon.CallActionReceiver"
             android:exported="false" />

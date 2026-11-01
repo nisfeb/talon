@@ -1176,6 +1176,8 @@ private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
             Quiet("A computer running Talon has been reading in the last two hours, so this phone leaves the reading to it. Facts still go up from here.")
         }
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
+        // Every device lists the shares and stops them; only a phone starts one.
+        io.nisfeb.talon.ui.SharingWithList()
         if (io.nisfeb.talon.ui.isHealthSharingSupported) HealthRow()
         error?.let { Quiet(it, error = true) }
         // An empty balance holds every message the pipe would read, so it
@@ -1196,7 +1198,9 @@ private fun LocationRow() {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Send where I am", style = MaterialTheme.typography.bodyMedium)
-            Quiet("When this phone moves a few hundred metres, Orrery hears where you are: a place it knows, or the neighbourhood or town. Never the coordinates.")
+            // It said "Never the coordinates", but since orrery 69 each fix also
+            // goes up to the metre, for the leave alert (2026-11-01).
+            Quiet("When this phone moves a few hundred metres, it tells Orrery on your ship where you are, to the metre, for leave alerts and the shares you start. What Orrery learns about you keeps only the place, or the neighbourhood or town.")
             if (on && !sharing.allowed()) Quiet("Location access for Talon is off, or not all the time, so nothing is sent.", error = true)
             if (on && !sharing.names) Quiet("This phone cannot look place names up, so only places Orrery knows are sent.")
         }

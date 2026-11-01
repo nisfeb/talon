@@ -88,6 +88,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
     /** An API answer that is not JSON: its status and content type, as a 403, a 502 or eyre's login page. Before [answerApi]. */
     @Volatile var answerApiOther: (method: String, path: String) -> Pair<HttpStatusCode, String>? = { _, _ -> null }
+    /** An app's answer with its own status and JSON body: a refusal with the app's reason, say. Thrown, it is no answer at all. */
+    @Volatile var answerApiStatus: (method: String, path: String, body: String) -> Pair<HttpStatusCode, String>? = { _, _, _ -> null }
     /** A scry the ship fails on (500), as a crashed or busy agent does; unlike one it has no answer for (404). */
     @Volatile var failScry: (path: String) -> Boolean = { false }
     /** How long a scry waits before it is answered: a busy ship, by path. */
@@ -432,6 +434,9 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
                 api += "${req.method.value} $path $body"
                 answerApiOther(req.method.value, path)?.let { (status, type) ->
                     return@MockEngine respond("<html></html>", status, headersOf(HttpHeaders.ContentType, type))
+                }
+                answerApiStatus(req.method.value, path, body)?.let { (status, json) ->
+                    return@MockEngine respond(json, status, headersOf(HttpHeaders.ContentType, "application/json"))
                 }
                 answerApi(req.method.value, path, body)
                     ?.let { respond(it, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json")) }

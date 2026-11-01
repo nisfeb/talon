@@ -87,6 +87,8 @@ class OrreryRepo(
     private val readWith: LocalModel? = null,
     /** The first pause before a failed check of the ship is tried again; a test's own. */
     private val probeRetryFirstMs: Long = PROBE_RETRY_FIRST_MS,
+    /** Whether this device sends fixes, so offers live location; a test's own. */
+    private val canShareLocation: Boolean = io.nisfeb.talon.ui.isLocationSharingSupported,
 ) {
     private var cloudModel: LocalModel? = null
 
@@ -529,6 +531,50 @@ class OrreryRepo(
 
     suspend fun setReviewAt(at: String): Result<Unit> = scope.async { runCatching { attached().setReviewAt(at) } }.await()
 
+    // ─── live location (orrery 88) ───
+
+    private val _shares = MutableStateFlow<LocationShares?>(null)
+
+    /** Live location with other ships, as every screen reads it ([LocalLiveLocation]). */
+    val live: LiveLocation = object : LiveLocation {
+        override val shares: StateFlow<LocationShares?> = _shares.asStateFlow()
+        override val canShare: Boolean get() = canShareLocation
+
+        override suspend fun refresh() {
+            runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }
+        }
+
+        // Said here at once, so every screen shows it; then read back from the
+        // ship, which a failed read leaves as said.
+        override suspend fun share(ship: String, length: ShareLength, exact: Boolean): Result<Unit> = scope.async {
+            runCatching {
+                attached().shareLocation(ship, length, exact)
+                val until = length.hours?.let { now() + it * 3_600_000L }
+                _shares.update { s ->
+                    val was = s ?: LocationShares(emptyList(), emptyList())
+                    was.copy(out = was.out.filter { it.ship != ship } + OutShare(ship, until, length.hours == null, exact))
+                }
+                location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                refresh()
+            }
+        }.await()
+
+        override suspend fun stop(ship: String): Result<Unit> = scope.async {
+            runCatching {
+                attached().unshareLocation(ship)
+                _shares.update { s -> s?.copy(out = s.out.filter { it.ship != ship }) }
+                location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                refresh()
+            }
+        }.await()
+    }
+
+    private suspend fun readShares() {
+        val s = locationShares(attached().locationDoc(), now())
+        _shares.value = s
+        location.live(sendFastUntil(s, now()))
+    }
+
     /** Orrery's flight and page watches, with what each last found; the flight API key masked. */
     suspend fun readWatches(): Result<JsonObject> = runCatching { attached().watches() }
 
@@ -746,6 +792,7 @@ class OrreryRepo(
         _failed.value = emptyList()
         _policy.value = null
         _schema.value = null
+        _shares.value = null
         scopeChecked = false
         // Nothing of the ship left is waiting on the owner: with Orrery off,
         // or another ship, its proposals and their notifications go.

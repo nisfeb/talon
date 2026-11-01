@@ -1586,6 +1586,8 @@ fun TalonApp(
             app.session.baseUrl?.takeIf { it.isNotBlank() }?.let { CometDomes(app.session.http, it, app.db) }
         },
         LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
+        // Live location rides orrery: none where the ship has none, or Orrery is off.
+        io.nisfeb.talon.orrery.LocalLiveLocation provides orreryRepo.live.takeIf { orreryRepo.availability.collectAsState().value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT },
         LocalCallTo provides callTarget,
         LocalFetchProfile provides remember(app.repo) { { ship: String -> app.repo.meetIfUnknown(ship); Unit } },
         io.nisfeb.talon.mail.LocalMailTo provides

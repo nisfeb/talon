@@ -68,6 +68,9 @@ object LocationWatch {
     /** Off, from wherever: the pipe going off takes this with it. */
     fun stop() = app?.let { set(it, false) } ?: Unit
 
+    /** A live share runs until [untilMs], or none does ([LiveShares]). */
+    fun live(untilMs: Long?) = app?.let { LiveShares.set(it, untilMs) } ?: Unit
+
     /**
      * Listening held, or taken up again, with the switch left as saved.
      * Saved too: [resume] runs on every start of the process, a boot or
@@ -96,6 +99,7 @@ object LocationWatch {
         if (on) resume(ctx) else {
             stopListening(ctx)
             ctx.stopService(Intent(ctx, TripService::class.java))
+            ctx.stopService(Intent(ctx, LiveShareService::class.java))
         }
     }
 
@@ -109,7 +113,8 @@ object LocationWatch {
         if (!sharing(ctx)) return
         val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return
         val providers = lm.getProviders(true)
-        val trip = Trips.active(ctx) != null
+        // A live share wants a fix a minute too (orrery 88).
+        val trip = Trips.active(ctx) != null || LiveShares.until(ctx) != null
         // On a trip GPS first: a fix a minute wants the street, not the cell.
         val order = if (trip) listOf(LocationManager.GPS_PROVIDER, LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER)
         else listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)

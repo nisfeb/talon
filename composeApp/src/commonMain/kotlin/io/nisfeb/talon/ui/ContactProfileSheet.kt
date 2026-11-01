@@ -273,6 +273,7 @@ fun ContactProfileSheet(
                     OutlinedButton(onClick = onDismiss) { FitText("Close") }
                 }
             }
+            if (!self) Column(Modifier.fillMaxWidth()) { LiveLocationProfileRows(ship, label) }
             Spacer(Modifier.height(12.dp))
         }
       }
