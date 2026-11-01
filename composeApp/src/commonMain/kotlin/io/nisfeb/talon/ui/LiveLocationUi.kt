@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
@@ -156,17 +157,49 @@ private fun WatchShares(ship: String) {
 
 @Composable
 private fun InboundRow(s: InShare, who: String) {
-    val maps = LocalMapsLauncher.current
-    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val open = rememberOpenInMaps()
+    var mapOpen by remember(s.ship) { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("$who is sharing where they are", style = MaterialTheme.typography.bodyMedium)
             Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        TextButton(onClick = {
-            runCatching { if (maps != null) maps.launch(s.lat, s.lon) else uri.openUri(osmViewerUrl(s.lat, s.lon)) }
-        }) { Text("Open map") }
+        // A map in Talon follows each fix; elsewhere the point goes to the maps app.
+        if (isLiveMapSupported) TextButton(onClick = { mapOpen = true }) { Text("Map") }
+        else TextButton(onClick = { open(s.lat, s.lon) }) { Text("Open map") }
     }
+    if (mapOpen) LiveMapDialog(s.ship, who, onDone = { mapOpen = false })
+}
+
+/** The point to the platform's maps app, or OpenStreetMap's site in the browser. */
+@Composable
+private fun rememberOpenInMaps(): (Double, Double) -> Unit {
+    val maps = LocalMapsLauncher.current
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    return { lat, lon -> runCatching { if (maps != null) maps.launch(lat, lon) else uri.openUri(osmViewerUrl(lat, lon)) } }
+}
+
+/** Their share on a map, following each fix as the shares are read again; gone when the share is. */
+@Composable
+private fun LiveMapDialog(ship: String, who: String, onDone: () -> Unit) {
+    val live = LocalLiveLocation.current ?: return
+    val shares by live.shares.collectAsState()
+    val s = shares?.from(ship)
+    LaunchedEffect(s == null) { if (s == null) onDone() }
+    if (s == null) return
+    val open = rememberOpenInMaps()
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Where $who is") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LiveMapView(s.lat, s.lon, s.accuracyM, Modifier.fillMaxWidth().height(360.dp))
+                Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { open(s.lat, s.lon) }) { Text("Open in Maps") } },
+    )
 }
 
 @Composable

@@ -25,7 +25,8 @@ import io.nisfeb.talon.urbit.FakeShip
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -139,7 +140,10 @@ class LiveLocationSheetTest {
                 block(ship, repo) { shown = it }
             }
         } finally {
-            scope.cancel()
+            // Every query the repo started is over before the database
+            // closes: closed under one, SQLite's native side crashed the
+            // test JVM later, in a finalizer (CI, 2026-11-01).
+            runBlocking { scope.coroutineContext.job.cancelAndJoin() }
             db.close()
             tmp.deleteRecursively()
         }
