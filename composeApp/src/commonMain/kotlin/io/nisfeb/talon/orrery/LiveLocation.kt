@@ -120,6 +120,16 @@ fun shareBody(ship: String, length: ShareLength, exact: Boolean): String = build
 fun sendFastUntil(shares: LocationShares, nowMs: Long, recheckMs: Long = 15 * 60_000L): Long? =
     shares.out.maxOfOrNull { it.untilMs ?: (nowMs + recheckMs) }
 
+/**
+ * Whether a fix goes up now. While a share runs (or a trip), at most one
+ * each [TRIP_GAP_MS]: iOS hands over a fix on every [TRIP_MOVE_M], and
+ * at speed that is several a minute. Otherwise each fix the platform
+ * wakes the phone for, which is already a move of hundreds of metres.
+ * Android's LocationManager keeps the minute itself.
+ */
+fun fixDue(lastSentMs: Long?, nowMs: Long, fast: Boolean): Boolean =
+    !fast || lastSentMs == null || nowMs - lastSentMs >= TRIP_GAP_MS
+
 /** Live location as the screens reach it; [LocalLiveLocation] holds the signed-in ship's, or null where it has no orrery. */
 interface LiveLocation {
     /** As last read, or null until then. */

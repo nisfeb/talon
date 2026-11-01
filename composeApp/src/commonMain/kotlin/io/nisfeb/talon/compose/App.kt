@@ -139,6 +139,8 @@ fun App(
     sessionStore: SessionStore,
     /** Add %groups, Grubbery and its stock apps where the ship lacks them, once a sign-in. Off in tests of other things. */
     installDefaultApps: Boolean = true,
+    /** Where this device sends its position from (iOS: IosLocationWatch). Android builds its own shell; desktop sends none. */
+    locationControl: io.nisfeb.talon.ui.LocationControl = io.nisfeb.talon.ui.NoopLocationControl,
     /** Deletes a ship's cached data when somebody asks for it to go.
      *  Noop where the host stores nothing per ship. */
     shipDataEraser: io.nisfeb.talon.data.ShipDataEraser =
@@ -1225,6 +1227,7 @@ fun App(
                 ) { aiSettings.state.value },
                 book = { repo.bookContacts.value },
                 decide = io.nisfeb.talon.orrery.DecideControl(uiSettings.orreryDecide, uiSettings::setOrreryDecide),
+                location = locationControl,
             )
         }
         // Orrery runs only when the owner turned it on (Settings > Orrery),
