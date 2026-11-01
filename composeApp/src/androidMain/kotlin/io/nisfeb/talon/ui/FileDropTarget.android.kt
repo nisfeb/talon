@@ -26,6 +26,8 @@ actual fun Modifier.fileDropTarget(
 // actual paste/insert event and already has the URI in hand.
 actual fun readClipboardImageOrNull(): DroppedFile? = null
 
+actual fun readCopiedImageFileOrNull(): DroppedFile? = null
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 actual fun Modifier.imagePasteTarget(

@@ -68,6 +68,9 @@ data class DroppedFile(
  *  the clipboard's text in its place. */
 expect fun readClipboardImageOrNull(): DroppedFile?
 
+/** An image file copied in a file manager, read from the clipboard; null where there is none, and where the clipboard holds no files (Android, iOS). */
+expect fun readCopiedImageFileOrNull(): DroppedFile?
+
 /** What a paste found on the clipboard. */
 sealed interface ClipboardPaste {
     /** An image, to stage for review. */

@@ -57,3 +57,6 @@ actual fun Modifier.imagePasteTarget(
     enabled: Boolean,
     onImage: (DroppedFile) -> Unit,
 ): Modifier = this
+
+// The pasteboard holds a copied file as its contents, not as a file list.
+actual fun readCopiedImageFileOrNull(): DroppedFile? = null

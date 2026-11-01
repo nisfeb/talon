@@ -27,17 +27,30 @@ class ClipboardPasteTest {
     @Test
     fun `ctrl v pastes the text where there is any and never reads the image then`() {
         var read = 0
-        assertEquals(ClipboardPaste.None, ctrlVPaste(hasText = { true }, read = { read++; png }))
+        assertEquals(ClipboardPaste.None, ctrlVPaste(copiedFile = { null }, hasText = { true }, read = { read++; png }))
         assertEquals(0, read, "an image is not decoded to be put aside")
+    }
+
+    // A user copied a picture in Dolphin and Ctrl+V pasted its path: a
+    // file manager copies a file as a file list, with the path as text.
+    @Test
+    fun `ctrl v takes a copied image file over the path beside it`() {
+        val photo = DroppedFile("photo.jpg", "image/jpeg", byteArrayOf(4, 5))
+        var asked = 0
+        assertEquals(
+            ClipboardPaste.Image(photo),
+            ctrlVPaste(copiedFile = { photo }, hasText = { asked++; true }, read = { asked++; png }),
+        )
+        assertEquals(0, asked, "neither the path nor a decoded image is looked at")
     }
 
     @Test
     fun `ctrl v with no text takes the image or says it is too large`() {
-        assertEquals(ClipboardPaste.Image(png), ctrlVPaste(hasText = { false }, read = { png }))
-        assertEquals(ClipboardPaste.None, ctrlVPaste(hasText = { false }, read = { null }))
+        assertEquals(ClipboardPaste.Image(png), ctrlVPaste(copiedFile = { null }, hasText = { false }, read = { png }))
+        assertEquals(ClipboardPaste.None, ctrlVPaste(copiedFile = { null }, hasText = { false }, read = { null }))
         assertEquals(
             ClipboardPaste.Problem("That image is too large to paste. Save it as a file and attach it instead."),
-            ctrlVPaste(hasText = { false }, read = { throw ImageTooLargeToPaste() }),
+            ctrlVPaste(copiedFile = { null }, hasText = { false }, read = { throw ImageTooLargeToPaste() }),
         )
     }
 }

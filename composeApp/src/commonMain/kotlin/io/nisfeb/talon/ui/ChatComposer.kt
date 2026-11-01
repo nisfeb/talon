@@ -350,13 +350,20 @@ internal suspend fun sendVoice(
 }
 
 /**
- * What Ctrl+V takes: the clipboard's text where it has any, which the
- * field then pastes, and its image only where it has none. An app that
- * copies both had its image staged and the words lost. [hasText] is asked
- * first, so an image is not decoded only to be put aside.
+ * What Ctrl+V takes: an image file copied in a file manager first, since
+ * the text beside it is only its path. Otherwise the clipboard's text
+ * where it has any, which the field then pastes, and its image only where
+ * it has none. An app that copies both had its image staged and the words
+ * lost. [hasText] is asked before [read], so an image is not decoded only
+ * to be put aside.
  */
-internal fun ctrlVPaste(hasText: () -> Boolean, read: () -> DroppedFile?): ClipboardPaste =
-    if (hasText()) ClipboardPaste.None else clipboardPaste(read)
+internal fun ctrlVPaste(
+    copiedFile: () -> DroppedFile?,
+    hasText: () -> Boolean,
+    read: () -> DroppedFile?,
+): ClipboardPaste =
+    copiedFile()?.let { ClipboardPaste.Image(it) }
+        ?: if (hasText()) ClipboardPaste.None else clipboardPaste(read)
 
 /**
  * Re-keys on [whom] so switching conversations starts the composer
@@ -1284,7 +1291,8 @@ fun ChatComposer(
                             return@onPreviewKeyEvent true
                         }
                         // Ctrl+V (or Cmd+V on macOS) — if the
-                        // clipboard holds an image and no text, intercept
+                        // clipboard holds an image file copied in a file
+                        // manager, or an image and no text, intercept
                         // the paste, stage it into the review preview, and
                         // consume the event so the text field doesn't
                         // ALSO try to paste (which would insert garbage
@@ -1294,7 +1302,7 @@ fun ChatComposer(
                         val pasteCombo = e.key == Key.V &&
                             (e.isCtrlPressed || e.isMetaPressed)
                         if (pasteCombo && canSend && !state.uploading &&
-                            takePaste(ctrlVPaste(clipboard::hasText, ::readClipboardImageOrNull))
+                            takePaste(ctrlVPaste(::readCopiedImageFileOrNull, clipboard::hasText, ::readClipboardImageOrNull))
                         ) {
                             return@onPreviewKeyEvent true
                         }
