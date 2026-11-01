@@ -21,10 +21,14 @@ class CloudTriage(
     val on: StateFlow<Boolean>,
     val config: () -> AiSettings.Config,
 ) {
-    val rung: CloudRung by lazy { CloudRung(config) }
+    val rung: CloudRung by lazy { CloudRung(config = config) }
 }
 
-class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
+class CloudRung(
+    /** Its own by default; a test hands in one that answers. */
+    private val http: io.ktor.client.HttpClient? = null,
+    private val config: () -> AiSettings.Config,
+) : Rung() {
     // The model triage is assigned, which is the frontier model's unless
     // the owner named another.
     private fun triage() = config().forFeature(io.nisfeb.talon.ai.AiFeature.OrreryTriage)
@@ -32,15 +36,17 @@ class CloudRung(private val config: () -> AiSettings.Config) : Rung() {
     private fun provider() = config().profile().resolve(AiFeature.OrreryTriage)?.provider
         ?.takeIf { it.kind != io.nisfeb.talon.ai.ProviderKind.ThisDevice }
     override val name: String get() = "${provider()?.label ?: "A cloud model"}, in the cloud"
-    private val ai by lazy { AiClient { triage() } }
+    private val ai by lazy { http?.let { AiClient(http = it) { triage() } } ?: AiClient { triage() } }
 
     override suspend fun status(): RungStatus =
         config().modelProblem(AiFeature.OrreryTriage)?.let { RungStatus.Unavailable("$it See AI in Settings.") } ?: RungStatus.Ready
 
     override suspend fun open(): LocalModel = object : LocalModel {
         override val rung: String get() = name
+        // The cap is sized for a model on the device, whose grammar ends
+        // its answer; one in the cloud may think first and needs room.
         override suspend fun complete(system: String, user: String, grammar: String?, maxTokens: Int): String =
-            ai.complete(system, user, maxTokens)
+            ai.complete(system, user, maxOf(maxTokens, io.nisfeb.talon.ai.AGENT_MAX_OUTPUT))
         override val lastCostUsd: Double? get() = ai.lastCostUsd
         override fun close() = Unit
     }

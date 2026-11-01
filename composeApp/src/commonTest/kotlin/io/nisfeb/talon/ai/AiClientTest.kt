@@ -109,7 +109,8 @@ class AiClientTest {
     @Test
     fun anAnswerThatIsNotJsonOrHasNoTextIsAnError() = runTest {
         assertTrue(assertFailsWith<IllegalStateException> { client(cfg(AiSettings.Provider.OpenAi), answer = "<html>").complete(null, "hi") }.message!!.contains("bad JSON"))
-        assertTrue(assertFailsWith<IllegalStateException> { client(cfg(AiSettings.Provider.Anthropic), answer = """{"content":[]}""").complete(null, "hi") }.message!!.contains("no content"))
+        // No text at all is no answer, said in words (it was "no content in response").
+        assertTrue(!assertFailsWith<NoAnswer> { client(cfg(AiSettings.Provider.Anthropic), answer = """{"content":[]}""").complete(null, "hi") }.outOfRoom)
     }
 
     @Test
@@ -117,5 +118,83 @@ class AiClientTest {
         val c = client(cfg(AiSettings.Provider.OpenAi), answer = """{"choices":[{"message":{"content":"Hi"}}],"usage":{"prompt_tokens":3,"completion_tokens":1}}""")
         c.complete(null, "hi")
         assertNull(c.lastCostUsd)
+    }
+
+    // A user's catch-ups came back as the word "null" (2026-10-31): the
+    // model thought through all 512 tokens and sent "content": null.
+
+    @Test
+    fun aNullAnswerIsNoAnswerAndNeverTheWordNull() = runTest {
+        val c = client(
+            cfg(AiSettings.Provider.Custom, model = "m", baseUrl = "https://llm.example/v1"),
+            answer = """{"choices":[{"message":{"role":"assistant","content":null,"reasoning":"so much thought"},"finish_reason":"length"}],
+                "usage":{"prompt_tokens":900,"completion_tokens":16384}}""",
+        )
+        val e = assertFailsWith<NoAnswer> { c.complete("sys", "hi") }
+        assertTrue(e.outOfRoom, "it stopped at the cap")
+        assertEquals("the model ran out of room before it answered", e.message, "what Copy error details carries")
+        assertEquals("the model sent no answer", NoAnswer(outOfRoom = false).message)
+    }
+
+    @Test
+    fun aBlankAnswerThatStoppedIsNoAnswerWithRoomLeft() = runTest {
+        val c = client(
+            cfg(AiSettings.Provider.OpenRouter, model = "m"),
+            answer = """{"choices":[{"message":{"role":"assistant","content":"  "},"finish_reason":"stop"}]}""",
+        )
+        assertTrue(!assertFailsWith<NoAnswer> { c.complete("sys", "hi") }.outOfRoom)
+    }
+
+    @Test
+    fun anthropicThatOnlyThoughtBeforeItsCapIsNoAnswer() = runTest {
+        val c = client(
+            cfg(AiSettings.Provider.Anthropic, model = "claude-sonnet-5-5"),
+            answer = """{"content":[{"type":"thinking","thinking":"hmm"}],"stop_reason":"max_tokens"}""",
+        )
+        assertTrue(assertFailsWith<NoAnswer> { c.complete("sys", "hi") }.outOfRoom)
+    }
+
+    @Test
+    fun everyCallHasTheAssistantsRoomUnlessToldLess() = runTest {
+        val ok = """{"choices":[{"message":{"role":"assistant","content":"fine"},"finish_reason":"stop"}]}"""
+        client(cfg(AiSettings.Provider.Custom, model = "m", baseUrl = "https://llm.example/v1"), answer = ok).complete("s", "u")
+        assertEquals("16384", body()["max_tokens"]?.jsonPrimitive?.content)
+        sent.clear()
+        client(cfg(AiSettings.Provider.OpenAi, model = "gpt-6"), answer = ok).complete("s", "u")
+        assertEquals("16384", body()["max_completion_tokens"]?.jsonPrimitive?.content, "OpenAI's own name for it")
+        sent.clear()
+        client(cfg(AiSettings.Provider.Anthropic, model = "claude-sonnet-5-5"), answer = """{"content":[{"type":"text","text":"fine"}]}""").complete("s", "u")
+        assertEquals("16384", body()["max_tokens"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun aCatchUpAsksForTheSameRoom() = runTest {
+        val c = client(
+            cfg(AiSettings.Provider.Custom, model = "m", baseUrl = "https://llm.example/v1"),
+            answer = """{"choices":[{"message":{"role":"assistant","content":"Rose is late"},"finish_reason":"stop"}]}""",
+        )
+        val said = io.nisfeb.talon.data.MessageEntity("~bus", "1", "~bus", 1L, """[{"inline":["running late"]}]""", "/chat")
+        assertEquals("Rose is late", AiFeatures(c).catchMeUp(listOf(said)) { it })
+        assertEquals("16384", body()["max_tokens"]?.jsonPrimitive?.content, "it was 512")
+    }
+
+    @Test
+    fun noAnswerSaysWhatHappenedInWords() {
+        assertEquals(
+            "Couldn't catch you up: the model used all its room before it answered. Try again, or pick a model that thinks less.",
+            modelProblem("Couldn't catch you up", NoAnswer(outOfRoom = true)).line,
+        )
+        assertEquals("Couldn't catch you up: the model sent back no answer. Try again.", modelProblem("Couldn't catch you up", NoAnswer(outOfRoom = false)).line)
+    }
+
+    @Test
+    fun triageInTheCloudHasRoomWhatAModelOnTheDeviceNeedsDoesNotLimit() = runTest {
+        val http = HttpClient(MockEngine { req ->
+            sent += Sent(req.url.toString(), emptyMap(), req.body.toByteArray().decodeToString())
+            respond("""{"choices":[{"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}]}""", HttpStatusCode.OK, headersOf("Content-Type", "application/json"))
+        })
+        val rung = io.nisfeb.talon.orrery.CloudRung(http) { cfg(AiSettings.Provider.Custom, model = "m", baseUrl = "https://llm.example/v1") }
+        assertEquals("{}", rung.open().complete("sys", "user", null, 256))
+        assertEquals("16384", body()["max_tokens"]?.jsonPrimitive?.content, "256 is a grammar-bound model's room")
     }
 }

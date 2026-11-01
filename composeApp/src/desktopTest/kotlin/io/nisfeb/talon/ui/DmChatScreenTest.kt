@@ -45,6 +45,8 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import io.ktor.client.engine.mock.respond
@@ -74,6 +76,7 @@ class DmChatScreenTest {
         jumpTo: String? = null,
         host: Host = Host(whom),
         drafts: DraftStore = InMemoryDraftStore(),
+        ai: io.nisfeb.talon.ai.AiSettingsRepository = FakeAiSettings(),
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -97,7 +100,7 @@ class DmChatScreenTest {
                     TalonTheme(darkTheme = false) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
-                            aiSettings = FakeAiSettings(), uiSettings = InMemoryUiSettings(),
+                            aiSettings = ai, uiSettings = InMemoryUiSettings(),
                             ourPatp = "~zod", whom = host.whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
@@ -916,6 +919,61 @@ class DmChatScreenTest {
             host.whom = "~nec"
             waitForIdle()
             waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Delete message?").fetchSemanticsNodes().isEmpty() }
+        }
+    }
+
+    /**
+     * A model on the owner's own Armillary that answers [answer] at
+     * /v1/chat/completions, on this machine: the screen's client is its
+     * own, so it is asked over a real socket. The bodies it was sent.
+     */
+    private fun model(answer: String, block: (base: String, bodies: List<String>) -> Unit) {
+        val bodies = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/v1/chat/completions") { ex ->
+            bodies += ex.requestBody.readBytes().decodeToString()
+            val out = answer.toByteArray()
+            ex.responseHeaders.add("Content-Type", "application/json")
+            ex.sendResponseHeaders(200, out.size.toLong())
+            ex.responseBody.use { it.write(out) }
+        }
+        server.start()
+        try { block("http://127.0.0.1:${server.address.port}/v1", bodies) } finally { server.stop(0) }
+    }
+
+    private suspend fun AppDatabase.unread25() {
+        messages().upsertAll((1..25).map { msg("~bus/17000000000$it", "~bus", "line $it", 1_700_000_000_000L + it * 1_000) })
+        unreads().upsert(io.nisfeb.talon.data.UnreadEntity("~bus", count = 25, notifyCount = 25, recencyMs = 1_700_000_025_000L))
+    }
+
+    private fun paidAt(base: String) = FakeAiSettings(io.nisfeb.talon.ai.paidSettings(row = io.nisfeb.talon.ai.armillaryRow(base = base)))
+
+    // A user's catch-ups in channels came back as "null" (2026-10-31): the
+    // model spent the 512 tokens thinking and sent "content": null, which
+    // was read as the word.
+    @Test
+    fun `a catch-up the model could not finish says why, and never shows null`() = model(
+        """{"choices":[{"message":{"role":"assistant","content":null},"finish_reason":"length"}]}""",
+    ) { base, bodies ->
+        chat(seed = { unread25() }, ai = paidAt(base)) { _, _ ->
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Catch me up on 25 unread messages").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Catch me up on 25 unread messages").clickAction()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Catch me up failed").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(onAllNodesWithText("the model used all its room before it answered", substring = true).fetchSemanticsNodes().isNotEmpty())
+            assertTrue(onAllNodesWithText("null").fetchSemanticsNodes().isEmpty(), "not the word null")
+            val sent = kotlinx.serialization.json.Json.parseToJsonElement(bodies.single()).jsonObject
+            assertEquals("16384", sent["max_tokens"]?.jsonPrimitive?.content, "it asked for room to think and answer")
+        }
+    }
+
+    @Test
+    fun `a catch-up the model answered shows the summary`() = model(
+        """{"choices":[{"message":{"role":"assistant","content":"Bus is running late."},"finish_reason":"stop"}]}""",
+    ) { base, _ ->
+        chat(seed = { unread25() }, ai = paidAt(base)) { _, _ ->
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Catch me up on 25 unread messages").fetchSemanticsNodes().isNotEmpty() }
+            onNodeWithText("Catch me up on 25 unread messages").clickAction()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Bus is running late.").fetchSemanticsNodes().isNotEmpty() }
         }
     }
 }
