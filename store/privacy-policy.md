@@ -53,7 +53,8 @@ describes what Talon does (and doesn't) do with user data.
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` | Keep the SSE event stream alive while the app is in the background, so notifications fire promptly. |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Let the user opt the app out of doze restrictions for reliable real-time message delivery. |
 | `RECORD_AUDIO`                   | Voice messages (user-initiated, never recorded in the background). |
-| `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION` | The `/loc` slash-command shares the user's current location as a chat message (user-initiated, single-shot fix per use). |
+| `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION` | The `/loc` slash-command shares the user's current location as a chat message (user-initiated, single-shot fix per use). With "Send where I am" on, the phone sends its position to Orrery on the user's own ship for leave alerts, and to ships the user chose to share live location with. |
+| `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE_LOCATION` | "Send where I am" hears a move with the app closed. A trip or a live share runs as a foreground service with an ongoing notification and a Stop button. |
 
 ## Third parties
 

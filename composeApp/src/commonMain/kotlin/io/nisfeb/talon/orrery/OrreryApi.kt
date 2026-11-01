@@ -606,6 +606,40 @@ class OrreryApi(
     suspend fun travelLastByScry(): JsonObject? =
         scryFile("/leave-last.json.json")?.let { text -> reading { Json.parseToJsonElement(text).jsonObject } }
 
+    /**
+     * Orrery's location document (version 88): the shares out and in, as
+     * [locationShares] reads it. The file by scry, which costs the ship
+     * no event; the owner's GET /api/location where it cannot be scried.
+     */
+    suspend fun locationDoc(): JsonObject {
+        val text = scryFile("/location.json.json") ?: request(owner, HttpMethod.Get, "/api/location")
+        return reading { Json.parseToJsonElement(text).jsonObject }
+    }
+
+    /** Share where the owner is with [ship]: the owner's only. See [shareBody] for the wire. */
+    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean) {
+        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact))
+    }
+
+    /** Take a share from a ship orrery did not know (orrery 137): it makes them a person here. */
+    suspend fun acceptLocation(ship: String) {
+        request(owner, HttpMethod.Post, "/api/location/accept", askBody(ship))
+    }
+
+    /** Turn a ship's share down (orrery 137): their fixes are dropped from now on. */
+    suspend fun declineLocation(ship: String) {
+        request(owner, HttpMethod.Post, "/api/location/decline", askBody(ship))
+    }
+
+    /** Stop sharing with [ship]. One the ship no longer shares with (404) is already stopped. */
+    suspend fun unshareLocation(ship: String) {
+        try {
+            request(owner, HttpMethod.Delete, "/api/location/share/$ship")
+        } catch (e: OrreryError.Refused) {
+            if (e.status != NOT_FOUND) throw e
+        }
+    }
+
     /** Orrery's change beacon (the time of its last write), or null where it cannot be scried. */
     suspend fun beacon(): Long? = scryFile("/beacon/rev.json")?.let { text -> reading { text.trim().toLong() } }
 

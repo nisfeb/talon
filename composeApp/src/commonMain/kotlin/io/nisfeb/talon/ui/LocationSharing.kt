@@ -5,9 +5,11 @@ import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Telling orrery where the owner is, from the phone, when they move a
- * few hundred metres: a place the ship knows, else a short place name,
- * never the coordinates. The platform wakes Talon for the move, so no
- * timer runs and a phone that stays put costs nothing.
+ * few hundred metres: as an observation, a place the ship knows, else a
+ * short place name, never the coordinates; and as the position, to the
+ * metre, for the leave alert and live shares (orrery 69, 88). The
+ * platform wakes Talon for the move, so no timer runs and a phone that
+ * stays put costs nothing; a live share asks a fix a minute.
  */
 interface LocationSharing {
     /** The switch, per device. */
@@ -47,6 +49,13 @@ interface LocationControl {
      * off for the ship that had a pipe, since there is one switch.
      */
     fun pause(paused: Boolean)
+
+    /**
+     * A fix a minute until [untilMs], while a live share runs (orrery 88);
+     * null when none does. The phone's to keep: the ship decides when a
+     * share ends, and the phone reads it again before then.
+     */
+    fun live(untilMs: Long?) = Unit
 }
 
 object NoopLocationControl : LocationControl {

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
 object AndroidLocationControl : LocationControl {
     override fun stop() = LocationWatch.stop()
     override fun pause(paused: Boolean) = LocationWatch.pause(paused)
+    override fun live(untilMs: Long?) = LocationWatch.live(untilMs)
 }
 
 /**

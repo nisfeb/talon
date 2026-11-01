@@ -251,6 +251,59 @@ class AppShellTest {
         onNodeWithContentDescription("Orrery").performClick()
     }
 
+    // Live location (orrery 88) on every screen that shows it: theirs and
+    // ours under the DM's header, and ours in Settings, where it can stop.
+    @Test
+    fun `a share either way shows in the DM, and ours in Settings`() {
+        val now = System.currentTimeMillis()
+        fun iso(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toString()
+        val doc = """{"out": [{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": true, "since": "${iso(now)}"}],
+            "in": {"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now - 60_000)}", "until": "${iso(now + 3_600_000)}", "home": false}},
+            "asks": {"~nec": {"lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true}}}"""
+        app(
+            ai = orreryOn,
+            seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
+            setup = {
+                answerApi = { method, path, _ ->
+                    when {
+                        path == "/apps/orrery/api/state" -> "{}"
+                        method == "GET" && path == "/apps/orrery/api/location" -> doc
+                        else -> null
+                    }
+                }
+            },
+        ) { ship ->
+            onNodeWithText("DMs").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("hello there") }
+            onNodeWithText("~bus").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("is sharing where they are") }
+            assertTrue(showing("You're sharing where you are"), "ours, under theirs")
+            onNodeWithContentDescription("Settings").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+            // Settings' Orrery page: the first "Orrery", in its list of pages
+            // (Appearance lists the rail's items, Orrery among them).
+            onAllNodesWithText("Orrery")[0].performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("Sharing where you are with") }
+            // A ship with no chat here asks in Settings.
+            assertTrue(showing("~nec wants to share where they are"), "the ask, where there is no chat for it")
+            assertTrue(ship.api.none { "/location/" in it }, "reading shares writes none: ${ship.api}")
+        }
+    }
+
+    // Off means off: with Orrery off, no screen asks the ship where anyone is.
+    @Test
+    fun `with Orrery off the DM asks nothing about location`() = app(
+        seed = { messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000, """[{"inline":["hello there"]}]""", "/chat")) },
+    ) { ship ->
+        onNodeWithText("DMs").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("hello there") }
+        onNodeWithText("~bus").performClick()
+        waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
+        waitForIdle()
+        assertTrue(ship.requests.none { "location" in it } && ship.scried.none { "location" in it }, ship.requests.toString())
+        assertTrue(!showing("sharing where"))
+    }
+
     @Test
     fun `a late high action leads Orrery and Snooze 1 h reaches the ship and empties Late`() = app(ai = orreryOn, setup = { orrery(110) }) { ship ->
         openOrrery()

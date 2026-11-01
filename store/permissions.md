@@ -14,12 +14,17 @@ gesture.
 
 ## ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION
 
-Talon has a `/loc` slash command that lets the user share their
-current location as a chat message. Location is read once per command
-invocation and embedded in the message body as latitude/longitude
-plus an OpenStreetMap link. The app does not poll, log, or otherwise
-retain location data, and never reads location outside of an explicit
-`/loc` invocation.
+Location is read in three places, each off until the user turns it on:
+
+- The `/loc` slash command shares the user's current location as a chat message. Location is read once per use and put in the message as latitude and longitude plus an OpenStreetMap link.
+- "Send where I am" (Settings, AI, Orrery) sends the phone's position to Orrery on the user's own ship when the phone moves a few hundred metres, for leave alerts.
+- While the user is on the way to an appointment, or shares their live location with another ship, the phone sends its position each minute.
+
+The app keeps no history of positions on the phone. Orrery on the user's ship keeps the latest one only.
+
+## ACCESS_BACKGROUND_LOCATION / FOREGROUND_SERVICE_LOCATION
+
+"Send where I am" hears a move with the app closed, so it asks for location all the time. A trip or a live share runs as a location foreground service with an ongoing notification that says so and has a Stop button.
 
 ## REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 

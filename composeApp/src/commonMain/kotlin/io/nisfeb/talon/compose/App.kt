@@ -1887,7 +1887,10 @@ fun App(
           val citePlaceName: (String) -> String? = remember(citeContacts) {
               { whom -> citeContacts.conversationLabel(whom) }
           }
+          // Live location rides orrery: none where the ship has none, or Orrery is off.
+          val liveLocation = orreryRepo.live.takeIf { orreryRepo.availability.collectAsState().value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT }
           androidx.compose.runtime.CompositionLocalProvider(
+              io.nisfeb.talon.orrery.LocalLiveLocation provides liveLocation,
               io.nisfeb.talon.ui.LocalImageDownloader provides imageDownloader,
               io.nisfeb.talon.ui.LocalInlineMediaPlayer provides io.nisfeb.talon.ui.platformInlineMediaPlayer(),
               io.nisfeb.talon.notify.LocalNotificationClearer provides remember(notifier) { { key: String -> notifier.clear(key) } },

@@ -26,7 +26,8 @@ import io.nisfeb.talon.urbit.asText
  * Where the owner is, from the phone, as the schema asks for it: a
  * place the ship knows as `{"ref": "place/..."}`, else a short place
  * name, and null once they have left and the new place is unknown.
- * Never the coordinates: those stay on the phone.
+ * The observation never carries the coordinates; the position does,
+ * for the leave alert and live shares ([OrreryApi.postPosition]).
  */
 data class LocationFix(val lat: Double, val lon: Double, val accuracyM: Double, val atMs: Long)
 

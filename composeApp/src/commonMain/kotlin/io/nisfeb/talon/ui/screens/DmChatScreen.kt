@@ -948,6 +948,7 @@ fun DmChatScreen(
         }
         HorizontalDivider()
         partyLineBar?.invoke()
+        if (whom.startsWith("~")) io.nisfeb.talon.ui.LiveLocationStrip(whom, contactMap.conversationLabel(whom))
         if (refreshing && rows.isEmpty()) {
             androidx.compose.material3.LinearProgressIndicator(
                 modifier = Modifier
