@@ -75,6 +75,16 @@ interface CiteResolver {
     suspend fun findLocal(whom: String, da: String): MessageEntity?
     suspend fun fetchPost(whom: String, da: String): MessageEntity?
     suspend fun fetchReply(whom: String, postDa: String, replyDa: String): MessageEntity?
+
+    /** False for a channel in a group this ship is not in: its posts are asked of its host. */
+    suspend fun holds(whom: String): Boolean = true
+
+    /** A post of a channel this ship is not in, asked of its host. */
+    suspend fun fetchOutside(whom: String, postDa: String, replyDa: String?): io.nisfeb.talon.urbit.Said =
+        io.nisfeb.talon.urbit.Said.NoAnswer
+
+    /** Its host's preview of a channel this ship is not in. */
+    suspend fun previewChannel(whom: String): io.nisfeb.talon.urbit.ChannelPreview? = null
 }
 
 val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
@@ -637,10 +647,22 @@ private fun InlineCitation(cite: StoryPart.Citation) {
     // coalesce into one network call instead of stampeding the
     // ship with 50.
     var resolved by remember(cite) { mutableStateOf<MessageEntity?>(null) }
+    // A channel this ship is not in: its host is asked for the post and
+    // for the channel's names, in place of the bare id the cite carries.
+    var outside by remember(cite) { mutableStateOf<Outside?>(null) }
+    var notOurs by remember(cite) { mutableStateOf(false) }
     LaunchedEffect(cite, resolver) {
         if (resolver == null) return@LaunchedEffect
         val whom = cite.openTarget ?: return@LaunchedEffect
         val da = cite.replyDa ?: cite.postDa ?: return@LaunchedEffect
+        val postDa = cite.postDa
+        if (postDa != null && io.nisfeb.talon.urbit.isChannelNest(whom) && !resolver.holds(whom)) {
+            notOurs = true
+            val found = OutsideCites.load(whom, postDa, cite.replyDa, resolver)
+            outside = found
+            resolved = (found.said as? io.nisfeb.talon.urbit.Said.Post)?.message
+            return@LaunchedEffect
+        }
         resolved = CiteCache.resolve(whom, da) {
             resolver.findLocal(whom, da)?.let { return@resolve it }
             if (whom.startsWith("chat/") || whom.startsWith("heap/") || whom.startsWith("diary/")) {
@@ -670,7 +692,9 @@ private fun InlineCitation(cite: StoryPart.Citation) {
         // target, so exclude it or a group reference reads "Post in
         // group:~host/name" instead of its own "Group …" label.
         val label = cite.openTarget?.takeIf { it.contains('/') && !it.startsWith("group:") }
-            ?.let { placeName(it) }
+            // A channel this ship does not know is named by its id ("#ve8843l"):
+            // its host's names, where it gave them, come first.
+            ?.let { outside?.preview?.placeName() ?: if (notOurs) "a group you're not in" else placeName(it) }
             ?.let { "Post in $it" }
             ?: cite.label
         Text(
@@ -694,7 +718,7 @@ private fun InlineCitation(cite: StoryPart.Citation) {
             }
         } else {
             Text(
-                "Referenced post",
+                outsideNote(outside?.said),
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
             )
         }
