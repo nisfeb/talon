@@ -10,7 +10,6 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.window.rememberWindowState
 import io.nisfeb.talon.notify.Notifier
 import io.nisfeb.talon.notify.SystemNotifier
 import org.jetbrains.skia.Image as SkiaImage
@@ -30,6 +29,7 @@ import io.nisfeb.talon.update.UpdateRuntime
 import io.nisfeb.talon.update.UpdateState
 import io.nisfeb.talon.util.AppDirs
 import io.nisfeb.talon.util.Log
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Properties
@@ -387,7 +387,18 @@ fun main() {
         // the app running invisibly with no way back. Quit-on-close
         // matches what the user expects from a window's X button;
         // the tray's "Quit" stays as a redundant exit affordance.
-        val windowState = rememberWindowState()
+        // Opens where and as large as it was left (see [WindowMemory]):
+        // kept as the window settles, and once more on quit.
+        val windowMemory = remember { WindowMemory(io.nisfeb.talon.ui.JvmUiSettingsStore(File(AppDirs.userData, "window.json"))) }
+        val windowState = remember { windowMemory.state() }
+        androidx.compose.runtime.LaunchedEffect(windowState) {
+            androidx.compose.runtime.snapshotFlow {
+                listOf(windowState.placement, windowState.isMinimized, windowState.position, windowState.size)
+            }.collectLatest {
+                kotlinx.coroutines.delay(500)
+                windowMemory.keep(windowState)
+            }
+        }
         val trayState = rememberTrayState()
         // Tray icon for OS notifications + show/quit menu. iconPainter
         // may be null when the bundled resource fails to load — Tray
@@ -402,8 +413,14 @@ fun main() {
         // sees the window vanish immediately.
         val quitToOs: () -> Unit = {
             // With a deadline: a shutdown that hangs used to leave the
-            // process behind holding the single-instance lock.
-            ExitPolicy.exitAfterShutdown { graph.shutdown() }
+            // process behind holding the single-instance lock. The
+            // window's last place is written inside it, from a copy
+            // taken before the window goes.
+            val closing = windowState.run { androidx.compose.ui.window.WindowState(placement, isMinimized, position, size) }
+            ExitPolicy.exitAfterShutdown {
+                windowMemory.keep(closing)
+                graph.shutdown()
+            }
             exitApplication()
         }
         // A comet set up earlier boots before the app connects; the
@@ -513,6 +530,7 @@ fun main() {
                     kotlin.system.exitProcess(0)
                 }
             }
+            androidx.compose.runtime.LaunchedEffect(Unit) { holdOpeningSize(windowState) }
             // No narrower than the chat column's minimum: below it a
             // chat's text ran into ever more rows. AWT sizes are in the
             // same unscaled units as dp.
