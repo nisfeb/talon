@@ -75,7 +75,7 @@ actual val isDrawerNavigation: Boolean = true
 actual val isTouchPrimary: Boolean = true
 
 // Port pending: CLLocationManager significant-change monitoring.
-actual val isLocationSharingSupported: Boolean = false
+actual val isLocationSharingSupported: Boolean = true
 actual val isHealthSharingSupported: Boolean = false
 
 /** The US storefront only. Read each time: the storefront follows the Apple ID's country. */

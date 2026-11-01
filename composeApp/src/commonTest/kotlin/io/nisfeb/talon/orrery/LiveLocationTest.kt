@@ -123,4 +123,13 @@ class LiveLocationTest {
     fun `an answer to an ask names the ship`() {
         assertEquals("""{"ship":"~bus"}""", askBody("~bus"))
     }
+
+    // iOS hands over a fix on every 100 m (IosLocationWatch): the minute is this rule's.
+    @Test
+    fun `a live share sends at most a fix a minute, and otherwise every fix the platform gives`() {
+        assertTrue(fixDue(null, now, fast = true), "the first fix goes")
+        assertTrue(!fixDue(now - 59_999, now, fast = true), "not twice in a minute")
+        assertTrue(fixDue(now - 60_000, now, fast = true), "a minute on, it goes")
+        assertTrue(fixDue(now - 1, now, fast = false), "a significant move goes at once")
+    }
 }
