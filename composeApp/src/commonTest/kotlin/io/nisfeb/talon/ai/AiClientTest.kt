@@ -132,6 +132,8 @@ class AiClientTest {
         )
         val e = assertFailsWith<NoAnswer> { c.complete("sys", "hi") }
         assertTrue(e.outOfRoom, "it stopped at the cap")
+        assertEquals("the model ran out of room before it answered", e.message, "what Copy error details carries")
+        assertEquals("the model sent no answer", NoAnswer(outOfRoom = false).message)
     }
 
     @Test
