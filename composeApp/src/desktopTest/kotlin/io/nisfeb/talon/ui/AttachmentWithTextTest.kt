@@ -62,6 +62,8 @@ class AttachmentWithTextTest {
         image: Boolean = false,
         quote: Boolean = false,
         ship: io.nisfeb.talon.urbit.FakeShip? = null,
+        /** What is staged, in place of [image]'s picture or the text file. */
+        staged: PendingAttachment? = null,
         block: androidx.compose.ui.test.ComposeUiTest.(ComposerState) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-attach-").toFile()
@@ -88,7 +90,7 @@ class AttachmentWithTextTest {
                 waitForIdle()
                 runOnIdle {
                     state.draft = TextFieldValue("look at this")
-                    state.pendingAttachment = if (image) PendingAttachment(byteArrayOf(1, 2, 3, 4), "image/png", "cat.png", isImage = true)
+                    state.pendingAttachment = staged ?: if (image) PendingAttachment(byteArrayOf(1, 2, 3, 4), "image/png", "cat.png", isImage = true)
                         else PendingAttachment("x".encodeToByteArray(), "text/plain", "notes.txt", isImage = false)
                     if (quote) state.pendingQuote = quoted
                 }
@@ -151,6 +153,27 @@ class AttachmentWithTextTest {
                 waitForIdle()
                 Thread.sleep(300)
                 assertEquals(1, texts.size, "nothing more to send: $texts")
+            } finally { events.cancel() }
+        }
+    }
+
+    // A GIF moved in the composer and went as one frame of JPEG: the
+    // upload's metadata strip re-encoded every format it did not parse
+    // (a user's report, 2026-11-01).
+    @Test
+    fun `a GIF sent from the composer goes as itself, every frame, without its comment`() {
+        val ship = hostingShip()
+        val gif = javaClass.getResourceAsStream("/gif/two-frames.gif")!!.readBytes()
+        val tagged = io.nisfeb.talon.util.gifWithComment(gif, "taken at 40.7N 74.0W")
+        withComposer(ship = ship, staged = PendingAttachment(tagged, "image/gif", "cat.gif", isImage = true)) { state ->
+            val events = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { ship.channel.events().collect {} }
+            try {
+                onNodeWithText("look at this").performKeyInput { pressKey(Key.Enter) }
+                waitUntil(timeoutMillis = 5_000) { texts.isNotEmpty() || state.sendError != null }
+                assertEquals(listOf("image https://cdn.test/zod/cat.png [look at this]"), texts.toList(), "${state.sendError}")
+                val sent = ship.apiBytes.single { it.first == "PUT /put-here" }.second
+                kotlin.test.assertContentEquals(gif, sent, "the GIF as it was, its comment gone")
+                assertEquals(2, org.jetbrains.skia.Codec.makeFromData(org.jetbrains.skia.Data.makeFromBytes(sent)).frameCount)
             } finally { events.cancel() }
         }
     }

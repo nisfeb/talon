@@ -83,6 +83,8 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
 
     /** Requests to an app's own HTTP API, as `METHOD path body`. */
     val api: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+    /** The same requests' bodies as sent, for a picture's bytes. */
+    val apiBytes: MutableList<Pair<String, ByteArray>> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** The answer to an API request, or null for 404. */
     @Volatile var answerApi: (method: String, path: String, body: String) -> String? = { _, _, _ -> null }
@@ -439,8 +441,10 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
             // An app's own HTTP API (%notes' v1, orrery's reads, Grubbery's shell, …): recorded, and answered by [answerApi].
             req.method != HttpMethod.Get || path.startsWith("/notes/") || path.startsWith("/apps/orrery/") ||
                 path.startsWith("/apps/grubbery/") -> {
-                val body = req.body.toByteArray().decodeToString()
+                val raw = req.body.toByteArray()
+                val body = raw.decodeToString()
                 api += "${req.method.value} $path $body"
+                apiBytes += "${req.method.value} $path" to raw
                 answerApiOther(req.method.value, path)?.let { (status, type) ->
                     return@MockEngine respond("<html></html>", status, headersOf(HttpHeaders.ContentType, type))
                 }
