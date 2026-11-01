@@ -140,6 +140,23 @@ class HoldOpeningSizeTest {
         assertEquals(DpSize(1000.dp, 700.dp), state.size)
     }
 
+    // Maximized at once, the size can grow before the placement says so.
+    @Test
+    fun `growing as it opens, or shrinking by more than a border, stands`() = kotlinx.coroutines.runBlocking {
+        val grown = floating(1300, 850)
+        val held = launch { holdOpeningSize(grown, within = kotlin.time.Duration.parse("300ms")) }
+        kotlinx.coroutines.delay(50)
+        set(grown, 3840, 1036)
+        held.join()
+        assertEquals(DpSize(3840.dp, 1036.dp), grown.size)
+        val dragged = floating(1300, 850)
+        val held2 = launch { holdOpeningSize(dragged, within = kotlin.time.Duration.parse("300ms")) }
+        kotlinx.coroutines.delay(50)
+        set(dragged, 1000, 850)
+        held2.join()
+        assertEquals(DpSize(1000.dp, 850.dp), dragged.size)
+    }
+
     @Test
     fun `a window left alone, or opened maximized, is not touched`() = kotlinx.coroutines.runBlocking {
         val still = floating(1300, 850)

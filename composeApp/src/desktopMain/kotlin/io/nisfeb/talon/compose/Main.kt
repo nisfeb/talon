@@ -412,10 +412,15 @@ fun main() {
         // background thread runs shutdown + exitProcess so the user
         // sees the window vanish immediately.
         val quitToOs: () -> Unit = {
-            windowMemory.keep(windowState)
             // With a deadline: a shutdown that hangs used to leave the
-            // process behind holding the single-instance lock.
-            ExitPolicy.exitAfterShutdown { graph.shutdown() }
+            // process behind holding the single-instance lock. The
+            // window's last place is written inside it, from a copy
+            // taken before the window goes.
+            val closing = windowState.run { androidx.compose.ui.window.WindowState(placement, isMinimized, position, size) }
+            ExitPolicy.exitAfterShutdown {
+                windowMemory.keep(closing)
+                graph.shutdown()
+            }
             exitApplication()
         }
         // A comet set up earlier boots before the app connects; the

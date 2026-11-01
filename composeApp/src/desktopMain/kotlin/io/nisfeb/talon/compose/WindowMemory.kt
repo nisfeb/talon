@@ -46,7 +46,8 @@ internal class WindowMemory(
 
     fun state(): WindowState = restoredWindow(kept, screens())
 
-    /** Writes [state] when it changes what is kept. */
+    /** Writes [state] when it changes what is kept. Quit writes from its own thread. */
+    @Synchronized
     fun keep(state: WindowState) {
         val now = keptWindow(state, kept)
         if (now == null || now == kept) return
@@ -64,12 +65,17 @@ internal class WindowMemory(
  * Puts the window's size back, once, if the window manager shrinks it as
  * it opens. An X11 manager says how wide its borders are only once the
  * window is up, and AWT then takes its guess's error off the size (10 by
- * 2 px under KWin): a kept window shrank a little at every start.
+ * 2 px under KWin): a kept window shrank a little at every start. Only a
+ * border-sized shrink is put back: growing, as when the user maximizes
+ * at once, is never a border's error.
  */
 internal suspend fun holdOpeningSize(state: WindowState, within: Duration = 2.seconds) {
     if (state.placement != WindowPlacement.Floating) return
     val opened = state.size
-    withTimeoutOrNull(within) { snapshotFlow { state.size }.first { it != opened } } ?: return
+    fun bordersOff(now: DpSize) = now != opened &&
+        now.width in (opened.width - BORDERS)..opened.width &&
+        now.height in (opened.height - BORDERS)..opened.height
+    withTimeoutOrNull(within) { snapshotFlow { state.size }.first(::bordersOff) } ?: return
     if (state.placement == WindowPlacement.Floating) state.size = opened
 }
 
@@ -122,6 +128,9 @@ internal fun restoredWindow(saved: SavedWindow?, screens: List<Rectangle>): Wind
 }
 
 private const val TITLE_BAR = 15f
+
+/** The most a window manager's borders take off: the 10 by 2 px seen under KWin, with room to spare. */
+private val BORDERS = 40.dp
 
 /** Every screen's bounds, the main one first; empty where there is no display. */
 private fun screenBounds(): List<Rectangle> = runCatching {
