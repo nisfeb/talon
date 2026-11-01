@@ -16,11 +16,12 @@ If Play prompts a follow-up because of permissions:
 
 **Collects, not shares.**
 - Type: Approximate location, Precise location.
-- Optional: yes (only when the user issues `/loc` in a message).
-- Used for: app functionality (sharing a one-shot location pin in a
-  message).
-- Sent off device: yes — to the user's Urbit ship as part of the
-  message body. Not to the Talon developer.
+- Optional: yes. Each use is off until the user turns it on.
+- Used for: app functionality, in three ways:
+  - `/loc` in a message: a one-shot location pin in that message.
+  - "Send where I am" (Settings, AI, Orrery): on each move of a few hundred metres, and each minute on a trip or while a live share runs, the phone sends its position, to the metre, to Orrery on the user's own ship. Orrery uses it for leave alerts. This reads location in the background, with the user's "all the time" permission.
+  - Live location: while the user shares where they are with another ship, the user's own ship passes each position to that ship, until the share ends. The user starts each share, picks who and for how long, and can stop it.
+- Sent off device: yes, to the user's own Urbit ship, and from there only to ships the user chose to share with. Never to the Talon developer. A share the user starts is a transfer the user asked for, not sharing in Play's sense.
 
 ### Does your app collect or share audio data?
 
