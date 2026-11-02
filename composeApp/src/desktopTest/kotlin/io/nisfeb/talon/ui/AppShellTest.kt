@@ -2158,6 +2158,75 @@ class AppShellTest {
         }
     }
 
+    // ---- The meeting's chat beside the call (sneagan, 2026-11-02) ----
+
+    private fun ComposeUiTest.meetingOption(item: String) {
+        onNodeWithContentDescription("Meeting options").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing(item) }
+        onNodeWithText(item).performClick()
+    }
+
+    private fun ComposeUiTest.composers() = onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size
+
+    @Test
+    fun `a call's meeting shows its DM beside the call, and what is written there goes`() {
+        val engine = VideoEngine()
+        app(seed = busSaid, setup = callingShip, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine.state)
+            openCallMeeting()
+            meetingOption("Show chat")
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            assertTrue(present("Hang up") && present("Minimize the call"), "still in the meeting")
+            assertEquals(1, composers(), "the chat is drawn once, beside the meeting, not again under it")
+            onNode(hasSetTextAction()).performTextInput("see you there")
+            onNodeWithContentDescription("Send").performClick()
+            waitUntil(timeoutMillis = 10_000) { chatSaid(ship, "see you there") }
+            // Out of the meeting, the chat is where it was, with what was said.
+            onNodeWithContentDescription("Minimize the call").performClick()
+            waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") }
+            waitUntil(timeoutMillis = 5_000) { busChatShown() && showing("see you there") }
+            assertEquals(1, composers())
+            assertTrue(!hungUp(ship))
+        }
+    }
+
+    // Real time: the ship holds the post while the pane goes.
+    @Test
+    fun `a message sent just before the meeting's chat is hidden still goes`() {
+        val engine = VideoEngine()
+        app(seed = busSaid, setup = callingShip, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine.state)
+            openCallMeeting()
+            meetingOption("Show chat")
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            ship.holdPoke = 1_500
+            onNode(hasSetTextAction()).performTextInput("held a moment")
+            onNodeWithContentDescription("Send").performClick()
+            meetingOption("Hide chat")
+            waitForIdle()
+            assertTrue(!chatSaid(ship, "held a moment"), "the ship had not taken it yet when the pane went")
+            val until = System.currentTimeMillis() + 10_000
+            while (!chatSaid(ship, "held a moment") && System.currentTimeMillis() < until) Thread.sleep(100)
+            assertTrue(chatSaid(ship, "held a moment"), "the send outlived the pane")
+        }
+    }
+
+    @Test
+    fun `Escape in the meeting puts its chat away and leaves the call`() {
+        val engine = VideoEngine()
+        app(seed = busSaid, setup = callingShip, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
+            liveCallFromBus(ship, engine.state)
+            openCallMeeting()
+            meetingOption("Show chat")
+            waitUntil(timeoutMillis = 5_000) { busChatShown() }
+            onAllNodes(isRoot())[0].performKeyInput { pressKey(Key.Escape) }
+            waitForIdle()
+            onNodeWithContentDescription("Meeting options").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Show chat") }
+            assertTrue(present("Minimize the call") && !hungUp(ship), "the meeting and the call go on")
+        }
+    }
+
     // Grubbery's stock apps on the way in, the whole way through the app.
     private fun quickDefaultApps(block: () -> Unit) {
         io.nisfeb.talon.urbit.DefaultApps.afterStartMs = 0

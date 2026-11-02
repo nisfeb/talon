@@ -32,7 +32,7 @@ package io.nisfeb.talon.ui
  *  - isTouchPrimary — A, i (thumb-sized rows); D: mouse + close screen favour density.
  *  - needsEmojiFontSpans — D (a bundled emoji family does the work); A/i: colour emoji render in the default family.
  *  - needsManualImagePaste — D, i; A: the text field's content receiver takes pasted images.
- *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place.
+ *  - isImmersiveCallSupported — A, i (full-screen call view); D: the inline roster toggles in place, and the meeting view opens over the window with the open chat beside it.
  *  - isUrbWebViewSupported — A, i (in-app webview popover); D: hands off to the system browser.
  *  - isLiveMapSupported — A (MapLibre, OpenFreeMap tiles), i (MapKit): a live share on a map that follows each fix. D: no map view; Open map hands off to the browser.
  *  - isLocalTriageSupported — D (llama.cpp on the JVM, or a local Ollama), A (MediaPipe LLM Inference), i (Apple's system model on iOS 26, else llama.cpp).

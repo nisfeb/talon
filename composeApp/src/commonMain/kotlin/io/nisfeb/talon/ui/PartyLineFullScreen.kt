@@ -133,6 +133,9 @@ fun PartyLineFullScreen(
     videoPane: (@Composable () -> Unit)? = null,
     /** The meeting view: a camera or shared screen can fill the window. */
     canFillWindow: Boolean = false,
+    /** Show or hide the meeting's chat pane, or null where there is none. */
+    onToggleChat: (() -> Unit)? = null,
+    chatOpen: Boolean = false,
 ) {
     val fullScreen = LocalWindowFullScreen.current
     val meeting = isWindowFullScreenSupported && fullScreen.isFullScreen()
@@ -259,6 +262,7 @@ fun PartyLineFullScreen(
             }
             val menu = buildList {
                 val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
+                if (onToggleChat != null) add(CallMenuItem(if (chatOpen) "Hide chat" else "Show chat", onToggleChat))
                 if (hasDeviceChoices(audioDevices, videoDevices, cameraChoice)) add(CallMenuItem("Devices") { devicesOpen = true })
                 if (isWindowFullScreenSupported) add(CallMenuItem(if (meeting) "Exit full screen" else "Full screen") { fullScreen.set(!meeting) })
                 if (onSwitchCamera != null && cameraOn) add(CallMenuItem("Flip camera", onSwitchCamera))

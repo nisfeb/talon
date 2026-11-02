@@ -76,4 +76,37 @@ class PartyLinesTest {
             partyRollCall(2, live.members.map { it.ship }, withLineNames({ names[it] ?: it }, live)),
         )
     }
+
+    // ---- The meeting's chat pane ----
+
+    @Test
+    fun `a line's group is the one its room is bound to, else the one whose flag names it`() {
+        val groups = listOf(
+            GroupEntity(flag = "~zod/nisfeb-software", title = "Nisfeb Software", image = null),
+            GroupEntity(flag = "~nec/other", title = "Other", image = null),
+        )
+        val bound = mapOf("~zod/renamed" to PartyRoom("renamed", "t", true, "", false, groupFlag = "~nec/other"))
+        assertEquals("~nec/other", lineGroupFlag("~zod/renamed", bound, groups), "bound wins over the name")
+        assertEquals("~zod/nisfeb-software", lineGroupFlag("~zod/nisfeb-software", emptyMap(), groups), "a member's line, by its name")
+        assertEquals(null, lineGroupFlag("~nec/nisfeb-software", emptyMap(), groups), "the host is part of the name")
+        assertEquals(null, lineGroupFlag("~bud/stranger", emptyMap(), groups))
+    }
+
+    @Test
+    fun `the meeting's chat opens on the open chat, else the line's latest, else its first`() {
+        val channels = listOf("chat/~zod/general", "chat/~zod/random")
+        assertEquals("chat/~zod/random", meetingChatTarget("chat/~zod/random", channels, listOf("chat/~zod/general")))
+        assertEquals("chat/~zod/random", meetingChatTarget("~bus", channels, listOf("~bus", "chat/~zod/random", "chat/~zod/general")))
+        assertEquals("chat/~zod/general", meetingChatTarget(null, channels, listOf("~bus")))
+        assertEquals(null, meetingChatTarget("~bus", emptyList(), listOf("~bus")))
+    }
+
+    @Test
+    fun `only a chat opens beside the meeting`() {
+        assertTrue(isChatScreenWhom("~bus"))
+        assertTrue(isChatScreenWhom("chat/~zod/general"))
+        assertFalse(isChatScreenWhom("diary/~zod/notes"))
+        assertFalse(isChatScreenWhom("heap/~zod/pics"))
+        assertFalse(isChatScreenWhom("notes/~zod/n"))
+    }
 }

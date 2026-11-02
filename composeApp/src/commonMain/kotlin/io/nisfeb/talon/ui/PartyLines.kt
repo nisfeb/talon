@@ -69,3 +69,20 @@ fun anyPartyLineOccupied(
 ): Boolean = rows.any { r ->
     (presence[r.key] ?: 0) > 0 || onLine[r.key].orEmpty().isNotEmpty()
 }
+
+/** The group behind the line [lineKey] ("host/name"): the one its room is bound to, else the one whose flag names it. */
+fun lineGroupFlag(lineKey: String, rooms: Map<String, PartyRoom>, groups: List<GroupEntity>): String? =
+    rooms[lineKey]?.groupFlag
+        ?: groups.firstOrNull { g -> PartyLineHost.roomForGroup(g.flag)?.let { (h, n) -> "$h/$n" } == lineKey }?.flag
+
+/**
+ * The chat a meeting's pane opens on: the one open, if it is among
+ * [channels]; else the most recently active of them ([latest], newest
+ * first); else the first.
+ */
+fun meetingChatTarget(open: String?, channels: List<String>, latest: List<String>): String? =
+    open?.takeIf { it in channels } ?: latest.firstOrNull { it in channels } ?: channels.firstOrNull()
+
+/** Whether [whom] opens on the chat screen, not a notebook, gallery or notes. */
+fun isChatScreenWhom(whom: String): Boolean =
+    !whom.startsWith("diary/") && !whom.startsWith("heap/") && !whom.startsWith("notes/")
