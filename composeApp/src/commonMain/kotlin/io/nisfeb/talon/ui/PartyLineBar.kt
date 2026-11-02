@@ -796,6 +796,8 @@ fun PartyLineMeeting(
     recording: Boolean = false,
     recordedBy: Set<String> = emptySet(),
     onToggleRecord: (() -> Unit)? = null,
+    onToggleChat: (() -> Unit)? = null,
+    chatOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val state by party.state.collectAsState()
@@ -833,6 +835,8 @@ fun PartyLineMeeting(
             onFocusVideo = w.onFocusVideo,
             onSwitchCamera = w.onSwitchCamera,
             canFillWindow = true,
+            onToggleChat = onToggleChat,
+            chatOpen = chatOpen,
         )
     }
 }

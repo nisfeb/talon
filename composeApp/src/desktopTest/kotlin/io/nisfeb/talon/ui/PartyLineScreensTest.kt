@@ -562,6 +562,32 @@ class PartyLineScreensTest {
     }
 
     @Test
+    fun `the meeting's More shows and hides its chat, and has no chat item without one`() = runComposeUiTest {
+        var chatOpen by mutableStateOf(false)
+        var withChat by mutableStateOf(true)
+        setContent {
+            CompositionLocalProvider(LocalWindowFullScreen provides Window()) {
+                TalonTheme(darkTheme = false) {
+                    PartyLineFullScreen(
+                        state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = {}, onMinimize = {},
+                        onToggleChat = if (withChat) ({ chatOpen = !chatOpen }) else null,
+                        chatOpen = chatOpen,
+                    )
+                }
+            }
+        }
+        more("Show chat")
+        assertTrue(chatOpen)
+        more("Hide chat")
+        assertTrue(!chatOpen)
+        withChat = false
+        onNodeWithContentDescription("Meeting options").performClick()
+        waitForIdle()
+        assertTrue(!shows("Show chat") && !shows("Hide chat"))
+    }
+
+    @Test
     fun `asking the host can be called off`() = runComposeUiTest {
         setContent { TalonTheme(darkTheme = false) { PartyLineAsking(onCancel = { did += "cancel" }) } }
         assertTrue(shows("Asking the host…"))

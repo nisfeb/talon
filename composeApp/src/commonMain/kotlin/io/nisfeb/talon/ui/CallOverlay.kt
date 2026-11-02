@@ -254,6 +254,8 @@ fun CallMeeting(
     videoDevices: io.nisfeb.talon.call.VideoDevices,
     onClose: () -> Unit,
     onMessage: ((String) -> Unit)? = null,
+    onToggleChat: (() -> Unit)? = null,
+    chatOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val state by controller.state.collectAsState()
@@ -285,6 +287,8 @@ fun CallMeeting(
             onSwitchCamera = w.onSwitchCamera,
             videoPane = w.pane,
             canFillWindow = true,
+            onToggleChat = onToggleChat,
+            chatOpen = chatOpen,
         )
     }
 }

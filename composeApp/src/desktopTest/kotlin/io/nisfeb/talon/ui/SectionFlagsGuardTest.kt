@@ -30,6 +30,7 @@ class SectionFlagsGuardTest {
         "localShipSetupOpen", // only while signed out, where there is no drawer to leave it by
         "meetingOpen", // an overlay over a live party line, closed with the line and by its own close
         "callMeetingOpen", // the same over a live 1:1 call
+        "meetingChatOpen", // a pane inside a meeting, closed with it, by its own menu and by Escape
     )
 
     /**

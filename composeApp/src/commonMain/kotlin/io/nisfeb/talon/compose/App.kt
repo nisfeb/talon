@@ -1973,6 +1973,52 @@ fun App(
             LaunchedEffect(callLive) {
                 if (!callLive) callMeetingOpen = false
             }
+            // The meeting's chat pane: the open chat, beside the call
+            // instead of behind it. While it shows, the chat pane under
+            // the meeting is not drawn, so the chat is on screen once.
+            // ponytail: closed at each meeting's start; keep it in UiSettings if it should stay open across meetings.
+            var meetingChatOpen by remember { mutableStateOf(false) }
+            val inMeeting = (meetingOpen && partyLine != null) || (callMeetingOpen && callController != null)
+            LaunchedEffect(inMeeting) { if (!inMeeting) meetingChatOpen = false }
+            val meetingChatShown = meetingChatOpen && inMeeting && loggedInShip != null &&
+                openChat?.let { io.nisfeb.talon.ui.isChatScreenWhom(it) } == true
+            // What its picker offers: the line's group's chats, or the peer.
+            val meetingChannels = remember(meetingOpen, callMeetingOpen, callContacts) {
+                when {
+                    callMeetingOpen -> listOfNotNull((callController?.state?.value as? io.nisfeb.talon.call.CallUiState.Active)?.peer)
+                    meetingOpen -> callController?.lineKey
+                        ?.let { io.nisfeb.talon.ui.lineGroupFlag(it, callController.rooms.value, callContacts.allGroups()) }
+                        ?.let { flag -> callContacts.channelsOfGroup(flag).filter { it.startsWith("chat/") } }
+                        .orEmpty()
+                    else -> emptyList()
+                }
+            }
+            val openInMeetingChat: (String) -> Unit = { other ->
+                if (io.nisfeb.talon.ui.isChatScreenWhom(other)) {
+                    openConversationAction()
+                    openChatFocusMessageId = null
+                    openChat = other
+                } else {
+                    // A notebook or gallery has no place beside a call.
+                    meetingOpen = false
+                    callMeetingOpen = false
+                    jumpToChat(other)
+                }
+            }
+            val meetingChatScope = rememberCoroutineScope()
+            val toggleMeetingChat: (() -> Unit)? = if (meetingChannels.isEmpty()) null else ({
+                if (meetingChatShown) {
+                    meetingChatOpen = false
+                } else {
+                    meetingChatScope.launch {
+                        val latest = runCatching { db.latestPerConversation().first().map { it.whom } }.getOrDefault(emptyList())
+                        io.nisfeb.talon.ui.meetingChatTarget(openChat, meetingChannels, latest)?.let {
+                            if (it != openChat) openInMeetingChat(it)
+                            meetingChatOpen = true
+                        }
+                    }
+                }
+            })
             val callFloats = !inlineCallUiShown.value && !callMeetingOpen &&
                 (callUi is io.nisfeb.talon.call.CallUiState.Active ||
                     callUi is io.nisfeb.talon.call.CallUiState.Ended)
@@ -2053,6 +2099,7 @@ fun App(
                                 openThreadParent = null
                                 openThreadReplyAnchor = null
                             }
+                            meetingChatShown -> meetingChatOpen = false
                             openChat != null -> openChat = null
                             else -> return@onKeyEvent false
                         }
@@ -2149,35 +2196,107 @@ fun App(
                         if (floats) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
                     ),
                 ) {
+            val meetingChat: @Composable () -> Unit = {
+                val whom = openChat
+                val me = loggedInShip
+                if (whom != null && me != null) io.nisfeb.talon.ui.MeetingChatPane(
+                    channels = meetingChannels,
+                    labelFor = { callContacts.channelShortName(it) },
+                    onPick = openInMeetingChat,
+                ) {
+                    val thread = openThreadParent
+                    if (thread != null) {
+                        ThreadScreen(
+                            db = db,
+                            repo = repo,
+                            http = http,
+                            drafts = drafts,
+                            ourPatp = me,
+                            whom = whom,
+                            parentId = thread,
+                            initialScrollReplyId = openThreadReplyAnchor,
+                            onScrollConsumed = { openThreadReplyAnchor = null },
+                            onBack = { closeRightPaneAction() },
+                            onOpenConversation = openInMeetingChat,
+                            onOpenImage = { url -> viewerImageUrl = url },
+                            powerFeaturesEnabled = uiSettings.powerFeaturesEnabled.collectAsState().value,
+                            hideComposerButtons = uiSettings.hideComposerButtons.collectAsState().value,
+                        )
+                    } else {
+                        DmChatScreen(
+                            db = db,
+                            repo = repo,
+                            drafts = drafts,
+                            http = http,
+                            aiSettings = aiSettings,
+                            uiSettings = uiSettings,
+                            calendar = calendarRepo,
+                            ourPatp = me,
+                            whom = whom,
+                            initialScrollMessageId = openChatFocusMessageId,
+                            onScrollConsumed = { openChatFocusMessageId = null },
+                            onBack = { meetingChatOpen = false },
+                            onOpenThread = { parentId -> openThreadAction(parentId, null) },
+                            onOpenThreadAt = { parentId, replyAnchor -> openThreadAction(parentId, replyAnchor) },
+                            onOpenConversation = openInMeetingChat,
+                            onOpenImage = { url -> viewerImageUrl = url },
+                            onOpenSelfProfile = {
+                                meetingOpen = false
+                                callMeetingOpen = false
+                                showSelfProfile = true
+                            },
+                            onTopUp = openTopUp,
+                            compact = true,
+                        )
+                    }
+                }
+            }
             // Drawn above the app content and catching pointer input, so
             // nothing underneath reacts while the meeting is up.
+            val meetingModifier = Modifier
+                .fillMaxSize()
+                .zIndex(1f)
+                .pointerInput(Unit) { detectTapGestures { } }
             if (meetingOpen && partyLine != null) {
-                io.nisfeb.talon.ui.PartyLineMeeting(
-                    party = partyLine,
-                    nameFor = { ship -> callContacts.displayName(ship) },
-                    selfShip = shipKey,
-                    audioDevices = audioDevices,
-                    videoDevices = videoDevices,
-                    onClose = { meetingOpen = false },
-                    onMessage = { who -> meetingOpen = false; jumpToChat(who) },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(1f)
-                        .pointerInput(Unit) { detectTapGestures { } },
-                )
+                androidx.compose.foundation.layout.Row(meetingModifier) {
+                    io.nisfeb.talon.ui.PartyLineMeeting(
+                        party = partyLine,
+                        nameFor = { ship -> callContacts.displayName(ship) },
+                        selfShip = shipKey,
+                        audioDevices = audioDevices,
+                        videoDevices = videoDevices,
+                        onClose = { meetingOpen = false },
+                        onMessage = { who -> if (meetingChatShown) openInMeetingChat(who) else { meetingOpen = false; jumpToChat(who) } },
+                        onToggleChat = toggleMeetingChat,
+                        chatOpen = meetingChatShown,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (meetingChatShown) meetingChat()
+                }
             }
             if (callMeetingOpen && callController != null) {
-                io.nisfeb.talon.ui.CallMeeting(
-                    controller = callController,
-                    nameFor = { ship -> callContacts.displayName(ship) },
-                    audioDevices = audioDevices,
-                    videoDevices = videoDevices,
-                    onClose = { callMeetingOpen = false },
-                    onMessage = { who -> callMeetingOpen = false; jumpToChat(who) },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(1f)
-                        .pointerInput(Unit) { detectTapGestures { } },
+                androidx.compose.foundation.layout.Row(meetingModifier) {
+                    io.nisfeb.talon.ui.CallMeeting(
+                        controller = callController,
+                        nameFor = { ship -> callContacts.displayName(ship) },
+                        audioDevices = audioDevices,
+                        videoDevices = videoDevices,
+                        onClose = { callMeetingOpen = false },
+                        onMessage = { who -> if (meetingChatShown) openInMeetingChat(who) else { callMeetingOpen = false; jumpToChat(who) } },
+                        onToggleChat = toggleMeetingChat,
+                        chatOpen = meetingChatShown,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (meetingChatShown) meetingChat()
+                }
+            }
+            // An image from the meeting's chat opens over the meeting;
+            // the app's own viewer is under it.
+            if (meetingChatShown) viewerImageUrl?.let { url ->
+                ImageViewerScreen(
+                    urls = listOf(url),
+                    onClose = { viewerImageUrl = null },
+                    modifier = Modifier.fillMaxSize().zIndex(2f),
                 )
             }
             Surface(
@@ -2874,7 +2993,7 @@ fun App(
                     // Compact-only thread. Wide windows render the thread
                     // in the right pane next to the chat. Replaces the
                     // detailSlot thread branch that lived here in Phase 2.
-                    openThreadParent != null && openChat != null && !expanded -> {
+                    openThreadParent != null && openChat != null && !expanded && !meetingChatShown -> {
                         val threadMicTrigger = remember(openChat, openThreadParent) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }
                         ThreadScreen(
                             db = db,
@@ -3706,7 +3825,8 @@ fun App(
                             enabledItems = enabledItems,
                             onItemClicked = onRailItemClicked,
                             list = railListSlot,
-                            detail = detailSlot,
+                            // The meeting's chat pane holds the chat meanwhile.
+                            detail = detailSlot.takeUnless { meetingChatShown },
                             listFraction = listFraction,
                             onListFractionChange = { uiSettings.setChatPaneListFraction(it) },
                             rightPaneWidth = rightPaneWidthDp.dp,
@@ -3877,7 +3997,7 @@ fun App(
                             // A tab that takes the whole area has no chat beside it,
                             // so no thread or info pane either.
                             rightSidebar = rightPaneContent?.takeIf {
-                                !showAssistant && activeRailTab != RailTab.Home &&
+                                !meetingChatShown && !showAssistant && activeRailTab != RailTab.Home &&
                                     activeRailTab != RailTab.Mail && activeRailTab != RailTab.Calendar
                             }?.let { content ->
                                 {
