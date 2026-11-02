@@ -18,6 +18,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.rightClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -83,6 +87,19 @@ class PartyLineScreensTest {
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
+    /** [item] from the meeting view's More menu. */
+    private fun ComposeUiTest.more(item: String) {
+        onNodeWithContentDescription("Meeting options").performClick()
+        onNodeWithText(item).performClick()
+        waitForIdle()
+    }
+
+    /** A right-click on [name]'s row, where an admin's mute for everyone is. */
+    private fun ComposeUiTest.rightClick(name: String) {
+        onNode(hasText(name) and hasClickAction()).performMouseInput { rightClick() }
+        waitForIdle()
+    }
+
     @Test
     fun `the line shows who is on, who is speaking and who is muted`() = full(live()) {
         for (t in listOf("Planting season", "3 people on the line · 4 listening", "Zod (you)", "Bus", "Speaking", "Nec", "Muted")) {
@@ -111,28 +128,35 @@ class PartyLineScreensTest {
     @Test
     fun `a recording says who records, and Stop asks the line`() = full(live(), recording = true) {
         assertTrue(shows("Recording · Bus"))
-        onNodeWithContentDescription("Stop").performClick()
-        waitForIdle()
+        more("Stop recording")
         assertEquals(listOf("record"), did)
     }
 
+    // A tap on someone messages them; the ⋯ on each person is gone
+    // (sneagan, 2026-11-02). An admin's mute is a right-click or a long press.
     @Test
-    fun `an admin can take a voice or send a message from someone's options`() = full(live(ops = true)) {
-        onNodeWithContentDescription("Options for Bus").performClick()
+    fun `a tap on someone messages them, and an admin mutes them with a right-click or a long press`() = full(live(ops = true)) {
+        rightClick("Bus")
         onNodeWithText("Mute for everyone").performClick()
         waitForIdle()
-        onNodeWithContentDescription("Options for Nec").performClick()
-        onNodeWithText("Message").performClick()
+        onNode(hasText("Nec") and hasClickAction()).performTouchInput { longClick() }
         waitForIdle()
-        assertEquals(listOf("revoke:~bus", "message:~nec"), did)
+        onNodeWithText("Mute for everyone").performClick()
+        waitForIdle()
+        onNode(hasText("Nec") and hasClickAction()).performClick()
+        waitForIdle()
+        assertEquals(listOf("revoke:~bus", "revoke:~nec", "message:~nec"), did)
+        assertTrue(onAllNodesWithContentDescription("Options for Bus").fetchSemanticsNodes().isEmpty(), "no ⋯ on a person")
     }
 
     @Test
-    fun `without an admin's rights, the options only message`() = full(live(ops = false)) {
-        onNodeWithContentDescription("Options for Bus").performClick()
-        waitForIdle()
-        assertTrue(shows("Message"))
+    fun `without an admin's rights, someone is only messaged, and we are not`() = full(live(ops = false)) {
+        rightClick("Bus")
         assertTrue(!shows("Mute for everyone"), "only an admin mutes others")
+        onNode(hasText("Bus") and hasClickAction()).performClick()
+        waitForIdle()
+        assertTrue(onAllNodes(hasText("Zod (you)") and hasClickAction()).fetchSemanticsNodes().isEmpty(), "no one to message in ourselves")
+        assertEquals(listOf("message:~bus"), did)
     }
 
     @Test
@@ -190,7 +214,8 @@ class PartyLineScreensTest {
                 )
             }
         }
-        onNodeWithContentDescription("Who's on the line").performClick()
+        onNodeWithContentDescription("More call options").performClick()
+        onNodeWithText("Who's on the line").performClick()
         waitForIdle()
         block()
     }
@@ -200,22 +225,23 @@ class PartyLineScreensTest {
         assertTrue(onAllNodesWithText("Bus").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText("Nec").fetchSemanticsNodes().isNotEmpty())
         assertTrue(onAllNodesWithContentDescription("Muted").fetchSemanticsNodes().isNotEmpty(), "Nec is marked muted")
         assertTrue(onAllNodesWithText("4 listening by link").fetchSemanticsNodes().isNotEmpty())
-        assertTrue(onAllNodesWithContentDescription("Options for Zod").fetchSemanticsNodes().isEmpty(), "no options on ourselves")
+        assertTrue(onAllNodes(hasText("Zod") and hasClickAction()).fetchSemanticsNodes().isEmpty(), "no one to message in ourselves")
     }
 
     @Test
     fun `an admin mutes someone for everyone from the opened bar, and anyone can message them`() = openBar(live(ops = true)) {
-        onNodeWithContentDescription("Options for Bus").performClick()
+        rightClick("Bus")
         onNodeWithText("Mute for everyone").performClick()
-        onNodeWithContentDescription("Options for Nec").performClick()
-        onNodeWithText("Message").performClick()
+        onNode(hasText("Nec") and hasClickAction()).performClick()
         waitForIdle()
         assertEquals(listOf("revoke:~bus", "message:~nec"), did)
     }
 
+    // Record is in the bar's ⋯ menu now, and the bar itself says a recording is on.
     @Test
-    fun `the opened bar records, and says who else is`() = openBar(live(), recordedBy = setOf("~bus")) {
-        assertTrue(onAllNodesWithText("Recording · Bus").fetchSemanticsNodes().isNotEmpty())
+    fun `the bar records from its menu, and says a recording is on`() = openBar(live(), recordedBy = setOf("~bus")) {
+        assertTrue(onAllNodesWithText("● Recording", substring = true).fetchSemanticsNodes().isNotEmpty())
+        onNodeWithContentDescription("More call options").performClick()
         onNodeWithText("Record").performClick()
         waitForIdle()
         assertEquals(listOf("record"), did)
@@ -281,8 +307,7 @@ class PartyLineScreensTest {
     fun `the microphone is chosen in the meeting view, beside the speaker`() {
         val mics = Mics()
         controls(mics) {
-            onNodeWithContentDescription("Devices").performClick()
-            waitForIdle()
+            more("Devices")
             assertTrue(shows("Microphone") && shows("Speaker") && shows("Camera"))
             onNodeWithText("OBS virtual mic").performClick()
             waitForIdle()
@@ -297,7 +322,7 @@ class PartyLineScreensTest {
         fun circle(zoom: Float): Int {
             var h = 0
             controls(Mics(), zoom = zoom) {
-                h = onNode(hasContentDescription("Devices"), useUnmergedTree = true).fetchSemanticsNode().size.height
+                h = onNode(hasContentDescription("Meeting options"), useUnmergedTree = true).fetchSemanticsNode().size.height
                 assertTrue(onAllNodesWithText("Audio").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Source").fetchSemanticsNodes().isEmpty(), "no words in the circles")
             }
             return h
@@ -311,8 +336,7 @@ class PartyLineScreensTest {
     fun `the speaker is picked from the outputs, and the caption says what took`() {
         val speakers = Speakers()
         controls(speakers) {
-            onNodeWithContentDescription("Devices").performClick()
-            waitForIdle()
+            more("Devices")
             assertTrue(!ticked("Headset") && ticked("System default"), "nothing chosen is the system's choice")
             onNodeWithText("Headset").performClick()
             waitForIdle()
@@ -320,7 +344,7 @@ class PartyLineScreensTest {
         }
         assertEquals("hs", speakers.chosen)
         controls(Speakers(takes = false)) {
-            onNodeWithContentDescription("Devices").performClick()
+            more("Devices")
             onNodeWithText("Headset").performClick()
             waitForIdle()
             assertTrue(!ticked("Headset"), "a route the platform refused is not claimed")
@@ -330,10 +354,12 @@ class PartyLineScreensTest {
     @Test
     fun `the camera turns on, its source is picked, and it flips only while on`() {
         controls {
-            assertTrue(onAllNodesWithContentDescription("Flip").fetchSemanticsNodes().isEmpty())
+            onNodeWithContentDescription("Meeting options").performClick()
+            assertTrue(!shows("Flip camera"), "no flip while the camera is off")
+            onNodeWithText("Devices").performClick()
+            onNodeWithText("Done").performClick()
             onNodeWithContentDescription("Camera").performClick()
-            onNodeWithContentDescription("Devices").performClick()
-            waitForIdle()
+            more("Devices")
             assertTrue(ticked("Front"), "the camera in use")
             onNodeWithText("Back").performClick()
             waitForIdle()
@@ -344,8 +370,7 @@ class PartyLineScreensTest {
         did.clear()
         controls(cameraOn = true) {
             onNodeWithContentDescription("Camera off").assertExists()
-            onNodeWithContentDescription("Flip").performClick()
-            waitForIdle()
+            more("Flip camera")
         }
         assertEquals(listOf("flip"), did.filterNot { it.startsWith("window:") })
     }
@@ -353,9 +378,9 @@ class PartyLineScreensTest {
     @Test
     fun `full screen fills the window, and leaving the call gives it back`() {
         controls {
-            onNodeWithContentDescription("Full screen").performClick()
-            waitForIdle()
-            onNodeWithContentDescription("Exit full screen").assertExists()
+            more("Full screen")
+            onNodeWithContentDescription("Meeting options").performClick()
+            onNodeWithText("Exit full screen").assertExists()
         }
         assertEquals(listOf("window:true", "window:false"), did)
     }
@@ -404,7 +429,7 @@ class PartyLineScreensTest {
         onNodeWithText("Notes").performClick()
         waitForIdle()
         assertEquals(listOf("share:Notes"), did)
-        onNodeWithContentDescription("Hide who's on the line").assertExists()
+        assertTrue(shows("4 listening by link"), "opened out")
     }
 
     @Test
@@ -453,7 +478,8 @@ class PartyLineScreensTest {
     fun `turning the camera on opens the bar out, where your own picture is`() = cameraBar(live()) {
         onNodeWithContentDescription("Turn the camera on").performClick()
         waitForIdle()
-        onNodeWithContentDescription("Hide who's on the line").assertExists()
+        assertTrue(shows("4 listening by link"), "opened out")
+        onNodeWithContentDescription("More call options").performClick()
         onNodeWithText("Meeting view").performClick()
         waitForIdle()
         assertEquals(listOf("camera", "meeting"), did)
@@ -474,12 +500,65 @@ class PartyLineScreensTest {
         val state = live(ops = true).let { s -> s.copy(members = s.members.map { if (it.ship == "~nec") it.copy(mutedByAdmin = true) else it }) }
         openBar(state) {
             onNodeWithContentDescription("Muted by an admin").assertExists()
-            onNodeWithContentDescription("Options for Nec").performClick()
+            rightClick("Nec")
             assertTrue(!shows("Mute for everyone"), "the one already muted is offered their voice back")
             onNodeWithText("Allow speaking").performClick()
             waitForIdle()
         }
         assertEquals(listOf("restore:~nec"), did)
+    }
+
+    // sneagan, 2026-11-02: "everything other than mute, camera, screen
+    // share, and leave should be in a settings ellipsis in calls".
+    @Test
+    fun `the bar keeps mute, camera, share and leave, and the rest is in its menu`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineBarContent(
+                    state = live(), nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    audioDevices = Speakers(), onToggleRecord = { did += "record" }, onOpenMeeting = { did += "meeting" },
+                    onToggleCamera = { did += "camera" }, screenShare = shareControl(screen), partyVideoSupported = true,
+                )
+            }
+        }
+        waitForIdle()
+        for (b in listOf("Mute", "Turn the camera on", "Share your screen", "More call options", "Leave the line")) {
+            assertTrue(onAllNodesWithContentDescription(b).fetchSemanticsNodes().isNotEmpty(), "the bar has $b")
+        }
+        assertTrue(onAllNodesWithContentDescription("Who's on the line").fetchSemanticsNodes().isEmpty(), "no arrow to open it out")
+        onNodeWithContentDescription("More call options").performClick()
+        waitForIdle()
+        for (item in listOf("Who's on the line", "Meeting view", "Devices", "Record")) assertTrue(shows(item), "the menu has $item")
+        onNodeWithText("Devices").performClick()
+        waitForIdle()
+        assertTrue(shows("Speaker") && shows("Headset"), "the devices, in their dialog")
+    }
+
+    @Test
+    fun `the meeting view keeps mute, camera, share and leave, and the rest is behind More`() = runComposeUiTest {
+        setContent {
+            CompositionLocalProvider(LocalWindowFullScreen provides Window()) {
+                TalonTheme(darkTheme = false) {
+                    PartyLineFullScreen(
+                        state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = {}, onMinimize = {},
+                        audioDevices = Speakers(), videoDevices = Cameras, onSelectCamera = {},
+                        cameraOn = true, onToggleCamera = {}, onSwitchCamera = {}, screenShare = shareControl(screen),
+                        onToggleRecord = {},
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        for (b in listOf("Mute", "Camera off", "Share", "Meeting options", "Leave")) {
+            assertTrue(onAllNodesWithContentDescription(b).fetchSemanticsNodes().isNotEmpty(), "the meeting has $b")
+        }
+        for (gone in listOf("Devices", "Full screen", "Flip", "Record")) {
+            assertTrue(onAllNodesWithContentDescription(gone).fetchSemanticsNodes().isEmpty(), "$gone is not a button of its own")
+        }
+        onNodeWithContentDescription("Meeting options").performClick()
+        waitForIdle()
+        for (item in listOf("Devices", "Full screen", "Flip camera", "Record")) assertTrue(shows(item), "More has $item")
     }
 
     @Test
@@ -598,8 +677,10 @@ class PartyLineScreensTest {
         }
         waitForIdle()
         assertTrue(shows("~wes (guest)"), "marked, though it typed an @p")
-        onNodeWithContentDescription("Options for Bus").assertExists()
-        assertTrue(onAllNodesWithContentDescription("Options for ~wes (guest)").fetchSemanticsNodes().isEmpty(), "no menu: nothing to offer without ops")
+        assertTrue(onAllNodes(hasText("~wes (guest)", substring = true) and hasClickAction()).fetchSemanticsNodes().isEmpty(), "nothing to do without ops")
+        onNode(hasText("Bus") and hasClickAction()).performClick()
+        waitForIdle()
+        assertEquals(listOf("message:~bus"), did, "anyone with a ship is messaged")
     }
 
     @Test
@@ -668,8 +749,7 @@ class PartyLineScreensTest {
         assertTrue(hangUp.top > picture.bottom, "the controls stay below it: $hangUp")
         assertTrue(!shows("1 person on the line"), "a call is not a line")
         assertTrue(shows("Bus"), "who it is, under the picture")
-        onNodeWithContentDescription("Options for Bus").performClick()
-        onNodeWithText("Message").performClick()
+        onNode(hasText("Bus") and hasClickAction()).performClick()
         assertEquals(listOf("message:~bus"), did)
     }
 

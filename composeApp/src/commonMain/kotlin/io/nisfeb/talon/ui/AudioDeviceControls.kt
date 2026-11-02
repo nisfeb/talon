@@ -1,7 +1,6 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +13,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.verticalScroll
@@ -26,69 +24,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.AudioDevices
-import io.nisfeb.talon.ui.icons.TalonIcons
 
 /**
- * Microphone and speaker pickers for a call in progress.
- *
- * Collapsed by default and absent entirely where the OS owns routing
- * (see [AudioDevices.supported]). This sits over a conversation, so an
- * always-open pair of lists would cost more rows than the call itself.
- *
- * Devices are read when the pane opens rather than held in state: the
- * list changes when someone plugs in a headset mid-call, and the moment
- * of opening the pane is exactly when a stale list would be noticed.
- */
-@Composable
-fun AudioDeviceControls(
-    devices: AudioDevices,
-    modifier: Modifier = Modifier,
-    /** Cameras, shown as a third section where the platform lists them. */
-    videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
-    /** Switches a live camera to the picked one; null hides the camera section. */
-    onSelectCamera: ((String) -> Unit)? = null,
-) {
-    if (!devices.supported) return
-    val showCamera = videoDevices.supported && onSelectCamera != null
-    var open by remember { mutableStateOf(false) }
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable { open = !open },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    when {
-                        devices.unifiedRoute -> "Audio device"
-                        showCamera -> "Microphone, speaker and camera"
-                        else -> "Microphone and speaker"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Icon(
-                    if (open) TalonIcons.ExpandLess else TalonIcons.ExpandMore,
-                    contentDescription = if (open) "Hide audio devices" else "Choose audio devices",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (open) DeviceChoices(devices, videoDevices, if (showCamera) onSelectCamera else null)
-        }
-    }
-}
-
-/**
- * The microphone, speaker and camera lists, for the call bar's pane and
- * the meeting view's Devices menu alike. Read when shown: each read
+ * The microphone, speaker and camera lists, in the Devices dialog of a
+ * call's ⋯ menu ([DevicesDialog]). Read when shown: each read
  * crosses into the native device layer. A pick shows what the platform
  * then reports, so a route it refused is never claimed. [onSelectCamera]
  * null leaves the camera out.
@@ -207,11 +148,11 @@ private fun DeviceRow(label: String, chosen: Boolean, onClick: () -> Unit) {
             Spacer(Modifier.size(14.dp))
         }
         Spacer(Modifier.width(8.dp))
+        // Wrapped, never cut: a long device name was cut off at the
+        // edge of the menu it was in (sneagan, 2026-11-02).
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             color = if (chosen) {
                 MaterialTheme.colorScheme.onSurface
             } else {

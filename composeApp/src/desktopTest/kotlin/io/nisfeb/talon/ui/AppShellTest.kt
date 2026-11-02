@@ -1204,7 +1204,7 @@ class AppShellTest {
     }
 
     private fun ComposeUiTest.recordTheCall() {
-        onAllNodesWithContentDescription("Call controls")[0].performClick()
+        onAllNodesWithContentDescription("More call options")[0].performClick()
         onAllNodesWithText("Record")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { showing("in your chat with") }
         onNodeWithText("Start recording").performClick()
@@ -2018,23 +2018,26 @@ class AppShellTest {
     }
 
     private fun ComposeUiTest.openCallMeeting() {
-        if (!showing("Meeting view")) onAllNodesWithContentDescription("Call controls")[0].performClick()
+        onAllNodesWithContentDescription("More call options")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Meeting view") }
         onNodeWithText("Meeting view").performClick()
         waitUntil(timeoutMillis = 5_000) { present("Minimize the call") }
     }
 
     private fun ComposeUiTest.pickCamera(label: String) {
-        onAllNodesWithContentDescription("Call controls")[0].performClick()
-        onNodeWithContentDescription("Choose audio devices").performClick()
+        onAllNodesWithContentDescription("More call options")[0].performClick()
+        onNodeWithText("Devices").performClick()
         waitUntil(timeoutMillis = 5_000) { showing(label) }
         onNodeWithText(label).performClick()
+        onNodeWithText("Done").performClick()
     }
 
     private fun ComposeUiTest.pickMeetingCamera(label: String) {
-        onNodeWithContentDescription("Devices").performClick()
+        onNodeWithContentDescription("Meeting options").performClick()
+        onNodeWithText("Devices").performClick()
         waitUntil(timeoutMillis = 5_000) { showing(label) }
         onNodeWithText(label).performClick()
+        onNodeWithText("Done").performClick()
     }
 
     private fun ComposeUiTest.pictures() = onAllNodes(androidx.compose.ui.test.hasTestTag("call-video")).fetchSemanticsNodes()
@@ -2051,9 +2054,11 @@ class AppShellTest {
         assertEquals(1, pictures().size, "the picture is drawn once, not again under the meeting")
         val meeting = pictures().single().boundsInRoot
         assertTrue(meeting.height > strip.height, "the meeting's picture is the larger: $meeting, the strip's $strip")
-        for (control in listOf("Devices", "Full screen", "Share", "Camera off", "Mute")) {
+        // Mute, camera, share and leave, and the rest behind More.
+        for (control in listOf("Mute", "Camera off", "Share", "Meeting options", "Hang up")) {
             assertTrue(present(control), "the meeting has $control")
         }
+        assertTrue(!present("Devices") && !present("Full screen"), "behind More, not beside the others")
         onAllNodesWithContentDescription("Hang up")[0].performClick()
         waitUntil(timeoutMillis = 10_000) { hungUp(ship) }
         waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") }
@@ -2063,7 +2068,7 @@ class AppShellTest {
     fun `the meeting view minimizes to the strip, and the call goes on`() = videoCall { ship, _, _ ->
         openCallMeeting()
         onNodeWithContentDescription("Minimize the call").performClick()
-        waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") && present("Call controls") }
+        waitUntil(timeoutMillis = 5_000) { !present("Minimize the call") && present("More call options") }
         assertTrue(showing("· 00:0"), "still on the call")
         assertTrue(!hungUp(ship))
     }
@@ -2141,13 +2146,15 @@ class AppShellTest {
         app(setup = { callingShip(); engine = RecordedEngine(this) }, calls = io.nisfeb.talon.call.CallEngineProvider { engine }) { ship ->
             liveCallFromBus(ship, engine)
             openCallMeeting()
-            onNodeWithContentDescription("Record").performClick()
+            onNodeWithContentDescription("Meeting options").performClick()
+            onNodeWithText("Record").performClick()
             waitUntil(timeoutMillis = 5_000) { showing("in your chat with") }
             onNodeWithText("Start recording").performClick()
             waitUntil(timeoutMillis = 10_000) { engine.remote != null }
             assertTrue(chatSaid(ship, io.nisfeb.talon.call.CallController.RECORDING_ON))
             assertEquals(1, engine.chatAtTap, "the DM went, and was taken, before any audio was tapped")
-            waitUntil(timeoutMillis = 5_000) { present("Stop") }
+            onNodeWithContentDescription("Meeting options").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Stop recording") }
         }
     }
 

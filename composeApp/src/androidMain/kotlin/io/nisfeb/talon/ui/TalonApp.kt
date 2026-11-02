@@ -1667,6 +1667,8 @@ fun TalonApp(
             stripShownInline = inlineCallUiShown.value,
             http = app.ktorHttp,
             aiConfig = app.aiSettings.state.value,
+            // A tap on someone in the call opens a DM with them.
+            onMessage = { who -> sections.leave { closeSections(); openWhom = who } },
         )
     }
     if (partyFloats) {
@@ -1679,6 +1681,7 @@ fun TalonApp(
                 // return to, this is its only way off the screen.
                 onDismiss = { line.dismissFailure() },
                 selfShip = loggedInShip.orEmpty(),
+                onMessage = { who -> sections.leave { closeSections(); openWhom = who } },
                 // No onModerate here: this floating fallback doesn't
                 // know which room the line belongs to (that lives
                 // with the chat slot). SFU-side moderation still
@@ -2893,6 +2896,7 @@ fun TalonApp(
                                 nameFor = { contactMap.displayName(it) },
                                 audioDevices = androidAudioDevices,
                                 selfShip = loggedInShip.orEmpty(),
+                                onMessage = { who -> sections.leave { closeSections(); openWhom = who } },
                                 // Leave the immersive full-screen when a
                                 // call rings: it is a Dialog, the ring is
                                 // a Popup, and the ring lost.
@@ -2944,6 +2948,7 @@ fun TalonApp(
                                     c,
                                     nameFor = { contactMap.displayName(it) },
                                     audioDevices = androidAudioDevices,
+                                    onMessage = { who -> sections.leave { closeSections(); openWhom = who } },
                                 )
                             }
                             // Only while the line is actually unknown.
