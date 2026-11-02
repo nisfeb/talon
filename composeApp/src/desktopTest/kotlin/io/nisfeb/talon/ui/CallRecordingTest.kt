@@ -106,8 +106,8 @@ class CallRecordingTest {
     }
 
     private fun ComposeUiTest.startRecording() {
-        // Behind the strip's expander on desktop, as a party line's is.
-        onNodeWithContentDescription("Call controls").performClick()
+        // In the strip's ⋯ menu, as a party line's is.
+        onNodeWithContentDescription("More call options").performClick()
         onNodeWithText("Record").performClick()
         showing("in your chat with Bus")
         onNodeWithText("Start recording").performClick()
@@ -124,6 +124,7 @@ class CallRecordingTest {
         showing("● Recording")
         engine.mic!!(tone(480), 48_000)
         engine.remote!!(tone(480), 48_000)
+        onNodeWithContentDescription("More call options").performClick()
         onNodeWithText("Stop recording").performClick()
         waitUntil(timeoutMillis = 10_000) { "notice ~bus: ${CallController.RECORDING_OFF}" in events }
         assertTrue("untap" in events)
@@ -168,6 +169,7 @@ class CallRecordingTest {
         calls.setMuted(true)
         engine.mic!!(tone(480), 48_000)
         engine.remote!!(tone(480), 48_000)
+        onNodeWithContentDescription("More call options").performClick()
         onNodeWithText("Stop recording").performClick()
         showing("Captured 1 speaker")
     }
@@ -176,7 +178,11 @@ class CallRecordingTest {
     fun `where the chat cannot be told there is no record control`() = call(notice = false) {
         live()
         waitForIdle()
-        assertTrue(onAllNodesWithContentDescription("Call controls").fetchSemanticsNodes().isEmpty(), "nothing to expand to")
+        // Not in the call's menu, where there is one.
+        if (onAllNodesWithContentDescription("More call options").fetchSemanticsNodes().isNotEmpty()) {
+            onNodeWithContentDescription("More call options").performClick()
+            waitForIdle()
+        }
         assertTrue(!recordButton())
     }
 }

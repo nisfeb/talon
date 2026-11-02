@@ -138,6 +138,10 @@ fun PartyLineFullScreen(
     val meeting = isWindowFullScreenSupported && fullScreen.isFullScreen()
     // Whose picture fills the window; back to the meeting once it goes.
     var filled by remember { mutableStateOf<String?>(null) }
+    var devicesOpen by remember { mutableStateOf(false) }
+    if (devicesOpen) {
+        DevicesDialog(audioDevices, videoDevices, onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }) { devicesOpen = false }
+    }
     val filledMember = filled?.let { s -> state.members.firstOrNull { it.ship == s && it.ship in videoOnShips } }
     LaunchedEffect(filledMember == null) { if (filledMember == null) filled = null }
     // Leaving the call view by any road gives the window back.
@@ -147,10 +151,9 @@ fun PartyLineFullScreen(
     // The call's buttons: under the meeting, and over a filled picture.
     val controls: @Composable (Modifier) -> Unit = { mod ->
         // ─── Controls ───
-        // FlowRow, not Row: mute + audio + camera + flip + record +
-        // leave is too many for one phone row and squished them. This
-        // wraps to a second row when they don't fit, and stays one
-        // row where they do.
+        // Mute, camera, share and leave, and the rest behind More
+        // (sneagan, 2026-11-02: too many buttons). FlowRow, so a
+        // narrow phone still wraps rather than squeezing them.
         FlowRow(
             modifier = mod,
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -208,28 +211,6 @@ fun PartyLineFullScreen(
                 }
             }
 
-            // Microphone, speaker and camera behind one icon. Their own
-            // circles held the words "Audio" and "Source", which outgrew
-            // them at bigger sizes, and the microphone had no choice here.
-            val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
-            if (audioDevices.supported || cameraChoice != null) {
-                DevicesControl(audioDevices, videoDevices, cameraChoice)
-            }
-            if (isWindowFullScreenSupported) {
-                ControlButton(
-                    label = if (meeting) "Exit full screen" else "Full screen",
-                    onClick = { fullScreen.set(!meeting) },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Icon(
-                        if (meeting) TalonIcons.FullscreenExit else TalonIcons.Fullscreen,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            }
-
             if (onToggleCamera != null) {
                 ControlButton(
                     label = if (cameraOn) "Camera off" else "Camera",
@@ -276,49 +257,22 @@ fun PartyLineFullScreen(
                     }
                 }
             }
-            if (onSwitchCamera != null && cameraOn) {
+            val menu = buildList {
+                val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
+                if (hasDeviceChoices(audioDevices, videoDevices, cameraChoice)) add(CallMenuItem("Devices") { devicesOpen = true })
+                if (isWindowFullScreenSupported) add(CallMenuItem(if (meeting) "Exit full screen" else "Full screen") { fullScreen.set(!meeting) })
+                if (onSwitchCamera != null && cameraOn) add(CallMenuItem("Flip camera", onSwitchCamera))
+                if (onToggleRecord != null) add(CallMenuItem(if (recording) "Stop recording" else "Record", onToggleRecord))
+            }
+            CallMenu(menu) { open ->
                 ControlButton(
-                    label = "Flip",
-                    onClick = onSwitchCamera,
+                    label = "More",
+                    description = "Meeting options",
+                    onClick = open,
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
-                    Icon(
-                        Icons.Filled.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            }
-
-            if (onToggleRecord != null) {
-                ControlButton(
-                    label = if (recording) "Stop" else "Record",
-                    onClick = onToggleRecord,
-                    containerColor = if (recording) {
-                        MaterialTheme.colorScheme.errorContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
-                    contentColor = if (recording) {
-                        MaterialTheme.colorScheme.onErrorContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                ) {
-                    if (recording) {
-                        // A stop square.
-                        Box(
-                            Modifier.size(22.dp).clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.error),
-                        )
-                    } else {
-                        // A record dot.
-                        Box(
-                            Modifier.size(26.dp).clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.error),
-                        )
-                    }
+                    Icon(Icons.Filled.MoreVert, contentDescription = null, modifier = Modifier.size(26.dp))
                 }
             }
 
@@ -479,6 +433,8 @@ private fun ControlButton(
     onClick: () -> Unit,
     containerColor: Color,
     contentColor: Color,
+    /** What explore-by-touch says, where the word under it is not enough. */
+    description: String = label,
     icon: @Composable () -> Unit,
 ) {
     // The circle and the word under it are one button: the word used to
@@ -495,38 +451,12 @@ private fun ControlButton(
             contentColor = contentColor,
             // The icon carries no contentDescription; naming the circle
             // names the button on explore-by-touch.
-            modifier = Modifier.size(58.dp).semantics { contentDescription = label },
+            modifier = Modifier.size(58.dp).semantics { contentDescription = description },
         ) {
             Box(contentAlignment = Alignment.Center) { icon() }
         }
         Spacer(Modifier.height(8.dp))
         Text(label, style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-/** The call's devices, the bar's lists in a menu, behind an icon that scales as the others do. */
-@Composable
-private fun DevicesControl(
-    audioDevices: AudioDevices,
-    videoDevices: io.nisfeb.talon.call.VideoDevices,
-    onSelectCamera: ((String) -> Unit)?,
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    Box {
-        ControlButton(
-            label = "Devices",
-            onClick = { menuOpen = true },
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ) {
-            Icon(TalonIcons.Tune, contentDescription = null, modifier = Modifier.size(26.dp))
-        }
-        // Open while picking: a microphone and a speaker are often chosen together.
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            Column(Modifier.widthIn(min = 220.dp, max = 360.dp).padding(horizontal = 12.dp)) {
-                DeviceChoices(audioDevices, videoDevices, onSelectCamera)
-            }
-        }
     }
 }
 
@@ -545,9 +475,15 @@ private fun ParticipantRow(
     } else {
         Modifier
     }
-    Row(
+    CallPersonRow(
+        ship = member.ship,
+        isSelf = isSelf,
+        mutedByAdmin = member.mutedByAdmin,
+        onMessage = onMessage,
+        ops = showOps,
+        onRevokeSpeaking = onRevokeSpeaking,
+        onRestoreSpeaking = onRestoreSpeaking,
         modifier = Modifier.fillMaxWidth().height(36.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(speakingRing.padding(2.dp)) {
             Avatar(label = nameFor(member.ship), url = null, size = 26.dp)
@@ -589,43 +525,6 @@ private fun ParticipantRow(
                 },
                 modifier = Modifier.size(14.dp),
             )
-        }
-        // The menu is for everyone, not just ops: messaging someone
-        // you're on a line with is the most ordinary thing to want,
-        // and it used to be reachable only by leaving the call UI.
-        // A guest has no ship to message.
-        val message = onMessage?.takeUnless { io.nisfeb.talon.comet.isGuestName(member.ship) }
-        if (!isSelf && (message != null || showOps)) {
-            var menuOpen by remember(member.id) { mutableStateOf(false) }
-            Box {
-                io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(member.ship)}", onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Filled.MoreVert,
-                        contentDescription = "Options for ${nameFor(member.ship)}",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    if (message != null) {
-                        DropdownMenuItem(
-                            text = { Text("Message") },
-                            onClick = { menuOpen = false; message(member.ship) },
-                        )
-                    }
-                    if (!showOps) {
-                    } else if (member.mutedByAdmin) {
-                        DropdownMenuItem(
-                            text = { Text("Allow speaking") },
-                            onClick = { menuOpen = false; onRestoreSpeaking?.invoke(member.ship) },
-                        )
-                    } else {
-                        DropdownMenuItem(
-                            text = { Text("Mute for everyone") },
-                            onClick = { menuOpen = false; onRevokeSpeaking?.invoke(member.ship) },
-                        )
-                    }
-                }
-            }
         }
     }
 }

@@ -230,6 +230,7 @@ fun PartyLineBarContent(
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
+    var devicesOpen by remember { mutableStateOf(false) }
     // On a phone the expand arrow opens a full-screen call view with
     // big controls instead of the inline roster; the compact strip and
     // "browse chats" stay one minimize-tap away. A 1:1 call (headline)
@@ -336,15 +337,21 @@ fun PartyLineBarContent(
                     // A 1:1 call (headline != null) has no real roster —
                     // CallStrip fabricates one member whose speaking/
                     // muted never update, which read as "peer is silent
-                    // and never muted". The expander survives only where
-                    // it still has a job: picking audio devices, or recording.
-                    val expandable = immersive || headline == null || audioDevices.supported || onToggleRecord != null
-                    // A 1:1 call's expander holds controls, not a roster.
-                    val expandTip = when {
-                        immersive -> "Open the full-screen call"
-                        headline != null -> if (expanded) "Hide call controls" else "Call controls"
-                        expanded -> "Hide who's on the line"
-                        else -> "Who's on the line"
+                    // and never muted" — so it has nothing to open out.
+                    val expandable = immersive || headline == null
+                    // Everything but mute, camera, share and leave
+                    // (sneagan, 2026-11-02: too many buttons).
+                    val menu = buildList {
+                        when {
+                            immersive -> add(CallMenuItem("Open the full-screen call") { fullScreen = true })
+                            headline == null -> add(CallMenuItem(if (expanded) "Hide who's on the line" else "Who's on the line") { expanded = !expanded })
+                        }
+                        // A 1:1 call (headline) has its picture in the meeting, not tiles.
+                        if (onOpenMeeting != null && !immersive && (partyVideoSupported || headline != null)) {
+                            add(CallMenuItem("Meeting view", onOpenMeeting))
+                        }
+                        if (hasDeviceChoices(audioDevices, videoDevices, onSelectCamera)) add(CallMenuItem("Devices") { devicesOpen = true })
+                        if (onToggleRecord != null) add(CallMenuItem(if (recording) "Stop recording" else "Record", onToggleRecord))
                     }
                     Column(
                         Modifier.weight(1f).then(
@@ -446,15 +453,9 @@ fun PartyLineBarContent(
                                 }
                             }
                         }
-                        if (expandable) {
-                            io.nisfeb.talon.ui.IconButton(tip = expandTip, onClick = {
-                                if (immersive) fullScreen = true else expanded = !expanded
-                            }) {
-                                Icon(
-                                    if (expanded) TalonIcons.ExpandLess
-                                    else TalonIcons.ExpandMore,
-                                    contentDescription = expandTip,
-                                )
+                        CallMenu(menu) { open ->
+                            io.nisfeb.talon.ui.IconButton(tip = "More call options", onClick = open) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More call options")
                             }
                         }
                         FilledIconButton(
@@ -516,31 +517,9 @@ fun PartyLineBarContent(
         if (headline == null) {
             Roster(state, nameFor, selfShip, onRevokeSpeaking, onRestoreSpeaking, onMessage)
         }
-        // Behind the same expander as the roster: picking a headset is
-        // a thing you do once, not something worth a permanent row over
-        // the conversation. Renders nothing where the OS owns routing.
-        // A 1:1 call (headline) has its picture in the meeting, not tiles.
-        if (onOpenMeeting != null && !immersive && (partyVideoSupported || headline != null)) {
-            io.nisfeb.talon.ui.TextButton(
-                onClick = onOpenMeeting,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            ) { Text("Meeting view") }
-        }
-        AudioDeviceControls(audioDevices, videoDevices = videoDevices, onSelectCamera = onSelectCamera)
-        // Recording control for non-immersive clients (desktop): the
-        // immersive full-screen has its own Record button, but desktop
-        // never opens it, so the control would otherwise be unreachable
-        // where recording is actually supported. A 1:1 call too.
-        if (onToggleRecord != null) {
-            RecordRow(
-                recording = recording,
-                recordedBy = recordedBy,
-                nameFor = nameFor,
-                onToggleRecord = onToggleRecord,
-            )
-        }
     }
     }
+    if (devicesOpen) DevicesDialog(audioDevices, videoDevices, onSelectCamera) { devicesOpen = false }
     // Full-screen over everything, so it covers the chat regardless of
     // where the strip is mounted. onDismissRequest is the Android back
     // button — same as tapping minimize.
@@ -641,10 +620,20 @@ private fun Roster(
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            // Op moderation, other people only. Wire 5. The action
+            // follows the target's current admin-mute state (learned
+            // over ADMIN_MUTE_KIND).
+            val ops = s.ops && onRevokeSpeaking != null && onRestoreSpeaking != null
             for (m in s.members) {
-                Row(
+                CallPersonRow(
+                    ship = m.ship,
+                    isSelf = m.ship == selfShip,
+                    mutedByAdmin = m.mutedByAdmin,
+                    onMessage = onMessage,
+                    ops = ops,
+                    onRevokeSpeaking = onRevokeSpeaking,
+                    onRestoreSpeaking = onRestoreSpeaking,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // A dot rather than a moving meter: the question
                     // is "who is talking", and a meter on a strip this
@@ -686,62 +675,6 @@ private fun Roster(
                             modifier = Modifier.size(14.dp),
                         )
                     }
-                    // Op moderation, other people only. Wire 5. The
-                    // action shown follows the target's current admin-
-                    // mute state (learned over ADMIN_MUTE_KIND), so a
-                    // muted person offers only "Allow speaking" and an
-                    // unmuted one only "Mute for everyone".
-                    val ops = s.ops && onRevokeSpeaking != null && onRestoreSpeaking != null
-                    // Everyone gets the menu, for Message; ops get
-                    // their mute items in the same one.
-                    // A guest has no ship to message.
-                    val message = onMessage?.takeUnless { io.nisfeb.talon.comet.isGuestName(m.ship) }
-                    if (m.ship != selfShip && (message != null || ops)) {
-                        Box {
-                            var menuOpen by remember(m.id) { mutableStateOf(false) }
-                            io.nisfeb.talon.ui.IconButton(tip = "Options for ${nameFor(m.ship)}", onClick = { menuOpen = true },
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                Icon(
-                                    Icons.Filled.MoreVert,
-                                    contentDescription = "Options for ${nameFor(m.ship)}",
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = menuOpen,
-                                onDismissRequest = { menuOpen = false },
-                            ) {
-                                if (message != null) {
-                                    DropdownMenuItem(
-                                        text = { Text("Message") },
-                                        onClick = {
-                                            menuOpen = false
-                                            message(m.ship)
-                                        },
-                                    )
-                                }
-                                if (!ops) {
-                                } else if (m.mutedByAdmin) {
-                                    DropdownMenuItem(
-                                        text = { Text("Allow speaking") },
-                                        onClick = {
-                                            menuOpen = false
-                                            onRestoreSpeaking?.invoke(m.ship)
-                                        },
-                                    )
-                                } else {
-                                    DropdownMenuItem(
-                                        text = { Text("Mute for everyone") },
-                                        onClick = {
-                                            menuOpen = false
-                                            onRevokeSpeaking?.invoke(m.ship)
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
             if (s.listeners > 0) {
@@ -756,65 +689,6 @@ private fun Roster(
         }
     }
 }
-
-/** The desktop expanded-bar recording control: a Record/Stop pill and,
- *  when anyone is recording, who. The immersive full-screen has its own
- *  Record button; this makes recording reachable where the full-screen
- *  never opens (desktop), gated the same way (onToggleRecord != null). */
-@Composable
-private fun RecordRow(
-    recording: Boolean,
-    recordedBy: Set<String>,
-    nameFor: (String) -> String,
-    onToggleRecord: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(
-            onClick = onToggleRecord,
-            shape = RoundedCornerShape(8.dp),
-            color = if (recording) {
-                MaterialTheme.colorScheme.errorContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceVariant
-            },
-            contentColor = if (recording) {
-                MaterialTheme.colorScheme.onErrorContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier.size(12.dp)
-                        .clip(if (recording) RoundedCornerShape(2.dp) else CircleShape)
-                        .background(MaterialTheme.colorScheme.error),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (recording) "Stop recording" else "Record",
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-        }
-        if (recordedBy.isNotEmpty()) {
-            Spacer(Modifier.width(10.dp))
-            Text(
-                "Recording · " + recordedBy.joinToString(", ") { nameFor(it) },
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.error,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
 
 /** Everything the call views derive from a [PartyLine], shared by the bar and the meeting view. */
 class PartyWiring(
