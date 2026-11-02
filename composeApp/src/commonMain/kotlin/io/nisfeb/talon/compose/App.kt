@@ -1976,6 +1976,7 @@ fun App(
             // The meeting's chat pane: the open chat, beside the call
             // instead of behind it. While it shows, the chat pane under
             // the meeting is not drawn, so the chat is on screen once.
+            // ponytail: closed at each meeting's start; keep it in UiSettings if it should stay open across meetings.
             var meetingChatOpen by remember { mutableStateOf(false) }
             val inMeeting = (meetingOpen && partyLine != null) || (callMeetingOpen && callController != null)
             LaunchedEffect(inMeeting) { if (!inMeeting) meetingChatOpen = false }

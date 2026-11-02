@@ -2199,13 +2199,14 @@ class AppShellTest {
             openCallMeeting()
             meetingOption("Show chat")
             waitUntil(timeoutMillis = 5_000) { busChatShown() }
-            ship.holdPoke = 1_500
+            // Long enough that a slow runner still hides the pane first.
+            ship.holdPoke = 5_000
             onNode(hasSetTextAction()).performTextInput("held a moment")
             onNodeWithContentDescription("Send").performClick()
             meetingOption("Hide chat")
             waitForIdle()
             assertTrue(!chatSaid(ship, "held a moment"), "the ship had not taken it yet when the pane went")
-            val until = System.currentTimeMillis() + 10_000
+            val until = System.currentTimeMillis() + 15_000
             while (!chatSaid(ship, "held a moment") && System.currentTimeMillis() < until) Thread.sleep(100)
             assertTrue(chatSaid(ship, "held a moment"), "the send outlived the pane")
         }
