@@ -155,6 +155,25 @@ class GroupAdminScreenTest {
 
     private fun ComposeUiTest.says(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
+    // A new channel's short name ends its id (sneagan, 2026-11-01). A
+    // notebook has none to give: %notes names it from its title.
+    @Test
+    fun `a new channel takes the short name given, and a notebook asks for none`() = admin { ship ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("New channel").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithContentDescription("New channel").performClick()
+        val inDialog = androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog())
+        onNode(hasSetTextAction() and hasText("Title") and inDialog).performTextInput("Town hall")
+        onNode(hasSetTextAction() and hasText("Short name (optional)") and inDialog).performTextInput("town-hall")
+        waitUntil(timeoutMillis = 5_000) { shows("chat/~zod/town-hall") }
+        onNodeWithText("Notebook").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("Short name (optional)") }
+        onNodeWithText("Chat").performClick()
+        onNodeWithText("Create").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val create = ship.pokesTo("channels").map { it.json.toString() }.first { "\"create\"" in it }
+        assertTrue("\"name\":\"town-hall\"" in create && "\"group\":\"$flag\"" in create, create)
+    }
+
     @Test
     fun `an admin decides who can post in a channel, a role at a time`() = admin(group = withChannels) { ship ->
         openGeneral(ship)
@@ -487,7 +506,7 @@ class GroupAdminScreenTest {
     fun `a chat channel is made in the group, with its title and description`() = admin { ship ->
         newChannel(kind = null, title = "Seeds", description = "what to plant")
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
-        val create = ship.pokesTo("channels").single().json.toString()
+        val create = ship.pokesTo("channels").map { it.json.toString() }.first { "\"create\"" in it }
         for (part in listOf("\"kind\":\"chat\"", "\"group\":\"$flag\"", "\"title\":\"Seeds\"", "\"description\":\"what to plant\"")) {
             assertTrue(part in create, "$part in $create")
         }

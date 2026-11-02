@@ -2074,9 +2074,9 @@ class TlonChatRepo(
      * createDefaultGroup: spins up a group with one "General" chat
      * channel. Returns the new group's flag (`~host/slug`).
      */
-    suspend fun createGroup(title: String, description: String = ""): String = carry {
+    suspend fun createGroup(title: String, description: String = "", shortName: String = ""): String = carry {
         val ch = liveChannel()
-        val slug = "v" + randomBase32(7)
+        val slug = chosenOrRandom(shortName)
         val groupId = "$ourPatp/$slug"
         val channelSlug = "v" + randomBase32(7)
         val channelId = "chat/$ourPatp/$channelSlug"
@@ -2114,6 +2114,29 @@ class TlonChatRepo(
         groupId
     }
 
+    /** [shortName] where one was chosen (see [shortNameProblem]), else a random one, as Tlon's client makes. */
+    private fun chosenOrRandom(shortName: String): String {
+        if (shortName.isEmpty()) return "v" + randomBase32(7)
+        require(shortNameProblem(shortName) == null) { "not a short name: $shortName" }
+        return shortName
+    }
+
+    /**
+     * The id [shortName] would give, where this ship already has it: one
+     * of its groups ([kind] null), or a channel of [kind] it hosts. Its
+     * %groups and %channels refuse to make a second.
+     */
+    suspend fun shortNameTaken(shortName: String, kind: String? = null): String? {
+        if (shortName.isEmpty()) return null
+        val id = if (kind == null) "$ourPatp/$shortName" else "$kind/$ourPatp/$shortName"
+        val taken = if (kind == null) {
+            _adminGroups.value.orEmpty().any { it.flag == id } || db.groups().getGroup(id) != null
+        } else {
+            db.groups().channelGroupFor(id) != null
+        }
+        return id.takeIf { taken }
+    }
+
     private fun randomBase32(length: Int): String {
         val chars = "0123456789abcdefghijklmnopqrstuv"
         return (1..length).map { chars.random() }.joinToString("")
@@ -2129,6 +2152,8 @@ class TlonChatRepo(
         kind: String,
         title: String,
         description: String = "",
+        /** Not for a notebook: %notes names it from its title. */
+        shortName: String = "",
     ): String = carry {
         require(kind in setOf("chat", "heap", "notes")) { "unknown channel kind: $kind" }
         // Notebooks live on %notes, which registers the channel with
@@ -2141,7 +2166,7 @@ class TlonChatRepo(
                 ?: error("couldn't create notebook")
         }
         val ch = liveChannel()
-        val slug = "v" + randomBase32(7)
+        val slug = chosenOrRandom(shortName)
         val nest = "$kind/$ourPatp/$slug"
         ch.poke(
             app = "channels",

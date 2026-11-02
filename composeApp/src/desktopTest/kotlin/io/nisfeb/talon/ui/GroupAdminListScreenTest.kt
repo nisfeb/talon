@@ -117,6 +117,45 @@ class GroupAdminListScreenTest {
         assertTrue("\"title\":\"Seed Swap\"" in made && "\"title\":\"General\"" in made, made)
     }
 
+    // Its short name is the end of its id, in every link to it, and cannot
+    // change once made (sneagan asked for it, 2026-11-01).
+    @Test
+    fun `a new group takes the short name given, as typed into one`() = admin(prepare = {
+        answerApi = { method, path, _ -> if (method == "PUT" && path.startsWith("/spider/groups/group-create-thread/")) "{}" else null }
+    }) { ship ->
+        showing("The Garden")
+        onNodeWithContentDescription("New group").performClick()
+        onNode(hasSetTextAction() and hasText("Title")).performTextInput("Seed Swap")
+        onNode(hasSetTextAction() and hasText("Short name (optional)")).performTextInput("Seed Swap")
+        showing("~zod/seed-swap")
+        onNodeWithText("Create").performClick()
+        waitUntil(timeoutMillis = 5_000) { opened.isNotEmpty() }
+        assertEquals(listOf("~zod/seed-swap"), opened.toList())
+        val made = ship.api.single { it.startsWith("PUT /spider/") }
+        assertTrue("\"groupId\":\"~zod/seed-swap\"" in made, made)
+    }
+
+    @Test
+    fun `a short name already one of ours is said, and nothing is sent`() = admin { ship ->
+        showing("The Garden")
+        onNodeWithContentDescription("New group").performClick()
+        onNode(hasSetTextAction() and hasText("Title")).performTextInput("Another garden")
+        onNode(hasSetTextAction() and hasText("Short name (optional)")).performTextInput("garden")
+        onNodeWithText("Create").performClick()
+        showing("~zod/garden is already one of your groups. Choose another short name.")
+        assertTrue(ship.api.none { it.startsWith("PUT /spider/") } && opened.isEmpty())
+    }
+
+    @Test
+    fun `a short name that is not one says what to change, and Create waits`() = admin { _ ->
+        showing("The Garden")
+        onNodeWithContentDescription("New group").performClick()
+        onNode(hasSetTextAction() and hasText("Title")).performTextInput("Lives")
+        onNode(hasSetTextAction() and hasText("Short name (optional)")).performTextInput("9lives")
+        showing("Start with a lowercase letter.")
+        onNodeWithText("Create").assertIsNotEnabled()
+    }
+
     @Test
     fun `a group the ship will not make says why, and the dialog stays`() = admin { _ ->
         showing("The Garden")

@@ -163,6 +163,7 @@ fun GroupAdminListScreen(
     if (newGroupOpen) {
         var title by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
+        var shortName by remember { mutableStateOf("") }
         // Dialog-local: the screen-level `error` renders behind the
         // dialog where the user can't see it.
         var dialogError by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
@@ -184,6 +185,7 @@ fun GroupAdminListScreen(
                         label = { Text("Description (optional)") },
                         enabled = !creating,
                     )
+                    io.nisfeb.talon.ui.ShortNameField(shortName, { shortName = it }, "${repo.ownShip}/", enabled = !creating)
                     if (creating) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -205,13 +207,18 @@ fun GroupAdminListScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = title.trim().isNotEmpty() && !creating,
+                    enabled = title.trim().isNotEmpty() && !creating && io.nisfeb.talon.urbit.shortNameProblem(shortName) == null,
                     onClick = {
                         creating = true
                         dialogError = null
                         scope.launch {
+                            repo.shortNameTaken(shortName)?.let { id ->
+                                creating = false
+                                dialogError = io.nisfeb.talon.util.Problem("$id is already one of your groups. Choose another short name.")
+                                return@launch
+                            }
                             runCatching {
-                                repo.createGroup(title.trim(), description.trim())
+                                repo.createGroup(title.trim(), description.trim(), shortName)
                             }.onSuccess { flag ->
                                 newGroupOpen = false
                                 creating = false
