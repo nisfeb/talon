@@ -118,8 +118,12 @@ class SearchScreenTest {
     fun `a word finds groups, people and messages, newest first, and not deleted ones`() = search {
         type("lunch", "lunch at noon")
         // Groups, people and messages are three queries that land in any
-        // order; the first message alone is not all of them.
-        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") && shows("lunch plans tomorrow") }
+        // order; the first message alone is not all of them. A person's
+        // "start a DM" comes after their row: waited for too, or it failed
+        // on a slow machine.
+        waitUntil(timeoutMillis = 5_000) {
+            shows("Lunch Crew") && shows("Lunch Club") && shows("lunch plans tomorrow") && shows("to start a DM")
+        }
         assertTrue(shows("GROUPS") && shows("Lunch Crew"))
         assertTrue(shows("PEOPLE") && shows("Lunch Club") && shows("Click to start a DM"), "a contact never written to says how to start")
         assertTrue(shows("lunch plans tomorrow"))
@@ -130,6 +134,9 @@ class SearchScreenTest {
     @Test
     fun `each result opens what it is`() = search {
         type("lunch", "lunch at noon")
+        // The group and the person land on their own: clicked before they
+        // were there, the test failed on a slow machine.
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") }
         onNodeWithText("Lunch Crew").performClick()
         onNodeWithText("Lunch Club").performClick()
         onNodeWithText("lunch at noon").performClick()
