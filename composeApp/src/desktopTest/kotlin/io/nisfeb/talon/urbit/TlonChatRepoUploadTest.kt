@@ -93,6 +93,19 @@ class TlonChatRepoUploadTest {
         assertTrue("\\]" in put, "the picture itself went: $put")
     }
 
+    // Re-encoded as a JPEG, a GIF went as its first frame (2026-11-01).
+    @Test
+    fun `a GIF reaches the bucket as a GIF, every frame, without its comment`() = live {
+        ownBucket()
+        ship.answerApi = { method, path, _ -> if (method == "PUT" && path.startsWith("/pics/talon/")) "" else null }
+        val gif = javaClass.getResourceAsStream("/gif/two-frames.gif")!!.readBytes()
+        val url = repo.uploadImage(io.nisfeb.talon.util.gifWithComment(gif, "GPS 40.7N 74.0W"), "image/gif", "cat.gif")
+        assertTrue(url.endsWith(".gif"), url)
+        val sent = ship.apiBytes.single { it.first.startsWith("PUT /pics/talon/") }.second
+        kotlin.test.assertContentEquals(gif, sent)
+        assertEquals(2, org.jetbrains.skia.Codec.makeFromData(org.jetbrains.skia.Data.makeFromBytes(sent)).frameCount)
+    }
+
     @Test
     fun `when neither way works, the failure says what each said`() = live {
         ownBucket(presigned = true)

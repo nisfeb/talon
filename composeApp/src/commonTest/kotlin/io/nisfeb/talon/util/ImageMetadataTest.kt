@@ -103,4 +103,30 @@ class ImageMetadataTest {
         val big = chunk("IDAT", ByteArray(70_000) { 7 })
         assertContentEquals(sig + ihdr + big + iend, stripImageMetadata(sig + ihdr + chunk("tEXt", ascii("Author\u0000Jane")) + big + iend))
     }
+
+    // A GIF moved in the composer and went as one frame of JPEG: every
+    // format not parsed here was re-encoded (a user's report, 2026-11-01).
+    private fun b(vararg x: Int) = ByteArray(x.size) { x[it].toByte() }
+    private val gifHead = "GIF89a".encodeToByteArray() + b(2, 0, 2, 0, 0x80, 0, 0) + b(0, 0, 0, 255, 255, 255)
+    private val gifLoop = b(0x21, 0xFF, 11) + "NETSCAPE2.0".encodeToByteArray() + b(3, 1, 0, 0, 0)
+    private val gifTiming = b(0x21, 0xF9, 4, 0, 10, 0, 0, 0)
+    private val gifFrame = b(0x2C, 0, 0, 0, 0, 2, 0, 2, 0, 0, 2, 2, 0x4C, 0x01, 0)
+
+    @Test
+    fun `a GIF keeps its frames, their timing and its looping, and loses its comments and XMP`() {
+        val comment = b(0x21, 0xFE, 5) + "hello".encodeToByteArray() + b(0)
+        val xmp = b(0x21, 0xFF, 11) + "XMP DataXMP".encodeToByteArray() + b(4) + "GPS!".encodeToByteArray() + b(0)
+        val tagged = gifHead + comment + gifLoop + xmp + gifTiming + gifFrame + gifTiming + gifFrame + b(0x3B) + "after".encodeToByteArray()
+        assertContentEquals(gifHead + gifLoop + gifTiming + gifFrame + gifTiming + gifFrame + b(0x3B), stripImageMetadata(tagged))
+    }
+
+    @Test
+    fun `a GIF with nothing to drop goes as it came, and one cut before its trailer is given one`() {
+        val clean = gifHead + gifLoop + gifTiming + gifFrame + b(0x3B)
+        assertContentEquals(clean, stripImageMetadata(clean))
+        assertContentEquals(clean, stripImageMetadata(gifHead + gifLoop + gifTiming + gifFrame))
+        // GIF87a, with no colour table: the frame follows the screen.
+        val old = "GIF87a".encodeToByteArray() + b(2, 0, 2, 0, 0, 0, 0) + gifFrame + b(0x3B)
+        assertContentEquals(old, stripImageMetadata(old))
+    }
 }

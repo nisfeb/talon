@@ -13,6 +13,12 @@ package io.nisfeb.talon.util
  *
  * PNG drops its text, EXIF and time chunks, and anything after IEND.
  *
+ * GIF keeps its frames, their timing and its looping: comments, and every
+ * application block but looping and the ICC profile (XMP among them),
+ * go, and anything after the trailer. Re-encoded, a GIF went as one
+ * frame of JPEG: it moved in the composer and stood still once sent (a
+ * user's report, 2026-11-01).
+ *
  * Anything else (WebP, HEIC) or a file that does not parse is decoded and
  * re-encoded to a metadata-free JPEG by [reencodeStrippingMetadata], so an
  * attached raw HEIC or WebP photo cannot leak its GPS even though the
@@ -23,6 +29,7 @@ fun stripImageMetadata(bytes: ByteArray): ByteArray = runCatching {
     when {
         bytes.size > 4 && bytes[0] == FF && bytes[1] == 0xD8.toByte() && bytes[2] == FF -> stripJpeg(bytes)
         bytes.size > 8 && PNG_SIGNATURE.indices.all { bytes[it] == PNG_SIGNATURE[it] } -> stripPng(bytes)
+        bytes.size > 13 && (bytes.has(0, "GIF87a") || bytes.has(0, "GIF89a")) -> stripGif(bytes)
         else -> null
     }
 }.getOrNull() ?: reencodeStrippingMetadata(bytes) ?: bytes
@@ -143,3 +150,58 @@ private fun stripPng(b: ByteArray): ByteArray? {
     }
     return null
 }
+
+/** GIF's application blocks kept: looping (Netscape's, and the older ANIMEXTS) and the colour profile. */
+private val GIF_APPS_KEPT = listOf("NETSCAPE2.0", "ANIMEXTS1.0", "ICCRGBG1")
+
+/**
+ * A GIF's header and screen, then its blocks to the trailer: frames and
+ * their timing kept, comments and other application blocks dropped. One
+ * that ends without a trailer is given one; one whose blocks run past its
+ * end is not parsed.
+ */
+private fun stripGif(b: ByteArray): ByteArray? {
+    fun table(flags: Int) = if (flags and 0x80 != 0) 3 * (1 shl ((flags and 7) + 1)) else 0
+    /** Where the sub-blocks from [at] end, past their empty one, or null where they run off the end. */
+    fun blocksEnd(at: Int): Int? {
+        var j = at
+        while (j < b.size) {
+            val len = u8(b, j)
+            if (len == 0) return j + 1
+            j += 1 + len
+        }
+        return null
+    }
+    val out = ByteArray(b.size + 1)
+    var n = 0
+    fun put(from: Int, to: Int) { b.copyInto(out, n, from, to); n += to - from }
+    var i = 13 + table(u8(b, 10))
+    if (i > b.size) return null
+    put(0, i)
+    while (i < b.size) {
+        when (u8(b, i)) {
+            0x3B -> { put(i, i + 1); return out.copyOf(n) }
+            0x2C -> {
+                if (i + 10 > b.size) return null
+                val end = blocksEnd(i + 10 + table(u8(b, i + 9)) + 1) ?: return null
+                put(i, end)
+                i = end
+            }
+            0x21 -> {
+                if (i + 2 > b.size) return null
+                val end = blocksEnd(i + 2) ?: return null
+                val kept = when (u8(b, i + 1)) {
+                    0xF9, 0x01 -> true // a frame's timing; text drawn as a frame
+                    0xFF -> GIF_APPS_KEPT.any { b.has(i + 3, it) }
+                    else -> false
+                }
+                if (kept) put(i, end)
+                i = end
+            }
+            else -> return null
+        }
+    }
+    out[n++] = 0x3B
+    return out.copyOf(n)
+}
+
