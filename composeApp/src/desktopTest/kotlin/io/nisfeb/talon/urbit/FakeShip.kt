@@ -459,9 +459,12 @@ internal class FakeShip(val us: String = "~zod", timeouts: Boolean = false) {
         }
     }) { if (timeouts) install(io.ktor.client.plugins.HttpTimeout) }
 
-    /** Signed in to this ship at https://ship.test, and nothing else. */
+    /** Where the ship is: a Tlon-hosted address for a test of Tlon's hosting, which Talon uses only there. Routes go by path, so any will do. */
+    @Volatile var shipUrl: String = "https://ship.test"
+
+    /** Signed in to this ship at [shipUrl], and nothing else. */
     val session = object : SessionStore {
-        private val s = SavedSession("https://ship.test", us, "test-session", "0v1", "ship.test")
+        private val s get() = SavedSession(shipUrl, us, "test-session", "0v1", io.ktor.http.Url(shipUrl).host)
         override fun all() = listOf(s)
         override fun active() = s
         override fun activeShip() = s.ship

@@ -1601,6 +1601,7 @@ class AppShellTest {
 
     /** Uploads land, as AttachmentWithTextTest's ship has them. */
     private val hostsUploads: FakeShip.() -> Unit = {
+        shipUrl = "https://zod.tlon.network"
         scries["genuine/secret"] = "\"tok-1\""
         answerApi = { method, path, _ ->
             when {
