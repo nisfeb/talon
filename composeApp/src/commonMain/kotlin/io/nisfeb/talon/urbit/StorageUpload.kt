@@ -126,3 +126,14 @@ internal fun uploadFailureLine(memex: Throwable?, storage: Throwable?): String {
     return if (why.isEmpty()) "The upload didn't go through: this ship has no image storage set up."
     else "The upload didn't go through: ${why.joinToString(", and ")}."
 }
+
+/**
+ * Whether Tlon hosts the ship at [url], read as Tlon's app reads it
+ * (hosting.ts nodeUrlIsHosted): a tlon.network address, or Tlon's test
+ * hosting's. By host, so a path or a port does not hide it.
+ */
+internal fun isTlonHosted(url: String?): Boolean {
+    val host = url?.substringAfter("://")?.substringBefore('/')?.substringBefore(':')?.lowercase()
+        ?.takeIf { it.isNotBlank() } ?: return false
+    return host == "tlon.network" || host.endsWith(".tlon.network") || host.endsWith(".test.tlon.systems")
+}

@@ -15,9 +15,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Uploading a picture: through Tlon's hosting when the ship has a token
- * for it, else straight to the ship's own S3 bucket, and a failure that
- * says what each way said.
+ * Uploading a picture: through Tlon's hosting for a ship Tlon hosts that
+ * has no bucket of its own, else straight to the ship's own S3 bucket,
+ * and a failure that says what each way said.
  */
 class TlonChatRepoUploadTest {
     private val db: AppDatabase = createTempDirectory(prefix = "talon-upload-").toFile().let { dir ->
@@ -25,7 +25,9 @@ class TlonChatRepoUploadTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
     }
     private val ship = FakeShip("~zod")
-    private val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod", http = ship.http) }
+    private val repo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod", http = ship.http, base = "https://my.ship") }
+    /** The same ship at a Tlon-hosted address. */
+    private val hostedRepo = TlonChatRepo(db).apply { attachForTest(ship.channel, "~zod", http = ship.http, base = "https://zod.tlon.network") }
     private val png = byteArrayOf(1, 2, 3, 4)
 
     @AfterTest
@@ -56,9 +58,9 @@ class TlonChatRepoUploadTest {
     }
 
     @Test
-    fun `with a hosting token the picture goes to Tlon's hosting`() = live {
+    fun `a ship Tlon hosts, with no bucket of its own, uploads through Tlon's hosting`() = live {
         hosted()
-        assertEquals("https://cdn.test/zod/cat.png", repo.uploadImage(png, "image/png", "photos/cat.png"))
+        assertEquals("https://cdn.test/zod/cat.png", hostedRepo.uploadImage(png, "image/png", "photos/cat.png"))
         val asked = ship.api.first { it.startsWith("PUT /v1/zod/upload") }
         for (part in listOf("\"token\":\"tok-1\"", "\"contentLength\":4", "\"contentType\":\"image/png\"")) {
             assertTrue(part in asked, "$part in $asked")
@@ -66,6 +68,38 @@ class TlonChatRepoUploadTest {
         // Tlon's hosting is told a name of chance, not the file's (2026-10-11).
         assertTrue(Regex("\"fileName\":\"[0-9a-f]{32}\\.png\"").containsMatchIn(asked) && "cat" !in asked, asked)
         assertTrue(ship.api.any { it.startsWith("PUT /put-here") }, "the bytes go to the URL it gave")
+    }
+
+    // A user's Jars ship, 2026-11-03: Talon asked Tlon's hosting first on
+    // every ship with a token, sent it the ship's secret, and led the
+    // failure with its refusal. Tlon's app never asks for a ship it
+    // doesn't host.
+    @Test
+    fun `a ship Tlon doesn't host never asks Tlon's hosting, token or not`() = live {
+        hosted()
+        ownBucket()
+        val answer = ship.answerApi
+        ship.answerApi = { method, path, body -> if (method == "PUT" && path.startsWith("/pics/talon/")) "" else answer(method, path, body) }
+        repo.uploadImage(png, "image/png", "cat.png")
+        assertTrue(ship.api.none { "/v1/zod/upload" in it }, "nothing to Tlon's hosting: ${ship.api}")
+        assertTrue(ship.api.any { it.startsWith("PUT /pics/talon/") }, "the bucket took it")
+    }
+
+    @Test
+    fun `a ship Tlon hosts that has its own bucket uses the bucket`() = live {
+        hosted()
+        ownBucket()
+        val answer = ship.answerApi
+        ship.answerApi = { method, path, body -> if (method == "PUT" && path.startsWith("/pics/talon/")) "" else answer(method, path, body) }
+        hostedRepo.uploadImage(png, "image/png", "cat.png")
+        assertTrue(ship.api.none { "/v1/zod/upload" in it }, "its own bucket, as Tlon's app does: ${ship.api}")
+    }
+
+    @Test
+    fun `a ship Tlon hosts in presigned mode uses Tlon's hosting`() = live {
+        hosted()
+        ownBucket(presigned = true)
+        assertEquals("https://cdn.test/zod/cat.png", hostedRepo.uploadImage(png, "image/png", "cat.png"))
     }
 
     @Test
@@ -109,11 +143,22 @@ class TlonChatRepoUploadTest {
     @Test
     fun `when neither way works, the failure says what each said`() = live {
         ownBucket(presigned = true)
-        val e = assertFailsWith<UploadFailed> { repo.uploadImage(png, "image/png", "cat.png") }
+        val e = assertFailsWith<UploadFailed> { hostedRepo.uploadImage(png, "image/png", "cat.png") }
         // Said plainly; what each route said is behind Copy error details.
         assertTrue(e.message!!.startsWith("The upload didn't go through:") && "memex=" !in e.message!!, e.message)
         val details = io.nisfeb.talon.util.errorDetailsOf(e)
         assertTrue("memex=" in details && "presigned-url mode" in details, details)
+    }
+
+    @Test
+    fun `a ship's own storage failing is said alone, without Tlon's hosting`() = live {
+        hosted()
+        ownBucket()
+        val answer = ship.answerApi
+        ship.answerApi = { method, path, body -> if (method == "PUT" && path.startsWith("/pics/talon/")) null else answer(method, path, body) }
+        val e = assertFailsWith<UploadFailed> { repo.uploadImage(png, "image/png", "cat.png") }
+        assertTrue("Tlon" !in e.message!!, e.message)
+        assertTrue("memex" !in io.nisfeb.talon.util.errorDetailsOf(e), io.nisfeb.talon.util.errorDetailsOf(e))
     }
 
     @Test
