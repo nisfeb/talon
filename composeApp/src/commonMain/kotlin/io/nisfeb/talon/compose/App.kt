@@ -2006,7 +2006,8 @@ fun App(
                 }
             }
             val meetingChatScope = rememberCoroutineScope()
-            val toggleMeetingChat: (() -> Unit)? = if (meetingChannels.isEmpty()) null else ({
+            // A phone's full-screen call has no room for a chat beside it.
+            val toggleMeetingChat: (() -> Unit)? = if (meetingChannels.isEmpty() || io.nisfeb.talon.ui.isImmersiveCallSupported) null else ({
                 if (meetingChatShown) {
                     meetingChatOpen = false
                 } else {
@@ -2257,6 +2258,13 @@ fun App(
                 .fillMaxSize()
                 .zIndex(1f)
                 .pointerInput(Unit) { detectTapGestures { } }
+            // On a phone this is the full-screen call (iOS draws it here,
+            // not in a Dialog, which cannot hold its video), and back
+            // minimizes it as the Dialog's did. Composed as it opens, so
+            // it outranks the handlers of the chat behind it.
+            if (io.nisfeb.talon.ui.isImmersiveCallSupported && inMeeting) {
+                PlatformBackHandler { meetingOpen = false; callMeetingOpen = false }
+            }
             if (meetingOpen && partyLine != null) {
                 androidx.compose.foundation.layout.Row(meetingModifier) {
                     io.nisfeb.talon.ui.PartyLineMeeting(
