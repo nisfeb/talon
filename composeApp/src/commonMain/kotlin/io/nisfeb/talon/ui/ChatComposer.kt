@@ -1108,7 +1108,10 @@ fun ChatComposer(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            // The buttons stay on the field's bottom line as it grows
+            // (a user, 2026-11-02: the send button "should be bottom
+            // aligned to stay put as the input field gets taller").
+            verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             // Shown even with the composer buttons hidden: it only
@@ -1143,7 +1146,7 @@ fun ChatComposer(
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             takePaste(clipboardPaste())
                         },
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
                     ) {
                         Icon(
                             TalonIcons.ContentPaste,
@@ -1156,7 +1159,7 @@ fun ChatComposer(
             if (!hideComposerButtons) {
                 io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
                 ) {
                     if (state.uploading) {
                         CircularProgressIndicator(
@@ -1173,7 +1176,7 @@ fun ChatComposer(
                 }
                 io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
                 ) {
                     Icon(
                         TalonIcons.AttachFile,
@@ -1182,12 +1185,14 @@ fun ChatComposer(
                     )
                 }
                 if (voiceComposer != null) {
-                    voiceComposer(
-                        canSend && !state.uploading,
-                        { path, durationMs ->
-                            state.pendingVoice = PendingVoice(path, durationMs)
-                        },
-                    )
+                    Box(Modifier.padding(bottom = BESIDE_FIELD)) {
+                        voiceComposer(
+                            canSend && !state.uploading,
+                            { path, durationMs ->
+                                state.pendingVoice = PendingVoice(path, durationMs)
+                            },
+                        )
+                    }
                 }
             }
             OutlinedTextField(
@@ -1374,7 +1379,7 @@ fun ChatComposer(
                     (state.pendingAttachment != null && !state.uploading))
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
             ) {
                 // A tick, not a paper plane. Editing and sending are
                 // different acts and the button is the only thing that
@@ -1390,6 +1395,9 @@ fun ChatComposer(
         }
     }
 }
+
+/** What lifts a 36 dp button beside the field to the middle of its one-line height. */
+private val BESIDE_FIELD = (androidx.compose.material3.OutlinedTextFieldDefaults.MinHeight - 36.dp) / 2
 
 @Composable
 private fun QuotePreviewRow(
