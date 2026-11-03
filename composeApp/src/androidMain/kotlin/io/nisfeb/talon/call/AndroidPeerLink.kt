@@ -311,53 +311,12 @@ class AndroidPeerLink(
         recSink = null
     }
 
-    // Android's RtpReceiver has no getSynchronizationSources, so the
-    // level comes from inbound-rtp stats instead. getStats is async,
-    // so a poll refreshes this and audioLevel() reads what it last
-    // saw — the caller polls at 250ms anyway.
-    @Volatile private var lastLevel: Float? = null
-    @Volatile private var statsInFlight = false
-    @Volatile private var lastLocalLevel: Float? = null
-    @Volatile private var localInFlight = false
+    private val levels by lazy { StatsLevels(pc) { closed.value } }
 
-    override fun audioLevel(): Float? = level("inbound-rtp")
+    override fun audioLevel(): Float? = levels.remote()
 
-    /**
-     * Our own microphone, from media-source.
-     *
-     * Not outbound-rtp: that describes what was sent, which is
-     * silence-suppressed, so a quiet talker reads as nothing at all.
-     * media-source is what the microphone actually heard.
-     */
-    override fun localAudioLevel(): Float? = level("media-source")
-
-    private fun level(type: String): Float? {
-        val local = type == "media-source"
-        val busy = if (local) localInFlight else statsInFlight
-        if (!busy && !closed.value) {
-            if (local) localInFlight = true else statsInFlight = true
-            runCatching {
-                pc.getStats { report ->
-                    var found: Float? = null
-                    for (stat in report.statsMap.values) {
-                        if (stat.type == type) {
-                            (stat.members["audioLevel"] as? Number)?.let {
-                                found = it.toFloat()
-                            }
-                        }
-                    }
-                    if (local) {
-                        lastLocalLevel = found
-                        localInFlight = false
-                    } else {
-                        lastLevel = found
-                        statsInFlight = false
-                    }
-                }
-            }.onFailure { if (local) localInFlight = false else statsInFlight = false }
-        }
-        return if (local) lastLocalLevel else lastLevel
-    }
+    /** Our own microphone: [StatsLevels.local]. */
+    override fun localAudioLevel(): Float? = levels.local()
 
     private val closed = kotlinx.atomicfu.atomic(false)
 

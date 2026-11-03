@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -189,7 +191,7 @@ fun CallStrip(
             // Pictures above the strip, so the controls stay in the
             // same place whether or not anyone has a camera on.
             if (w.pane != null && w.engine != null) {
-                CallVideoPane(w.engine, w.video, Modifier.fillMaxWidth())
+                CallVideoPane(w.engine, w.video, Modifier.fillMaxWidth(), peerSpeaking = w.peerSpeaking, selfSpeaking = w.selfSpeaking)
             }
             // Open the full screen once per call, from whichever strip
             // composes first; a strip that recomposes elsewhere after a
@@ -311,7 +313,10 @@ internal class CallWiring(
     val engine: io.nisfeb.talon.call.CallEngine?,
     val video: VideoState,
     /** The picture as large as its place allows, or null while nobody's camera is on. */
-    val pane: (@Composable () -> Unit)?,
+    val pane: (@Composable (gallery: Boolean) -> Unit)?,
+    /** Who is talking, from the call's audio levels, as a party line's links say. */
+    val peerSpeaking: Boolean,
+    val selfSpeaking: Boolean,
 )
 
 /** The record consent dialog rides with it, so whichever view asked shows it, and it goes with the call. */
@@ -332,6 +337,19 @@ internal fun rememberCallWiring(
     // Recording: on the controller, so the strip can come and go.
     val recording by controller.callRecording.collectAsState()
     val cameraFailed by controller.cameraFailed.collectAsState()
+    // Who is talking, polled as a party line polls its links, so a 1:1
+    // call rings its speaker as a line does (sneagan, 2026-11-03: these
+    // views at parity). Our own mic counts only while it is on.
+    var peerSpeaking by remember { mutableStateOf(false) }
+    var selfSpeaking by remember { mutableStateOf(false) }
+    LaunchedEffect(engine, s.muted) {
+        val e = engine ?: return@LaunchedEffect
+        while (true) {
+            peerSpeaking = (e.audioLevel() ?: 0f) > io.nisfeb.talon.call.PartyLine.SPEAKING_THRESHOLD
+            selfSpeaking = !s.muted && (e.localAudioLevel() ?: 0f) > io.nisfeb.talon.call.PartyLine.SPEAKING_THRESHOLD
+            delay(io.nisfeb.talon.call.PartyLine.SPEAKING_POLL_MS)
+        }
+    }
     var askRecord by remember { mutableStateOf<String?>(null) }
     var recordProblem by remember { mutableStateOf<String?>(null) }
     val videoCalls = isVideoCallsSupported && engine != null
@@ -360,7 +378,7 @@ internal fun rememberCallWiring(
     return CallWiring(
         live = PartyState.Live(
             room = s.peer,
-            members = listOf(PartyMember(id = s.peer, ship = s.peer)),
+            members = listOf(PartyMember(id = s.peer, ship = s.peer, speaking = peerSpeaking)),
             muted = s.muted,
             media = s.media,
         ),
@@ -400,8 +418,10 @@ internal fun rememberCallWiring(
         engine = engine,
         video = video,
         pane = if (engine != null && isVideoCallsSupported && video.anyOn) {
-            { CallVideoPane(engine, video, Modifier.fillMaxSize(), fill = true) }
+            { gallery -> CallVideoPane(engine, video, Modifier.fillMaxSize(), fill = true, gallery = gallery, peerSpeaking = peerSpeaking, selfSpeaking = selfSpeaking) }
         } else null,
+        peerSpeaking = peerSpeaking,
+        selfSpeaking = selfSpeaking,
     )
 }
 
@@ -629,13 +649,16 @@ private fun liveDuration(startMs: Long): String {
 }
 
 /**
- * The two pictures on a 1:1 call: them large, us inset.
+ * The two pictures on a 1:1 call: them large, us inset, or with
+ * [gallery] side by side at one size, as a party line's are (sneagan,
+ * 2026-11-03: these views at parity). A ring borders whoever is
+ * speaking, round the picture itself.
  *
- * The pane takes the shape of their picture once the renderer says
- * what it is -- a phone's portrait camera gets a portrait pane -- and
- * 16:9 until then. A fixed 220dp landscape pane used to show a
- * portrait caller as a band across the forehead. Whatever the shape,
- * the renderers fit rather than fill, so the whole picture is there.
+ * Each picture takes its shape once the renderer says what it is -- a
+ * phone's portrait camera gets a portrait pane -- and an assumed one
+ * until then. A fixed 220dp landscape pane used to show a portrait
+ * caller as a band across the forehead. Whatever the shape, the
+ * renderers fit rather than fill, so the whole picture is there.
  */
 @Composable
 private fun CallVideoPane(
@@ -644,8 +667,14 @@ private fun CallVideoPane(
     modifier: Modifier = Modifier,
     /** As large as its place, not capped: the full-screen and meeting views, where the picture is the point. */
     fill: Boolean = false,
+    gallery: Boolean = false,
+    peerSpeaking: Boolean = false,
+    selfSpeaking: Boolean = false,
 ) {
     var remoteAspect by remember { mutableStateOf<Float?>(null) }
+    var localAspect by remember { mutableStateOf<Float?>(null) }
+    val ring = MaterialTheme.colorScheme.primary
+    fun Modifier.ringWhen(on: Boolean, corner: Dp) = if (on) border(2.dp, ring, RoundedCornerShape(corner)) else this
     // The pane is sized to fit both the width it is given and its height
     // cap, in the picture's shape. A full-width pane in that shape was
     // taller than the cap on a wide window, the cap gave way, and the
@@ -653,8 +682,38 @@ private fun CallVideoPane(
     // 2026-10-09).
     BoxWithConstraints(modifier, contentAlignment = if (fill) Alignment.Center else Alignment.TopCenter) {
     val cap = if (fill) maxHeight else MAX_VIDEO_PANE_HEIGHT
-    Surface(
-        modifier = Modifier.size(fitVideoPane(maxWidth, remoteAspect ?: (16f / 9f), cap)).testTag("call-video"),
+    if (gallery && video.remoteOn && video.localOn) {
+        val gap = 6.dp
+        val (cols, rows) = galleryShape(2, maxWidth, cap, gap)
+        val cellWidth = (maxWidth - gap * (cols - 1)) / cols
+        val cellHeight = (cap - gap * (rows - 1)) / rows
+        val pictures: @Composable () -> Unit = {
+            Box(Modifier.size(cellWidth, cellHeight), contentAlignment = Alignment.Center) {
+                Surface(
+                    modifier = Modifier.size(fitVideoPane(cellWidth, remoteAspect ?: (16f / 9f), cellHeight))
+                        .ringWhen(peerSpeaking, 12.dp).testTag("call-video"),
+                    color = Color.Black,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    VideoSurface(engine, local = false, modifier = Modifier.fillMaxSize(), onFrameAspect = { remoteAspect = it })
+                }
+            }
+            Box(Modifier.size(cellWidth, cellHeight), contentAlignment = Alignment.Center) {
+                Surface(
+                    modifier = Modifier.size(fitVideoPane(cellWidth, localAspect ?: (16f / 9f), cellHeight))
+                        .ringWhen(selfSpeaking, 12.dp).testTag("call-video-self"),
+                    color = Color.DarkGray,
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    VideoSurface(engine, local = true, modifier = Modifier.fillMaxSize(), onFrameAspect = { localAspect = it })
+                }
+            }
+        }
+        if (cols == 2) Row(horizontalArrangement = Arrangement.spacedBy(gap)) { pictures() }
+        else Column(verticalArrangement = Arrangement.spacedBy(gap)) { pictures() }
+    } else Surface(
+        modifier = Modifier.size(fitVideoPane(maxWidth, remoteAspect ?: (16f / 9f), cap))
+            .ringWhen(peerSpeaking && video.remoteOn, 12.dp).testTag("call-video"),
         color = Color.Black,
         shape = RoundedCornerShape(12.dp),
     ) {
@@ -677,15 +736,20 @@ private fun CallVideoPane(
                 )
             }
             if (video.localOn) {
+                // Our inset in our picture's shape, so its ring borders it.
+                val inset = if (fill) 160.dp else 112.dp
                 Surface(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(8.dp)
-                        .then(if (fill) Modifier.size(160.dp) else Modifier.size(width = 84.dp, height = 112.dp)),
+                        .height(inset)
+                        .width(inset * (localAspect ?: (3f / 4f)))
+                        .ringWhen(selfSpeaking, 8.dp)
+                        .testTag("call-video-self"),
                     color = Color.DarkGray,
                     shape = RoundedCornerShape(8.dp),
                 ) {
-                    VideoSurface(engine, local = true, modifier = Modifier.fillMaxSize())
+                    VideoSurface(engine, local = true, modifier = Modifier.fillMaxSize(), onFrameAspect = { localAspect = it })
                 }
             }
         }

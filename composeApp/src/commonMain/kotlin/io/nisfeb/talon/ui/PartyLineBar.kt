@@ -192,7 +192,7 @@ fun PartyLineBarContent(
      *  the ring card is reachable. */
     incomingCall: Boolean = false,
     /** A 1:1 call's video pane, for the full-screen view. */
-    videoPane: (@Composable () -> Unit)? = null,
+    videoPane: (@Composable (gallery: Boolean) -> Unit)? = null,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
     /**

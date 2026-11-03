@@ -296,42 +296,11 @@ class DesktopPeerLink(
         runCatching { micTrack?.isEnabled = !muted }
     }
 
-    /**
-     * Remote audio level, or null when it can't be read.
-     *
-     * Two sources, because the cheap one is not always there.
-     * getSynchronizationSources reports the level carried in RTP's
-     * own header extension — free, but only populated when that
-     * extension was negotiated. Galène's down streams did not carry
-     * it, so desktop showed nobody speaking while Android, which
-     * reads inbound-rtp statistics instead, showed everyone.
-     *
-     * Fall back to the same statistic Android uses. It is
-     * asynchronous, so a call kicks off a refresh and returns what
-     * the last one saw; the caller polls at 4Hz anyway.
-     */
-    override fun audioLevel(): Float? =
-        runCatching {
-            pc.receivers.firstNotNullOfOrNull { r ->
-                // > 0, not just non-null. audioLevel is a primitive
-                // double, so an existing source whose header extension
-                // was never negotiated reports 0.0 — which is not null,
-                // so the fallback below never ran and desktop reported
-                // silence forever. Nobody is audible at exactly zero
-                // anyway, so losing that value costs nothing.
-                r.synchronizationSources?.firstOrNull()?.audioLevel?.toFloat()
-                    ?.takeIf { it > 0f }
-            }
-        }.getOrNull() ?: statsAudioLevel()
+    /** Remote audio level, or null when it can't be read: [AudioLevels.remote]. */
+    override fun audioLevel(): Float? = levels.remote()
 
-    /**
-     * Our own microphone level, from the MEDIA_SOURCE statistic.
-     *
-     * Not inbound-rtp: the up link has no receivers, and outbound-rtp
-     * describes what was sent rather than what the microphone heard —
-     * which is silence-suppressed, so a quiet talker reads as nothing.
-     */
-    override fun localAudioLevel(): Float? = statsAudioLevel(local = true)
+    /** Our own microphone level: [AudioLevels.local]. */
+    override fun localAudioLevel(): Float? = levels.local()
 
     override fun onPcm(sink: ((pcm: ByteArray, sampleRate: Int) -> Unit)?) {
         pcmCb.value = sink
@@ -385,36 +354,7 @@ class DesktopPeerLink(
         recSink = null
     }
 
-    private val lastStatsLevel = kotlinx.atomicfu.atomic(-1f)
-    private val lastLocalLevel = kotlinx.atomicfu.atomic(-1f)
-    private val statsInFlight = kotlinx.atomicfu.atomic(false)
-    private val localInFlight = kotlinx.atomicfu.atomic(false)
-
-    private fun statsAudioLevel(local: Boolean = false): Float? {
-        val inFlight = if (local) localInFlight else statsInFlight
-        val last = if (local) lastLocalLevel else lastStatsLevel
-        val want =
-            if (local) dev.onvoid.webrtc.RTCStatsType.MEDIA_SOURCE
-            else dev.onvoid.webrtc.RTCStatsType.INBOUND_RTP
-        if (inFlight.compareAndSet(expect = false, update = true)) {
-            runCatching {
-                pc.getStats { report ->
-                    var level = -1f
-                    report?.stats?.values?.forEach { st ->
-                        if (st?.type == want) {
-                            (st.attributes?.get("audioLevel") as? Number)?.let {
-                                level = it.toFloat()
-                            }
-                        }
-                    }
-                    last.value = level
-                    if (!local) logAudioDiag(report)
-                    inFlight.value = false
-                }
-            }.onFailure { inFlight.value = false }
-        }
-        return last.value.takeIf { it >= 0f }
-    }
+    private val levels by lazy { AudioLevels(pc) { logAudioDiag(it) } }
 
     // When a party line sounds wrong — one member glitchy, or everyone
     // slow and pitched-down — the AudioDeviceModule tells us nothing (it

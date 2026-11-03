@@ -20,6 +20,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performMouseInput
@@ -1958,6 +1959,11 @@ class AppShellTest {
         @Volatile var opens = true
         /** Holds a camera that is closing until completed: a restart caught midway. */
         @Volatile var closing: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        /** The far end's audio level and our microphone's. */
+        @Volatile var level: Float? = null
+        @Volatile var localLevel: Float? = null
+        override fun audioLevel() = level
+        override fun localAudioLevel() = localLevel
         override suspend fun setCameraEnabled(enabled: Boolean): Boolean {
             tries += enabled
             if (!enabled) {
@@ -2156,6 +2162,41 @@ class AppShellTest {
             onNodeWithContentDescription("Meeting options").performClick()
             waitUntil(timeoutMillis = 5_000) { showing("Stop recording") }
         }
+    }
+
+    // ---- A 1:1 call's views at parity with a line's (sneagan, 2026-11-03) ----
+
+    private fun ComposeUiTest.picture(tag: String) = onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+
+    @Test
+    fun `a call's meeting shows who is speaking, from the call's own audio`() = videoCall { _, engine, _ ->
+        engine.video.value = io.nisfeb.talon.call.VideoState(localOn = true, remoteOn = true)
+        openCallMeeting()
+        assertTrue(!showing("Speaking"), "nobody is, yet")
+        engine.level = 0.5f
+        waitUntil(timeoutMillis = 5_000) { showing("Speaking") }
+        engine.level = 0.001f
+        waitUntil(timeoutMillis = 5_000) { !showing("Speaking") }
+    }
+
+    @Test
+    fun `a call's meeting has gallery and speaker views, as a line's does`() = videoCall { _, engine, _ ->
+        engine.video.value = io.nisfeb.talon.call.VideoState(localOn = true, remoteOn = true)
+        openCallMeeting()
+        waitForIdle()
+        val them = picture("call-video")
+        val us = picture("call-video-self")
+        assertTrue(us.width < them.width / 2, "speaker view: ours is the small inset: $us in $them")
+        meetingOption("Gallery view")
+        waitForIdle()
+        val g1 = picture("call-video")
+        val g2 = picture("call-video-self")
+        assertEquals(g1.width, g2.width, 1f, "the same size: $g1 $g2")
+        assertEquals(g1.height, g2.height, 1f, "the same size: $g1 $g2")
+        assertTrue(g2.left >= g1.right || g2.top >= g1.bottom, "apart, neither inset in the other: $g1 $g2")
+        meetingOption("Speaker view")
+        waitForIdle()
+        assertTrue(picture("call-video-self").width < picture("call-video").width / 2, "back to the inset")
     }
 
     // ---- The meeting's chat beside the call (sneagan, 2026-11-02) ----

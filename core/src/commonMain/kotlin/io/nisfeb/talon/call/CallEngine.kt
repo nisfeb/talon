@@ -63,6 +63,15 @@ interface CallEngine {
     fun setMuted(muted: Boolean)
 
     /**
+     * The far end's audio level, 0 to 1, or null where it can't be read:
+     * polled for who is speaking, as a party line polls its links.
+     */
+    fun audioLevel(): Float? = null
+
+    /** Our own microphone's level, as [audioLevel]. */
+    fun localAudioLevel(): Float? = null
+
+    /**
      * Who is showing a camera, ours and theirs.
      *
      * The renderer watches this rather than polling: a remote camera
