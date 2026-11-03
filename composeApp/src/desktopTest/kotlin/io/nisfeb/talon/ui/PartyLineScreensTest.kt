@@ -582,6 +582,54 @@ class PartyLineScreensTest {
         assertTrue(back.maxOf { it.width } > back.minOf { it.width } * 2, "one large again: $back")
     }
 
+    // A user's iOS screenshot, 2026-11-03: the full-screen call showed the
+    // chat beneath it where its video was. iOS cannot hold native video in
+    // a Dialog, so where the host draws its own full-window view (App.kt),
+    // a phone's full screen is that; the Dialog stays for Android.
+    private fun ComposeUiTest.phoneBar(onOpenMeeting: (() -> Unit)?, autoOpenKey: Any? = null) {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                PartyLineBarContent(
+                    state = live(), nameFor = { names[it] ?: it }, selfShip = "~zod",
+                    onOpenMeeting = onOpenMeeting, autoOpenKey = autoOpenKey, immersive = true,
+                )
+            }
+        }
+        waitForIdle()
+    }
+
+    private fun ComposeUiTest.ownDialog() = onAllNodesWithContentDescription("Minimize the call").fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun `a phone's full screen is the host's own view where it has one, not a dialog`() = runComposeUiTest {
+        var opened = 0
+        phoneBar(onOpenMeeting = { opened++ })
+        onNodeWithContentDescription("More call options").performClick()
+        waitForIdle()
+        onNodeWithText("Open the full-screen call").performClick()
+        waitForIdle()
+        assertEquals(1, opened)
+        assertFalse(ownDialog(), "no Dialog of its own")
+    }
+
+    @Test
+    fun `a call that connects on a phone opens the host's view once`() = runComposeUiTest {
+        var opened = 0
+        phoneBar(onOpenMeeting = { opened++ }, autoOpenKey = "call-1")
+        assertEquals(1, opened)
+        assertFalse(ownDialog())
+    }
+
+    @Test
+    fun `without a view of the host's, a phone's full screen is its dialog`() = runComposeUiTest {
+        phoneBar(onOpenMeeting = null)
+        onNodeWithContentDescription("More call options").performClick()
+        waitForIdle()
+        onNodeWithText("Open the full-screen call").performClick()
+        waitForIdle()
+        assertTrue(ownDialog(), "Android's Dialog")
+    }
+
     @Test
     fun `the meeting view keeps mute, camera, share and leave, and the rest is behind More`() = runComposeUiTest {
         setContent {
