@@ -39,6 +39,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.unit.Dp
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,10 +69,15 @@ import io.nisfeb.talon.ui.icons.TalonIcons
  * The conference pictures, shared by the mobile full-screen view and
  * the desktop expanded bar so both show the same video.
  *
- * One picture is front and centre: whoever is pinned, else whoever
- * spoke last, else the first camera on. Everyone else's camera is a
- * row of small tiles underneath; tapping one pins it, tapping the
- * pinned one lets go. Ourselves only when nobody else has a camera on.
+ * Speaker view: one picture is front and centre, whoever is pinned,
+ * else whoever spoke last, else the first camera on. Everyone else's
+ * camera is a row of small tiles underneath; tapping one pins it,
+ * tapping the pinned one lets go. [gallery]: every camera the same
+ * size, as large as fills the space (sneagan, 2026-11-03). Our own
+ * camera is front and centre only when nobody else's is on.
+ *
+ * Each tile is its picture's shape, so the ring round a speaker borders
+ * the picture, not the space it sits in.
  */
 @Composable
 internal fun PartyVideoGrid(
@@ -82,6 +91,7 @@ internal fun PartyVideoGrid(
     onFocusVideo: (String?) -> Unit,
     /** The meeting view's Fill the window, on the big picture; null hides it. */
     onFill: ((String) -> Unit)? = null,
+    gallery: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // Who spoke last, kept until somebody else does: the level flag
@@ -95,44 +105,88 @@ internal fun PartyVideoGrid(
     val onCamera = members.filter { it.ship in videoOnShips }
     val featured = featuredVideo(onCamera.map { it.ship }, selfShip, focusedShip, lastSpeaker)
         ?: return
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    // Each picture's shape, as its frames report it; assumed until then.
+    val aspects = remember { mutableStateMapOf<String, Float>() }
+    fun aspectOf(ship: String) = aspects[ship] ?: ASSUMED_ASPECT
+    @Composable
+    fun tile(m: PartyMember, focused: Boolean, onTap: (() -> Unit)?, fill: Boolean, shape: Modifier) {
+        val isSelf = m.ship == selfShip
+        VideoTile(
+            member = m,
+            isSelf = isSelf,
+            nameFor = nameFor,
+            link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
+            videoOn = true,
+            focused = focused,
+            onTap = onTap.takeUnless { isSelf },
+            onFill = if (fill) onFill?.let { f -> { f(m.ship) } } else null,
+            onFrameAspect = { aspects[m.ship] = it },
+            modifier = shape,
+        )
+    }
+    if (gallery) {
+        BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+            val (cols, rows) = galleryShape(onCamera.size, maxWidth, maxHeight, TILE_GAP)
+            val cellWidth = (maxWidth - TILE_GAP * (cols - 1)) / cols
+            val cellHeight = (maxHeight - TILE_GAP * (rows - 1)) / rows
+            Column(verticalArrangement = Arrangement.spacedBy(TILE_GAP)) {
+                onCamera.chunked(cols).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(TILE_GAP)) {
+                        row.forEach { m ->
+                            Box(Modifier.size(cellWidth, cellHeight), contentAlignment = Alignment.Center) {
+                                tile(m, focused = false, onTap = null, fill = true, Modifier.size(fitVideoPane(cellWidth, aspectOf(m.ship), cellHeight)))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(TILE_GAP)) {
         onCamera.firstOrNull { it.ship == featured }?.let { m ->
-            val isSelf = m.ship == selfShip
-            VideoTile(
-                member = m,
-                isSelf = isSelf,
-                nameFor = nameFor,
-                link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
-                videoOn = true,
-                focused = m.ship == focusedShip,
-                onTap = if (isSelf) null else {
-                    { onFocusVideo(if (m.ship == focusedShip) null else m.ship) }
-                },
-                onFill = onFill?.let { fill -> { fill(m.ship) } },
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            )
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                tile(
+                    m,
+                    focused = m.ship == focusedShip,
+                    onTap = { onFocusVideo(if (m.ship == focusedShip) null else m.ship) },
+                    fill = true,
+                    Modifier.size(fitVideoPane(maxWidth, aspectOf(m.ship), maxHeight)),
+                )
+            }
         }
         val rest = onCamera.filter { it.ship != featured }
         if (rest.isNotEmpty()) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(TILE_GAP)) {
                 items(rest, key = { it.ship }) { m ->
-                    val isSelf = m.ship == selfShip
-                    VideoTile(
-                        member = m,
-                        isSelf = isSelf,
-                        nameFor = nameFor,
-                        link = if (isSelf) localVideoLink else videoLinkFor(m.ship),
-                        videoOn = true,
-                        focused = false,
-                        onTap = if (isSelf) null else {
-                            { onFocusVideo(m.ship) }
-                        },
-                        modifier = Modifier.size(96.dp),
-                    )
+                    tile(m, focused = false, onTap = { onFocusVideo(m.ship) }, fill = false, Modifier.height(SMALL_TILE).width(SMALL_TILE * aspectOf(m.ship)))
                 }
             }
         }
     }
+}
+
+/** A picture's shape until its frames say (iOS's never do). */
+private const val ASSUMED_ASPECT = 16f / 9f
+private val TILE_GAP = 6.dp
+/** A small tile's height in speaker view; its width follows the picture. */
+private val SMALL_TILE = 96.dp
+
+/**
+ * Columns and rows for [count] equal tiles of [aspect] (width over
+ * height) in [width] by [height], [gap] apart: whichever makes the
+ * tiles largest.
+ */
+internal fun galleryShape(count: Int, width: Dp, height: Dp, gap: Dp, aspect: Float = ASSUMED_ASPECT): Pair<Int, Int> {
+    if (count <= 1) return 1 to 1
+    return (1..count).map { cols ->
+        val rows = (count + cols - 1) / cols
+        val tileWidth = minOf(
+            (width.value - gap.value * (cols - 1)) / cols,
+            (height.value - gap.value * (rows - 1)) / rows * aspect,
+        )
+        Triple(cols, rows, tileWidth)
+    }.maxBy { it.third }.let { (cols, rows, _) -> cols to rows }
 }
 
 /**
@@ -163,6 +217,8 @@ internal fun VideoTile(
     focused: Boolean = false,
     onTap: (() -> Unit)? = null,
     onFill: (() -> Unit)? = null,
+    /** The picture's shape whenever its frames change it. */
+    onFrameAspect: ((Float) -> Unit)? = null,
     /** The caller's shape; the renderers fit the picture into it. */
     modifier: Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
 ) {
@@ -172,13 +228,14 @@ internal fun VideoTile(
     val on = videoOn
     Box(
         modifier
+            .testTag("video-tile")
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         if (link != null && on) {
-            VideoSurface(link, local = isSelf, Modifier.fillMaxSize())
+            VideoSurface(link, local = isSelf, Modifier.fillMaxSize(), onFrameAspect = onFrameAspect)
         } else {
             Avatar(label = nameFor(member.ship), url = null, size = 56.dp)
         }

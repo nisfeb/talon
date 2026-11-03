@@ -343,6 +343,12 @@ class DesktopCallEngine(
         runCatching { micTrack?.isEnabled = !muted }
     }
 
+    private val levels by lazy { AudioLevels(pc) }
+
+    override fun audioLevel(): Float? = if (closed.value) null else levels.remote()
+
+    override fun localAudioLevel(): Float? = if (closed.value) null else levels.local()
+
     @Volatile private var remoteAudioTrack: AudioTrack? = null
     private var recRemote: ((ByteArray, Int) -> Unit)? = null
     private var recSink: dev.onvoid.webrtc.media.audio.AudioTrackSink? = null

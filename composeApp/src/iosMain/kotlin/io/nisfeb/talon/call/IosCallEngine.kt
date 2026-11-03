@@ -19,6 +19,9 @@ import kotlin.coroutines.resumeWithException
  * does it, so the pinning check in CallController stays identical.
  */
 class IosCallEngine(private val native: NativeRtcPeer) : CallEngine {
+    override fun audioLevel(): Float? = native.remoteAudioLevel().takeIf { it >= 0.0 }?.toFloat()
+
+    override fun localAudioLevel(): Float? = native.micLevel().takeIf { it >= 0.0 }?.toFloat()
 
     private val _state = MutableStateFlow(MediaState.Idle)
     override val state: StateFlow<MediaState> = _state.asStateFlow()

@@ -304,6 +304,12 @@ class AndroidCallEngine(
         suspendSet { pc.setRemoteDescription(it, desc) }
     }
 
+    private val levels by lazy { StatsLevels(pc) { closed.value } }
+
+    override fun audioLevel(): Float? = levels.remote()
+
+    override fun localAudioLevel(): Float? = levels.local()
+
     override fun setMuted(muted: Boolean) {
         micTrack?.setEnabled(!muted)
     }

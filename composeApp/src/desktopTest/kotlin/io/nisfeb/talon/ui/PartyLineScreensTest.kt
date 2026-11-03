@@ -534,6 +534,54 @@ class PartyLineScreensTest {
         assertTrue(shows("Speaker") && shows("Headset"), "the devices, in their dialog")
     }
 
+    private fun ComposeUiTest.cameras(on: Set<String>) {
+        setContent {
+            CompositionLocalProvider(LocalWindowFullScreen provides Window()) {
+                TalonTheme(darkTheme = false) {
+                    PartyLineFullScreen(
+                        state = live(), roomName = "Garden chat", nameFor = { names[it] ?: it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = {}, onMinimize = {},
+                        partyVideoSupported = true, videoOnShips = on,
+                    )
+                }
+            }
+        }
+        waitForIdle()
+    }
+
+    private fun ComposeUiTest.tiles() = onAllNodesWithTag("video-tile").fetchSemanticsNodes().map { it.boundsInRoot }
+
+    // sneagan, 2026-11-03: "when there is only one video and he speaks the
+    // green outline indicating who is speaking is way larger than the video
+    // itself". The tile filled its space and the picture sat inside it.
+    @Test
+    fun `one camera's tile, and so the ring round its speaker, is the picture's shape`() = runComposeUiTest {
+        cameras(setOf("~bus"))
+        val tile = tiles().single()
+        assertEquals(16f / 9f, tile.width / tile.height, 0.02f, "a 16:9 picture's tile is 16:9: $tile")
+    }
+
+    // sneagan, 2026-11-03: "a toggle between the speaker being full size and
+    // everyone else being small and everyone being equally sized".
+    @Test
+    fun `gallery view gives every camera the same size, and speaker view brings one back large`() = runComposeUiTest {
+        cameras(setOf("~zod", "~bus", "~nec"))
+        val speaker = tiles()
+        assertTrue(speaker.maxOf { it.width } > speaker.minOf { it.width } * 2, "speaker view: one large, the rest small: $speaker")
+        more("Gallery view")
+        val gallery = tiles()
+        assertEquals(3, gallery.size)
+        for (t in gallery) {
+            assertEquals(gallery[0].width, t.width, 1f, "equal: $gallery")
+            assertEquals(gallery[0].height, t.height, 1f, "equal: $gallery")
+            assertEquals(16f / 9f, t.width / t.height, 0.02f, "each its picture's shape")
+        }
+        assertTrue(gallery[0].width > speaker.minOf { it.width }, "larger than speaker view's small tiles")
+        more("Speaker view")
+        val back = tiles()
+        assertTrue(back.maxOf { it.width } > back.minOf { it.width } * 2, "one large again: $back")
+    }
+
     @Test
     fun `the meeting view keeps mute, camera, share and leave, and the rest is behind More`() = runComposeUiTest {
         setContent {

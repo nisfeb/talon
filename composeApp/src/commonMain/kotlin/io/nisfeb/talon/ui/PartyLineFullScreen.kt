@@ -130,7 +130,7 @@ fun PartyLineFullScreen(
     /** A 1:1 call's picture, rendered above the roster. The party grid
      *  can't show it — 1:1 video lives on the CallEngine, not on a
      *  PeerLink — so the caller supplies the pane instead. */
-    videoPane: (@Composable () -> Unit)? = null,
+    videoPane: (@Composable (gallery: Boolean) -> Unit)? = null,
     /** The meeting view: a camera or shared screen can fill the window. */
     canFillWindow: Boolean = false,
     /** Show or hide the meeting's chat pane, or null where there is none. */
@@ -142,6 +142,10 @@ fun PartyLineFullScreen(
     // Whose picture fills the window; back to the meeting once it goes.
     var filled by remember { mutableStateOf<String?>(null) }
     var devicesOpen by remember { mutableStateOf(false) }
+    // Everyone's camera the same size, or the speaker's large.
+    var gallery by remember { mutableStateOf(false) }
+    // A 1:1 call's two cameras toggle as a line's do.
+    val partyVideo = if (directCall) videoPane != null else partyVideoSupported && state.members.any { it.ship in videoOnShips }
     if (devicesOpen) {
         DevicesDialog(audioDevices, videoDevices, onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }) { devicesOpen = false }
     }
@@ -265,6 +269,7 @@ fun PartyLineFullScreen(
                 if (onToggleChat != null) add(CallMenuItem(if (chatOpen) "Hide chat" else "Show chat", onToggleChat))
                 if (hasDeviceChoices(audioDevices, videoDevices, cameraChoice)) add(CallMenuItem("Devices") { devicesOpen = true })
                 if (isWindowFullScreenSupported) add(CallMenuItem(if (meeting) "Exit full screen" else "Full screen") { fullScreen.set(!meeting) })
+                if (partyVideo) add(CallMenuItem(if (gallery) "Speaker view" else "Gallery view") { gallery = !gallery })
                 if (onSwitchCamera != null && cameraOn) add(CallMenuItem("Flip camera", onSwitchCamera))
                 if (onToggleRecord != null) add(CallMenuItem(if (recording) "Stop recording" else "Record", onToggleRecord))
             }
@@ -390,7 +395,7 @@ fun PartyLineFullScreen(
                 // A 1:1 call's picture is what there is to look at: it
                 // takes the room, over the one row that names who it is
                 // and offers Message.
-                Box(Modifier.weight(1f).fillMaxWidth()) { videoPane() }
+                Box(Modifier.weight(1f).fillMaxWidth()) { videoPane(gallery) }
                 state.members.forEach { participant(it) }
             } else if (partyVideoSupported && anyVideo) {
                 PartyVideoGrid(
@@ -403,6 +408,7 @@ fun PartyLineFullScreen(
                     focusedShip = focusedShip,
                     onFocusVideo = onFocusVideo,
                     onFill = if (canFillWindow) { ship -> filled = ship } else null,
+                    gallery = gallery,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
                 // The roster is always present under the grid: it is the
@@ -417,7 +423,7 @@ fun PartyLineFullScreen(
                     items(state.members, key = { it.ship }) { participant(it) }
                 }
             } else {
-                videoPane?.invoke()
+                videoPane?.invoke(gallery)
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp),

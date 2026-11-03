@@ -1481,7 +1481,7 @@ class PartyLine(
 
     companion object {
         /** Fast enough to look live, slow enough to cost nothing. */
-        private const val SPEAKING_POLL_MS = 250L
+        const val SPEAKING_POLL_MS = 250L
 
         /** Silence padding is emitted in chunks this size (64 KB ~= 0.7 s
          *  of 16-bit 48 kHz mono) so a late joiner never asks for one
@@ -1493,7 +1493,7 @@ class PartyLine(
 
         /** Above this counts as talking. WebRTC's level is linear
          *  0..1; room noise sits well below it. */
-        private const val SPEAKING_THRESHOLD = 0.02f
+        const val SPEAKING_THRESHOLD = 0.02f
 
         private const val TAG = "PartyLine"
 
