@@ -482,6 +482,11 @@ fun DmChatScreen(
     }
     LaunchedEffect(displayRows.size, jumpId, dividerResolved) {
         if (displayRows.isEmpty()) return@LaunchedEffect
+        // At a frame boundary, as placeDivider is. A chat composed inside
+        // a measure (a BoxWithConstraints, as the pane is when a meeting
+        // hands it back) starts this effect there, with its cached rows,
+        // and a scroll then remeasures in the middle of the measure.
+        withFrameNanos { }
         if (jumpId != null && jumpId != lastAppliedAnchor) {
             val originalIdx = displayRows.indexOfFirst { item ->
                 item is ChatListItem.Message && item.row.m.id == jumpId
