@@ -940,7 +940,7 @@ fun CalendarScreen(
                     if (guestLine.isNotEmpty()) Text(guestLine, style = MaterialTheme.typography.bodyMedium)
                     val me = guests.firstOrNull { it.self }
                     if (me != null && !readOnlyHere) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.foundation.layout.FlowRow(itemVerticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             ANSWERS.forEach { (st, label) ->
                                 FilterChip(selected = me.status == st, onClick = { answer(r, st) }, label = { Text(label) })
                             }
@@ -1436,13 +1436,15 @@ private fun EventEditor(
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (calendars.size > 1) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    // Chips wrap: a plain Row squeezed the last of a fourth calendar
+                    // to a letter a line (a user, 2026-11-02, on a phone).
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         calendars.forEach { c ->
                             FilterChip(selected = d.cal == c.id, onClick = { d = d.copy(cal = c.id) }, label = { Text(c.name.ifBlank { c.id }) })
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     EventCat.entries.forEach { c ->
                         FilterChip(selected = d.cat == c, onClick = { d = d.copy(cat = c) }, label = { Text(c.label) })
                     }
@@ -1459,7 +1461,7 @@ private fun EventEditor(
                     // unless one is picked.
                     d.priority?.let { p ->
                         Text("Priority", style = MaterialTheme.typography.labelMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             io.nisfeb.talon.calendar.PRIORITY_CHOICES.forEach { (v, label) ->
                                 FilterChip(
                                     selected = io.nisfeb.talon.calendar.priorityBand(p) == io.nisfeb.talon.calendar.priorityBand(v),
@@ -1501,7 +1503,7 @@ private fun EventEditor(
                     )
                     val q = zoneText.trim()
                     if (q.length >= 2 && q !in zones) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                             zones.filter { it.contains(q, ignoreCase = true) }.take(3).forEach { z ->
                                 FilterChip(selected = false, onClick = { zoneText = z; d = d.copy(zone = z) }, label = { Text(z) })
                             }
@@ -1522,12 +1524,12 @@ private fun EventEditor(
                         }
                     }
                     if (d.repeat == Repeat.MONTHLY_NTH) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             ORDINALS.forEach { o ->
                                 FilterChip(selected = d.ordinal == o, onClick = { d = d.copy(ordinal = o) }, label = { Text(o) })
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             DayOfWeek.entries.forEach { w ->
                                 FilterChip(selected = (d.nthDay ?: d.date.dayOfWeek) == w, onClick = { d = d.copy(nthDay = w) }, label = { Text(d3(w).take(2)) })
                             }
@@ -1540,7 +1542,7 @@ private fun EventEditor(
                         )
                     }
                     if (d.repeat == Repeat.WEEKLY) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             DayOfWeek.entries.forEach { w ->
                                 FilterChip(
                                     selected = w in d.weekdays,
@@ -1617,7 +1619,7 @@ private fun EventEditor(
                 if (meetings && ownEvent && d.cat == EventCat.TIMED) {
                     val shown = d.call ?: callOf(d.otherMeta)
                     Text("Video call", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         VideoCall.entries.filter {
                             it == VideoCall.NONE || (it == VideoCall.MEET && google) || (it == VideoCall.KEEP && callOf(d.otherMeta) == VideoCall.KEEP)
                         }.forEach { c ->
@@ -1687,7 +1689,7 @@ private fun EventEditor(
                 }
                 if (recurringOccurrence) {
                     Text("This change applies to", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         EditScope.entries.forEach { s ->
                             FilterChip(selected = editScope == s, onClick = { editScope = s }, label = { Text(s.label) })
                         }

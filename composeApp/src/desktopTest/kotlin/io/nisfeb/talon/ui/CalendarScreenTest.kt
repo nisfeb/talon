@@ -69,6 +69,9 @@ class CalendarScreenTest {
     @Volatile private var calendarZone = "UTC"
     /** Rows the window has besides the four below, each led by a comma. */
     @Volatile private var moreRows = ""
+
+    @Volatile private var calendarsJson =
+        """[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"},{"id":"family","name":"Family","kind":"caldav"}]"""
     private val soon = java.time.LocalDate.now().atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
     /** A weekly lesson at 16:00 in New York, from a CalDAV calendar, read in a UTC calendar, on the same day as the
      *  other rows: the device's date, whose 16:00 in New York (20:00 or 21:00 UTC) is that date in UTC too. */
@@ -106,8 +109,7 @@ class CalendarScreenTest {
                 """{"id":"s1","cal":"default","cat":"timed","kind":"daily","start_ms":${soon + HOUR},"dur_min":15,"args":{"at":600},"zone":"none","meta":{"name":"Standup"}${alarms("""[{"kind":"offset","from":"end","after":true,"s":0,"desc":"wrap up"}]""")}}""",
             )
             path.endsWith("/events.json") -> json(tasksJson)
-            path.endsWith("/calendars.json") ->
-                json("""[{"id":"default","name":"Personal","kind":"local"},{"id":"~nec/work","name":"Work","kind":"local"},{"id":"family","name":"Family","kind":"caldav"}]""")
+            path.endsWith("/calendars.json") -> json(calendarsJson)
             path.endsWith("/config.json") -> json(if (reminders) """{"title":"Calendar","zone":"$calendarZone","ball":"abc123","lead_min":$leadMin}""" else """{"title":"Calendar","zone":"$calendarZone","ball":"abc123"}""")
             path.endsWith("/share/shares.json") ->
                 json("""{"shares":{},"offers":{},"accepted":{"~nec/work":{"key":"~nec/work","mode":"read"}}}""")
@@ -607,6 +609,29 @@ class CalendarScreenTest {
     private fun ComposeUiTest.save() = onAllNodesWithText("Save")[0].performClick()
 
     private fun sentMatching(pattern: String) = writes.any { Regex(pattern).containsMatchIn(it.second) }
+
+    // A user, 2026-11-02, on a phone: "I have more than 3 calendars but
+    // that area doesn't scroll sideways or anything". The chips sat in
+    // one row, and the last was squeezed to a letter a line, as was "A
+    // date each year".
+    @Test
+    fun `every calendar's chip shows whole in the event dialog, and the last can be picked`() {
+        val names = listOf("Personal", "Work", "Family", "Birthdays", "General", "EBTM meetups", "Holidays abroad")
+        calendarsJson = names.mapIndexed { i, n -> """{"id":"c$i","name":"$n","kind":"local"}""" }.joinToString(",", "[", "]")
+        calendar(ready = "Dentist") {
+            newEvent()
+            field("Name").performTextInput("Masquerade Show")
+            fun label(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().last().boundsInRoot
+            val oneLine = label("Work").height
+            for (n in names + listOf("At a time", "All day", "A date each year")) {
+                val b = label(n)
+                assertTrue(b.height < oneLine * 1.5f, "$n is on one line, not squeezed: $b, a line is $oneLine")
+            }
+            chip("Holidays abroad")
+            save()
+            assertTrue("\"cal\":\"c6\"" in wrote("Masquerade Show"), "saved to the last calendar")
+        }
+    }
 
     // "now calendar says the ship isn't taking my changes to events": the
     // ship was down for a restart. Said as that, and the edit is kept.
