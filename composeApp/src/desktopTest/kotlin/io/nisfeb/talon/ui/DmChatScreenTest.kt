@@ -976,4 +976,25 @@ class DmChatScreenTest {
             waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Bus is running late.").fetchSemanticsNodes().isNotEmpty() }
         }
     }
+
+    // ─── the composer's buttons as the field grows ─────────────────
+
+    // A user, 2026-11-02: the send button "should be bottom aligned to
+    // stay put as the input field gets taller".
+    @Test
+    fun `send keeps its place at the field's bottom as the field grows, and sits mid-field on one line`() = chat { _, _ ->
+        fun field() = onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot
+        fun sendIcon() = onAllNodesWithContentDescription("Send")[0].fetchSemanticsNode().boundsInRoot
+        onNode(hasSetTextAction()).performTextInput("one line")
+        waitForIdle()
+        val one = field()
+        val sendOne = sendIcon()
+        assertEquals(one.center.y, sendOne.center.y, 1.5f, "one line: Send in the middle, as before ($sendOne in $one)")
+        onNode(hasSetTextAction()).performTextInput("\nsecond\nthird\nfourth")
+        waitForIdle()
+        val tall = field()
+        val sendTall = sendIcon()
+        assertTrue(tall.height > one.height + 20, "the field grew: $one to $tall")
+        assertEquals(one.bottom - sendOne.bottom, tall.bottom - sendTall.bottom, 1.5f, "Send stayed as far above the field's bottom")
+    }
 }
