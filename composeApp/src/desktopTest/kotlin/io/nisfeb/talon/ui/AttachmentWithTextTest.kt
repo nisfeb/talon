@@ -47,6 +47,7 @@ class AttachmentWithTextTest {
 
     /** A ship that hosts uploads, as [io.nisfeb.talon.urbit.TlonChatRepoUploadTest] has it. */
     private fun hostingShip() = io.nisfeb.talon.urbit.FakeShip("~zod").apply {
+        shipUrl = "https://zod.tlon.network"
         scries["genuine/secret"] = "\"tok-1\""
         answerApi = { method, path, _ ->
             when {
@@ -80,7 +81,7 @@ class AttachmentWithTextTest {
                         state = rememberComposerState("~zod", drafts)
                         ChatComposer(
                             state = state, db = db,
-                            repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http) } },
+                            repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http, base = it.shipUrl) } },
                             http = createAppHttpClient(),
                             drafts = drafts, whom = "~zod", contactMap = ContactMap.EMPTY, allShips = emptyList(),
                             canSend = true, hideComposerButtons = true, focusOnOpen = false, strategy = strategy,
@@ -220,7 +221,7 @@ class AttachmentWithTextTest {
                 var shown by androidx.compose.runtime.mutableStateOf(true)
                 lateinit var state: ComposerState
                 val drafts = InMemoryDraftStore()
-                val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http) }
+                val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
                 setContent {
                     TalonTheme(darkTheme = false) {
                         if (shown) {
@@ -279,7 +280,7 @@ class AttachmentWithTextTest {
         // user leaves the chat.
         val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
         try {
-            val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http) }
+            val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
             val file = DroppedFile("cat.png", "image/png", byteArrayOf(1, 2, 3, 4))
             screen.launch { uploadDroppedFile(file, repo, strategy) }
             // Let the upload reach the slow PUT, then leave the chat.

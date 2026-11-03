@@ -3324,10 +3324,11 @@ class TlonChatRepo(
 
 
     /**
-     * Upload an image. Tries memex first (Tlon-hosted ships with %genuine
-     * installed), then falls back to the ship's %storage S3 credentials.
-     * Self-hosted ships configure their own bucket in Landscape's Storage
-     * settings; we scry those creds and do a direct SigV4 PUT.
+     * Upload an image: to Tlon's hosting (memex) for a ship Tlon hosts
+     * that has no bucket of its own, else to the ship's own %storage
+     * bucket with a direct SigV4 PUT. That is how Tlon's app decides
+     * (storageApi.ts uploadFile). A hosted ship whose hosting fails still
+     * tries its bucket.
      */
     suspend fun uploadImage(
         bytes: ByteArray,
@@ -3351,9 +3352,13 @@ class TlonChatRepo(
         val name = uploadName(fileName, contentType)
         val clean = io.nisfeb.talon.util.stripImageMetadata(bytes)
 
+        // Tried first everywhere, the hosting was sent a self-hosted ship's
+        // %genuine secret, and its refusal led every failure there, a Jars
+        // ship's among them (2026-11-03).
+        val useHosting = isTlonHosted(baseUrl) && !hasOwnBucket(ch)
         // A cancelled upload goes on up as one: wrapped in the failure
         // below, it defeated every caller's cancellation check.
-        val memexErr = io.nisfeb.talon.util.runSuspendCatching {
+        val memexErr = if (!useHosting) null else io.nisfeb.talon.util.runSuspendCatching {
             uploadViaMemex(ch, client, clean, contentType, name)
         }.onSuccess { return@withContext it }.exceptionOrNull()
 
@@ -3363,9 +3368,16 @@ class TlonChatRepo(
 
         throw UploadFailed(
             uploadFailureLine(memexErr, storageErr),
-            IllegalStateException("image upload failed: memex=${memexErr?.message}; storage=${storageErr?.message}"),
+            IllegalStateException("image upload failed: " + listOfNotNull(memexErr?.let { "memex=${it.message}" }, "storage=${storageErr?.message}").joinToString("; ")),
         )
     }
+
+    /** Whether the ship's %storage holds a bucket of its own: S3 credentials, and not in Tlon's presigned-url mode. */
+    private suspend fun hasOwnBucket(ch: UrbitChannel): Boolean = io.nisfeb.talon.util.runSuspendCatching {
+        val creds = parseStorageCredentials(ch.scry("storage", "/credentials"))
+        val config = parseStorageConfiguration(ch.scry("storage", "/configuration"))
+        creds != null && config != null && config.service != "presigned-url" && storageS3Ready(creds, config)
+    }.getOrDefault(false)
 
     private suspend fun uploadViaMemex(
         ch: UrbitChannel,

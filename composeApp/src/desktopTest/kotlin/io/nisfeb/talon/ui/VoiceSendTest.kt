@@ -48,6 +48,7 @@ class VoiceSendTest {
 
     /** A ship that hosts uploads slowly, as AttachmentWithTextTest's does. */
     private fun hostingShip(putMs: Long = 1_000) = FakeShip("~zod").apply {
+        shipUrl = "https://zod.tlon.network"
         scries["genuine/secret"] = "\"tok-1\""
         answerApi = { method, path, _ ->
             when {
@@ -76,7 +77,7 @@ class VoiceSendTest {
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val events = CoroutineScope(Dispatchers.IO).launch { ship?.channel?.events()?.collect {} }
-        val repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http) } }
+        val repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http, base = it.shipUrl) } }
         val file = recording(tmp)
         try {
             runComposeUiTest {
@@ -177,7 +178,7 @@ class VoiceSendTest {
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         val events = CoroutineScope(Dispatchers.IO).launch { ship.channel.events().collect {} }
         val screen = CoroutineScope(Dispatchers.IO)
-        val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http) }
+        val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
         val failures = java.util.concurrent.CopyOnWriteArrayList<String>()
         try {
             val files = listOf(
