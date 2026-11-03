@@ -195,7 +195,11 @@ fun PartyLineBarContent(
     videoPane: (@Composable () -> Unit)? = null,
     /** Toggle recording, or null to hide the control. */
     onToggleRecord: (() -> Unit)? = null,
-    /** Desktop: open the meeting view that fills the window. */
+    /**
+     * The host's own full-window call view: desktop's meeting view, and
+     * a phone's full screen where the host draws one (App.kt, so iOS).
+     * Null keeps the full screen in this composable's Dialog (Android).
+     */
     onOpenMeeting: (() -> Unit)? = null,
     /**
      * Camera toggle, shown only when non-null.
@@ -227,6 +231,8 @@ fun PartyLineBarContent(
     /** A fresh non-null value opens the immersive full screen once:
      *  a call that just connected lands there, not on a strip. */
     autoOpenKey: Any? = null,
+    /** A phone's full-screen call, not an inline roster; a parameter so tests can take the phone's path. */
+    immersive: Boolean = isImmersiveCallSupported,
 ) {
     if (state is PartyState.Idle) return
     var expanded by remember { mutableStateOf(false) }
@@ -240,8 +246,12 @@ fun PartyLineBarContent(
     // 1:1 calls included: on a phone the chevron should open the big
     // controls, not an inline roster of one fabricated row. The 1:1
     // picture rides in through [videoPane].
-    val immersive = isImmersiveCallSupported
-    LaunchedEffect(autoOpenKey) { if (autoOpenKey != null && immersive) fullScreen = true }
+    // iOS cannot show a native video view inside a Dialog: the view's
+    // hole shows the window beneath it, the chat with its own bar and
+    // video (a user's screenshot, 2026-11-03). So where the host draws
+    // its own full-window call view, the full screen is that.
+    val openFullScreen: () -> Unit = onOpenMeeting ?: { fullScreen = true }
+    LaunchedEffect(autoOpenKey) { if (autoOpenKey != null && immersive) openFullScreen() }
 
     // One node, not two siblings: the bar and the admin strip have to
     // stack vertically, and emitting them loose leaves that to whatever
@@ -343,7 +353,7 @@ fun PartyLineBarContent(
                     // (sneagan, 2026-11-02: too many buttons).
                     val menu = buildList {
                         when {
-                            immersive -> add(CallMenuItem("Open the full-screen call") { fullScreen = true })
+                            immersive -> add(CallMenuItem("Open the full-screen call", openFullScreen))
                             headline == null -> add(CallMenuItem(if (expanded) "Hide who's on the line" else "Who's on the line") { expanded = !expanded })
                         }
                         // A 1:1 call (headline) has its picture in the meeting, not tiles.
@@ -357,7 +367,7 @@ fun PartyLineBarContent(
                         Modifier.weight(1f).then(
                             if (expandable) {
                                 Modifier.clickable {
-                                    if (immersive) fullScreen = true else expanded = !expanded
+                                    if (immersive) openFullScreen() else expanded = !expanded
                                 }
                             } else {
                                 Modifier
@@ -417,7 +427,7 @@ fun PartyLineBarContent(
                                 // tile lives only in PartyVideoGrid, and
                                 // neither surface opens on its own.
                                 if (!cameraOn) {
-                                    if (immersive) fullScreen = true
+                                    if (immersive) openFullScreen()
                                     else if (partyVideoSupported && headline == null) {
                                         expanded = true
                                     }
@@ -441,7 +451,7 @@ fun PartyLineBarContent(
                                 io.nisfeb.talon.ui.IconButton(tip = tip, onClick = {
                                     // Show the self tile, as the camera does.
                                     if (!sharing) {
-                                        if (immersive) fullScreen = true
+                                        if (immersive) openFullScreen()
                                         else if (partyVideoSupported && headline == null) expanded = true
                                     }
                                     press()
