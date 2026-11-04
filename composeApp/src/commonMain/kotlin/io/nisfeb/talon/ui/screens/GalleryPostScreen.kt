@@ -28,6 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import io.nisfeb.talon.ui.sendOnEnter
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
@@ -103,7 +106,7 @@ fun GalleryPostScreen(
 
     val contactMap by io.nisfeb.talon.ui.rememberContactMap(db)
 
-    var replyText by remember(anchorId) { mutableStateOf("") }
+    var replyText by remember(anchorId) { mutableStateOf(TextFieldValue()) }
     var sending by remember(anchorId) { mutableStateOf(false) }
     var actionError by remember(anchorId) { mutableStateOf<String?>(null) }
     // Deleted from another client while open: there is nothing left
@@ -289,36 +292,39 @@ fun GalleryPostScreen(
             // Send accent. Theme primary already carries the user's
             // chosen accent (per App.kt's TalonTheme override).
             val sendAccent = MaterialTheme.colorScheme.primary
+            val canComment = replyText.text.isNotBlank() && !sending && post != null
+            val sendComment: () -> Unit = {
+                val text = replyText.text.trim()
+                replyText = TextFieldValue()
+                actionError = null
+                sending = true
+                scope.launch {
+                    // A failed send restores the text — swallowing a
+                    // typed comment is the one unforgivable outcome.
+                    runCatching { repo.reply(whom, anchorId, text) }
+                        .onFailure {
+                            replyText = TextFieldValue(text, TextRange(text.length))
+                            actionError = "Couldn't send — check your connection."
+                        }
+                    sending = false
+                }
+            }
             OutlinedTextField(
                 value = replyText,
                 onValueChange = { replyText = it },
                 placeholder = { Text("Write a comment") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).sendOnEnter(replyText, { replyText = it }, canComment, sendComment),
                 // No post to comment on while its row is missing.
-                enabled = !sending && post != null,
+                enabled = post != null,
+                // Read-only, not disabled, while it sends: a disabled box
+                // lets go of the cursor, and Enter's next comment needs it.
+                readOnly = sending,
             )
-            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = replyText.trim().isNotEmpty() && !sending && post != null,
-                onClick = {
-                    val text = replyText.trim()
-                    replyText = ""
-                    actionError = null
-                    sending = true
-                    scope.launch {
-                        // A failed send restores the text — swallowing a
-                        // typed comment is the one unforgivable outcome.
-                        runCatching { repo.reply(whom, anchorId, text) }
-                            .onFailure {
-                                replyText = text
-                                actionError = "Couldn't send — check your connection."
-                            }
-                        sending = false
-                    }
-                },
-            ) {
+            io.nisfeb.talon.ui.IconButton(tip = "Send", enabled = canComment, onClick = sendComment) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
-                    tint = if (replyText.trim().isNotEmpty() && !sending) sendAccent
+                    tint = if (replyText.text.isNotBlank() && !sending) sendAccent
                     else LocalContentColor.current,
                 )
             }

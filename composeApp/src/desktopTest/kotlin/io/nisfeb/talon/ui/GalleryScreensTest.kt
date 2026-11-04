@@ -1,5 +1,13 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -90,6 +98,11 @@ class GalleryScreensTest {
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
     private fun ComposeUiTest.showing(text: String) = waitUntil(timeoutMillis = 5_000) { shows(text) }
 
+    private fun textOf(node: SemanticsNodeInteraction) =
+        node.fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+    private fun editable(node: SemanticsNodeInteraction) =
+        node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.IsEditable) == true
+
     /** What the last post or reply sent to %channels carried. */
     private fun ComposeUiTest.sent(ship: FakeShip): String {
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
@@ -144,6 +157,45 @@ class GalleryScreensTest {
         GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500200", onBack = {})
     }
 
+    // A user: "commenting in a gallery doesn't post with enter nor with
+    // cmd+enter." Enter sends, as the chat composer does, Ctrl (Cmd) held
+    // or not; Shift+Enter is a new line; the cursor stays for the next.
+    @Test
+    fun `Enter sends a comment, Ctrl+Enter too, and Shift+Enter breaks its line`() = gallery({ ship ->
+        showing("Comments · 1")
+        val box = onNode(hasSetTextAction())
+        box.performTextInput("agreed")
+        box.performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.Enter) } }
+        box.performTextInput("twice")
+        assertEquals("agreed\ntwice", textOf(box))
+        assertTrue(ship.pokesTo("channels").isEmpty(), "Shift+Enter is a line, not a send")
+        box.performKeyInput { pressKey(Key.Enter) }
+        val reply = sent(ship)
+        assertTrue("agreed" in reply && "twice" in reply && "\"break\"" in reply, reply)
+        waitUntil(timeoutMillis = 5_000) { editable(box) && textOf(box).isEmpty() }
+        box.assertIsFocused()
+        box.performTextInput("and again")
+        box.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").size == 2 }
+        assertTrue("and again" in ship.pokesTo("channels").last().json.toString())
+    }) { repo, db ->
+        GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500200", onBack = {})
+    }
+
+    @Test
+    fun `Enter on an empty comment sends nothing`() = gallery({ ship ->
+        showing("Comments · 1")
+        val box = onNode(hasSetTextAction())
+        box.performTextInput("   ")
+        box.performKeyInput { pressKey(Key.Enter) }
+        box.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        waitForIdle()
+        assertTrue(ship.pokesTo("channels").isEmpty())
+        assertEquals("   ", textOf(box), "and Enter is not a line either")
+    }) { repo, db ->
+        GalleryPostScreen(db, repo, web, ourPatp = "~zod", whom = whom, postId = "170141184500200", onBack = {})
+    }
+
     @Test
     fun `our own post can be deleted, after asking`() = gallery({ ship ->
         showing("Comments · 1")
@@ -178,6 +230,39 @@ class GalleryScreensTest {
         waitUntil(timeoutMillis = 5_000) { did == listOf("posted") }
     }) { repo, _ ->
         GalleryComposeScreen(repo, web, whom, onBack = { did += "back" }, onPosted = { did += "posted" })
+    }
+
+    // Cmd+Enter (Ctrl off a Mac) posts from the body; plain Enter stays
+    // a new line in it.
+    @Test
+    fun `Ctrl+Enter posts a text post and Cmd+Enter does too, while Enter is a new line`() = gallery({ ship ->
+        onNodeWithText("Text").performClick()
+        val body = onNode(hasSetTextAction() and hasText("Text"))
+        body.performTextInput("first line")
+        body.performKeyInput { pressKey(Key.Enter) }
+        body.performTextInput("second line")
+        waitForIdle()
+        assertTrue(ship.pokesTo("channels").isEmpty(), "Enter is a line in a post")
+        body.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        val sentBody = sent(ship)
+        assertTrue("first line" in sentBody && "second line" in sentBody && "\"break\":null" in sentBody, sentBody)
+        waitUntil(timeoutMillis = 5_000) { did == listOf("posted") }
+    }) { repo, _ ->
+        GalleryComposeScreen(repo, web, whom, onBack = { did += "back" }, onPosted = { did += "posted" })
+    }
+
+    @Test
+    fun `Cmd+Enter posts a link post, and nothing with nothing to post`() = gallery({ ship ->
+        onNodeWithText("Link").performClick()
+        val url = onNode(hasSetTextAction() and hasText("URL"))
+        url.performKeyInput { withKeyDown(Key.MetaLeft) { pressKey(Key.Enter) } }
+        waitForIdle()
+        assertTrue(ship.pokesTo("channels").isEmpty(), "not while Post is off")
+        url.performTextInput("https://fine.example/page")
+        url.performKeyInput { withKeyDown(Key.MetaLeft) { pressKey(Key.Enter) } }
+        assertTrue("https://fine.example/page" in sent(ship))
+    }) { repo, _ ->
+        GalleryComposeScreen(repo, web, whom, onBack = {}, onPosted = {})
     }
 
     @Test

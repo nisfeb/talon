@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -130,6 +135,22 @@ class NotebookPostScreenTest {
         val reply = ship.pokesTo("channels").single().json.toString()
         assertTrue("reply" in reply && "agreed" in reply, reply)
         showing("Comments · 2")
+    }
+
+    // As under a gallery post: Enter sends, Ctrl (Cmd) with it too.
+    @Test
+    fun `Enter sends a comment, and Ctrl+Enter sends the next`() = post("~bus") { ship ->
+        val box = onNode(hasSetTextAction())
+        box.performTextInput("agreed")
+        box.performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        assertTrue("agreed" in ship.pokesTo("channels").single().json.toString())
+        showing("Comments · 2")
+        waitUntil(timeoutMillis = 5_000) { box.fetchSemanticsNode().config.getOrNull(SemanticsProperties.IsEditable) == true }
+        box.performTextInput("more")
+        box.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").size == 2 }
+        assertTrue("more" in ship.pokesTo("channels").last().json.toString())
     }
 
     @Test

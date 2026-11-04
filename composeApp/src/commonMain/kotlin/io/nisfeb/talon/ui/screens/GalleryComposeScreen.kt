@@ -24,6 +24,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import io.nisfeb.talon.ui.submitOnCmdEnter
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.TextButton
@@ -139,7 +140,65 @@ fun GalleryComposeScreen(
         GalleryTab.Text -> textBody.trim().isNotEmpty()
     } && !sending
 
-    Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+    val sendPost: () -> Unit = {
+        sending = true
+        error = null
+        val content: kotlinx.serialization.json.JsonArray? = when (tab) {
+            GalleryTab.Image -> buildJsonArray {
+                add(buildJsonObject {
+                    put("block", buildJsonObject {
+                        put("image", buildJsonObject {
+                            put("src", imageSrc!!)
+                            put("width", imageWidth)
+                            put("height", imageHeight)
+                            put("alt", imageAlt)
+                        })
+                    })
+                })
+            }
+            // Built in the coroutine below: the link block's
+            // meta comes from our own preview fetch.
+            GalleryTab.Link -> null
+            GalleryTab.Text -> buildJsonArray {
+                val lines = textBody.trim().split("\n")
+                add(buildJsonObject {
+                    put("inline", buildJsonArray {
+                        lines.forEachIndexed { i, l ->
+                            // null, as every other story here writes it:
+                            // the ship's story parser takes no object.
+                            if (i > 0) add(buildJsonObject { put("break", kotlinx.serialization.json.JsonNull) })
+                            add(JsonPrimitive(l))
+                        }
+                    })
+                })
+            }
+        }
+        scope.launch {
+            val body = content ?: run {
+                // Tlon's LinkInput fills the link block's meta
+                // from the poster's own OpenGraph fetch; nothing
+                // server-side ever does. Post the empty bag when
+                // the site blocks us, exactly as Tlon does.
+                val url = linkUrl.trim()
+                val preview = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    runCatching { io.nisfeb.talon.urbit.LinkPreviewCache.await(http, url) }.getOrNull()
+                }
+                buildJsonArray {
+                    add(io.nisfeb.talon.urbit.galleryLinkBlock(url, io.nisfeb.talon.urbit.linkMeta(preview)))
+                }
+            }
+            runCatching { repo.sendGalleryPost(whom, body) }
+                .onSuccess {
+                    sending = false
+                    onPosted()
+                }.onFailure {
+                    error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
+                    sending = false
+                }
+        }
+    }
+
+    Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing).submitOnCmdEnter(canPost, sendPost)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -154,63 +213,7 @@ fun GalleryComposeScreen(
             )
             TextButton(
                 enabled = canPost,
-                onClick = {
-                    sending = true
-                    error = null
-                    val content: kotlinx.serialization.json.JsonArray? = when (tab) {
-                        GalleryTab.Image -> buildJsonArray {
-                            add(buildJsonObject {
-                                put("block", buildJsonObject {
-                                    put("image", buildJsonObject {
-                                        put("src", imageSrc!!)
-                                        put("width", imageWidth)
-                                        put("height", imageHeight)
-                                        put("alt", imageAlt)
-                                    })
-                                })
-                            })
-                        }
-                        // Built in the coroutine below: the link block's
-                        // meta comes from our own preview fetch.
-                        GalleryTab.Link -> null
-                        GalleryTab.Text -> buildJsonArray {
-                            val lines = textBody.trim().split("\n")
-                            add(buildJsonObject {
-                                put("inline", buildJsonArray {
-                                    lines.forEachIndexed { i, l ->
-                                        // null, as every other story here writes it:
-                                        // the ship's story parser takes no object.
-                                        if (i > 0) add(buildJsonObject { put("break", kotlinx.serialization.json.JsonNull) })
-                                        add(JsonPrimitive(l))
-                                    }
-                                })
-                            })
-                        }
-                    }
-                    scope.launch {
-                        val body = content ?: run {
-                            // Tlon's LinkInput fills the link block's meta
-                            // from the poster's own OpenGraph fetch; nothing
-                            // server-side ever does. Post the empty bag when
-                            // the site blocks us, exactly as Tlon does.
-                            val url = linkUrl.trim()
-                            val preview = kotlinx.coroutines.withTimeoutOrNull(8_000) {
-                                runCatching { io.nisfeb.talon.urbit.LinkPreviewCache.await(http, url) }.getOrNull()
-                            }
-                            buildJsonArray {
-                                add(io.nisfeb.talon.urbit.galleryLinkBlock(url, io.nisfeb.talon.urbit.linkMeta(preview)))
-                            }
-                        }
-                        runCatching { repo.sendGalleryPost(whom, body) }
-                            .onSuccess {
-                                sending = false
-                                onPosted()
-                            }.onFailure {
-                                error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
-                                sending = false
-                            }
-                    }
-                },
+                onClick = sendPost,
             ) { Text(if (sending) "Posting…" else "Post") }
         }
         HorizontalDivider()
