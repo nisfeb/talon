@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import io.nisfeb.talon.ui.submitOnCmdEnter
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
@@ -115,7 +116,40 @@ fun NotebookComposeScreen(
         }
     }
 
-    Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+    val canPost = title.trim().isNotEmpty() && !sending && !uploading
+    val sendPost: () -> Unit = {
+        sending = true
+        error = null
+        scope.launch {
+            runCatching {
+                if (isEdit) {
+                    repo.editNotebookPost(
+                        nest = whom,
+                        postId = editPostId!!,
+                        title = title.trim(),
+                        image = imageUrl.trim(),
+                        bodyMarkdown = body,
+                        originalSentMs = originalSentMs,
+                    )
+                } else {
+                    repo.sendNotebookPost(
+                        nest = whom,
+                        title = title.trim(),
+                        image = imageUrl.trim(),
+                        bodyMarkdown = body,
+                    )
+                }
+            }.onSuccess {
+                sending = false
+                onPosted()
+            }.onFailure {
+                error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
+                sending = false
+            }
+        }
+    }
+
+    Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing).submitOnCmdEnter(canPost, sendPost)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -131,38 +165,8 @@ fun NotebookComposeScreen(
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
             TextButton(
-                enabled = title.trim().isNotEmpty() && !sending && !uploading,
-                onClick = {
-                    sending = true
-                    error = null
-                    scope.launch {
-                        runCatching {
-                            if (isEdit) {
-                                repo.editNotebookPost(
-                                    nest = whom,
-                                    postId = editPostId!!,
-                                    title = title.trim(),
-                                    image = imageUrl.trim(),
-                                    bodyMarkdown = body,
-                                    originalSentMs = originalSentMs,
-                                )
-                            } else {
-                                repo.sendNotebookPost(
-                                    nest = whom,
-                                    title = title.trim(),
-                                    image = imageUrl.trim(),
-                                    bodyMarkdown = body,
-                                )
-                            }
-                        }.onSuccess {
-                            sending = false
-                            onPosted()
-                        }.onFailure {
-                            error = io.nisfeb.talon.util.problemOf("Couldn't post", it)
-                            sending = false
-                        }
-                    }
-                },
+                enabled = canPost,
+                onClick = sendPost,
             ) {
                 Text(
                     when {

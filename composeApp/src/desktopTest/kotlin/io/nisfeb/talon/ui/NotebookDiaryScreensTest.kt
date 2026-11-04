@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -99,6 +103,26 @@ class NotebookDiaryScreensTest {
         onNodeWithText("Post").performClick()
         val essay = posted(ship)
         assertTrue("\"title\":\"Autumn\"" in essay && "\"bold\":[\"fall\"]" in essay && "/diary" in essay, essay)
+        waitUntil(timeoutMillis = 5_000) { did == listOf("posted") }
+    }) { repo, _ ->
+        NotebookComposeScreen(repo, whom, onBack = { did += "back" }, onPosted = { did += "posted" })
+    }
+
+    // Cmd+Enter (Ctrl off a Mac) posts from the body, where Enter is a
+    // new line, and does nothing while Post is off for want of a title.
+    @Test
+    fun `Ctrl+Enter from the body posts, once there is a title`() = diary({ ship ->
+        val body = onNode(hasSetTextAction() and hasText("Body (markdown)"))
+        body.performTextInput("Leaves")
+        body.performKeyInput { pressKey(Key.Enter) }
+        body.performTextInput("fall.")
+        body.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        waitForIdle()
+        assertTrue(ship.pokesTo("channels").isEmpty(), "no title, no post")
+        onNode(hasSetTextAction() and hasText("Title")).performTextInput("Autumn")
+        body.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.Enter) } }
+        val essay = posted(ship)
+        assertTrue("\"title\":\"Autumn\"" in essay && "Leaves" in essay && "fall." in essay, essay)
         waitUntil(timeoutMillis = 5_000) { did == listOf("posted") }
     }) { repo, _ ->
         NotebookComposeScreen(repo, whom, onBack = { did += "back" }, onPosted = { did += "posted" })
