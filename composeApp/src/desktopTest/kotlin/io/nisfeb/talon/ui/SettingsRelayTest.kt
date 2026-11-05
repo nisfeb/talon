@@ -66,7 +66,7 @@ class SettingsRelayTest {
             }
         }
         onAllNodesWithText("Notifications")[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Push relay") }
+        waitUntil(timeoutMillis = 5_000) { shows("Background delivery") }
         block()
     }
 
@@ -152,7 +152,7 @@ class SettingsRelayTest {
         panel(shipPoke = { pokes += it.toString() }) {
             assertTrue(shows("Notifications come from ~zod"))
             val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
-            val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
+            val relay = onNodeWithText("Background delivery").fetchSemanticsNode().boundsInRoot.top
             assertTrue(row < relay, "above the relay panel, not inside it")
             onNodeWithText("Use the relay").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }

@@ -82,6 +82,8 @@ import io.nisfeb.talon.ai.orreryOn
 @Composable
 fun SettingsScreen(
     aiSettings: AiSettingsRepository,
+    /** Sets every group's notification level at once; returns how many. Null hides the control. */
+    onSetAllGroupsNotify: (suspend (level: String) -> Int)? = null,
     themePreference: ThemePreference,
     uiSettings: UiSettings,
     /** The orrery pipe, for its section under AI; null where no ship is known. */
@@ -212,9 +214,8 @@ fun SettingsScreen(
             add(SettingsTab.General)
             add(SettingsTab.Home)
             add(SettingsTab.Chats)
-            if (notificationHealth != null || relayConfig != null) {
-                add(SettingsTab.Notifications)
-            }
+            // Always: what notifies the owner is said here on every device.
+            add(SettingsTab.Notifications)
             add(SettingsTab.Ai)
             // Under AI, and its own page: many will want it off, which is
             // how it starts.
@@ -736,6 +737,8 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
             }
             if (safeTab == SettingsTab.Notifications) {
+            NotifyRulesSection(onSetAllGroupsNotify)
+            Spacer(Modifier.height(12.dp))
             // Said plainly, so a missed call is not how the owner learns it (B3-3).
             if (io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush) {
                 Text(
@@ -1484,7 +1487,7 @@ private fun NotificationHealthPanel(
     val systemState = probe.snapshot()
 
     Text(
-        "Notification health",
+        "Delivery check",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
@@ -1698,7 +1701,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     var code by remember { mutableStateOf("") }
 
     Text(
-        "Push relay",
+        "Background delivery",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(

@@ -63,6 +63,7 @@ class SettingsScreenTest {
         pinCandidates: List<Pair<String, String>> = emptyList(),
         ai: FakeAiSettings = FakeAiSettings(),
         fontRepo: FontRepo? = null,
+        allGroups: (suspend (String) -> Int)? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -80,6 +81,7 @@ class SettingsScreenTest {
                         onAlwaysPatpChanged = { patpChanges += it },
                         notificationHealth = health, systemNotificationProbe = probe, callController = calls,
                         homePinCandidates = pinCandidates,
+                        onSetAllGroupsNotify = allGroups,
                     )
                 }
             }
@@ -495,5 +497,18 @@ class SettingsScreenTest {
         tap("Experimental")
         waitUntil(timeoutMillis = 5_000) { shows("Power features") }
         assertTrue(!shows("Hide composer buttons"))
+    }
+
+    @Test
+    fun `Notifications says what notifies you, and sets every group's level at once`() {
+        val set = mutableListOf<String>()
+        settings(allGroups = { level -> set += level; 3 }) {
+            tap("Notifications")
+            waitUntil(timeoutMillis = 5_000) { shows("What notifies you") }
+            assertTrue(shows("Direct messages") && shows("When you are mentioned"))
+            tap("Off")
+            waitUntil(timeoutMillis = 5_000) { shows("Set for 3 groups.") }
+            assertEquals(listOf("none"), set)
+        }
     }
 }

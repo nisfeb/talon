@@ -2703,6 +2703,14 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            // Every group's level at once, synced like a group's own.
+                            onSetAllGroupsNotify = { level ->
+                                val sync = repo.settingsSync ?: error("settings do not sync on this device")
+                                val flags = db.groups().allGroups().map { it.flag }
+                                // On the repo's scope: leaving Settings midway still sets them all.
+                                repo.carry { flags.forEach { sync.setNotifyLevel(io.nisfeb.talon.data.groupLevelKey(it), level) } }
+                                flags.size
+                            },
                             orrery = orreryRepo,
                             armillary = armillaryRepo,
                             mailRepo = mailRepo,
