@@ -3734,6 +3734,7 @@ fun App(
                                         },
                                         onSwitchShip = switchShip,
                                         onAddShip = addShip,
+                                        showFolderTabs = false,
                                         onOpenShipSwitcher = {
                                             drawerScope.launch { drawerState.open() }
                                         },

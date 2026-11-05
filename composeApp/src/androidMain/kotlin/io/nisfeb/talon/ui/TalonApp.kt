@@ -3153,6 +3153,7 @@ fun TalonApp(
                     }
                 },
                 onAddShip = { addingAnotherShip = true },
+                showFolderTabs = false,
                 onOpenShipSwitcher = {
                     drawerScope.launch { drawerState.open() }
                 },

@@ -191,6 +191,10 @@ fun DmListScreen(
      *  leak its left-translated closed-state over the rail. Default
      *  no-op for tests / hosts that don't wire a switcher. */
     onOpenShipSwitcher: () -> Unit = {},
+    /** The folder tabs (new folder, Unread, All, the user's folders).
+     *  The app shells pass false for now: the row is hidden and the list
+     *  stays on All. Tests keep the default to exercise folders. */
+    showFolderTabs: Boolean = true,
     /** Optional slot for the platform-specific battery-exemption nudge
      *  banner. Android wires it to a real Composable; desktop (and
      *  tests) leave it null. Replaces the previous expect/actual
@@ -379,9 +383,17 @@ fun DmListScreen(
             else snap.selectedHomeTab
         )
     }
+    // With the folder tabs hidden, nothing could leave a folder or the
+    // Unread view, so the list is held on All.
+    LaunchedEffect(showFolderTabs) {
+        if (!showFolderTabs) {
+            selectedFolderId = null
+            selectedSpecial = SpecialTab.All
+        }
+    }
     LaunchedEffect(folders) {
         if (!initialTabApplied) {
-            if (folders.isNotEmpty()) {
+            if (showFolderTabs && folders.isNotEmpty()) {
                 selectedFolderId = folders.first().id
             }
             initialTabApplied = true
@@ -1081,7 +1093,7 @@ fun DmListScreen(
         val totalMentions = remember(mentionUnreads) {
             mentionUnreads.sumOf { it.notifyCount }
         }
-        FolderTabs(
+        if (showFolderTabs) FolderTabs(
             folders = folders,
             selectedFolderId = selectedFolderId,
             selectedSpecial = selectedSpecial,
