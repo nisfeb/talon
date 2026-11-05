@@ -41,7 +41,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import io.nisfeb.talon.ui.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.TextButton

@@ -21,7 +21,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import io.nisfeb.talon.ui.isCallsSupported
-import androidx.compose.material3.Switch
+import io.nisfeb.talon.ui.Switch
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
