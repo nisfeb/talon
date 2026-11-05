@@ -46,21 +46,15 @@ mono = mark("branding/ic_launcher_monochrome_1024.png")
 # monochrome layer, so the grounding lines stay holes the tint keeps.
 placed(mono, 256, 0.90).save(out("composeApp/src/commonMain/composeResources/drawable/talon_logo.png"), optimize=True)
 
-# Desktop window, taskbar, notifications, .dmg/.msi/.deb: a whole rounded square.
-body, margin = 920, 52
-desk = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
-ImageDraw.Draw(desk).rounded_rectangle((margin, margin, margin + body - 1, margin + body - 1), radius=200, fill=NAVY + (255,))
-desk.alpha_composite(placed(colour, 1024, 0.62))
+# Desktop window, taskbar, notifications, .dmg/.msi/.deb: the Groundwire
+# mark itself, a disc, with no tile behind it.
+desk = placed(colour, 1024, 920 / 1024)
 desk.save(out("composeApp/src/desktopMain/resources/icon.png"), optimize=True)
 desk.save(out("composeApp/src/desktopMain/resources/icon.ico"), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
-# macOS (Dock, menu bar, .app/.dmg): Apple's grid, an 824 px tile 100 px
-# in, so Talon is the size of the icons beside it. The 920 px tile above
-# stood 12% taller in the Dock (users' screenshots, 2026-10-07).
-body, margin = 824, 100
-mac = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
-ImageDraw.Draw(mac).rounded_rectangle((margin, margin, margin + body - 1, margin + body - 1), radius=185, fill=NAVY + (255,))
-mac.alpha_composite(placed(colour, 1024, 0.62 * 824 / 920))
+# macOS (Dock, menu bar, .app/.dmg): the disc on Apple's grid, 824 px
+# across and 100 px in, so it is the size of the icons beside it.
+mac = placed(colour, 1024, 824 / 1024)
 mac.save(out("composeApp/src/desktopMain/resources/icon-macos.png"), optimize=True)
 
 # iOS: full bleed and opaque; iOS rounds the corners itself.
