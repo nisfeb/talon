@@ -73,7 +73,7 @@ class NewDmScreenTest {
     @Test
     fun `words that are not a ship cannot start one`() = newDm {
         type("hello there")
-        onNodeWithText("Start").assertIsNotEnabled()
+        onNodeWithText("Start").assertDoesNotExist()
     }
 
     @Test
@@ -103,7 +103,7 @@ class NewDmScreenTest {
     @Test
     fun `a pasted group reference offers to join the group, and joins once confirmed`() = newDm {
         type("/1/group/~bus/the-club")
-        onNodeWithText("Start").assertIsNotEnabled()
+        onNodeWithText("Start").assertDoesNotExist()
         onNodeWithText("Join group ~bus/the-club").performClick()
         onNodeWithText("Join group?").assertExists()
         assertEquals(emptyList(), did, "nothing before the confirm")
