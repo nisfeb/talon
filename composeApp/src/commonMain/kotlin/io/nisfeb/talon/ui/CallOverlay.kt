@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
@@ -578,15 +579,25 @@ private fun FullScreenRing(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 12.dp,
             ) {
+                // A card sized like a notification, not a poster: the
+                // name leads, the state under it, one row of buttons.
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 40.dp, vertical = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .widthIn(min = 260.dp, max = 340.dp)
+                        .padding(horizontal = 28.dp, vertical = 22.dp),
                 ) {
-                    PulsingCallIcon(36.dp)
-                    RingingText(subtitle, style = MaterialTheme.typography.titleMedium)
-                    Text(title, style = MaterialTheme.typography.headlineSmall)
-                    Box(Modifier.padding(top = 28.dp)) { actions() }
+                    PulsingCallIcon(24.dp)
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    RingingText(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(Modifier.padding(top = 16.dp)) { actions() }
                 }
             }
         }
@@ -668,13 +679,13 @@ private fun RoundAction(
             // the call UI is redesigned, at which point this should come
             // back as a deliberate key binding rather than whatever the
             // focus order happened to be.
-            modifier = Modifier.size(72.dp).focusProperties { canFocus = false },
+            modifier = Modifier.size(56.dp).focusProperties { canFocus = false },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = container,
                 contentColor = content,
             ),
         ) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(32.dp))
+            Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
         }
         if (showLabel) Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
     }
