@@ -61,7 +61,7 @@ class NewDmScreenTest {
         block()
     }
 
-    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("~ship, a word name, or a group reference")).performTextInput(text)
+    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("Name, ~ship or group code")).performTextInput(text)
 
     @Test
     fun `a ship typed with or without its sig starts a conversation`() = newDm {

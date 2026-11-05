@@ -201,6 +201,7 @@ class SettingsScreenTest {
         waitForIdle()
         assertTrue(ui.powerFeaturesEnabled.value)
 
+        tap("Chats")
         val before = ui.swipeQuotes.value
         tap(if (before) "Replies in its thread" else "Quotes it")
         assertEquals(!before, ui.swipeQuotes.value)

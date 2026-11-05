@@ -1794,7 +1794,7 @@ private fun MessageRow(
                 Spacer(Modifier.width(AVATAR_SIZE))
             }
         }
-        if (mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand)
+        if (mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
         Column(
             modifier = Modifier.weight(1f, fill = false).widthIn(max = 560.dp),
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
@@ -1938,7 +1938,7 @@ private fun MessageRow(
                 actionMenu()
             }
         }
-        if (!mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand)
+        if (!mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
     }
 }
 
@@ -1950,13 +1950,15 @@ private fun MessageRow(
  * the slot never shifts.
  */
 @Composable
-private fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit) {
+private fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit, modifier: Modifier = Modifier) {
     if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) return
     Icon(
         Icons.Filled.MoreVert,
         contentDescription = "Message actions",
         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
+        // At the top of the bubble, beside its first line, where the eye
+        // (and the tests) look for it.
+        modifier = modifier
             .alpha(if (hovered || menuExpanded) 1f else 0f)
             .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onMenuExpand)

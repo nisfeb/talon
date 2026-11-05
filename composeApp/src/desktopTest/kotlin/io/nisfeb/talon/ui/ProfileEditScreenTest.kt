@@ -173,7 +173,7 @@ class ProfileEditScreenTest {
     }
 
     @Test
-    fun `each kind of thing has its own section: keys and the invite code are not with the profile`() = profile(keys = zodKeys) {
+    fun `each kind of thing has its own section, keys and the invite code apart from the profile`() = profile(keys = zodKeys) {
         assertTrue(shows("Nickname"))
         assertTrue(!shows("0xauthkey") && !shows("Post this anywhere"))
         onNodeWithText("Invite me").performClick()

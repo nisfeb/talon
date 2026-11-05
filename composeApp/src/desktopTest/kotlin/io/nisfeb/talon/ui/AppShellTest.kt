@@ -285,7 +285,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
             // Settings' Orrery page: the first "Orrery", in its list of pages
             // (Appearance lists the rail's items, Orrery among them).
-            onAllNodesWithText("Orrery")[0].performClick()
+            onAllNodesWithText("Assistant")[0].performClick()
             waitUntil(timeoutMillis = 10_000) { showing("Sharing where you are with") }
             // A ship with no chat here asks in Settings.
             assertTrue(showing("~nec wants to share where they are"), "the ask, where there is no chat for it")
@@ -389,8 +389,9 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("hello there") }
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
-        onNode(hasSetTextAction()).performClick() // typing in the chat
-        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Escape) }
+        // The chat's composer: the list's search bar is a text field too.
+        onAllNodes(hasSetTextAction()).onLast().performClick() // typing in the chat
+        onAllNodes(hasSetTextAction()).onLast().performKeyInput { pressKey(Key.Escape) }
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
@@ -545,9 +546,9 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("hello there") }
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
-        onNode(hasSetTextAction()).performClick()
+        onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performClick()
         Thread.sleep(300)
-        onNode(hasSetTextAction()).assertIsFocused()
+        onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).assertIsFocused()
     }
 
     @Test
@@ -619,7 +620,7 @@ class AppShellTest {
         onNodeWithText("Reply in thread").performClick()
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
-        assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+        assertTrue(onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
     }
 
     // "Dropdown instead of panes": in a window too narrow for list, chat
@@ -644,10 +645,10 @@ class AppShellTest {
         val threadOpen = { onAllNodesWithText("Thread").fetchSemanticsNodes().isNotEmpty() }
         waitUntil(timeoutMillis = 5_000) { threadOpen() }
         assertTrue(showing("DMs"), "the list stays")
-        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the thread's composer alone, over the chat")
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size, "the thread's composer alone, over the chat")
         onNodeWithContentDescription("Close").performClick()
         waitUntil(timeoutMillis = 5_000) { !threadOpen() }
-        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the chat's composer is back")
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size, "the chat's composer is back")
         assertTrue(present("Message actions"), "the chat is back")
     }
 
@@ -1247,6 +1248,7 @@ class AppShellTest {
     @Test
     fun `Message on a contact just added leaves Contacts for the conversation`() = app { ship ->
         onNodeWithContentDescription("More").performClick()
+        onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
         onNodeWithText("~patp, or a word name").performTextInput("~bus")
@@ -1376,6 +1378,7 @@ class AppShellTest {
 
     private fun ComposeUiTest.addOnContacts(who: String) {
         onNodeWithContentDescription("More").performClick()
+        onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
         onNodeWithText("~patp, or a word name").performTextInput(who)
@@ -1454,9 +1457,10 @@ class AppShellTest {
         val store = twoShips()
         val relay = io.nisfeb.talon.notify.InMemoryRelaySettings().apply { setDeviceIdFor("~zod", "dev-zod") }
         app(sessions = { store }, relay = relay) { ship ->
-            onAllNodesWithContentDescription("More").onFirst().performClick()
-            waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
-            onNodeWithText("Sign out").performClick()
+            // Sign out lives with the ships, behind the switcher's mark.
+            onAllNodesWithContentDescription("Switch ship").onFirst().performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Sign out of") }
+            onNodeWithText("Sign out of", substring = true).performClick()
             waitUntil(timeoutMillis = 10_000) { store.activeShip() == "~bus" && present("New message") }
             assertTrue(!showing("Connect"), "the other ship, not the login form")
             assertEquals(listOf("~bus"), store.all().map { it.ship })
@@ -2208,7 +2212,7 @@ class AppShellTest {
         onNodeWithText(item).performClick()
     }
 
-    private fun ComposeUiTest.composers() = onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size
+    private fun ComposeUiTest.composers() = onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size
 
     @Test
     fun `a call's meeting shows its DM beside the call, and what is written there goes`() {
@@ -2220,7 +2224,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { busChatShown() }
             assertTrue(present("Hang up") && present("Minimize the call"), "still in the meeting")
             assertEquals(1, composers(), "the chat is drawn once, beside the meeting, not again under it")
-            onNode(hasSetTextAction()).performTextInput("see you there")
+            onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performTextInput("see you there")
             onNodeWithContentDescription("Send").performClick()
             waitUntil(timeoutMillis = 10_000) { chatSaid(ship, "see you there") }
             // Out of the meeting, the chat is where it was, with what was said.
@@ -2243,7 +2247,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { busChatShown() }
             // Long enough that a slow runner still hides the pane first.
             ship.holdPoke = 5_000
-            onNode(hasSetTextAction()).performTextInput("held a moment")
+            onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performTextInput("held a moment")
             onNodeWithContentDescription("Send").performClick()
             meetingOption("Hide chat")
             waitForIdle()
