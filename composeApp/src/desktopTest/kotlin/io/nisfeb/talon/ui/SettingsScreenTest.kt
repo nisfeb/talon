@@ -169,6 +169,7 @@ class SettingsScreenTest {
         assertEquals(Density.Compact, ui.density.value)
         tap("Cozy")
         assertEquals(Density.Cozy, ui.density.value)
+        tap("Chats")
         tap("Host order")
         assertEquals(GroupChannelOrder.HostOrder, ui.groupChannelOrder.value)
         tap("Saved order")
@@ -177,6 +178,7 @@ class SettingsScreenTest {
 
     @Test
     fun `showing raw ship names is switched and reported`() = settings {
+        tap("General")
         switchBeside("Always show ~ship names").performClick()
         waitForIdle()
         assertEquals(listOf(true), patpChanges)
@@ -192,6 +194,7 @@ class SettingsScreenTest {
         assertTrue(ui.hideComposerButtons.value)
         switchBeside("Hide composer buttons").assertIsOn()
 
+        tap("Experimental")
         switchBeside("Power features").performClick()
         waitForIdle()
         assertTrue(ui.powerFeaturesEnabled.value)
@@ -296,9 +299,9 @@ class SettingsScreenTest {
     // The hour sat under Home's dial, while chats, search and the calendar
     // each kept a clock of their own.
     @Test
-    fun `the clock is chosen once, under Appearance, and every time shown follows it`() {
+    fun `the clock is chosen once, under General, and every time shown follows it`() {
         settings {
-            tap("Appearance")
+            tap("General")
             tap("24-hour")
             assertTrue(ui.homeTwentyFourHour.value)
             val oneTwentySixPm = kotlinx.datetime.LocalDateTime(2026, 7, 10, 13, 26)
@@ -462,7 +465,7 @@ class SettingsScreenTest {
     fun `a shortcut is set by pressing its keys, and moves from the action that had it`() {
         val mac = io.nisfeb.talon.util.isMacOsHost
         settings {
-            tap("Appearance")
+            tap("Keyboard shortcuts")
             val search = defaultKeybinds(mac).getValue("search").label(mac)
             onAllNodesWithText(search)[0].performScrollTo()
             // Mail: a key on its own is typing, and is refused.
@@ -483,5 +486,14 @@ class SettingsScreenTest {
             assertTrue(ui.keybinds.value.isEmpty())
         }
     }
-}
 
+    @Test
+    fun `experimental switches sit apart from everyday ones`() = settings {
+        assertTrue(!shows("Power features"))
+        tap("Chats")
+        assertTrue(shows("Hide composer buttons") && !shows("Power features"))
+        tap("Experimental")
+        waitUntil(timeoutMillis = 5_000) { shows("Power features") }
+        assertTrue(!shows("Hide composer buttons"))
+    }
+}

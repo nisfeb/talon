@@ -220,7 +220,11 @@ fun SettingsScreen(
             // how it starts.
             add(SettingsTab.Orrery)
             if (isCallsSupported && callController != null) add(SettingsTab.Calls)
+            // Where there is a keyboard to press them on.
+            if (!io.nisfeb.talon.ui.isTouchPrimary) add(SettingsTab.Shortcuts)
             add(SettingsTab.Account)
+            // Beta and power-user switches, kept apart from everyday ones.
+            add(SettingsTab.Experimental)
             add(SettingsTab.About)
         }
         var tab by remember {
@@ -417,6 +421,8 @@ fun SettingsScreen(
             FontSection(uiSettings)
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.General) {
             // ── Ship naming ─────────────────────────────────────────
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
             FeatureToggleRow(
@@ -450,6 +456,8 @@ fun SettingsScreen(
                 },
                 switchEnabled = !alwaysPatp,
             )
+            }
+            if (safeTab == SettingsTab.Appearance) {
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
                 label = "Custom accent color",
@@ -535,8 +543,10 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
+            }
+            if (safeTab == SettingsTab.Chats) {
             Text(
-                "Home list",
+                "Chat list order",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Text(
@@ -594,6 +604,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.General) {
             // Every time shown, not only the dial's: it sat under Home's
             // clock while the chats, search and calendar went their own way.
             Text(
@@ -615,6 +627,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Shortcuts) {
             // Where there is a keyboard to press them on.
             if (!io.nisfeb.talon.ui.isTouchPrimary) {
                 KeybindsSection(uiSettings)
@@ -714,11 +728,12 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
-            if (io.nisfeb.talon.ui.isLocalCometSupported && localShip.pierExists()) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                LocalShipSection(localShip)
             }
+            if (safeTab == SettingsTab.Experimental &&
+                io.nisfeb.talon.ui.isLocalCometSupported && localShip.pierExists()
+            ) {
+                LocalShipSection(localShip)
+                Spacer(Modifier.height(8.dp))
             }
             if (safeTab == SettingsTab.Notifications) {
             // Said plainly, so a missed call is not how the owner learns it (B3-3).
@@ -790,6 +805,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Experimental) {
             FeatureToggleRow(
                 label = "Power features",
                 description = "Unlocks `/poke <app> <mark> <json>` from any composer — " +
@@ -1997,7 +2014,9 @@ private enum class SettingsTab(val label: String) {
     Ai("AI"),
     Orrery("Orrery"),
     Calls("Calls"),
+    Shortcuts("Keyboard shortcuts"),
     Account("Account"),
+    Experimental("Experimental"),
     About("About"),
 }
 
