@@ -2310,6 +2310,7 @@ fun TalonApp(
             invitesOpen -> GroupInvitesScreen(
                 repo = app.repo,
                 onBack = { invitesOpen = false },
+                ourShip = activeShip,
                 modifier = mod,
             )
 

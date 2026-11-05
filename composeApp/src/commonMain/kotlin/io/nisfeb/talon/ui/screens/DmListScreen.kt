@@ -364,6 +364,8 @@ fun DmListScreen(
     // Seeded from HomeListSnapshot so back-navigation from a chat
     // returns the user to whatever tab they were on, not the
     // fresh-launch auto-landed folder.
+    // What the menu's "Invite a friend" did, shown for a moment under the header.
+    var inviteNote by remember { mutableStateOf<String?>(null) }
     var selectedFolderId by remember {
         mutableStateOf(snap.selectedFolderId)
     }
@@ -874,6 +876,7 @@ fun DmListScreen(
                 }
             }
             var menuOpen by remember { mutableStateOf(false) }
+            val inviteFriend = io.nisfeb.talon.ui.rememberInviteFriend(activeShip)
             // Freshness-dot inputs. Per-feature data flows joined with
             // the menuSeen state so a tap-through actually clears the
             // dot. The marker writes happen in the per-item onClick
@@ -938,6 +941,15 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
+                    // One click to invite a friend: the share sheet, or the
+                    // invite copied where there is none.
+                    DropdownMenuItem(
+                        text = { Text("Invite a friend") },
+                        onClick = {
+                            menuOpen = false
+                            inviteNote = inviteFriend()
+                        },
+                    )
                     // Reordering groups and folders, which the header's
                     // pencil used to toggle.
                     DropdownMenuItem(
@@ -1116,6 +1128,15 @@ fun DmListScreen(
         }
         HorizontalDivider()
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
+        inviteNote?.let { note ->
+            LaunchedEffect(note) { kotlinx.coroutines.delay(5_000); inviteNote = null }
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
         batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
         val totalMentions = remember(mentionUnreads) {

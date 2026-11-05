@@ -2788,6 +2788,7 @@ fun App(
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
                         onBack = { showInvites = false },
+                        ourShip = loggedInShip,
                     )
                     showCalendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
                         openPushTag = noticeCalendarTag,

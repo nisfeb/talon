@@ -43,6 +43,10 @@ import kotlinx.coroutines.launch
 fun GroupInvitesScreen(
     repo: TlonChatRepo,
     onBack: () -> Unit,
+    /** The signed-in ship, which an invite to a friend says to add. */
+    ourShip: String? = null,
+    /** How friends know the owner, opening the invite; null leaves it out. */
+    ourName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val cached by repo.invitesFlow.collectAsState()
@@ -90,6 +94,18 @@ fun GroupInvitesScreen(
             }
         }
         HorizontalDivider()
+        // Inviting a friend to Groundwire comes first; the invites the
+        // ship has been sent to groups follow.
+        io.nisfeb.talon.ui.InviteFriendCard(
+            ship = ourShip,
+            name = ourName,
+            modifier = Modifier.padding(16.dp),
+        )
+        Text(
+            "Invites to groups",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
         when {
             loading -> Row(
                 modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -104,7 +120,7 @@ fun GroupInvitesScreen(
             }
 
             invites.isEmpty() && joining.isEmpty() -> Text(
-                "No pending invites.",
+                "No pending invites to groups.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
