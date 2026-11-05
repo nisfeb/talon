@@ -421,9 +421,9 @@ class HomeListTest {
     // ─── the More menu and folders ─────────────────────────────────
 
     @Test
-    fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
-        val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
-            "Group Moderation", "Invites", "Settings", "Sign out")
+    fun `every place in the More menu opens`() = home(seed = {}) {
+        val places = listOf("Home", "My profile", "Mail", "Bookmarks", "Activity", "Calendar",
+            "Group Moderation", "Invites", "Settings")
         for (place in places) {
             onNodeWithContentDescription("More").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
@@ -431,6 +431,19 @@ class HomeListTest {
             waitUntil(timeoutMillis = 5_000) { did.lastOrNull() == place }
         }
         assertEquals(places, did.toList())
+    }
+
+    @Test
+    fun `statuses, contacts and the sidebar are one entry in the More menu, and sign out is not there`() = home(seed = {}) {
+        for (place in listOf("Statuses", "Contacts")) {
+            onNodeWithContentDescription("More").performClick()
+            assertTrue(onAllNodesWithText("Sign out").fetchSemanticsNodes().isEmpty())
+            assertTrue(onAllNodesWithText(place).fetchSemanticsNodes().isEmpty(), "folded until opened")
+            onNodeWithText("People & sidebar").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
+            onAllNodesWithText(place).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+            waitUntil(timeoutMillis = 5_000) { did.lastOrNull() == place }
+        }
     }
 
     @Test

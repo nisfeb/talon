@@ -876,6 +876,7 @@ fun DmListScreen(
                 }
             }
             var menuOpen by remember { mutableStateOf(false) }
+            var peopleOpen by remember(menuOpen) { mutableStateOf(false) }
             val inviteFriend = io.nisfeb.talon.ui.rememberInviteFriend(activeShip)
             // Freshness-dot inputs. Per-feature data flows joined with
             // the menuSeen state so a tap-through actually clears the
@@ -993,23 +994,6 @@ fun DmListScreen(
                             },
                         )
                     }
-                    if (RailItem.Statuses in kebabItems) {
-                        DropdownMenuItem(
-                            text = { Text("Statuses") },
-                            trailingIcon = {
-                                if (hasFreshStatuses) MenuBadgeDot()
-                            },
-                            onClick = {
-                                menuOpen = false
-                                val now = nowMs()
-                                menuSeen.markStatusesSeenAt(now)
-                                repo.pushScope.launch {
-                                    runCatching { repo.settingsSync?.pushStatusesSeen(now) }
-                                }
-                                onOpenStatusFeed()
-                            },
-                        )
-                    }
                     if (RailItem.Mail in kebabItems) {
                         DropdownMenuItem(
                             text = { Text("Mail") },
@@ -1046,13 +1030,58 @@ fun DmListScreen(
                             },
                         )
                     }
+                    // People and the list's own layout, as one entry that
+                    // opens in place: statuses, contacts and what the
+                    // sidebar shows. Sign out lives with the ships, in the
+                    // switcher behind the logo.
                     DropdownMenuItem(
-                        text = { Text("Contacts") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenContacts()
+                        text = { Text("People & sidebar") },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (hasFreshStatuses && RailItem.Statuses in kebabItems) MenuBadgeDot()
+                                Text(if (peopleOpen) " \u25B4" else " \u25B8")
+                            }
                         },
+                        onClick = { peopleOpen = !peopleOpen },
                     )
+                    if (peopleOpen) {
+                        if (RailItem.Statuses in kebabItems) {
+                            DropdownMenuItem(
+                                text = { Text("Statuses") },
+                                trailingIcon = {
+                                    if (hasFreshStatuses) MenuBadgeDot()
+                                },
+                                contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                                onClick = {
+                                    menuOpen = false
+                                    val now = nowMs()
+                                    menuSeen.markStatusesSeenAt(now)
+                                    repo.pushScope.launch {
+                                        runCatching { repo.settingsSync?.pushStatusesSeen(now) }
+                                    }
+                                    onOpenStatusFeed()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Contacts") },
+                            contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                            onClick = {
+                                menuOpen = false
+                                onOpenContacts()
+                            },
+                        )
+                        if (onOpenSidebarSettings != null) {
+                            DropdownMenuItem(
+                                text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
+                                contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenSidebarSettings()
+                                },
+                            )
+                        }
+                    }
                     if (RailItem.Actions in kebabItems) onOpenActions?.let { open ->
                         DropdownMenuItem(
                             text = { Text(io.nisfeb.talon.ui.railLabel(RailItem.Actions)) },
@@ -1093,24 +1122,6 @@ fun DmListScreen(
                             },
                         )
                     }
-                    if (onOpenSidebarSettings != null) {
-                        DropdownMenuItem(
-                            text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
-                            onClick = {
-                                menuOpen = false
-                                onOpenSidebarSettings()
-                            },
-                        )
-                    }
-                    // Sign out is always rendered last, never gated by kebabItems —
-                    // it's not a RailItem and never lives on the rail.
-                    DropdownMenuItem(
-                        text = { Text("Sign out") },
-                        onClick = {
-                            menuOpen = false
-                            onSignOut()
-                        },
-                    )
                 }
             }
             // The brand mark on the right, where the ellipsis was, and
@@ -2045,6 +2056,24 @@ internal fun ShipSwitcherDrawer(
                     ),
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+            // Signing out lives here, with the ships, not in the chat
+            // list's menu: it is about which ship this device is on.
+            if (onSignOut != null && activeShip != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSignOut(activeShip) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Sign out of ${io.nisfeb.talon.ui.shipHandle(activeShip)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
     }
