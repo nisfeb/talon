@@ -152,6 +152,8 @@ fun CallOverlay(
                 container = MaterialTheme.colorScheme.error,
                 content = MaterialTheme.colorScheme.onError,
                 onClick = { controller.hangup() },
+                // The red hang-up says it; the word under it is not needed.
+                showLabel = false,
             )
         }
 
@@ -653,6 +655,8 @@ private fun RoundAction(
     container: androidx.compose.ui.graphics.Color,
     content: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
+    /** The label under the button; off where the icon says it alone (hanging up a ringing call). */
+    showLabel: Boolean = true,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(
@@ -672,7 +676,7 @@ private fun RoundAction(
         ) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(32.dp))
         }
-        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+        if (showLabel) Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
