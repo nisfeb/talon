@@ -2187,6 +2187,7 @@ fun TalonApp(
 
             contactsOpen -> io.nisfeb.talon.ui.screens.ContactsScreen(
                 db = app.db,
+                ourShip = activeShip,
                 bookContacts = bookContacts,
                 // On the repo's scope, awaited: Contacts keeps what was typed
                 // until the ship has it, and says why when not.

@@ -2903,6 +2903,7 @@ fun App(
                     )
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,
+                        ourShip = loggedInShip,
                         bookContacts = bookContacts,
                         // On the repo's scope, awaited: Contacts keeps what was
                         // typed until the ship has it, and says why when not.

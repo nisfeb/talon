@@ -61,6 +61,8 @@ fun ContactsScreen(
     onRemoveContact: suspend (patp: String) -> Unit,
     onOpenContact: (patp: String) -> Unit,
     onBack: () -> Unit,
+    /** The signed-in ship, never offered to itself. */
+    ourShip: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val allContacts by remember { db.contacts().stream() }.collectAsState(initial = emptyList())
@@ -185,6 +187,50 @@ fun ContactsScreen(
         removeProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
         HorizontalDivider()
 
+        // Everyone the ship already knows (its %contacts directory: who
+        // you message, share groups with, or whose profile you have
+        // seen), offered in one tap, so the book does not start empty.
+        val candidates = remember(allContacts, bookContacts, ourShip) {
+            importCandidates(allContacts, bookContacts, ourShip)
+        }
+        var importing by remember { mutableStateOf(0) }
+        var importNote by remember { mutableStateOf<String?>(null) }
+        if (candidates.isNotEmpty() || importNote != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("People your ship already knows", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                    Text(
+                        importNote ?: if (importing > 0) "Adding… $importing left"
+                        else "${candidates.size} not in your contacts yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (candidates.isNotEmpty()) io.nisfeb.talon.ui.Button(
+                    enabled = importing == 0,
+                    onClick = {
+                        val batch = candidates.map { it.ship }
+                        importing = batch.size
+                        importNote = null
+                        scope.launch {
+                            var failed = 0
+                            for (ship in batch) {
+                                runCatching { onAddContact(ship, null) }.onFailure { failed++ }
+                                importing--
+                            }
+                            importNote = if (failed == 0) "Added ${batch.size}."
+                            else "Added ${batch.size - failed}; your ship did not take $failed."
+                        }
+                    },
+                ) { Text("Add all") }
+            }
+            HorizontalDivider()
+        }
+
         if (bookContacts.isNotEmpty()) {
             OutlinedTextField(
                 value = query,
@@ -271,3 +317,13 @@ private fun ContactRow(c: ContactEntity, removing: Boolean, onClick: () -> Unit,
         TextButton(onClick = onRemove, enabled = !removing) { Text(if (removing) "Removing…" else "Remove") }
     }
 }
+
+/**
+ * Ships the ship already has a profile for and the book does not hold:
+ * what "Add all" brings in. Never the signed-in ship itself; named ones
+ * first, then by name.
+ */
+internal fun importCandidates(all: List<ContactEntity>, book: Set<String>, ourShip: String?): List<ContactEntity> =
+    all.filter { it.ship != ourShip && it.ship !in book && it.ship.startsWith("~") }
+        .distinctBy { it.ship }
+        .sortedWith(compareBy({ it.nickname.isNullOrBlank() }, { (it.nickname ?: it.ship).lowercase() }))
