@@ -1156,7 +1156,6 @@ fun DmListScreen(
                 .heightIn(min = 40.dp)
                 .semantics { contentDescription = "Search" },
         )
-        HorizontalDivider()
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
         inviteNote?.let { note ->
             LaunchedEffect(note) { kotlinx.coroutines.delay(5_000); inviteNote = null }
@@ -1307,7 +1306,6 @@ fun DmListScreen(
                         onConfirm = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.confirm(db, n.id) } },
                         onDiscard = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.discard(db, n.id) } },
                     )
-                    HorizontalDivider()
                 }
             }
 
@@ -1343,7 +1341,6 @@ fun DmListScreen(
                             }
                         },
                     )
-                    HorizontalDivider()
                 }
             }
             if (selectedFolderId == null && selectedSpecial == SpecialTab.Unread) {
@@ -1368,7 +1365,6 @@ fun DmListScreen(
                             onLongClick = onRowLongPress,
                             open = m.whom == openWhom,
                         )
-                        HorizontalDivider()
                     }
                 }
             } else if (selectedFolderId == null && selectedSpecial == SpecialTab.Mentions) {
@@ -1410,7 +1406,6 @@ fun DmListScreen(
                                 onLongClick = onRowLongPress,
                             )
                         }
-                        HorizontalDivider()
                     }
                 }
             } else if (selectedFolderId != null) {
@@ -1504,7 +1499,6 @@ fun DmListScreen(
                                                 onDragStopped = { onDragStopped() },
                                             ),
                                         )
-                                        HorizontalDivider()
                                         // Instant, not animated, and that is the
                                         // fix rather than a simplification.
                                         // AnimatedVisibility animates the *measured
@@ -1539,7 +1533,6 @@ fun DmListScreen(
                                                         onLongClick = onRowLongPress,
                                                         open = child.whom == openWhom,
                                                     )
-                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
                                             }
                                         }
@@ -1586,7 +1579,6 @@ fun DmListScreen(
                                             onDragStopped = { onDragStopped() },
                                         ),
                                     )
-                                    HorizontalDivider()
                                 }
                             }
                             i++
@@ -1706,7 +1698,6 @@ fun DmListScreen(
                                                 onDragStopped = { onDragStopped() },
                                             ),
                                         )
-                                        HorizontalDivider()
                                         // Instant, not animated, and that is the
                                         // fix rather than a simplification.
                                         // AnimatedVisibility animates the *measured
@@ -1741,7 +1732,6 @@ fun DmListScreen(
                                                         onLongClick = onRowLongPress,
                                                         open = child.whom == openWhom,
                                                     )
-                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
                                             }
                                         }
@@ -1765,7 +1755,6 @@ fun DmListScreen(
                                     onLongClick = onRowLongPress,
                                     open = row.m.whom == openWhom,
                                 )
-                                HorizontalDivider()
                             }
                             i++
                         }
