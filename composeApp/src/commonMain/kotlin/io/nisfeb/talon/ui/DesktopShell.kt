@@ -287,14 +287,11 @@ private fun RailIconButton(
                     // nestles the dot on the icon corner instead of
                     // the button's outer edge, matching the kebab
                     // badge's visual weight.
-                    Box(
+                    NotificationDot(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = (-12).dp, y = 12.dp)
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
+                            .offset(x = (-11).dp, y = 11.dp),
+                        )
                 }
             }
         }

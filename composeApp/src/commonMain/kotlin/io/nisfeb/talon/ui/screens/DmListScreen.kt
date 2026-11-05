@@ -2178,15 +2178,7 @@ private fun TabChip(
             // surfaceVariant, so amber primary pops; on a selected
             // chip the chip bg is already primary — use onPrimary
             // there so the count stays readable.
-            val badgeColor = if (selected) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.primary
-            Text(
-                " " + if (badgeCount < 100) badgeCount.toString() else "99+",
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                ),
-                color = badgeColor,
-            )
+            io.nisfeb.talon.ui.NotificationBadge(badgeCount, Modifier.padding(start = 6.dp))
         }
         // Rename pencil — only surfaced on the active, renameable chip
         // while the user is in edit mode.
@@ -2449,15 +2441,7 @@ private fun ConversationRow(
             }
         }
         if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(unread)
         }
         if (editMode && dragHandleModifier != null) {
             Icon(
@@ -2533,15 +2517,7 @@ private fun MentionPlaceholderRow(
             }
         }
         if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(unread)
         }
     }
 }
@@ -2555,14 +2531,7 @@ private fun MentionPlaceholderRow(
  */
 @Composable
 internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            // A dot is color alone: a screen reader said nothing of it.
-            .semantics { contentDescription = "Unread" },
-    )
+    io.nisfeb.talon.ui.NotificationDot(modifier)
 }
 
 /** Per-whom message scan depth for the Mentions tab's true-mention
@@ -2700,15 +2669,7 @@ private fun GroupHeaderRow(
             )
         }
         if (totalUnread > 0 && !expanded) {
-            Text(
-                if (totalUnread < 100) totalUnread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(totalUnread)
         }
         Icon(
             // Always the down chevron; rotation alone communicates state
@@ -2817,15 +2778,7 @@ private fun GroupChannelRow(
             }
         }
         if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(unread)
         }
     }
 }
