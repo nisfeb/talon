@@ -98,7 +98,7 @@ fun LoginQrShareScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                "Generate login QR",
+                "Generate Login QR",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp),
             )

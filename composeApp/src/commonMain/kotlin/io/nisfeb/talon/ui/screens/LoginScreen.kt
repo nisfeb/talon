@@ -461,7 +461,7 @@ fun LoginScreen(
                 // ZXing core is wired into both leaves.
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = "Signing in on another device? Make a login QR →",
+                    text = "Signing in on another device? Make a Login QR →",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.Center,

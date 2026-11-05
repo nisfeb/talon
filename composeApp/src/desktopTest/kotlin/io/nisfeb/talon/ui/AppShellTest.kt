@@ -1348,9 +1348,9 @@ class AppShellTest {
         onNodeWithText("Account").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Login QR generator") }
         onNodeWithText("Login QR generator").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Generate login QR") }
+        waitUntil(timeoutMillis = 5_000) { showing("Generate Login QR") }
         press(Key.Escape)
-        waitUntil(timeoutMillis = 5_000) { !showing("Generate login QR") }
+        waitUntil(timeoutMillis = 5_000) { !showing("Generate Login QR") }
         assertTrue(showing("Appearance") && !present("Chats"), "Settings, where it was opened")
         press(Key.Escape)
         home()

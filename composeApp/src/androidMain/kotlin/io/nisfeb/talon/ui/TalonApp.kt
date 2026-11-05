@@ -773,7 +773,7 @@ fun TalonApp(
     var orreryItem by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
-     *  "Make a login QR" link (pre-login) and from settings
+     *  "Make a Login QR" link (pre-login) and from settings
      *  once a ship is logged in. Full-screen, so a section. */
     var shareLoginQrOpen by remember { sections.flag() }
 
