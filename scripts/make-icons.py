@@ -42,8 +42,9 @@ def out(rel):
 colour = mark("branding/ic_launcher_foreground_1024.png")
 mono = mark("branding/ic_launcher_monochrome_1024.png")
 
-# In the app: the mark alone, tinted with the theme's primary colour.
-placed(colour, 256, 0.90).save(out("composeApp/src/commonMain/composeResources/drawable/talon_logo.png"), optimize=True)
+# In the app: the mark alone, tinted with the theme's primary colour. The
+# monochrome layer, so the grounding lines stay holes the tint keeps.
+placed(mono, 256, 0.90).save(out("composeApp/src/commonMain/composeResources/drawable/talon_logo.png"), optimize=True)
 
 # Desktop window, taskbar, notifications, .dmg/.msi/.deb: a whole rounded square.
 body, margin = 920, 52
@@ -63,7 +64,15 @@ mac.alpha_composite(placed(colour, 1024, 0.62 * 824 / 920))
 mac.save(out("composeApp/src/desktopMain/resources/icon-macos.png"), optimize=True)
 
 # iOS: full bleed and opaque; iOS rounds the corners itself.
-placed(colour, 1024, 0.64, bg=NAVY).convert("RGB").save(out("iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"), optimize=True)
+full = placed(colour, 1024, 0.64, bg=NAVY).convert("RGB")
+full.save(out("iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"), optimize=True)
+
+# The same full-bleed tile: Play Store listing, the website, and the
+# Linux hicolor icons (scripts/build-appimage.sh installs these).
+full.save(out("branding/ic_launcher_full_1024.png"), optimize=True)
+full.resize((512, 512), Image.LANCZOS).save(out("branding/play_store_icon_512.png"), optimize=True)
+for n in (16, 24, 32, 48, 64, 128, 256, 512):
+    placed(colour, 1024, 0.64, bg=NAVY).resize((n, n), Image.LANCZOS).save(out(f"branding/linux/talon-{n}.png"), optimize=True)
 
 # Android adaptive icon: a 108dp layer of which the launcher shows the
 # middle 72dp, and promises only the middle 66dp: the mark keeps inside it.

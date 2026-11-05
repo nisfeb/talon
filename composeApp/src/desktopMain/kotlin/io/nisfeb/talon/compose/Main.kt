@@ -331,7 +331,7 @@ fun main() {
         DesktopAppGraph()
     } catch (t: DatabaseOpenTimeoutException) {
         showStartupError(
-            title = "Talon — couldn't open data directory",
+            title = "Groundwire — couldn't open data directory",
             body = "Talon couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
                 "If your home directory is on a network mount or encrypted " +
                 "volume, make sure it's available and try again.",
@@ -339,7 +339,7 @@ fun main() {
         kotlin.system.exitProcess(2)
     } catch (t: Throwable) {
         showStartupError(
-            title = "Talon — startup error",
+            title = "Groundwire — startup error",
             body = "Talon couldn't start.\n\n" +
                 "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}\n\n" +
                 t.stackTraceToString().lineSequence().take(15).joinToString("\n"),
@@ -445,7 +445,7 @@ fun main() {
             // from non-EDT threads.
             javax.swing.SwingUtilities.invokeLater {
                 java.awt.Frame.getFrames()
-                    .firstOrNull { it.title.startsWith("Talon") }
+                    .firstOrNull { it.title.startsWith("Groundwire") }
                     ?.let { frame ->
                         if (!frame.isVisible) frame.isVisible = true
                         frame.extendedState = java.awt.Frame.NORMAL
@@ -457,14 +457,14 @@ fun main() {
         Tray(
             icon = trayIconPainter,
             state = trayState,
-            tooltip = "Talon",
+            tooltip = "Groundwire",
             // Primary click on the tray icon brings Talon to front +
             // focuses it. Previously only un-minimized, which left
             // the window stacked behind whatever the user was
             // looking at — defeating the whole point of clicking.
             onAction = showAndFocus,
             menu = {
-                Item("Show Talon", onClick = showAndFocus)
+                Item("Show Groundwire", onClick = showAndFocus)
                 Item("Quit", onClick = quitToOs)
             },
         )
@@ -506,7 +506,7 @@ fun main() {
             // application { } for why we don't minimize-to-tray here.
             onCloseRequest = quitToOs,
             state = windowState,
-            title = io.nisfeb.talon.util.AppDirs.profile?.let { "Talon ($it)" } ?: "Talon",
+            title = io.nisfeb.talon.util.AppDirs.profile?.let { "Groundwire ($it)" } ?: "Groundwire",
             icon = iconPainter,
             onPreviewKeyEvent = { e ->
                 if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&

@@ -280,7 +280,7 @@ fun LoginScreen(
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                "Talon",
+                "Groundwire",
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.SemiBold,
                 ),

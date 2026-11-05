@@ -324,7 +324,7 @@ class QuickDictationActivity : ComponentActivity() {
     @Composable
     private fun Blocked(why: String) {
         Text(why, style = MaterialTheme.typography.headlineSmall)
-        BigButton("Open Talon", null) {
+        BigButton("Open Groundwire", null) {
             startActivity(Intent(this@QuickDictationActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
         }

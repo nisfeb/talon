@@ -96,9 +96,9 @@ object SingleInstance {
         runCatching {
             javax.swing.JOptionPane.showMessageDialog(
                 null,
-                "Talon is already running. Look for the open window or check " +
+                "Groundwire is already running. Look for the open window or check " +
                     "your taskbar / dock.",
-                "Talon",
+                "Groundwire",
                 javax.swing.JOptionPane.INFORMATION_MESSAGE,
             )
         }

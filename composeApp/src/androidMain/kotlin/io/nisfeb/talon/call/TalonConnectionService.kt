@@ -253,7 +253,7 @@ object TalonTelecom {
         val tm = app.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager ?: return false
         val h = handleFor(app)
         return runCatching {
-            val account = PhoneAccount.builder(h, "Talon")
+            val account = PhoneAccount.builder(h, "Groundwire")
                 .setCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)
                 .addSupportedUriScheme(SCHEME)
                 // The reason this file exists: without it a self-managed
