@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.foundation.border
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
@@ -1902,7 +1903,12 @@ private fun MessageRow(
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
-                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+                // Narrower, and set off from the chat behind it: its own
+                // raised colour and a hairline edge.
+                modifier = Modifier
+                    .widthIn(min = 200.dp, max = 260.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }
@@ -2423,11 +2429,11 @@ private fun MessageActionMenu(
     // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
     // actions stacked to ~400.dp of dropdown — too tall for
     // single-thumb reach on phones.
-    val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-    val itemMinHeight = 36.dp
+    val itemPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+    val itemMinHeight = 30.dp
     Column(
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
             if (onShip) {
                 val topUsage by remember {
@@ -2450,42 +2456,36 @@ private fun MessageActionMenu(
                     out.take(8)
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "React",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 4.dp),
-                    )
-                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = "Browse emojis",
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
+                // One line of reactions, the emoji browser at its end: the
+                // "React" heading over them took a row of its own.
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 2.dp),
                 ) {
                     suggested.forEach { code ->
                         val glyph = ReactionPalette.display(code)
                         Text(
                             glyph,
                             fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { onPickReaction(code) }
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Browse emojis",
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
             }
             // Action rows — short, left-aligned, full-width so the
             // tap target spans the popover and reads like a menu

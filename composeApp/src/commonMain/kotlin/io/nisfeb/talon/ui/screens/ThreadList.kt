@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.foundation.border
 import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.animation.core.Animatable
@@ -881,7 +882,12 @@ private fun ThreadMessage(
             androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
-                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+                // Narrower, and set off from the chat behind it: its own
+                // raised colour and a hairline edge.
+                modifier = Modifier
+                    .widthIn(min = 200.dp, max = 260.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }
