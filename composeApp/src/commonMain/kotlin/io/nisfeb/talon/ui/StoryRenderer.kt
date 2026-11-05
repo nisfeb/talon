@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.horizontalScroll
 import kotlinx.datetime.number
 import io.nisfeb.talon.util.createTempFileUri
 import io.nisfeb.talon.util.formatDecimals
@@ -396,14 +397,22 @@ fun StoryRenderer(
                     )
                 }
 
+                // A code block reads as one: its own panel with an edge (on
+                // the dark theme the panel alone was the chat's colour, so
+                // code looked like loose monospace lines), and long lines
+                // scroll sideways instead of wrapping.
                 is StoryPart.Code -> Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Text(
                         part.code,
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        softWrap = false,
+                        modifier = Modifier
+                            .horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                 }
 
