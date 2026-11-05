@@ -812,19 +812,8 @@ fun DmListScreen(
                     // the list mid-compose; getValue would throw there.
                     else -> io.nisfeb.talon.ui.shipHandles(allShips)[activeShip] ?: activeShip
                 }
-                // Colored dot in the user's chosen accent — same
-                // value as `colorScheme.primary` since App.kt's
-                // TalonTheme override drives the theme primary
-                // with the active ship's color (Profile mode), the
-                // user's hex (Custom mode), or brand (off / Brand).
-                val accent = MaterialTheme.colorScheme.primary
-                Box(
-                    modifier = Modifier
-                        .padding(start = 6.dp)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(accent),
-                )
+                // No dot before the name: an accent-coloured dot here
+                // said nothing (removed 2026-11-05).
                 Text(
                     label,
                     style = MaterialTheme.typography.labelMedium,
