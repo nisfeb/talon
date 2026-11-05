@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -1200,6 +1201,12 @@ fun DmListScreen(
             },
             onSpecialLongPress = { confirmMarkAllRead = true },
             onCreateNew = { creatingFolder = true },
+            creating = creatingFolder,
+            onCreateFolder = { name ->
+                scope.launch { createFolderLogged(repo, name, folders.size, null) }
+                creatingFolder = false
+            },
+            onDismissCreate = { creatingFolder = false },
         )
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             // Groups and DMs always, then Party lines and Threads where a
@@ -1945,15 +1952,6 @@ fun DmListScreen(
         )
     }
 
-    if (creatingFolder) {
-        FolderCreateDialog(
-            onCreate = { name ->
-                scope.launch { createFolderLogged(repo, name, folders.size, null) }
-                creatingFolder = false
-            },
-            onDismiss = { creatingFolder = false },
-        )
-    }
 }
 
 @Composable
@@ -2144,6 +2142,10 @@ private fun FolderTabs(
      *  reached for. */
     onSpecialLongPress: () -> Unit,
     onCreateNew: () -> Unit,
+    /** The new-folder popover is open, under the + that opened it. */
+    creating: Boolean = false,
+    onCreateFolder: (String) -> Unit = {},
+    onDismissCreate: () -> Unit = {},
 ) {
     val specialActive = selectedFolderId == null
     LazyRow(
@@ -2163,11 +2165,14 @@ private fun FolderTabs(
             )
         }
         item(key = "__new") {
-            TabChip(
-                text = "+",
-                selected = false,
-                onClick = onCreateNew,
-            )
+            Box {
+                TabChip(
+                    text = "+",
+                    selected = false,
+                    onClick = onCreateNew,
+                )
+                FolderCreatePopover(expanded = creating, onCreate = onCreateFolder, onDismiss = onDismissCreate)
+            }
         }
         // Special tabs on the right, in priority order:
         //   Mentions (highest-signal) → Unread → All (scavenge pile).
@@ -2306,31 +2311,41 @@ private fun FolderRenameDialog(
     )
 }
 
+/**
+ * Naming a new folder: a small popover hanging under the + that opened
+ * it, a field and a Create, rather than a dialog over the whole window.
+ * Enter creates; Escape or a click outside closes it.
+ */
 @Composable
-private fun FolderCreateDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New folder") },
-        text = {
+private fun FolderCreatePopover(expanded: Boolean, onCreate: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember(expanded) { mutableStateOf("") }
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            "New folder",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 2.dp),
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(expanded) { if (expanded) runCatching { focus.requestFocus() } }
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (name.isNotBlank()) onCreate(name.trim()) }),
+                modifier = Modifier.width(180.dp).focusRequester(focus),
             )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onCreate(name.trim()) },
-                enabled = name.isNotBlank(),
-            ) { Text("Create") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+            TextButton(onClick = { onCreate(name.trim()) }, enabled = name.isNotBlank()) { Text("Create") }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
