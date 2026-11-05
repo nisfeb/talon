@@ -701,6 +701,13 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Account) {
+            Text(
+                "Your Groundwire is an instance of the Urbit operating system: a personal " +
+                    "server you own, which keeps your messages, contacts and apps. Groundwire " +
+                    "is how you reach it.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(8.dp))
             // ── Login QR generator ─────────────────────────────────
             // Lets the user build a `talon://login?...` QR for someone
             // else (assisted onboarding flow). Generation works on
@@ -2012,7 +2019,7 @@ private enum class SettingsTab(val label: String) {
     Orrery("Assistant"),
     Calls("Calls"),
     Shortcuts("Keyboard shortcuts"),
-    Account("Account"),
+    Account("Urbit"),
     Experimental("Experimental"),
     About("About"),
 }

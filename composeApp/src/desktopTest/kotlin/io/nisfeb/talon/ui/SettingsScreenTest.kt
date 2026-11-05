@@ -456,7 +456,7 @@ class SettingsScreenTest {
 
     @Test
     fun `the login QR generator opens from Account`() = settings {
-        tap("Account")
+        tap("Urbit")
         tap("Login QR generator")
         assertEquals(listOf("login qr"), did.toList())
     }

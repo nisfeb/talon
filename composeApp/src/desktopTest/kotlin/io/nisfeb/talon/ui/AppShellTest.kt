@@ -1345,7 +1345,7 @@ class AppShellTest {
     fun `Escape leaves the login QR for the Settings it was opened from`() = app {
         onNodeWithContentDescription("Settings").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
-        onNodeWithText("Account").performClick()
+        onNodeWithText("Urbit").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Login QR generator") }
         onNodeWithText("Login QR generator").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Generate Login QR") }
