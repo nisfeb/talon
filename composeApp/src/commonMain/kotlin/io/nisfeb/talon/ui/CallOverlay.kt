@@ -2,6 +2,7 @@ package io.nisfeb.talon.ui
 
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.text.withStyle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -233,12 +234,10 @@ fun CallStrip(
         }
 
         is CallUiState.Ended -> {
-            PartyLineBarContent(
-                state = PartyState.Failed(s.peer, s.reason),
-                    modifier = modifier,
-                nameFor = nameFor,
-                headline = "${nameFor(s.peer)} — ${s.reason}",
+            CallEndedPill(
+                text = "Call ended · ${nameFor(s.peer)} ${s.reason}",
                 onDismiss = { controller.dismissEnded() },
+                modifier = modifier,
             )
             LaunchedEffect(s) {
                 delay(ENDED_NOTICE_MS)
@@ -657,6 +656,40 @@ private fun RingingText(
         color = color,
         modifier = modifier.semantics { contentDescription = text },
     )
+}
+
+/**
+ * How a call that just ended is said: a small rounded note centred over
+ * the chat, a phone glyph, one line and a close, not a full-width coloured
+ * bar with a Dismiss button. It goes away by itself.
+ */
+@Composable
+private fun CallEndedPill(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shadowElevation = 2.dp,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            ) {
+                Icon(TalonIcons.CallEnd, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                io.nisfeb.talon.ui.IconButton(tip = "Dismiss", onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss", modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+    }
 }
 
 @Composable

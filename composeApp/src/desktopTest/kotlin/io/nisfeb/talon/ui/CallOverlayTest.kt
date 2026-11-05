@@ -102,7 +102,7 @@ class CallOverlayTest {
         assertTrue(shows("Bus"), "named as the app names them")
         onNodeWithContentDescription("Decline").performClick() // the word under it is a label
         assertEquals("c1", sent("reject"))
-        showing("Bus — declined")
+        showing("Call ended · Bus declined")
         assertTrue(!shows("Incoming call"))
     }
 
