@@ -182,18 +182,21 @@ class OrrerySwitchTest {
 
     @Test
     fun `off until turned on, what it is is said, and none of it shows`() = page(orrery = null) { _, _, _ ->
-        assertTrue(shows("a private notebook about your life"))
+        assertTrue(shows("Enable Groundwire Assistant"))
+        assertTrue(shows("A private notebook about your life"))
+        // The long account is folded away until asked for.
+        assertTrue(!shows("every direct message unless you pick which ones"))
+        onNodeWithText("What it reads and keeps", substring = true).performClick()
         // What turning it on allows, as orrery 58 reads: every DM by default.
-        assertTrue(shows("every direct message unless you pick which ones"))
+        waitUntil(timeoutMillis = 5_000) { shows("every direct message unless you pick which ones") }
         assertTrue(shows("Turning it off stops all of it"))
-        onAllNodes(isToggleable())[0].assertIsOff()
         assertTrue(!shows("Read calls and status lines"), "no settings while it is off")
         assertTrue("preferences" !in reads, "nor are the owner's preferences asked for")
     }
 
     @Test
     fun `turned on, its settings show, and the switch goes to every device`() = page(orrery = null) { ai, _, _ ->
-        onAllNodes(isToggleable())[0].performClick()
+        onNodeWithText("Enable Groundwire Assistant").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Read calls and status lines on this device") }
         assertEquals(true, ai.state.value.savedProfile?.orrery)
         assertEquals("true", ai.state.value.savedProfile!!.switches()["orrery"].toString(), "it travels with the switches")

@@ -2015,7 +2015,7 @@ private enum class SettingsTab(val label: String) {
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
-    Orrery("Orrery"),
+    Orrery("Assistant"),
     Calls("Calls"),
     Shortcuts("Keyboard shortcuts"),
     Account("Account"),

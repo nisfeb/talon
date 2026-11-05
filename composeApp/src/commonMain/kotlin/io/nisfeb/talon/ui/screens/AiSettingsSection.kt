@@ -228,28 +228,31 @@ fun OrrerySettingsSection(
     var confirmOff by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
 
-    OrreryAbout()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Use Orrery", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-            Quiet(
-                when {
-                    busy -> "Turning Orrery off."
-                    on -> "On, for all your devices."
-                    missing -> "Orrery is not on your ship. Install it from the Apps page."
-                    else -> "Off, for all your devices. Nothing of Orrery runs."
-                },
+    // Off: one obvious button, the explanation folded away below it.
+    // On: a switch to turn it off again, which asks first.
+    if (!on) {
+        io.nisfeb.talon.ui.Button(
+            enabled = !busy && !missing,
+            onClick = { note = null; edit { it.copy(orrery = true) } },
+        ) { Text("Enable Groundwire Assistant") }
+        Quiet(
+            if (missing) "The assistant (Orrery) is not on your ship. Install it from the Apps page."
+            else "A private notebook about your life, kept on your own ship. Off, for all your devices.",
+        )
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Groundwire Assistant", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                Quiet(if (busy) "Turning it off." else "On, for all your devices.")
+            }
+            Switch(
+                checked = true,
+                enabled = !busy,
+                onCheckedChange = { want -> note = null; if (!want) confirmOff = true },
             )
         }
-        Switch(
-            checked = on,
-            enabled = !busy && !missing,
-            onCheckedChange = { want ->
-                note = null
-                if (want) edit { it.copy(orrery = true) } else confirmOff = true
-            },
-        )
     }
+    OrreryAbout()
     note?.let { Quiet(it, error = true) }
     if (confirmOff) {
         androidx.compose.material3.AlertDialog(
@@ -345,10 +348,14 @@ private fun EveningReminderRow(orrery: OrreryRepo) {
 /** The times offered for the evening reminder; orrery's own default is 20:00. */
 private val REMINDER_TIMES = listOf("18:00", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00")
 
-/** What Orrery is and what turning it on allows, for someone who has never heard of it. */
+/** What Orrery is and what turning it on allows, folded until asked for. */
 @Composable
 private fun OrreryAbout() {
-    Heading("Orrery")
+    var open by remember { mutableStateOf(false) }
+    TextButton(onClick = { open = !open }) {
+        Text(if (open) "What it reads and keeps \u25B4" else "What it reads and keeps \u25BE")
+    }
+    if (!open) return
     Text(
         "Orrery is a private notebook about your life, kept on your own ship. When it is on, Groundwire and your ship " +
             "notice things that matter in your conversations, like where someone is, a plan you made, or something " +
