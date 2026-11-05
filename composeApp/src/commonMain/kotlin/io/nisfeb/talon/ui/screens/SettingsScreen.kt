@@ -888,32 +888,26 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 )
                 Text(
-                    "What the app does to your microphone before sending it. " +
-                        "One size does not fit all: a headset in a quiet room wants " +
-                        "less of this than a laptop mic in a café. Per device; takes " +
-                        "effect on the next call or line you join.",
+                    "Cleanup applied to your mic on this device. Changes apply from your next call.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 val mic by uiSettings.micProcessing.collectAsState()
                 FeatureToggleRow(
                     label = "Noise suppression",
-                    description = "Removes fans, keyboards and room hum. Also eats music " +
-                        "and some voices; turn it off if people say you sound underwater.",
+                    description = "Filters out background noise. Turn off if you sound muffled.",
                     enabled = mic.noiseSuppression,
                     onChange = { uiSettings.setMicProcessing(mic.copy(noiseSuppression = it)) },
                 )
                 FeatureToggleRow(
                     label = "Echo cancellation",
-                    description = "Stops the room from hearing itself when you use speakers. " +
-                        "Safe to turn off with a headset.",
+                    description = "Prevents echo when using speakers. Not needed with headphones.",
                     enabled = mic.echoCancellation,
                     onChange = { uiSettings.setMicProcessing(mic.copy(echoCancellation = it)) },
                 )
                 FeatureToggleRow(
                     label = "Auto gain",
-                    description = "Evens out your level so whispers and shouts arrive alike. " +
-                        "Turn it off for a mic you have already set up, or for music.",
+                    description = "Keeps your volume steady. Turn off for a tuned mic or music.",
                     enabled = mic.autoGainControl,
                     onChange = { uiSettings.setMicProcessing(mic.copy(autoGainControl = it)) },
                 )
