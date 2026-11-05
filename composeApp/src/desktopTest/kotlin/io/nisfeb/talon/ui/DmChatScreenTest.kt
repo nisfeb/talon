@@ -48,6 +48,7 @@ import kotlin.test.Test
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import io.ktor.client.engine.mock.respond
 import androidx.compose.runtime.getValue
@@ -77,6 +78,7 @@ class DmChatScreenTest {
         host: Host = Host(whom),
         drafts: DraftStore = InMemoryDraftStore(),
         ai: io.nisfeb.talon.ai.AiSettingsRepository = FakeAiSettings(),
+        ui: io.nisfeb.talon.ui.UiSettings = InMemoryUiSettings(),
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -100,7 +102,7 @@ class DmChatScreenTest {
                     TalonTheme(darkTheme = false) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
-                            aiSettings = ai, uiSettings = InMemoryUiSettings(),
+                            aiSettings = ai, uiSettings = ui,
                             ourPatp = "~zod", whom = host.whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
@@ -201,6 +203,30 @@ class DmChatScreenTest {
     }) { _, _ ->
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("No messages yet").fetchSemanticsNodes().isNotEmpty() }
         onAllNodesWithText("Messages could not be loaded").assertCountEquals(0)
+    }
+
+    // sneagan, 2026-11-05: "the chat view should be a setting because I
+    // don't like bubble chats even though many people do". Bubbles: ours
+    // on the right with no byline. Rows: every message on the left under
+    // its author's byline. The choice switches an open conversation.
+    @Test
+    fun `bubbles put ours on the right, and rows put every message on the left under its byline`() {
+        val ui = InMemoryUiSettings()
+        chat(seed = { messages().upsertAll(listOf(msg("~bus/170141184501", "~bus", "from them", 1_000), msg("~zod/170141184502", "~zod", "from me", 2_000))) }, ui = ui) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from me").fetchSemanticsNodes().isNotEmpty() }
+            fun left(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.left
+            fun bylined() = onAllNodesWithText("~zod", substring = true).fetchSemanticsNodes().isNotEmpty()
+            assertTrue(ui.chatBubbles.value, "bubbles unless chosen otherwise")
+            assertTrue(left("from me") > left("from them") + 200f, "ours sits on the right")
+            assertFalse(bylined(), "and carries no byline")
+            ui.setChatBubbles(false)
+            waitForIdle()
+            assertEquals(left("from them"), left("from me"), "rows put both on the left")
+            assertTrue(bylined(), "ours under its byline")
+            ui.setChatBubbles(true)
+            waitForIdle()
+            assertTrue(left("from me") > left("from them") + 200f, "and back")
+        }
     }
 
     @Test

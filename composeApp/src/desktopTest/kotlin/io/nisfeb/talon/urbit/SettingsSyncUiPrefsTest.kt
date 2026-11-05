@@ -25,6 +25,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -105,6 +106,30 @@ class SettingsSyncUiPrefsTest {
         ui.setPowerFeaturesEnabled(ui.powerFeaturesEnabled.value)
         delay(300)
         assertEquals(sent, pushed("power-features").size, "the same value again is not a change")
+    }
+
+    // Bubbles or rows is a taste, not a screen size, so it travels. The
+    // body is %settings' own: the value a cord of JSON, as Tlon writes it.
+    @Test
+    fun `rows chosen here go up as the ship's own body`() = live {
+        watching()
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"chat-bubbles","value":"{\"enabled\":false}"}}""",
+            pushed("chat-bubbles").single(),
+        )
+    }
+
+    @Test
+    fun `rows chosen on another device are taken here and not sent back`() = live {
+        watching()
+        arrives("chat-bubbles", """{"enabled":false}""")
+        settled { !ui.chatBubbles.value }
+        arrives("chat-bubbles", """{"enabled":"yes"}""")
+        delay(300)
+        assertFalse(ui.chatBubbles.value, "nonsense changes nothing")
+        assertTrue(pushed("chat-bubbles").isEmpty(), "applying is not an edit: ${pushed("chat-bubbles")}")
     }
 
     // ─── fonts ────────────────────────────────────────────────────

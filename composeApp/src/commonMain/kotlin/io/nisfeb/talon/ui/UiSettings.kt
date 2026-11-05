@@ -14,6 +14,14 @@ interface UiSettings {
     fun setHideComposerButtons(hidden: Boolean)
 
     /**
+     * A conversation's messages as bubbles (ours on the right, theirs on
+     * the left), or as rows: each on the left under its author's name and
+     * time. A taste rather than a screen size, so it syncs.
+     */
+    val chatBubbles: StateFlow<Boolean>
+    fun setChatBubbles(on: Boolean)
+
+    /**
      * Theme accent color preferences. The effective tint that drives
      * every primary-colored UI element (send icon, focus rings, ship
      * pip, FilterChip selected state, etc) is derived from this plus
@@ -305,6 +313,12 @@ class InMemoryUiSettings(
         _hideComposerButtons.asStateFlow()
     override fun setHideComposerButtons(hidden: Boolean) {
         _hideComposerButtons.value = hidden
+    }
+
+    private val _chatBubbles = MutableStateFlow(true)
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+    override fun setChatBubbles(on: Boolean) {
+        _chatBubbles.value = on
     }
 
     private val _accentSettings = MutableStateFlow(initialAccent)

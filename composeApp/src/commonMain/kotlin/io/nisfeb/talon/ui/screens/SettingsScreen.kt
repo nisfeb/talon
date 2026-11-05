@@ -165,6 +165,7 @@ fun SettingsScreen(
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
+    val chatBubbles by uiSettings.chatBubbles.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -779,6 +780,30 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Chats) {
+            Text(
+                "Messages",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "Bubbles put yours on the right and theirs on the left. Rows put every message " +
+                    "on the left under its author's name and time.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = chatBubbles,
+                    onClick = { uiSettings.setChatBubbles(true) },
+                    label = { Text("Bubbles") },
+                )
+                FilterChip(
+                    selected = !chatBubbles,
+                    onClick = { uiSettings.setChatBubbles(false) },
+                    label = { Text("Rows") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
             Text(
                 "Composer",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),

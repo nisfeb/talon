@@ -69,6 +69,9 @@ class AndroidUiSettings(
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
 
+    private val _chatBubbles = MutableStateFlow(prefs.getBoolean(KEY_CHAT_BUBBLES, true))
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+
     private val _accentSettings = MutableStateFlow(loadAccent())
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
@@ -264,6 +267,12 @@ class AndroidUiSettings(
         _hideComposerButtons.value = hidden
     }
 
+    override fun setChatBubbles(on: Boolean) {
+        if (_chatBubbles.value == on) return
+        prefs.edit().putBoolean(KEY_CHAT_BUBBLES, on).apply()
+        _chatBubbles.value = on
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         prefs.edit().apply {
@@ -402,6 +411,7 @@ class AndroidUiSettings(
 
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
+        private const val KEY_CHAT_BUBBLES = "chat_bubbles"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"

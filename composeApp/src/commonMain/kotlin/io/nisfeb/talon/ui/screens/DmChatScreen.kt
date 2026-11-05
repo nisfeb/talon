@@ -245,6 +245,7 @@ fun DmChatScreen(
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
+    val chatBubbles by uiSettings.chatBubbles.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient(io.nisfeb.talon.ai.AiFeature.CatchUp) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
@@ -1262,6 +1263,7 @@ fun DmChatScreen(
                             onImageTap = currentOnOpenImage,
                             onAvatarTap = onAvatarTap,
                             flashAmber = item.row.m.id == flashMessageId,
+                            bubbles = chatBubbles,
                         )
                     }
                 }
@@ -1681,6 +1683,8 @@ private fun MessageRow(
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
     flashAmber: Boolean = false,
+    /** Bubbles, or the classic rows: [io.nisfeb.talon.ui.UiSettings.chatBubbles]. */
+    bubbles: Boolean = true,
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
@@ -1774,14 +1778,23 @@ private fun MessageRow(
                     )
                 } else Modifier,
             )
-            .padding(top = if (row.showHeader) 10.dp else 2.dp, start = 8.dp, end = 8.dp),
-        // A blend of the big messengers' shared shape: yours on the right
+            .then(
+                if (bubbles) Modifier.padding(top = if (row.showHeader) 10.dp else 2.dp, start = 8.dp, end = 8.dp)
+                else Modifier.padding(top = if (row.showHeader) 12.dp else 2.dp),
+            ),
+        // Bubbles blend the big messengers' shared shape: ours on the right
         // in a soft accent bubble, theirs on the left in grey with the
         // avatar beside the first of a run, the time inside the bubble.
-        horizontalArrangement = if (mine) Arrangement.End else Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Bottom,
+        // Rows put every message on the left under its author and time.
+        horizontalArrangement = when {
+            !bubbles -> Arrangement.spacedBy(10.dp)
+            mine -> Arrangement.End
+            else -> Arrangement.spacedBy(8.dp)
+        },
+        verticalAlignment = if (bubbles) Alignment.Bottom else Alignment.Top,
     ) {
-        if (!mine) {
+        val onRight = bubbles && mine
+        if (!onRight) {
             if (row.showHeader) {
                 Avatar(
                     label = authorLabel,
@@ -1794,67 +1807,94 @@ private fun MessageRow(
                 Spacer(Modifier.width(AVATAR_SIZE))
             }
         }
-        if (mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
+        if (onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
         Column(
-            modifier = Modifier.weight(1f, fill = false).widthIn(max = 560.dp),
-            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+            modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
+            horizontalAlignment = if (onRight) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            val corner = 18.dp
-            val tail = 6.dp
-            androidx.compose.material3.Surface(
-                color = if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                    else MaterialTheme.colorScheme.surfaceVariant,
-                shape = if (mine) RoundedCornerShape(corner, corner, tail, corner)
-                    else RoundedCornerShape(corner, corner, corner, tail),
-            ) {
-                Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 5.dp)) {
-                    // Their name opens the first bubble of a run in a group;
-                    // a DM has only one other person, and yours need none.
-                    if (!mine && row.showHeader && !io.nisfeb.talon.urbit.isDirect(m.whom)) {
-                        Text(
-                            contactMap.byline(m.author, authorLabel, "").removeSuffix(" · "),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 2.dp),
-                        )
-                    }
+            val body: @Composable () -> Unit = {
+                StoryRenderer(
+                    parts = parts,
+                    onMentionTap = onMentionTap,
+                    onLinkTap = onLinkTap,
+                    onImageTap = onImageTap,
+                    reactions = row.reactions,
+                    ourPatp = ourPatp,
+                    // A poll the ship has not taken yet has no post to vote on.
+                    onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
+                    // Touch only: tapping the message text (off any link) opens
+                    // the action menu — same as tapping the row background. Null
+                    // on desktop so a left-press-drag in text selects rather than
+                    // opening the menu (right-click opens it instead).
+                    onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
+                )
+            }
             // Only a post that could run long is measured for a fold.
-                    val body: @Composable () -> Unit = {
-                    StoryRenderer(
-                        parts = parts,
-                        onMentionTap = onMentionTap,
-                        onLinkTap = onLinkTap,
-                        onImageTap = onImageTap,
-                        reactions = row.reactions,
-                        ourPatp = ourPatp,
-                        // A poll the ship has not taken yet has no post to vote on.
-                        onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
-                        // Touch only: tapping the message text (off any link) opens
-                        // the action menu — same as tapping the row background. Null
-                        // on desktop so a left-press-drag in text selects rather than
-                        // opening the menu (right-click opens it instead).
-                        onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
-                    )
+            val folded: @Composable () -> Unit = {
+                if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                    io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+                } else body()
+            }
+            if (bubbles) {
+                val corner = 18.dp
+                val tail = 6.dp
+                androidx.compose.material3.Surface(
+                    color = if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    shape = if (mine) RoundedCornerShape(corner, corner, tail, corner)
+                        else RoundedCornerShape(corner, corner, corner, tail),
+                ) {
+                    Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 5.dp)) {
+                        // Their name opens the first bubble of a run in a group;
+                        // a DM has only one other person, and ours need none.
+                        if (!mine && row.showHeader && !io.nisfeb.talon.urbit.isDirect(m.whom)) {
+                            Text(
+                                contactMap.byline(m.author, authorLabel, "").removeSuffix(" · "),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 2.dp),
+                            )
+                        }
+                        folded()
+                        // The time inside the bubble, at its foot, with the
+                        // send state beside it.
+                        Row(
+                            modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                clock,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (m.status == "pending") SendingIcon()
+                        }
                     }
-                    if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
-                        io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
-                    } else body()
-                    // The time inside the bubble, at its foot, with the
-                    // send state beside it.
+                }
+            } else {
+                if (row.showHeader) {
                     Row(
-                        modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
-                            clock,
+                            contactMap.byline(m.author, authorLabel, stamp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // Send-state indicator. status is set only on our own
+                        // outgoing messages (see TlonChatRepo.postContent /
+                        // reply), DMs included: they are "pending" until the
+                        // ship acks them, so a send cut off is requeued. "failed"
+                        // renders below the body instead — grouped rows
+                        // (a burst of your own sends) have no header, and
+                        // a failed send must never be invisible.
                         if (m.status == "pending") SendingIcon()
                     }
                 }
+                folded()
             }
             SendStateNote(m.status)
             val firstLink = remember(parts) { firstLinkUrl(parts) }
@@ -1938,7 +1978,7 @@ private fun MessageRow(
                 actionMenu()
             }
         }
-        if (!mine) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
+        if (!onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
     }
 }
 

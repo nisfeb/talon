@@ -64,6 +64,15 @@ class DesktopUiSettingsTest {
     }
 
     @Test
+    fun `rows instead of bubbles persist and survive reload, and bubbles are the default`() {
+        assertTrue(newStore().chatBubbles.value)
+        newStore().setChatBubbles(true)
+        assertFalse(file.exists(), "the default again touches nothing")
+        newStore().setChatBubbles(false)
+        assertFalse(newStore().chatBubbles.value)
+    }
+
+    @Test
     fun `corrupt JSON falls back to default`() {
         file.writeText("not json")
         val store = newStore()

@@ -205,6 +205,12 @@ class SettingsScreenTest {
         val before = ui.swipeQuotes.value
         tap(if (before) "Replies in its thread" else "Quotes it")
         assertEquals(!before, ui.swipeQuotes.value)
+
+        assertTrue(ui.chatBubbles.value)
+        tap("Rows")
+        assertFalse(ui.chatBubbles.value)
+        tap("Bubbles")
+        assertTrue(ui.chatBubbles.value)
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
