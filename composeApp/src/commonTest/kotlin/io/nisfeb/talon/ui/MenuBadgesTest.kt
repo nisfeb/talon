@@ -17,11 +17,20 @@ class MenuBadgesTest {
             MenuBadges(statusesFresh = true) to RailItem.Statuses,
             MenuBadges(invitesPending = true) to RailItem.Invites,
             MenuBadges(assistantNews = true) to RailItem.Assistant,
-            MenuBadges(threadsUnread = true) to RailItem.Chats,
             MenuBadges(noticesUnread = true) to RailItem.Activity,
         )) {
             assertEquals(setOf(own), RailItem.entries.filter(b::forItem).toSet(), "$b")
         }
+    }
+
+    @Test
+    fun `the Chats icon never shows a dot`() {
+        val all = MenuBadges(
+            statusesFresh = true, invitesPending = true, calendarOffers = true, actionsWaiting = true,
+            mailUnread = true, assistantNews = true, threadsUnread = true, noticesUnread = true,
+        )
+        assertEquals(false, all.forItem(RailItem.Chats))
+        assertEquals(false, all.byItem()[RailItem.Chats])
     }
 
     @Test

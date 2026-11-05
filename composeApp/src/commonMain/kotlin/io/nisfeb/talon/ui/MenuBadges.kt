@@ -42,7 +42,9 @@ data class MenuBadges(
         RailItem.Mail -> mailUnread
         RailItem.Assistant -> assistantNews
         RailItem.Activity -> noticesUnread
-        RailItem.Chats -> threadsUnread
+        // Chats never carries a dot: unread chats and followed threads
+        // show their counts in the chat list itself (the Threads tab).
+        RailItem.Chats -> false
         else -> false
     }
 
