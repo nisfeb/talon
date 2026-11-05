@@ -40,9 +40,10 @@ fun groundwireInviteMessage(ship: String, name: String? = null, installUrl: Stri
     return buildString {
         append(hello)
         append("I'm on Groundwire, a private messenger where your messages live on a server you own. Come chat with me there.\n\n")
-        append("1. Get Groundwire: ").append(installUrl).append('\n')
-        append("2. Add me: ").append(ship).append('\n')
-        append("   Or open this once it's installed: ").append(TalonLink.forInviteMe(ship))
+        append("1. Get Groundwire: ").append(installUrl).append(" (on iPhone, it is Talon on the App Store)\n")
+        // Only the ship: no system registers the app's talon:// links, so
+        // tapped in the friend's messages app one opened nothing.
+        append("2. Add me: ").append(ship)
     }
 }
 

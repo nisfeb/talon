@@ -193,10 +193,6 @@ fun DmListScreen(
      *  leak its left-translated closed-state over the rail. Default
      *  no-op for tests / hosts that don't wire a switcher. */
     onOpenShipSwitcher: () -> Unit = {},
-    /** The folder tabs (new folder, Unread, All, the user's folders).
-     *  The app shells pass false for now: the row is hidden and the list
-     *  stays on All. Tests keep the default to exercise folders. */
-    showFolderTabs: Boolean = true,
     /** Optional slot for the platform-specific battery-exemption nudge
      *  banner. Android wires it to a real Composable; desktop (and
      *  tests) leave it null. Replaces the previous expect/actual
@@ -387,17 +383,9 @@ fun DmListScreen(
             else snap.selectedHomeTab
         )
     }
-    // With the folder tabs hidden, nothing could leave a folder or the
-    // Unread view, so the list is held on All.
-    LaunchedEffect(showFolderTabs) {
-        if (!showFolderTabs) {
-            selectedFolderId = null
-            selectedSpecial = SpecialTab.All
-        }
-    }
     LaunchedEffect(folders) {
         if (!initialTabApplied) {
-            if (showFolderTabs && folders.isNotEmpty()) {
+            if (folders.isNotEmpty()) {
                 selectedFolderId = folders.first().id
             }
             initialTabApplied = true
@@ -859,6 +847,13 @@ fun DmListScreen(
                     )
                 }
             } else {
+                // A phone has no More menu, where reordering moved: its
+                // way in sits beside the pencil, ungated as the pencil was.
+                if (io.nisfeb.talon.ui.isDrawerNavigation) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Reorder", onClick = { editMode = true }) {
+                        Icon(io.nisfeb.talon.ui.icons.TalonIcons.DragHandle, contentDescription = "Reorder")
+                    }
+                }
                 io.nisfeb.talon.ui.IconButton(tip = "New chat or group", onClick = onNewMessage) {
                     Box(
                         contentAlignment = Alignment.Center,
@@ -1135,13 +1130,17 @@ fun DmListScreen(
         // Message search, as a small rounded bar at the top of the list:
         // the first letter typed opens the results with it, and emptying
         // them comes back here.
-        var searchText by remember { mutableStateOf("") }
+        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
         OutlinedTextField(
             value = searchText,
             onValueChange = { typed ->
-                if (typed.isNotBlank()) {
-                    SearchDraft.query = typed
-                    searchText = ""
+                // An input method's word goes over once it is committed:
+                // handed over while composing, its first keystroke went
+                // raw ("n" for に, a lone jamo) and the rest was lost.
+                if (typed.composition == null && typed.text.isNotBlank()) {
+                    SearchDraft.query = typed.text
+                    SearchDraft.fromBar = true
+                    searchText = androidx.compose.ui.text.input.TextFieldValue()
                     onOpenSearch()
                 } else searchText = typed
             },
@@ -1171,7 +1170,7 @@ fun DmListScreen(
         val totalMentions = remember(mentionUnreads) {
             mentionUnreads.sumOf { it.notifyCount }
         }
-        if (showFolderTabs) FolderTabs(
+        FolderTabs(
             folders = folders,
             selectedFolderId = selectedFolderId,
             selectedSpecial = selectedSpecial,
@@ -2472,7 +2471,8 @@ private fun ConversationRow(
             label = title,
             url = contactMap.conversationAvatar(m.whom),
             colorHex = contactMap.conversationColor(m.whom),
-            size = maxOf(density.listAvatarSize, 48.dp),
+            // The density setting's size, as the group rows take it.
+            size = density.listAvatarSize,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -2482,15 +2482,23 @@ private fun ConversationRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                    modifier = Modifier.weight(1f, fill = false),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                ChannelTypeBadge(m.whom)
-                Spacer(Modifier.weight(1f))
+                // The name and its badge take all the room the time leaves:
+                // two weights side by side split it, and cut a long name at
+                // half the row while the time floated.
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    ChannelTypeBadge(m.whom)
+                }
                 Text(
                     timestamp,
                     style = MaterialTheme.typography.labelSmall,

@@ -64,6 +64,7 @@ class SettingsScreenTest {
         ai: FakeAiSettings = FakeAiSettings(),
         fontRepo: FontRepo? = null,
         allGroups: (suspend (String) -> Int)? = null,
+        startOnLocalShip: Boolean = false,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -82,6 +83,7 @@ class SettingsScreenTest {
                         notificationHealth = health, systemNotificationProbe = probe, callController = calls,
                         homePinCandidates = pinCandidates,
                         onSetAllGroupsNotify = allGroups,
+                        startOnLocalShip = startOnLocalShip,
                     )
                 }
             }
@@ -185,6 +187,13 @@ class SettingsScreenTest {
         waitForIdle()
         assertEquals(listOf(true), patpChanges)
         switchBeside("Always show ~ship names").assertIsOn()
+    }
+
+    // The local comet's Terminal link opened the Urbit tab once the comet
+    // moved to Experimental, and that tab holds only the Login QR row.
+    @Test
+    fun `the way in to the local ship opens the tab it lives on`() = settings(startOnLocalShip = true) {
+        assertTrue(shows("Power features"), "Experimental is open")
     }
 
     @Test

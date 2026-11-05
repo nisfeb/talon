@@ -44,7 +44,7 @@ The architecture is server-relay-plus-distributor: your ship's chat events flow 
 
 2. **Open ntfy once**, tap the ⋮ menu → Settings → scroll to the **UnifiedPush** section → confirm the toggle is on. Default server is `ntfy.sh`; leave that for now unless you self-host an ntfy server.
 
-3. **In Talon**: Settings → Notifications → **Push relay** section.
+3. **In Talon**: Settings → Notifications → **Background delivery** section.
    - Endpoint: `https://relay.nisfeb.com` (the relay I run; see below to self-host instead)
    - Tap **Save endpoint**, then **Register this device** → paste your ship's `+code` → Register
    - Status should jump to `Registered (deviceId=…)` within a second
@@ -158,7 +158,7 @@ curl https://relay.example.com/
 # {"relay":"talon","status":"ok"}
 ```
 
-In Talon: Settings → Notifications → Push relay → set Endpoint to `https://relay.example.com` → Save → Register → paste `+code`.
+In Talon: Settings → Notifications → Background delivery → set Endpoint to `https://relay.example.com` → Save → Register → paste `+code`.
 
 `sudo journalctl -u talon-relay -f` shows live registration / push activity. `sudo journalctl -u talon-relay | grep "push whom"` is the "how often is this thing actually pushing" view.
 

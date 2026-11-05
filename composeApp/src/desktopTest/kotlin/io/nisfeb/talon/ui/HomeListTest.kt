@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.swipeUp
@@ -203,7 +204,8 @@ class HomeListTest {
         unreads().upsert(UnreadEntity("~bus", count = 7, notifyCount = 0, recencyMs = 1_000))
     }) {
         tap("DMs · 7") // the tab carries the count
-        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasText("hello?") and hasText("7")).fetchSemanticsNodes().isNotEmpty() }
+        // The bubble says its count once, as "7 unread", not its text again.
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasText("hello?") and hasContentDescription("7 unread")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -215,7 +217,7 @@ class HomeListTest {
     }) {
         tap("DMs · 2")
         shows("all caught up")
-        onAllNodes(hasText("all caught up") and hasText("2")).assertCountEquals(0)
+        onAllNodes(hasText("all caught up") and hasContentDescription("unread", substring = true)).assertCountEquals(0)
         tap("Unread", substring = true)
         shows("waiting on you")
         onAllNodesWithText("all caught up").assertCountEquals(0)
@@ -411,9 +413,9 @@ class HomeListTest {
         onAllNodesWithText("nothing about you", substring = true).assertCountEquals(0)
         onAllNodesWithText("dm for ~zod", substring = true).assertCountEquals(0)
         // Nothing cached for the channel: a row made from what is known of it.
-        val placeholder = onAllNodes(hasText("general", substring = true) and hasText("2")).fetchSemanticsNodes()
+        val placeholder = onAllNodes(hasText("general", substring = true) and hasContentDescription("2 unread")).fetchSemanticsNodes()
         assertTrue(placeholder.isNotEmpty(), "the channel's mention is listed with its count")
-        onAllNodes(hasText("general", substring = true) and hasText("2"))[0].performClick()
+        onAllNodes(hasText("general", substring = true) and hasContentDescription("2 unread"))[0].performClick()
         waitForIdle()
         assertEquals(listOf("chat/~nec/general"), opened)
     }

@@ -157,7 +157,7 @@ class AppsSettingsScreenTest {
             row("Orrery", "not installed")
             onNodeWithText("Install").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Added Orrery to your Grubbery shell.") }
-            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under AI.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under Assistant.") }
             assertTrue("add orrery" in did)
         }
     }
@@ -207,7 +207,7 @@ class AppsSettingsScreenTest {
             Result.success(Unit)
         }) {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Make a new key").fetchSemanticsNodes().isNotEmpty() }
-            onNodeWithText("Lattice refused Groundwire's key", substring = true).assertExists()
+            onNodeWithText("Lattice refused this app's key", substring = true).assertExists()
             onNodeWithText("Make a new key").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Made a new key. The assistants remember again.").fetchSemanticsNodes().isNotEmpty() }
             assertEquals(listOf("renew"), did.filter { it == "renew" })

@@ -149,8 +149,8 @@ fun SettingsScreen(
     onOpenLoops: () -> Unit = {},
     /** The comet Talon runs on this computer; Noop where unsupported. */
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
-    /** Open on the Account tab, where the local ship and its dojo live. */
-    startOnAccount: Boolean = false,
+    /** Open on the Experimental tab, where the local ship and its dojo live. */
+    startOnLocalShip: Boolean = false,
     /** Open on the AI tab: the way in from a failure the balance caused. */
     startOnAi: Boolean = false,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
@@ -232,7 +232,7 @@ fun SettingsScreen(
         var tab by remember {
             mutableStateOf(
                 when {
-                    startOnAccount -> SettingsTab.Account
+                    startOnLocalShip -> SettingsTab.Experimental
                     startOnAi -> SettingsTab.Ai
                     else -> SettingsTab.Appearance
                 },
@@ -673,7 +673,7 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "The hour reads as set under Appearance, Time. The place the dial uses is set on the dial itself.",
+                "The hour reads as set under General, Time. The place the dial uses is set on the dial itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),

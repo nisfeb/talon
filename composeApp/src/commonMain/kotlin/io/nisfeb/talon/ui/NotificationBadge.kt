@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +27,9 @@ import androidx.compose.ui.unit.sp
  * it, "99+" past 99. One look in light and dark, and in every theme, so
  * it never reads as the accent.
  */
-val NotificationRed = Color(0xFFE5484D)
+// #DC2626: white on it is 4.8:1, past AA for the bubble's small bold
+// count; #E5484D was 3.9:1.
+val NotificationRed = Color(0xFFDC2626)
 
 /** The text a bubble shows for [count]: the number, or "99+" past 99. */
 fun notificationBadgeLabel(count: Int): String = if (count > 99) "99+" else count.toString()
@@ -43,7 +46,8 @@ fun NotificationBadge(count: Int, modifier: Modifier = Modifier) {
             .clip(RoundedCornerShape(10.dp))
             .background(NotificationRed)
             .padding(horizontal = 6.dp)
-            .semantics { contentDescription = "$label unread" },
+            // The count once: the text inside is not read again after it.
+            .clearAndSetSemantics { contentDescription = "$label unread" },
     ) {
         Text(
             label,

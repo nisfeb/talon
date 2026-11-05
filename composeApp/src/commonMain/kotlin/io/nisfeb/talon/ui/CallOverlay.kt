@@ -235,7 +235,9 @@ fun CallStrip(
 
         is CallUiState.Ended -> {
             CallEndedPill(
-                text = "Call ended · ${nameFor(s.peer)} ${s.reason}",
+                // The reason after a colon, not after their name: "Bus hung up"
+                // blamed them for the owner's own hang-up or decline.
+                text = "Call with ${nameFor(s.peer)} ended: ${s.reason}",
                 onDismiss = { controller.dismissEnded() },
                 modifier = modifier,
             )
@@ -712,13 +714,15 @@ private fun RoundAction(
             // the call UI is redesigned, at which point this should come
             // back as a deliberate key binding rather than whatever the
             // focus order happened to be.
-            modifier = Modifier.size(56.dp).focusProperties { canFocus = false },
+            // Normal sizes on a desktop card; a phone's ring keeps a big
+            // target for a thumb answering in a hurry.
+            modifier = Modifier.size(if (io.nisfeb.talon.ui.isTouchPrimary) 72.dp else 56.dp).focusProperties { canFocus = false },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = container,
                 contentColor = content,
             ),
         ) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
+            Icon(icon, contentDescription = label, modifier = Modifier.size(if (io.nisfeb.talon.ui.isTouchPrimary) 32.dp else 24.dp))
         }
         if (showLabel) Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
     }

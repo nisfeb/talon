@@ -35,7 +35,7 @@ internal fun NotifyRulesSection(
     var busy by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("What notifies you", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-        RuleLine("Direct messages", "Always.")
+        RuleLine("Direct messages", "Always, unless you mute one.")
         RuleLine("Groups", "When you are mentioned, unless you choose otherwise for a group or a chat.")
         RuleLine("Replies to you", "Always, in any chat that is not off.")
         RuleLine("Calls", "Ring on this device. See Calls for when they can reach you with the app closed.")
@@ -58,9 +58,9 @@ internal fun NotifyRulesSection(
                                 runCatching { onSetAllGroups(level) }
                                     .onSuccess { n ->
                                         picked = level
-                                        note = if (n == 1) "Set for 1 group." else "Set for $n groups."
+                                        note = everyGroupNote(n)
                                     }
-                                    .onFailure { note = "Couldn't save that: ${it.message ?: "the ship did not answer"}" }
+                                    .onFailure { note = "Couldn't set them on this device." }
                                 busy = false
                             }
                         },
@@ -71,6 +71,13 @@ internal fun NotifyRulesSection(
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
         }
     }
+}
+
+/** What setting every group at once did: groups already there are not counted, and a chat's own level stands. */
+internal fun everyGroupNote(changed: Int): String = when (changed) {
+    0 -> "Every group is already set to that."
+    1 -> "Set for 1 group. A chat with a level of its own keeps it."
+    else -> "Set for $changed groups. A chat with a level of its own keeps it."
 }
 
 @Composable

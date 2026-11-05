@@ -11,7 +11,8 @@ class InviteFriendTest {
         val m = groundwireInviteMessage("~sampel-palnet", installUrl = "https://example.test/get")
         assertTrue("https://example.test/get" in m, m)
         assertTrue("Add me: ~sampel-palnet" in m, m)
-        assertTrue("talon://invite/~sampel-palnet" in m, m)
+        assertTrue("App Store" in m, "an iPhone gets it from the store, not the downloads page: $m")
+        assertFalse("talon://" in m, "a link no messages app can open is not sent: $m")
         assertTrue("Groundwire" in m, m)
     }
 

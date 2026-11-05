@@ -184,12 +184,15 @@ class OrrerySwitchTest {
     fun `off until turned on, what it is is said, and none of it shows`() = page(orrery = null) { _, _, _ ->
         assertTrue(shows("Enable Groundwire Assistant"))
         assertTrue(shows("A private notebook about your life"))
-        // The long account is folded away until asked for.
-        assertTrue(!shows("every direct message unless you pick which ones"))
-        onNodeWithText("What it reads and keeps", substring = true).performClick()
-        // What turning it on allows, as orrery 58 reads: every DM by default.
-        waitUntil(timeoutMillis = 5_000) { shows("every direct message unless you pick which ones") }
+        // What turning it on allows, as orrery 58 reads: every DM by
+        // default. Said before the button, not folded under it.
+        assertTrue(shows("every direct message unless you pick which ones"))
         assertTrue(shows("Turning it off stops all of it"))
+        assertTrue(
+            onNodeWithText("every direct message unless you pick which ones", substring = true).fetchSemanticsNode().boundsInRoot.top <
+                onNodeWithText("Enable Groundwire Assistant").fetchSemanticsNode().boundsInRoot.top,
+            "consent comes before the button",
+        )
         assertTrue(!shows("Read calls and status lines"), "no settings while it is off")
         assertTrue("preferences" !in reads, "nor are the owner's preferences asked for")
     }
@@ -205,13 +208,13 @@ class OrrerySwitchTest {
     @Test
     fun `turned off, it asks, stops the ship's own work, and gives this device's key back`() = page(orrery = true) { ai, _, db ->
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Keep it on").performClick()
         waitForIdle()
         assertEquals(true, ai.state.value.savedProfile?.orrery, "kept")
 
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Turn off").performClick()
         waitUntil(timeoutMillis = 10_000) { ai.state.value.savedProfile?.orrery == false }
         // Exactly these: orrery merges a partial body into what it has, so
@@ -229,7 +232,7 @@ class OrrerySwitchTest {
     fun `a reader the ship does not stop is said, and Orrery is off here anyway`() = page(orrery = true) { ai, _, db ->
         refused = setOf("chat")
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Turn off").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("did not confirm it stopped reading your chats") }
         assertEquals(false, ai.state.value.savedProfile?.orrery)

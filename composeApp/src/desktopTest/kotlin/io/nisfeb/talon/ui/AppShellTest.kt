@@ -390,8 +390,11 @@ class AppShellTest {
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
         // The chat's composer: the list's search bar is a text field too.
-        onAllNodes(hasSetTextAction()).onLast().performClick() // typing in the chat
-        onAllNodes(hasSetTextAction()).onLast().performKeyInput { pressKey(Key.Escape) }
+        // The chat's composer, by what it is, not where it sits: the
+        // list's search bar is a text field too.
+        val composer = hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")
+        onNode(composer).performClick() // typing in the chat
+        onNode(composer).performKeyInput { pressKey(Key.Escape) }
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
@@ -588,7 +591,9 @@ class AppShellTest {
     @Test
     fun `with no rail the More menu opens Home`() = app(width = 600.dp) {
         onNodeWithContentDescription("More").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        // An entry only the open menu has: "Sign out of" is in the ship
+        // switcher, which is composed while closed, so it proved nothing.
+        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
         assertTrue(!showing("Orrery"), "Orrery is off")
         onNodeWithText("Home").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
@@ -599,7 +604,9 @@ class AppShellTest {
     @Test
     fun `with the rail the More menu has no second Home`() = app {
         onNodeWithContentDescription("More").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        // An entry only the open menu has: "Sign out of" is in the ship
+        // switcher, which is composed while closed, so it proved nothing.
+        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
         assertTrue(onAllNodesWithText("Home").fetchSemanticsNodes().isEmpty())
     }
 
@@ -1906,12 +1913,20 @@ class AppShellTest {
 
     private val quickSync = io.nisfeb.talon.ui.SyncThresholds(heardRecentlyMs = 3_000, connectGraceMs = 2_000)
 
+    /** The header's sync mark, by any of its headlines. It goes only when
+     *  the ship is connected, synced and nothing waits to go out, so its
+     *  absence is that state, not merely the absence of a problem. */
+    private fun ComposeUiTest.syncMarkShown() =
+        listOf("Signed out of ~zod", "Connecting to ~zod", "Syncing with ~zod", "Sending ", "Can't reach ~zod")
+            .any { onAllNodesWithContentDescription(it, substring = true).fetchSemanticsNodes().isNotEmpty() }
+
     @Test
     fun `the header says nothing while the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
         home()
+        waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
         Thread.sleep(4_000)
         waitForIdle()
-        assertTrue(!showing("Can't reach") && !present("Connected to ~zod"), "the heartbeat keeps it connected on a quiet ship, and all well shows no mark")
+        assertTrue(!showing("Can't reach") && !syncMarkShown(), "the heartbeat keeps it connected on a quiet ship, and all well shows no mark")
         // The network goes: the stream drops and every new one is refused.
         ship.refuseStream = true
         kotlinx.coroutines.runBlocking { ship.endStreams() }
@@ -1921,7 +1936,8 @@ class AppShellTest {
         // Back, and asked at once.
         ship.refuseStream = false
         onNodeWithText("Try now").performClick()
-        waitUntil(timeoutMillis = 10_000) { !showing("Can't reach") && !present("Can't reach ~zod since") }
+        // Back to connected and synced, not only out of the banner.
+        waitUntil(timeoutMillis = 10_000) { !showing("Can't reach") && !syncMarkShown() }
     }
 
     // The reporter's case, as far as the code shows one: the ship refused
@@ -1932,6 +1948,8 @@ class AppShellTest {
         val store = twoShips()
         app(sessions = { store }, sync = quickSync, setup = { heartbeat(500) }) { ship ->
             home()
+            // Connected first: the reporter's login lapsed after it was.
+            waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
             ship.signedOut = true
             kotlinx.coroutines.runBlocking { ship.endStreams() }
             waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
@@ -1947,9 +1965,10 @@ class AppShellTest {
     @Test
     fun `while all is well there is no banner and no mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
         home()
+        waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
         Thread.sleep(4_000)
         waitForIdle()
-        assertTrue(!showing("Can't reach") && !showing("Signed out of") && !present("Connected to ~zod"))
+        assertTrue(!showing("Can't reach") && !showing("Signed out of") && !syncMarkShown())
     }
 
     // ---- A 1:1 call's meeting view, cameras and share: what party lines had (sneagan, 2026-10-29) ----

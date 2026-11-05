@@ -5152,6 +5152,29 @@ class TlonChatRepo(
         (settingsSync as? SettingsSyncImpl)?.levelMirror = { whom, level -> mirrorLevel(whom, level) }
     }
 
+    private val everyGroupLevel = Mutex()
+
+    /**
+     * Every joined group's notification level set to [level] at once, each
+     * synced and told to %activity as a group's own is. A group already
+     * there, the default included, is skipped: the same tap again sends
+     * nothing, and a ship with sixty groups is asked only for those that
+     * change. On the repo's scope, so leaving Settings midway still sets
+     * them all, and one batch at a time. Channels with a level of their own
+     * keep it. Answers how many groups changed.
+     */
+    suspend fun setEveryGroupLevel(level: String): Int = carry {
+        everyGroupLevel.withLock {
+            val sync = settingsSync ?: error("settings do not sync on this device")
+            val levels = db.notifyPrefs().all().associate { it.whom to it.level }
+            val changing = db.groups().allGroups()
+                .map { io.nisfeb.talon.data.groupLevelKey(it.flag) }
+                .filter { (levels[it] ?: io.nisfeb.talon.data.NotifyLevel.DEFAULT) != level }
+            changing.forEach { sync.setNotifyLevel(it, level) }
+            changing.size
+        }
+    }
+
     /**
      * A Talon level, told to %activity as Tlon's client tells it
      * ([ActivityLevels]): a channel's or a group's, or null where the

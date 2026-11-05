@@ -883,11 +883,11 @@ private fun ThreadMessage(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 // Narrower, and set off from the chat behind it: its own
-                // raised colour and a hairline edge.
-                modifier = Modifier
-                    .widthIn(min = 200.dp, max = 260.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                // raised colour and a hairline edge, as the menu's own (on
+                // its inner column they lost the menu's rounded corners).
+                modifier = Modifier.widthIn(min = 200.dp, max = 260.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }

@@ -55,6 +55,9 @@ import kotlinx.coroutines.flow.take
  */
 internal object SearchDraft {
     var query = ""
+    /** The query is the list's search bar's first letters, not one a
+     *  result brought back: only then does emptying it close Search. */
+    var fromBar = false
 }
 
 
@@ -87,13 +90,15 @@ fun SearchScreen(
     // The text and the cursor: opened from the list's search bar with a
     // letter already typed, the cursor goes after it, not before.
     val opened = remember { SearchDraft.query.also { SearchDraft.query = "" } }
+    val fromBar = remember { SearchDraft.fromBar.also { SearchDraft.fromBar = false } }
     var field by remember {
         mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(opened, androidx.compose.ui.text.TextRange(opened.length)))
     }
     val query = field.text
-    // Emptied after being opened with text, search gives the list back:
-    // no blank page with only a box in it.
-    LaunchedEffect(query) { if (opened.isNotEmpty() && query.isEmpty()) onBack() }
+    // Emptied after the bar opened it with text, search gives the list
+    // back: no blank page with only a box in it. A query a result brought
+    // back is cleared to type a new one, and Search stays.
+    LaunchedEffect(query) { if (fromBar && opened.isNotEmpty() && query.isEmpty()) onBack() }
     var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
 

@@ -2,6 +2,8 @@
 
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import io.nisfeb.talon.ui.submitOnEnter
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
@@ -565,15 +567,20 @@ private fun NotifyLevelOption(
 ) {
     // A compact pill: the choices sit side by side instead of a stack of
     // full-width rows, and the chosen one is filled.
+    // pressable draws the fill (the chosen one tinted), so the text takes
+    // that fill's own colour: a primary fill under it was painted over,
+    // and onPrimary on the tint was unreadable in dark themes.
     Text(
         if (selected) "✓ $label" else label,
         style = MaterialTheme.typography.labelLarge,
-        color = if (selected) MaterialTheme.colorScheme.onPrimary
+        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
                 else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-            .pressable(enabled = enabled, selected = selected, onClick = onClick)
+            .semantics { this.selected = selected }
+            .pressable(
+                enabled = enabled, selected = selected,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), onClick = onClick,
+            )
             .padding(horizontal = 12.dp, vertical = 7.dp),
     )
 }

@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
@@ -44,14 +45,21 @@ fun Switch(
     enabled: Boolean = true,
 ) {
     val on = MaterialTheme.colorScheme.primary
-    val off = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+    // Full outline, not a tint of it: at 45% the off track was 1.4:1
+    // against a light page, a white knob on nearly nothing.
+    val off = MaterialTheme.colorScheme.outline
     val track by animateColorAsState(if (checked) on else off, tween(150), label = "switch track")
     val knobX by animateDpAsState(if (checked) 20.dp else 2.dp, tween(150), label = "switch knob")
     val interactive = onCheckedChange?.let { change ->
-        Modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = change)
+        // A round ripple about the track, not the 48dp square around it.
+        Modifier.toggleable(
+            value = checked, enabled = enabled, role = Role.Switch, onValueChange = change,
+            interactionSource = null, indication = androidx.compose.material3.ripple(bounded = false, radius = 24.dp),
+        )
     } ?: Modifier.semantics {
         role = Role.Switch
         toggleableState = ToggleableState(checked)
+        if (!enabled) disabled()
     }
     // A 48dp touch target around the slim track, as Material's had.
     Box(
@@ -74,7 +82,9 @@ fun Switch(
                     .size(18.dp)
                     .shadow(1.dp, CircleShape)
                     .clip(CircleShape)
-                    .background(Color.White),
+                    // On, the accent's own ink, as Material's thumb took:
+                    // white on the amber accent was 2:1.
+                    .background(if (checked) MaterialTheme.colorScheme.onPrimary else Color.White),
             )
         }
     }

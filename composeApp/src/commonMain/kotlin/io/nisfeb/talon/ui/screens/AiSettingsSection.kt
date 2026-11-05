@@ -228,9 +228,11 @@ fun OrrerySettingsSection(
     var confirmOff by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
 
-    // Off: one obvious button, the explanation folded away below it.
-    // On: a switch to turn it off again, which asks first.
+    // Off: what it reads, then one obvious button that allows it; consent
+    // comes before the button, not folded under it. On: a switch to turn
+    // it off again, which asks first, with the account folded away.
     if (!on) {
+        if (!missing) OrreryAbout(folded = false)
         io.nisfeb.talon.ui.Button(
             enabled = !busy && !missing,
             onClick = { note = null; edit { it.copy(orrery = true) } },
@@ -251,13 +253,13 @@ fun OrrerySettingsSection(
                 onCheckedChange = { want -> note = null; if (!want) confirmOff = true },
             )
         }
+        OrreryAbout(folded = true)
     }
-    OrreryAbout()
     note?.let { Quiet(it, error = true) }
     if (confirmOff) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmOff = false },
-            title = { Text("Turn Orrery off?") },
+            title = { Text("Turn the assistant off?") },
             text = {
                 Text(
                     "On all your devices, Groundwire stops reading and sending, and your ship stops reading your chats " +
@@ -347,14 +349,16 @@ private fun EveningReminderRow(orrery: OrreryRepo) {
 /** The times offered for the evening reminder; orrery's own default is 20:00. */
 private val REMINDER_TIMES = listOf("18:00", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00")
 
-/** What Orrery is and what turning it on allows, folded until asked for. */
+/** What Orrery is and what turning it on allows: shown whole before it is on, folded until asked for after. */
 @Composable
-private fun OrreryAbout() {
+private fun OrreryAbout(folded: Boolean) {
     var open by remember { mutableStateOf(false) }
-    TextButton(onClick = { open = !open }) {
-        Text(if (open) "What it reads and keeps \u25B4" else "What it reads and keeps \u25BE")
+    if (folded) {
+        TextButton(onClick = { open = !open }) {
+            Text(if (open) "What it reads and keeps \u25B4" else "What it reads and keeps \u25BE")
+        }
+        if (!open) return
     }
-    if (!open) return
     Text(
         "Orrery is a private notebook about your life, kept on your own ship. When it is on, Groundwire and your ship " +
             "notice things that matter in your conversations, like where someone is, a plan you made, or something " +

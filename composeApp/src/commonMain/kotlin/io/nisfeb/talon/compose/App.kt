@@ -313,7 +313,7 @@ fun App(
     // nothing to wait for.
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var landingHidden by remember { mutableStateOf(false) }
-    var settingsStartOnAccount by remember { mutableStateOf(false) }
+    var settingsStartOnLocalShip by remember { mutableStateOf(false) }
     var settingsStartOnAi by remember { mutableStateOf(false) }
     // Every full-screen section is a flag made here, so the resets and
     // the back gesture cannot miss one. See Sections for the bug this ends.
@@ -730,7 +730,7 @@ fun App(
     LaunchedEffect(showAssistant) { if (!showAssistant) assistantListen = false }
     LaunchedEffect(showSettings) {
         if (!showSettings) {
-            settingsStartOnAccount = false
+            settingsStartOnLocalShip = false
             settingsStartOnAi = false
         }
     }
@@ -2127,7 +2127,7 @@ fun App(
                         progress = progress,
                         terminalLine = lastLine,
                         onOpenTerminal = {
-                            settingsStartOnAccount = true
+                            settingsStartOnLocalShip = true
                             showSettings = true
                         },
                         onDismiss = { landingProgress = null; landingHidden = true },
@@ -2704,13 +2704,7 @@ fun App(
                         }
                         SettingsScreen(
                             // Every group's level at once, synced like a group's own.
-                            onSetAllGroupsNotify = { level ->
-                                val sync = repo.settingsSync ?: error("settings do not sync on this device")
-                                val flags = db.groups().allGroups().map { it.flag }
-                                // On the repo's scope: leaving Settings midway still sets them all.
-                                repo.carry { flags.forEach { sync.setNotifyLevel(io.nisfeb.talon.data.groupLevelKey(it), level) } }
-                                flags.size
-                            },
+                            onSetAllGroupsNotify = { level -> repo.setEveryGroupLevel(level) },
                             orrery = orreryRepo,
                             armillary = armillaryRepo,
                             mailRepo = mailRepo,
@@ -2746,7 +2740,7 @@ fun App(
                             ),
                             onBack = {
                                 showSettings = false
-                                settingsStartOnAccount = false
+                                settingsStartOnLocalShip = false
                                 settingsStartOnAi = false
                             },
                             // wires it to dailyDigest.generateAndNotifyAsync
@@ -2756,7 +2750,7 @@ fun App(
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
-                            startOnAccount = settingsStartOnAccount,
+                            startOnLocalShip = settingsStartOnLocalShip,
                             startOnAi = settingsStartOnAi,
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
@@ -2903,7 +2897,6 @@ fun App(
                     )
                     showContacts -> io.nisfeb.talon.ui.screens.ContactsScreen(
                         db = db,
-                        ourShip = loggedInShip,
                         bookContacts = bookContacts,
                         // On the repo's scope, awaited: Contacts keeps what was
                         // typed until the ship has it, and says why when not.
@@ -3744,7 +3737,6 @@ fun App(
                                         },
                                         onSwitchShip = switchShip,
                                         onAddShip = addShip,
-                                        showFolderTabs = false,
                                         onOpenShipSwitcher = {
                                             drawerScope.launch { drawerState.open() }
                                         },

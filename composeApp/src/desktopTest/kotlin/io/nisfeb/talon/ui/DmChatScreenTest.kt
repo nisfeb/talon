@@ -229,6 +229,30 @@ class DmChatScreenTest {
         }
     }
 
+    // A club is a DM of three or more: who said each run is the one thing
+    // its bubbles must not drop (review, 2026-11-05: isDirect is true for
+    // clubs too, so the names went).
+    @Test
+    fun `in a club each run's bubble is named, as in a channel`() = chat(
+        whom = "0v1.club",
+        seed = {
+            messages().upsertAll(listOf(
+                MessageEntity("0v1.club", "~nec/170141184501", "~nec", 1_000, """[{"inline":["first from nec"]}]""", "/chat"),
+                MessageEntity("0v1.club", "~wes/170141184502", "~wes", 2_000, """[{"inline":["then wes"]}]""", "/chat"),
+            ))
+        },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("then wes").fetchSemanticsNodes().isNotEmpty() }
+        // Named just above its own words, so a title naming the members
+        // cannot pass for it.
+        fun namedAbove(name: String, words: String): Boolean {
+            val top = onNodeWithText(words).fetchSemanticsNode().boundsInRoot.top
+            return onAllNodesWithText(name, substring = true).fetchSemanticsNodes().any { it.boundsInRoot.bottom <= top && it.boundsInRoot.bottom > top - 60f }
+        }
+        assertTrue(namedAbove("~nec", "first from nec"), "nec's run is named")
+        assertTrue(namedAbove("~wes", "then wes"), "and wes's")
+    }
+
     @Test
     fun `enter sends what was typed to the ship and shows it at once`() = chat { ship, _ ->
         send("hi bus")

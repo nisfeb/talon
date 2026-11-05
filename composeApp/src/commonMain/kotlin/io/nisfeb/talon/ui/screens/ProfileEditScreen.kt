@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui.screens
 
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -417,6 +418,8 @@ private fun ColorSwatchRow(
             "#607D8B", "#222222", "#666666",
         )
     }
+    // Compact where a pointer picks; a finger needs the old 32dp.
+    val swatch = if (io.nisfeb.talon.ui.isTouchPrimary) 32.dp else 20.dp
     FlowRow(
         modifier = Modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -424,7 +427,7 @@ private fun ColorSwatchRow(
     ) {
         Box(
             modifier = Modifier
-                .size(20.dp)
+                .size(swatch)
                 .clip(CircleShape)
                 .border(
                     width = if (selected.isNullOrBlank()) 2.dp else 1.dp,
@@ -445,7 +448,7 @@ private fun ColorSwatchRow(
             val isSel = selected?.equals(hex, ignoreCase = true) == true
             Box(
                 modifier = Modifier
-                    .size(20.dp)
+                    .size(swatch)
                     .clip(CircleShape)
                     .background(parseSwatch(hex))
                     .border(
@@ -498,7 +501,7 @@ internal fun SectionNavItem(label: String, selected: Boolean, onClick: () -> Uni
         modifier = Modifier
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
             .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
-            .clickable(onClick = onClick)
+            .selectable(selected = selected, role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
 }

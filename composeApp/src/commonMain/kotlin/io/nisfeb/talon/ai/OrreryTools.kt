@@ -182,7 +182,7 @@ Settings live in documents, read and written whole by name:
   generator's key, so that is set first. It reads only the DMs and
   channels listed, and only from people it knows by ship (a person
   body with its ship, or one in `people`). It is the only reader of
-  the owner's chats: Talon reads none itself. Talon goes on reading
+  the owner's chats: the app reads none itself. The app goes on reading
   calls and mail. The calendar's events the ship also writes itself.
 - `schema`, `policy`: what bodies may carry, and what the ship does
   with what it is told.

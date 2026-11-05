@@ -1840,19 +1840,29 @@ private fun MessageRow(
                 val corner = 18.dp
                 val tail = 6.dp
                 androidx.compose.material3.Surface(
+                    // Theirs on the raised colour, not surfaceVariant: the
+                    // quotes, link cards and polls inside a message draw on
+                    // that, and vanished into a bubble of the same grey.
                     color = if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                        else MaterialTheme.colorScheme.surfaceVariant,
+                        else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    // The text's own colour (a custom theme's "text"), not
+                    // the muted ink a Surface would give its variant colour.
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     shape = if (mine) RoundedCornerShape(corner, corner, tail, corner)
                         else RoundedCornerShape(corner, corner, corner, tail),
                 ) {
                     Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 5.dp)) {
-                        // Their name opens the first bubble of a run in a group;
-                        // a DM has only one other person, and ours need none.
-                        if (!mine && row.showHeader && !io.nisfeb.talon.urbit.isDirect(m.whom)) {
+                        // Their name opens the first bubble of a run wherever
+                        // more than one other person talks: a group's channel
+                        // or a club. In a 1:1 DM, only when it says more than
+                        // the name (a bot that is offline). Ours need none.
+                        val nameLine = contactMap.byline(m.author, authorLabel, "").removeSuffix(" · ")
+                        if (!mine && row.showHeader && (!m.whom.startsWith("~") || nameLine != authorLabel)) {
                             Text(
-                                contactMap.byline(m.author, authorLabel, "").removeSuffix(" · "),
+                                nameLine,
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.primary,
+                                // The byline's colour: the accent was 2:1 on a light page.
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(bottom = 2.dp),
                             )
                         }
@@ -1969,11 +1979,11 @@ private fun MessageRow(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 // Narrower, and set off from the chat behind it: its own
-                // raised colour and a hairline edge.
-                modifier = Modifier
-                    .widthIn(min = 200.dp, max = 260.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                // raised colour and a hairline edge, as the menu's own (on
+                // its inner column they lost the menu's rounded corners).
+                modifier = Modifier.widthIn(min = 200.dp, max = 260.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }

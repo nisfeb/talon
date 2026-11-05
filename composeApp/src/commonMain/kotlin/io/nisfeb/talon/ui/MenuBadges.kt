@@ -42,9 +42,9 @@ data class MenuBadges(
         RailItem.Mail -> mailUnread
         RailItem.Assistant -> assistantNews
         RailItem.Activity -> noticesUnread
-        // Chats never carries a dot: unread chats and followed threads
-        // show their counts in the chat list itself (the Threads tab).
-        RailItem.Chats -> false
+        // A followed thread's reply: from Mail or the calendar, the only
+        // sign of it outside the chat list's Threads tab.
+        RailItem.Chats -> threadsUnread
         else -> false
     }
 

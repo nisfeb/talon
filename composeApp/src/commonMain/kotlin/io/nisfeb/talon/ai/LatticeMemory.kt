@@ -110,10 +110,10 @@ object LatticeMemory {
 
     /** Said where the key was refused: the owner revoked it. */
     const val REVOKED: String =
-        "MEMORY\nLattice refused Groundwire's key: the owner revoked it, so you have no memory here. If the owner asks about memory, say so: Settings, Apps, Lattice makes a new key."
+        "MEMORY\nLattice refused this app's key: the owner revoked it, so you have no memory here. If the owner asks about memory, say so: Settings, Apps, Lattice makes a new key."
 
     /** What a tool answers once the key is refused. */
-    const val REVOKED_TOOL = "Lattice refused Groundwire's key: the owner revoked it. A new one is made in Settings, Apps, Lattice."
+    const val REVOKED_TOOL = "Lattice refused this app's key: the owner revoked it. A new one is made in Settings, Apps, Lattice."
 
     /** Said where lattice did not answer, or refused a key, this time. */
     fun unavailable(why: String): String =

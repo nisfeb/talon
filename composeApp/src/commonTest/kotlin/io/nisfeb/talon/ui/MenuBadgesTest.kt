@@ -23,14 +23,13 @@ class MenuBadgesTest {
         }
     }
 
+    // The branch that took it away left a phone in Mail with no sign of a
+    // followed thread's reply (review, 2026-11-05).
     @Test
-    fun `the Chats icon never shows a dot`() {
-        val all = MenuBadges(
-            statusesFresh = true, invitesPending = true, calendarOffers = true, actionsWaiting = true,
-            mailUnread = true, assistantNews = true, threadsUnread = true, noticesUnread = true,
-        )
-        assertEquals(false, all.forItem(RailItem.Chats))
-        assertEquals(false, all.byItem()[RailItem.Chats])
+    fun `the Chats icon shows a followed thread's reply, in the rail and the drawer`() {
+        assertEquals(true, MenuBadges(threadsUnread = true).forItem(RailItem.Chats))
+        assertEquals(true, MenuBadges(threadsUnread = true).byItem()[RailItem.Chats])
+        assertEquals(false, MenuBadges().forItem(RailItem.Chats))
     }
 
     @Test

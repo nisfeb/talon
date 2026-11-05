@@ -65,7 +65,7 @@ class SearchScreenTest {
     }
 
     @AfterTest
-    fun close() { SearchDraft.query = ""; db.close() }
+    fun close() { SearchDraft.query = ""; SearchDraft.fromBar = false; db.close() }
 
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
@@ -85,8 +85,11 @@ class SearchScreenTest {
      *  it off, as Android's chat does when it covers Search. */
     private val shown = mutableStateOf(true)
 
-    private fun search(embedder: SearchEmbedderClient? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun search(embedder: SearchEmbedderClient? = null, fromBar: String? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         SearchDraft.query = ""
+        SearchDraft.fromBar = false
+        // The list's search bar hands over its first letters this way.
+        fromBar?.let { SearchDraft.query = it; SearchDraft.fromBar = true }
         // A pass is run at most every ten minutes, process-wide: each test is a fresh start.
         io.nisfeb.talon.ui.screens.lastSearchPassMs = Long.MIN_VALUE / 2
         setContent {
@@ -96,7 +99,7 @@ class SearchScreenTest {
                     onOpenConversation = { opened += "dm $it" },
                     onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent"; shown.value = false },
                     onOpenGroup = { opened += "group $it" },
-                    onBack = {},
+                    onBack = { opened += "back" },
                     embedder = embedder,
                 )
             }
@@ -152,6 +155,30 @@ class SearchScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("lunch plans tomorrow") }
         onNode(hasSetTextAction()).assertTextContains("lunch")
         assertEquals("", SearchDraft.query, "taken once: the next Search starts empty")
+    }
+
+    // Android keeps Search open under a result and brings its query back:
+    // emptying that query is starting another, not leaving (review,
+    // 2026-11-05). Emptying what the list's bar typed is leaving.
+    @Test
+    fun `a query brought back from a result is cleared to type another, and Search stays`() = search {
+        type("lunch", "lunch plans tomorrow")
+        onNodeWithText("lunch plans tomorrow").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") }
+        onNode(hasSetTextAction()).performTextClearance()
+        waitForIdle()
+        assertTrue("back" !in opened, "still searching: $opened")
+    }
+
+    @Test
+    fun `opened from the list's bar with a letter, the cursor follows it, and emptying it gives the list back`() = search(fromBar = "l") {
+        onNode(hasSetTextAction()).performTextInput("unch")
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") }
+        onNode(hasSetTextAction()).assertTextContains("lunch")
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { "back" in opened }
     }
 
     @Test

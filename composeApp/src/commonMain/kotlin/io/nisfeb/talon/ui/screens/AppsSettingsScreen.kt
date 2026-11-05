@@ -247,7 +247,7 @@ fun AppsSettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Assistant memory", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (key.revoked) "Lattice refused Groundwire's key: it was revoked. The assistants have no memory until there is a new one."
+                            if (key.revoked) "Lattice refused this app's key: it was revoked. The assistants have no memory until there is a new one."
                             else "The assistants remember in Lattice with this install's own key.",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (key.revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -286,7 +286,7 @@ fun AppsSettingsScreen(
             if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (orreryOn) "Groundwire is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    if (orreryOn) "Groundwire is feeding Orrery. Its settings are under Assistant." else "Feed Orrery from Settings, under Assistant.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

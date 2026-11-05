@@ -62,7 +62,7 @@ fun LocalShipSetupScreen(
             )
             Text(
                 "A comet is an Urbit identity that lives on this computer. " +
-                    "It is yours as long as this computer keeps it; Groundwire runs it whenever the app is open.",
+                    "It is yours as long as this computer keeps it; the app runs it whenever it is open.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

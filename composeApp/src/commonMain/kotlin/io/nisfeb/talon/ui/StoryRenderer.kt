@@ -401,17 +401,21 @@ fun StoryRenderer(
                 // the dark theme the panel alone was the chat's colour, so
                 // code looked like loose monospace lines), and long lines
                 // scroll sideways instead of wrapping.
+                // Where a swipe across a message replies (touch), the lines
+                // wrap: a sideways scroll there took the swipe first.
                 is StoryPart.Code -> Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    // outlineVariant was the panel's own colour on the dark theme.
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
                 ) {
+                    val scrolls = !io.nisfeb.talon.ui.isTouchSwipeNavSupported
                     Text(
                         part.code,
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        softWrap = false,
+                        softWrap = !scrolls,
                         modifier = Modifier
-                            .horizontalScroll(androidx.compose.foundation.rememberScrollState())
+                            .then(if (scrolls) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier)
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                 }

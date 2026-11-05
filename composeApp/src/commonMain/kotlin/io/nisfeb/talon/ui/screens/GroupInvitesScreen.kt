@@ -95,45 +95,61 @@ fun GroupInvitesScreen(
         }
         HorizontalDivider()
         // Inviting a friend to Groundwire comes first; the invites the
-        // ship has been sent to groups follow.
-        io.nisfeb.talon.ui.InviteFriendCard(
-            ship = ourShip,
-            name = ourName,
-            modifier = Modifier.padding(16.dp),
-        )
-        Text(
-            "Invites to groups",
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        when {
-            loading -> Row(
-                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) { CircularProgressIndicator() }
-
-            // Full-screen error only when the cache has nothing to show;
-            // a failed refresh over a populated list becomes a banner.
-            error != null && invites.isEmpty() && joining.isEmpty() -> Column(Modifier.padding(vertical = 16.dp)) {
-                io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load invites", error!!))
-                io.nisfeb.talon.ui.TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(start = 8.dp)) { Text("Try again") }
+        // ship has been sent to groups follow. One list for all of it: the
+        // card (and its QR) above a list of its own pushed the invites off a
+        // phone held sideways.
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 4.dp),
+        ) {
+            item(key = "invite-friend") {
+                io.nisfeb.talon.ui.InviteFriendCard(
+                    ship = ourShip,
+                    name = ourName,
+                    modifier = Modifier.padding(16.dp),
+                )
             }
-
-            invites.isEmpty() && joining.isEmpty() -> Text(
-                "No pending invites to groups.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-
-            else -> Column {
-                listOfNotNull(error?.let { io.nisfeb.talon.util.problemOf("Couldn't refresh", it) }, actionError).forEach {
-                    io.nisfeb.talon.ui.ProblemLine(it)
+            item(key = "groups-head") {
+                Text(
+                    "Invites to groups",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            when {
+                loading -> item(key = "loading") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) { CircularProgressIndicator() }
                 }
-                LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-            ) {
+
+                // Full-screen error only when the cache has nothing to show;
+                // a failed refresh over a populated list becomes a banner.
+                error != null && invites.isEmpty() && joining.isEmpty() -> item(key = "error") {
+                    Column(Modifier.padding(vertical = 16.dp)) {
+                        io.nisfeb.talon.ui.ProblemLine(io.nisfeb.talon.util.problemOf("Couldn't load invites", error!!))
+                        io.nisfeb.talon.ui.TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(start = 8.dp)) { Text("Try again") }
+                    }
+                }
+
+                invites.isEmpty() && joining.isEmpty() -> item(key = "none") {
+                    Text(
+                        "No pending invites to groups.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                }
+
+                else -> {
+                item(key = "problems") {
+                    Column {
+                        listOfNotNull(error?.let { io.nisfeb.talon.util.problemOf("Couldn't refresh", it) }, actionError).forEach {
+                            io.nisfeb.talon.ui.ProblemLine(it)
+                        }
+                    }
+                }
                 // Accepted and not got into yet: accepting again does
                 // nothing while the ship waits, so the way out is to stop.
                 if (joining.isNotEmpty()) {

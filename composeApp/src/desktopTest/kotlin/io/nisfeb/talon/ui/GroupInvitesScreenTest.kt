@@ -43,6 +43,11 @@ class GroupInvitesScreenTest {
     private val shared = mutableListOf<String>()
     private var shareSheet = true
     private val sharer = TextSharer { text, _ -> if (shareSheet) { shared += text; true } else false }
+    private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val clipboard = object : androidx.compose.ui.platform.ClipboardManager {
+        override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+        override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
+    }
 
     private fun invitesWith(prepare: FakeShip.() -> Unit = {}, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-invites-").toFile()
@@ -55,7 +60,10 @@ class GroupInvitesScreenTest {
         try {
             runComposeUiTest {
                 setContent {
-                    androidx.compose.runtime.CompositionLocalProvider(LocalTextSharer provides sharer) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalTextSharer provides sharer,
+                        androidx.compose.ui.platform.LocalClipboardManager provides clipboard,
+                    ) {
                         TalonTheme(darkTheme = false) { GroupInvitesScreen(repo = repo, onBack = {}, ourShip = "~zod", ourName = "Zod") }
                     }
                 }
@@ -218,6 +226,8 @@ class GroupInvitesScreenTest {
             onNodeWithText("Invite a friend").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Invite copied") }
             assertTrue(shared.isEmpty())
+            val m = copied.single()
+            assertTrue("Add me: ~zod" in m && GROUNDWIRE_INSTALL_URL in m, "the whole invite, not an empty copy: $m")
         }
     }
 }

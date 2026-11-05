@@ -2187,7 +2187,6 @@ fun TalonApp(
 
             contactsOpen -> io.nisfeb.talon.ui.screens.ContactsScreen(
                 db = app.db,
-                ourShip = activeShip,
                 bookContacts = bookContacts,
                 // On the repo's scope, awaited: Contacts keeps what was typed
                 // until the ship has it, and says why when not.
@@ -2479,13 +2478,7 @@ fun TalonApp(
                 }
                 SettingsScreen(
                     // Every group's level at once, synced like a group's own.
-                    onSetAllGroupsNotify = { level ->
-                        val sync = app.repo.settingsSync ?: error("settings do not sync on this device")
-                        val flags = app.db.groups().allGroups().map { it.flag }
-                        // On the repo's scope: leaving Settings midway still sets them all.
-                        app.repo.carry { flags.forEach { sync.setNotifyLevel(io.nisfeb.talon.data.groupLevelKey(it), level) } }
-                        flags.size
-                    },
+                    onSetAllGroupsNotify = { level -> app.repo.setEveryGroupLevel(level) },
                     orrery = orreryRepo,
                     armillary = armillaryRepo,
                     mailRepo = mailRepo,
@@ -3163,7 +3156,6 @@ fun TalonApp(
                     }
                 },
                 onAddShip = { addingAnotherShip = true },
-                showFolderTabs = false,
                 onOpenShipSwitcher = {
                     drawerScope.launch { drawerState.open() }
                 },
