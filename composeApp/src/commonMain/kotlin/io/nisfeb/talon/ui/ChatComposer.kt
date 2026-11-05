@@ -1205,6 +1205,17 @@ fun ChatComposer(
                 enabled = canSend,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 visualTransformation = composerLook,
+                // A filled pill, as the big messengers draw it: no outline
+                // at rest, a soft one in the accent while typing.
+                shape = RoundedCornerShape(22.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    disabledBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(fieldFocus)

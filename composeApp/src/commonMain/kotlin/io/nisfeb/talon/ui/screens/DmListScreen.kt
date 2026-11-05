@@ -2465,11 +2465,14 @@ private fun ConversationRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // The shared messenger row: a round avatar, the name in bold with
+        // the time at the far right, and under it a two-line preview with
+        // the red unread count beside it.
         Avatar(
             label = title,
             url = contactMap.conversationAvatar(m.whom),
             colorHex = contactMap.conversationColor(m.whom),
-            size = density.listAvatarSize,
+            size = maxOf(density.listAvatarSize, 48.dp),
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -2481,39 +2484,43 @@ private fun ConversationRow(
             ) {
                 Text(
                     title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
-                    ),
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f, fill = false),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 ChannelTypeBadge(m.whom)
-            }
-            Text(
-                "$authorLabel · $timestamp",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (!draftPreview.isNullOrEmpty()) {
+                Spacer(Modifier.weight(1f))
                 Text(
-                    "Draft: $draftPreview",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontStyle = FontStyle.Italic,
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            } else if (preview.isNotEmpty()) {
-                Text(
-                    preview.applyEmojiSpans(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    timestamp,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        if (unread > 0) {
-            io.nisfeb.talon.ui.NotificationBadge(unread)
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f)) {
+                    if (!draftPreview.isNullOrEmpty()) {
+                        Text(
+                            "Draft: $draftPreview",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (preview.isNotEmpty()) {
+                        // Who said it, where more than one person talks.
+                        val who = if (m.whom.contains('/') || !m.whom.startsWith("~")) "$authorLabel: " else ""
+                        Text(
+                            (who + preview).applyEmojiSpans(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (unread > 0) io.nisfeb.talon.ui.NotificationBadge(unread, Modifier.padding(top = 2.dp))
+            }
         }
         if (editMode && dragHandleModifier != null) {
             Icon(
