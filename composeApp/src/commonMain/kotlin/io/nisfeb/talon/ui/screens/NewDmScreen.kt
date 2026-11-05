@@ -121,7 +121,7 @@ fun NewDmScreen(
                 is io.nisfeb.talon.urbit.TalonLink.InviteMe ->
                     if (onInviteShip != null) onInviteShip(link.ship)
                     else scanProblem = "That is an invite code, and invites aren't available here."
-                else -> if (raw != null) scanProblem = "That is not a Talon group or invite code."
+                else -> if (raw != null) scanProblem = "That is not a Groundwire group or invite code."
             }
         }
     } else null

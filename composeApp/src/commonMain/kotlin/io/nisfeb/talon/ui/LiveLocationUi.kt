@@ -267,7 +267,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                 scope.launch {
                     // The phone sends only while "Send where I am" is on: turned on here, its prompts with it.
                     if (sending != null && !sending.on.value && !sending.start()) {
-                        problem = "Talon needs location access all the time to send where you are."
+                        problem = "Groundwire needs location access all the time to send where you are."
                         busy = false
                         return@launch
                     }

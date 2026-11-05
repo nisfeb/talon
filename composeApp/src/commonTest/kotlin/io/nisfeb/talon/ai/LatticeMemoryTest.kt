@@ -195,7 +195,7 @@ class LatticeMemoryTest {
         // Still refused within its first minutes: said so, and not revoked.
         ship.answers = { HttpStatusCode.Unauthorized to "{}" }
         val said = m.tools.single { it.spec.name == "memory_read" }.execute(buildJsonObject { put("key", "/user/x") })
-        assertEquals("Lattice did not answer: lattice has not taken Talon's new key yet", said)
+        assertEquals("Lattice did not answer: lattice has not taken Groundwire's new key yet", said)
         assertEquals(false, dao.get("~zod")?.revoked)
     }
 

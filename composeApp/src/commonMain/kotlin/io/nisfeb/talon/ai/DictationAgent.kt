@@ -367,7 +367,7 @@ class DictationRun(
         /** What a dictation is recorded at: Whisper's own rate, so nothing is resampled or uploaded for nothing. */
         const val RATE = 16_000
 
-        const val NO_SHIP = "Log in to your ship in Talon first."
+        const val NO_SHIP = "Log in to your ship in Groundwire first."
         /** No Armillary key on this device yet: credit first. Where buying is not allowed, nothing points to it. */
         val NO_ARMILLARY: String get() =
             if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up Armillary under Settings, AI, to dictate."

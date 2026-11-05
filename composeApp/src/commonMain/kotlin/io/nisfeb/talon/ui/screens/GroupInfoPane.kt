@@ -410,7 +410,7 @@ fun GroupInfoPane(
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         Text("Group reference")
                         Text(
-                            "Paste it in Talon's or Tlon's join box to find the group, or in a chat to show it.",
+                            "Paste it in Groundwire's or Tlon's join box to find the group, or in a chat to show it.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -424,7 +424,7 @@ fun GroupInfoPane(
                 io.nisfeb.talon.ui.ShareQr(
                     link = io.nisfeb.talon.urbit.TalonLink.forGroup(flag),
                     title = "Join the group by code",
-                    caption = "Anyone can scan this from Talon's + screen to join.",
+                    caption = "Anyone can scan this from Groundwire's + screen to join.",
                     fileName = "group-" + flag.removePrefix("~").replace('/', '-'),
                     modifier = Modifier.padding(16.dp),
                 )

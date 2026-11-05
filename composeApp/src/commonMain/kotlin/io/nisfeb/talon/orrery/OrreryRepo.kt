@@ -2316,7 +2316,7 @@ internal fun probeProblemLine(e: Throwable): String = when (e) {
         ?.let { "Orrery on your ship could not answer: $it." } ?: "Orrery on your ship could not answer."
     is OrreryError.Garbled -> "Your ship's answer about Orrery could not be read."
     else -> "Your ship did not answer."
-} + " Talon asks again by itself."
+} + " Groundwire asks again by itself."
 
 /** The first pause before a failed check for orrery is tried again, and the most it grows to. */
 internal const val PROBE_RETRY_FIRST_MS = 30_000L

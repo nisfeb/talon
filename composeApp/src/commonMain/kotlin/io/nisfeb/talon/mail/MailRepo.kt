@@ -1066,7 +1066,7 @@ class MailRepo(
             // nor anywhere the list could open it, and was lost.
             val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
             if (!ok) {
-                val line = "${named(d.subject)} was not saved: the draft did not reach the ship. It is kept here until Talon closes."
+                val line = "${named(d.subject)} was not saved: the draft did not reach the ship. It is kept here until Groundwire closes."
                 _unsent.update { list -> list.filterNot { it.draft.id == d.id } + Unsent(line, d, files) }
             }
         }

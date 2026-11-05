@@ -367,7 +367,7 @@ class MailRepoWriteTest {
         r.keepDraft(draft, listOf(file))
         until("the draft kept here") { r.unsent.value.isNotEmpty() }
         val kept = r.unsent.value.single()
-        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Talon closes.", kept.line)
+        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Groundwire closes.", kept.line)
         // What the list's Open gives back: the text, and the file.
         val reopened = io.nisfeb.talon.ui.screens.unsentIntent(kept)
         assertEquals("half a thought" to listOf("notes.txt"), reopened.body to reopened.edits.files.map { it.displayName })

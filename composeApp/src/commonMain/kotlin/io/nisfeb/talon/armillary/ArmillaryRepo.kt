@@ -769,7 +769,7 @@ internal fun checkProblemLine(e: Throwable): String = when (e) {
         ?.let { "Armillary on your ship could not answer: $it." } ?: "Armillary on your ship could not answer."
     is ArmillaryError.Garbled -> "Your ship's answer about Armillary could not be read."
     else -> "Your ship did not answer."
-} + " Talon asks again by itself."
+} + " Groundwire asks again by itself."
 
 /** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
 /** A second order while the first is on its way. */

@@ -187,7 +187,7 @@ class OrreryAiRowsTest {
     fun `a check that failed is said under the reading row, and that it is asked again`() {
         probe = HttpStatusCode.BadGateway
         rows(answered = false) { _, orrery ->
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Talon asks again by itself.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Groundwire asks again by itself.") }
             assertTrue(shows("Checking your ship for Orrery."))
             assertFalse(shows("Bad Gateway"), "never the proxy's page")
             assertEquals(OrreryAvailability.UNKNOWN, orrery.availability.value)

@@ -60,9 +60,9 @@ data class AppRow(
 fun mailRow(availability: MailAvailability, error: String?): AppRow = when (availability) {
     MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this ship.", null, error)
     MailAvailability.NO_GRUBBERY ->
-        AppRow("Mail", AppState.MISSING, "Mail runs in Grubbery, which this ship does not have. Talon can add both.", AppInstall.GRUBBERY, error)
+        AppRow("Mail", AppState.MISSING, "Mail runs in Grubbery, which this ship does not have. Groundwire can add both.", AppInstall.GRUBBERY, error)
     MailAvailability.NOT_FETCHED ->
-        AppRow("Mail", AppState.MISSING, "Grubbery is here, but not its Mail yet. Talon can fetch it.", AppInstall.GRUBBERY, error)
+        AppRow("Mail", AppState.MISSING, "Grubbery is here, but not its Mail yet. Groundwire can fetch it.", AppInstall.GRUBBERY, error)
     MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
@@ -77,7 +77,7 @@ fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = wh
     CalendarAvailability.SIGNED_OUT -> AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     CalendarAvailability.UNKNOWN -> AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", null, error)
     CalendarAvailability.ABSENT ->
-        AppRow("Calendar", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
+        AppRow("Calendar", AppState.MISSING, "Not on this ship yet. Groundwire can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
 }
 
 /**
@@ -86,7 +86,7 @@ fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = wh
  */
 fun latticeRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
     true -> AppRow("Lattice", AppState.WORKING, "Answering on this ship.", null, error)
-    false -> AppRow("Lattice", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
+    false -> AppRow("Lattice", AppState.MISSING, "Not on this ship yet. Groundwire can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
     null -> AppRow("Lattice", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
@@ -109,7 +109,7 @@ fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (instal
 fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: String? = null): AppRow = when (availability) {
     io.nisfeb.talon.orrery.OrreryAvailability.PRESENT -> AppRow("Orrery", AppState.WORKING, "Answering on this ship.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.MISSING ->
-        AppRow("Orrery", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ORRERY, error)
+        AppRow("Orrery", AppState.MISSING, "Not on this ship. Groundwire can add it to your Grubbery shell.", AppInstall.ORRERY, error)
     io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.UNKNOWN -> AppRow("Orrery", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
@@ -121,7 +121,7 @@ fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: St
 fun armillaryRow(availability: io.nisfeb.talon.armillary.ArmillaryAvailability, error: String? = null): AppRow = when (availability) {
     io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT -> AppRow("Armillary", AppState.WORKING, "Answering on this ship.", null, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING ->
-        AppRow("Armillary", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ARMILLARY, error)
+        AppRow("Armillary", AppState.MISSING, "Not on this ship. Groundwire can add it to your Grubbery shell.", AppInstall.ARMILLARY, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT -> AppRow("Armillary", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN -> AppRow("Armillary", AppState.UNKNOWN, "Not asked yet.", null, error)
 }

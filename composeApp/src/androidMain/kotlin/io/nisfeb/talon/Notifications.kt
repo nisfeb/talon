@@ -164,7 +164,7 @@ object Notifications {
                     "Background sync",
                     NotificationManager.IMPORTANCE_MIN,
                 ).apply {
-                    description = "Keeps Talon connected so new messages arrive instantly"
+                    description = "Keeps Groundwire connected so new messages arrive instantly"
                     setShowBadge(false)
                 }
             )
@@ -238,7 +238,7 @@ object Notifications {
         if (mgr.getNotificationChannel(CHANNEL_DICTATING) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_DICTATING, "Dictating", NotificationManager.IMPORTANCE_LOW)
-                    .apply { description = "Shown while Talon listens to a dictation and acts on it" },
+                    .apply { description = "Shown while Groundwire listens to a dictation and acts on it" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_DICTATION_ASK) == null) {

@@ -35,7 +35,7 @@ class IosImageDownloader(private val http: HttpClient) : ImageDownloader {
 
     override suspend fun saveImage(url: String): SaveResult {
         val bytes = fetchImageBytes(http, url).getOrElse { return SaveResult.Failed(it.message ?: "Couldn't download the image.") }
-        if (!mayAddToPhotos()) return SaveResult.Failed("Talon may not add to your photos. Allow it in Settings, Talon, Photos.")
+        if (!mayAddToPhotos()) return SaveResult.Failed("Groundwire may not add to your photos. Allow it in Settings, Groundwire, Photos.")
         return if (addToPhotos(bytes)) SaveResult.Saved("Photos") else SaveResult.Failed("Couldn't add the image to Photos.")
     }
 

@@ -200,7 +200,7 @@ fun LoopsList(
                     if (isBackgroundSchedulingSupported) {
                         "Runs on your LLM key, on this device."
                     } else {
-                        "Runs on your LLM key, on this device — only while Talon is open."
+                        "Runs on your LLM key, on this device — only while Groundwire is open."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -71,7 +71,7 @@ fun LandingBanner(
                                 "Nothing has gone wrong; the ship is still installing its updates and the chat opens when it is done."
                         } else {
                             "The ship is installing its updates and using most of a CPU core. " +
-                                "Talon may stutter or freeze for a minute at a time until it settles; it recovers on its own."
+                                "Groundwire may stutter or freeze for a minute at a time until it settles; it recovers on its own."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

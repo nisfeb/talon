@@ -364,7 +364,7 @@ fun ProfileEditScreen(
             io.nisfeb.talon.ui.ShareQr(
                 link = io.nisfeb.talon.urbit.TalonLink.forInviteMe(ourPatp),
                 title = "Invite me",
-                caption = "Post this anywhere. Someone who scans it in Talon can message you or invite you to their groups.",
+                caption = "Post this anywhere. Someone who scans it in Groundwire can message you or invite you to their groups.",
                 fileName = "invite-" + ourPatp.removePrefix("~"),
             )
         }

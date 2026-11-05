@@ -362,7 +362,7 @@ internal fun rememberCallWiring(
                 askRecord = null
                 controller.beginCallRecording { recordProblem = it }
             },
-            text = "Recording captures both voices. Talon first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
+            text = "Recording captures both voices. Groundwire first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
                 "in your chat with ${nameFor(peer)}, and records only once your ship has sent it. " +
                 "A transcript is made by Armillary's speech model, only if you publish one afterwards.",
         )
@@ -483,7 +483,7 @@ private fun TrunkInstallPrompt(controller: CallController) {
                 when (val s = install) {
                     is TrunkInstall.Installing -> Text(
                         "Installing… this can take a minute. You can close " +
-                            "this and keep using Talon; it carries on in the " +
+                            "this and keep using Groundwire; it carries on in the " +
                             "background and we'll tell you if it fails.",
                         style = MaterialTheme.typography.bodySmall,
                     )

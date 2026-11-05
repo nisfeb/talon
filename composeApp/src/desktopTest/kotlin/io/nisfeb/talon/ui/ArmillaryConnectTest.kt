@@ -174,7 +174,7 @@ class ArmillaryConnectTest {
         val ai = settings()
         show(ai, repo(ai))
         onNodeWithText("Checking your ship.").assertExists()
-        onNodeWithText("Your ship did not answer. Talon asks again by itself.").assertExists()
+        onNodeWithText("Your ship did not answer. Groundwire asks again by itself.").assertExists()
         assertFalse(shows("Bad Gateway"), "never the proxy's page")
     }
 

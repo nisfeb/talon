@@ -89,8 +89,8 @@ fun shipPushStatusLine(debug: JsonElement?, deviceId: String): String? {
         val drop = (d["drops"] as? kotlinx.serialization.json.JsonArray)?.map { it.obj() }
             ?.firstOrNull { (it?.get("id") as? JsonPrimitive)?.contentOrNull == deviceId }
         val why = (drop?.get("reason") as? JsonPrimitive)?.contentOrNull
-        return if (why != null) "Your ship stopped pushing here (its push service answered $why). Talon sets it up again when it next starts."
-        else "Your ship does not have this device yet. Talon sets it up again when it next starts."
+        return if (why != null) "Your ship stopped pushing here (its push service answered $why). Groundwire sets it up again when it next starts."
+        else "Your ship does not have this device yet. Groundwire sets it up again when it next starts."
     }
     val sentAt = device["sent"].obj()?.long("at")
     val last = device["last"].obj()

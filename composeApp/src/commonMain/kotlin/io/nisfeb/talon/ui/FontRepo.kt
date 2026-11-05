@@ -134,7 +134,7 @@ class FontRepo(
                     if (it is NoGrubbery) "${info.family} is installed on this device only: ${it.message}"
                     else "${info.family} is installed here; it was not shared yet" +
                         (io.nisfeb.talon.util.readableReason(it.message)?.let { r -> " ($r)" } ?: "") +
-                        ". It is tried again next time Talon starts."
+                        ". It is tried again next time Groundwire starts."
                 },
             )
         }

@@ -1912,7 +1912,7 @@ class AppShellTest {
         ship.refuseStream = true
         kotlinx.coroutines.runBlocking { ship.endStreams() }
         waitUntil(timeoutMillis = 15_000) { showing("Can't reach ~zod since") }
-        assertTrue(showing("Talon keeps trying."))
+        assertTrue(showing("Groundwire keeps trying."))
         assertTrue(onAllNodesWithContentDescription("Can't reach ~zod since", substring = true).fetchSemanticsNodes().isNotEmpty(), "the mark says it too")
         // Back, and asked at once.
         ship.refuseStream = false

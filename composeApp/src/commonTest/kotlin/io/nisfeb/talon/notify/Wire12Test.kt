@@ -69,11 +69,11 @@ class Wire12Test {
     @Test
     fun a_device_the_ship_dropped_is_said_with_why() {
         assertEquals(
-            "Your ship stopped pushing here (its push service answered 410). Talon sets it up again when it next starts.",
+            "Your ship stopped pushing here (its push service answered 410). Groundwire sets it up again when it next starts.",
             shipPushStatusLine(debug("[]", """[{"at":$now,"id":"me","platform":"unifiedpush","reason":"410"}]"""), "me"),
         )
         assertEquals(
-            "Your ship does not have this device yet. Talon sets it up again when it next starts.",
+            "Your ship does not have this device yet. Groundwire sets it up again when it next starts.",
             shipPushStatusLine(debug("[]"), "me"),
         )
         assertNull(shipPushStatusLine(null, "me"), "an older trunk has no status")

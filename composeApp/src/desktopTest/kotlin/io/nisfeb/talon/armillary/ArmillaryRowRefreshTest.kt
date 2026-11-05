@@ -207,8 +207,8 @@ class ArmillaryRowRefreshTest {
 
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
-        assertEquals("Your ship did not answer. Talon asks again by itself.", checkProblemLine(ArmillaryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))))
-        assertEquals("Armillary on your ship could not answer: busy. Talon asks again by itself.", checkProblemLine(ArmillaryError.Refused(500, "busy")))
+        assertEquals("Your ship did not answer. Groundwire asks again by itself.", checkProblemLine(ArmillaryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))))
+        assertEquals("Armillary on your ship could not answer: busy. Groundwire asks again by itself.", checkProblemLine(ArmillaryError.Refused(500, "busy")))
     }
 
     @Test

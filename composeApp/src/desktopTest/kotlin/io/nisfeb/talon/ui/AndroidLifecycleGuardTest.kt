@@ -191,7 +191,7 @@ class AndroidLifecycleGuardTest {
         assertTrue("actual val needsPushForBackgroundRing: Boolean = false" in read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/Capabilities.ios.kt"))
         val settings = read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/screens/SettingsScreen.kt")
         val tab = settings.substringAfter("if (safeTab == SettingsTab.Notifications) {").substringBefore("ShipNotificationsRow(relayConfig)")
-        assertTrue("io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush" in tab && "Without push, calls ring only while Talon is open." in tab, tab)
+        assertTrue("io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush" in tab && "Without push, calls ring only while Groundwire is open." in tab, tab)
         // Push alone decides it: mail keeps the process, not a ring.
         assertTrue("keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT" in talonApp)
         val noPush = talonApp.substringAfter("noPush = io.nisfeb.talon.notify.keepAliveNeeded(").substringBefore(")\n")

@@ -96,7 +96,7 @@ class SettingsCallsTest {
     // while it is open is true on desktop, and shown there.
     @Test
     fun `the calls tab says a call rings only while Talon is open`() = calls {
-        waitUntil(timeoutMillis = 5_000) { shows("Incoming calls ring only while Talon is open.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Incoming calls ring only while Groundwire is open.") }
     }
 
     @Test

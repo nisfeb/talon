@@ -126,7 +126,7 @@ fun OrreryActionDialog(
                         proposed && event != null -> "Approve puts it on your calendar at that time. You can move it there after."
                         proposed && how != null -> "Approve sends this message $how."
                         proposed && change != null -> "Approve lets the ship make this change."
-                        proposed -> "Approve accepts it. Talon cannot carry this kind out, so mark it done once you have."
+                        proposed -> "Approve accepts it. Groundwire cannot carry this kind out, so mark it done once you have."
                         action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "The ship gave no reason." }
                         // The ship carries it out on its own executor, the
                         // moment the owner approves.
@@ -134,7 +134,7 @@ fun OrreryActionDialog(
                         how != null -> "Approved. The ship sends it $how."
                         change != null -> "Approved. The ship makes the change itself."
                         action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
-                        else -> "Approved. Talon cannot carry this kind out. Mark it done once you have."
+                        else -> "Approved. Groundwire cannot carry this kind out. Mark it done once you have."
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )

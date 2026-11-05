@@ -127,7 +127,7 @@ suspend fun OrreryApi.lateMove(id: String, move: LateMove): String? = try {
         LateMove.SNOOZE -> snooze(null, id, SNOOZE_MINUTES)
         LateMove.DONE -> {
             val a = actions(null).firstOrNull { it.id == id }
-            if (a != null && a.shipCarriesOut) return "Open Talon to answer this one: the ship carries it out."
+            if (a != null && a.shipCarriesOut) return "Open Groundwire to answer this one: the ship carries it out."
             if (a != null) finish(null, id, proposed = a.status == "proposed")
         }
     }

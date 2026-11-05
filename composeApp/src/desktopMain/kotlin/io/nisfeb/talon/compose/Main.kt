@@ -332,7 +332,7 @@ fun main() {
     } catch (t: DatabaseOpenTimeoutException) {
         showStartupError(
             title = "Groundwire — couldn't open data directory",
-            body = "Talon couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
+            body = "Groundwire couldn't open its data directory at:\n\n${t.dbPath}\n\n" +
                 "If your home directory is on a network mount or encrypted " +
                 "volume, make sure it's available and try again.",
         )
@@ -340,7 +340,7 @@ fun main() {
     } catch (t: Throwable) {
         showStartupError(
             title = "Groundwire — startup error",
-            body = "Talon couldn't start.\n\n" +
+            body = "Groundwire couldn't start.\n\n" +
                 "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}\n\n" +
                 t.stackTraceToString().lineSequence().take(15).joinToString("\n"),
         )

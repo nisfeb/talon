@@ -101,7 +101,7 @@ class OrreryRecoveryTest {
         downFor.set(2)
         attached { repo, _ ->
             until("the failed check is said, in words") { repo.error.value != null }
-            assertEquals("Your ship did not answer. Talon asks again by itself.", repo.error.value)
+            assertEquals("Your ship did not answer. Groundwire asks again by itself.", repo.error.value)
             until("orrery answers in the end") { repo.availability.value == OrreryAvailability.PRESENT }
             until("the beacon runs") { asked.any { it.endsWith("/beacon/rev") } }
             until("what is waiting is read") { repo.actions.value.map { it.id } == listOf("a1") }

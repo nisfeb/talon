@@ -31,7 +31,7 @@ fun UpdateBanner(
     when (status) {
         is UpdateStatus.Idle -> Unit
         is UpdateStatus.Available -> BannerSurface(
-            primary = "Talon ${status.manifest.versionName} available",
+            primary = "Groundwire ${status.manifest.versionName} available",
             secondary = status.manifest.changelog.takeIf { it.isNotBlank() }
                 ?: "${io.nisfeb.talon.ui.tapWord} to update.",
             onTap = onTap,

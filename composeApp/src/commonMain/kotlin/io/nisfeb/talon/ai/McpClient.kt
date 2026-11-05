@@ -138,7 +138,7 @@ class McpClient(
         val detail = body.trim().take(200)
         if (code == 400 && detail.isEmpty()) {
             val hint = if (endpointUrl.protocol.name == "http" && !isLoopbackHost(endpointUrl.host)) {
-                "Talon is on http to ${endpointUrl.host} — reconnect using your ship's https:// URL."
+                "Groundwire is on http to ${endpointUrl.host} — reconnect using your ship's https:// URL."
             } else {
                 "Your ship treated the request as insecure. If it's behind a reverse proxy " +
                     "(nginx), the proxy must send X-Forwarded-Proto and the MCP server must trust it."

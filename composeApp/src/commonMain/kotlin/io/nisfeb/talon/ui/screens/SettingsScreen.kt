@@ -435,7 +435,7 @@ fun SettingsScreen(
                 } else {
                     "Off by default. Comets always show word names -- " +
                         "their Urbit name is their key. A planet's is " +
-                        "not, so turning this on has Talon look each " +
+                        "not, so turning this on has Groundwire look each " +
                         "one up from your own ship, which only works " +
                         "where that ship can answer."
                 },
@@ -720,7 +720,7 @@ fun SettingsScreen(
             // Said plainly, so a missed call is not how the owner learns it (B3-3).
             if (io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush) {
                 Text(
-                    "Without push, calls ring only while Talon is open.",
+                    "Without push, calls ring only while Groundwire is open.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -898,7 +898,7 @@ fun SettingsScreen(
                 if (!isBackgroundCallRingSupported) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Incoming calls ring only while Talon is open.",
+                        "Incoming calls ring only while Groundwire is open.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -945,10 +945,10 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text("Quick dictation", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Speak, and Talon hands it to orrery: a note, a todo, a message to send. A question " +
+                    "Speak, and Groundwire hands it to orrery: a note, a todo, a message to send. A question " +
                         "is answered. What orrery's policy holds for you shows on the card: say \"send\" or tap, " +
                         "and on a locked phone, your fingerprint. Start one from the tile, the widget, or the " +
-                        "assist gesture with Talon as your assistant.",
+                        "assist gesture with Groundwire as your assistant.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1003,7 +1003,7 @@ private fun AboutSection(
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
-        "Talon — Compose Multiplatform Urbit chat client.",
+        "Groundwire — Compose Multiplatform Urbit chat client.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1057,7 +1057,7 @@ private fun AboutSection(
                     // so far have come down to a ship running an older
                     // %trunk than the app, and this is what someone
                     // pastes into a support thread.
-                    "Talon ${io.nisfeb.talon.TalonBuild.versionName} " +
+                    "Groundwire ${io.nisfeb.talon.TalonBuild.versionName} " +
                         "(build ${io.nisfeb.talon.TalonBuild.versionCode}) " +
                         "· ${io.nisfeb.talon.ui.platformLabel}" +
                         if (callController != null) {
@@ -1468,7 +1468,7 @@ private fun NotificationHealthPanel(
     )
     Text(
         "If something below looks wrong, real-time delivery may be " +
-            "degraded — restart Talon, check your network, or look " +
+            "degraded — restart Groundwire, check your network, or look " +
             "at battery / background-app permissions.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1537,7 +1537,7 @@ private fun NotificationHealthPanel(
                 label = "Phone-app call log",
                 value = when {
                     !registered -> "no account — calls aren't logged"
-                    systemState.callLogIsVoip -> "logged as VoIP calls — turn Talon on under Calling accounts › Integrated call logs"
+                    systemState.callLogIsVoip -> "logged as VoIP calls — turn Groundwire on under Calling accounts › Integrated call logs"
                     else -> "account registered"
                 },
                 highlight = !registered,
@@ -1683,11 +1683,11 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears from your ship only " +
-                "through a relay. The default endpoint is the Talon-operated host."
+                "through a relay. The default endpoint is the Groundwire-operated host."
         } else {
             "Optional: register this device with a notification relay so " +
-                "pushes still arrive when Talon is killed by Android or " +
-                "force-stopped. The default endpoint is the Talon-operated " +
+                "pushes still arrive when Groundwire is killed by Android or " +
+                "force-stopped. The default endpoint is the Groundwire-operated " +
                 "host; self-host by pointing at your own."
         },
         style = MaterialTheme.typography.bodySmall,
@@ -1880,7 +1880,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                             ) {
                                 is io.nisfeb.talon.notify.Enrollment.On ->
                                     "Registered (deviceId=${r.deviceId.take(8)}…)" +
-                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Talon."
+                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Groundwire."
                                 is io.nisfeb.talon.notify.Enrollment.NoToken -> r.why
                                 is io.nisfeb.talon.notify.Enrollment.Refused -> r.why
                             }
@@ -2458,7 +2458,7 @@ internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
             Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "Messages that notified you: direct messages, mentions and replies. " +
-                    "If no number shows, turn on Badges for Talon in the ${io.nisfeb.talon.ui.iosDeviceName}'s Settings, Notifications.",
+                    "If no number shows, turn on Badges for Groundwire in the ${io.nisfeb.talon.ui.iosDeviceName}'s Settings, Notifications.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2489,15 +2489,15 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     val (title, body) = when {
         via -> "Notifications come from $name" to (
             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                "Your ship sends them to $device itself, through its calling app. The Talon relay only hands them to Apple."
+                "Your ship sends them to $device itself, through its calling app. The Groundwire relay only hands them to Apple."
             } else {
-                "Your ship sends them to $device itself, through its calling app. The Talon relay is not used."
+                "Your ship sends them to $device itself, through its calling app. The Groundwire relay is not used."
             }
             )
-        declined -> "Notifications come from the Talon relay" to
+        declined -> "Notifications come from the Groundwire relay" to
             "You chose the relay over $name's own notifications. Register $device with the relay below to get them from it."
         backToShip -> "Moving to $name's notifications" to
-            "Talon moves $device the next time it starts, once a test notification from $name arrives."
+            "Groundwire moves $device the next time it starts, once a test notification from $name arrives."
         else -> return
     }
     val status by produceState<String?>(null, ship, via) {

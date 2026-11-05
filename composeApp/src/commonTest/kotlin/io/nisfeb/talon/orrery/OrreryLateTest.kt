@@ -173,7 +173,7 @@ class OrreryLateTest {
     @Test
     fun done_on_one_the_ship_carries_out_is_left_to_the_app() = runTest {
         val ship = Ship().apply { open = { row("proposed", kind = "message", payload = """{"priority":"high","via":"chat","to":"~bus","text":"late"}""") } }
-        assertEquals("Open Talon to answer this one: the ship carries it out.", ship.api.lateMove("a1", LateMove.DONE))
+        assertEquals("Open Groundwire to answer this one: the ship carries it out.", ship.api.lateMove("a1", LateMove.DONE))
         assertEquals(emptyList<String>(), ship.sent, "approving it would send it")
     }
 

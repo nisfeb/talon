@@ -155,7 +155,7 @@ class SettingsRelayTest {
             val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
             assertTrue(row < relay, "above the relay panel, not inside it")
             onNodeWithText("Use the relay").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Talon relay") }
+            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }
             assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
             assertTrue(shows("Use my ship"))
         }

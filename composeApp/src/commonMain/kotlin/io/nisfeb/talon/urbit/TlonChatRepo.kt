@@ -3460,7 +3460,7 @@ class TlonChatRepo(
             error(
                 if (config.service == "presigned-url") {
                     "%storage is in presigned-url mode with no S3 credentials. " +
-                        "Talon uploads need direct credentials — add them in " +
+                        "Groundwire uploads need direct credentials — add them in " +
                         "Landscape's storage settings, or switch the agent with " +
                         "`:storage &storage-action [%toggle-service %credentials]`."
                 } else {

@@ -51,9 +51,9 @@ class SyncStatusTest {
         assertEquals("Connecting to ~zod…", syncHeadline(SyncStatus.Connecting, "~zod", now, at))
         assertEquals("Can't reach ~zod since 2:02 PM", syncHeadline(SyncStatus.Unreachable(0, 0), "~zod", now, at))
         assertEquals("Can't reach ~zod since t123", syncHeadline(SyncStatus.Unreachable(123, 0), "~zod", now) { "t$it" }, "since the time it was last heard")
-        assertEquals("Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 0)))
-        assertEquals("1 waiting to send. Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 1)))
-        assertEquals("3 waiting to send. Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 3)))
+        assertEquals("Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 0)))
+        assertEquals("1 waiting to send. Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 1)))
+        assertEquals("3 waiting to send. Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 3)))
         assertEquals("Signed out of ~zod", syncHeadline(SyncStatus.SignedOut, "~zod", now, at))
         assertEquals("New messages wait until you sign in again.", syncDetail(SyncStatus.SignedOut))
     }

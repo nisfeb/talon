@@ -73,7 +73,7 @@ fun syncDetail(status: SyncStatus): String = when (status) {
     SyncStatus.SignedOut -> "New messages wait until you sign in again."
     SyncStatus.Connecting -> ""
     is SyncStatus.Connected -> "Heard from it ${agoLabel(status.heardAgoMs)}."
-    is SyncStatus.Unreachable -> waiting(status.pending) + "Talon keeps trying."
+    is SyncStatus.Unreachable -> waiting(status.pending) + "Groundwire keeps trying."
 }
 
 private fun waiting(n: Int) = when (n) {

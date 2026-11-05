@@ -128,7 +128,7 @@ class BugReportDialogTest {
         assertTrue("marker-4d1f" in blobs.single(), "this run's logs are the file")
         val mail = sent()
         assertEquals(listOf(BUG_REPORT_TO), mail["to"]!!.jsonArray.map { it.jsonPrimitive.content })
-        assertEquals("Talon bug: Calls drop after a minute", mail["subject"]!!.jsonPrimitive.content)
+        assertEquals("Groundwire bug: Calls drop after a minute", mail["subject"]!!.jsonPrimitive.content)
         val body = mail["body"]!!.jsonPrimitive.content
         assertTrue(body.startsWith("Calls drop after a minute\n\nVersion: 9.9.9\nLogs: "), body)
         val file = mail["attachments"]!!.jsonArray.single().jsonObject
@@ -190,7 +190,7 @@ class BugReportDialogTest {
             write("Calls drop")
             onNodeWithText("Copy report").performClick()
             val text = copied.single()
-            assertTrue(text.startsWith("Talon bug: Calls drop\n\nCalls drop\n\nVersion: 9.9.9"), text)
+            assertTrue(text.startsWith("Groundwire bug: Calls drop\n\nCalls drop\n\nVersion: 9.9.9"), text)
             assertTrue("marker-77c2" in text, "the logs come with it")
             assertTrue(sends.isEmpty())
         }
