@@ -1903,11 +1903,11 @@ class AppShellTest {
     private val quickSync = io.nisfeb.talon.ui.SyncThresholds(heardRecentlyMs = 3_000, connectGraceMs = 2_000)
 
     @Test
-    fun `the header says the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+    fun `the header says nothing while the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
+        home()
         Thread.sleep(4_000)
         waitForIdle()
-        assertTrue(present("Connected to ~zod") && !showing("Can't reach"), "the heartbeat keeps it connected on a quiet ship")
+        assertTrue(!showing("Can't reach") && !present("Connected to ~zod"), "the heartbeat keeps it connected on a quiet ship, and all well shows no mark")
         // The network goes: the stream drops and every new one is refused.
         ship.refuseStream = true
         kotlinx.coroutines.runBlocking { ship.endStreams() }
@@ -1917,7 +1917,7 @@ class AppShellTest {
         // Back, and asked at once.
         ship.refuseStream = false
         onNodeWithText("Try now").performClick()
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") && !showing("Can't reach") }
+        waitUntil(timeoutMillis = 10_000) { !showing("Can't reach") && !present("Can't reach ~zod since") }
     }
 
     // The reporter's case, as far as the code shows one: the ship refused
@@ -1927,7 +1927,7 @@ class AppShellTest {
     fun `a lapsed login put off with Cancel is said, and Sign in brings the form back`() {
         val store = twoShips()
         app(sessions = { store }, sync = quickSync, setup = { heartbeat(500) }) { ship ->
-            waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+            home()
             ship.signedOut = true
             kotlinx.coroutines.runBlocking { ship.endStreams() }
             waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
@@ -1941,11 +1941,11 @@ class AppShellTest {
     }
 
     @Test
-    fun `while all is well there is no banner, only the mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
-        onNodeWithContentDescription("Connected to ~zod").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Heard from it") }
-        assertTrue(!showing("Can't reach") && !showing("Signed out of"))
+    fun `while all is well there is no banner and no mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
+        home()
+        Thread.sleep(4_000)
+        waitForIdle()
+        assertTrue(!showing("Can't reach") && !showing("Signed out of") && !present("Connected to ~zod"))
     }
 
     // ---- A 1:1 call's meeting view, cameras and share: what party lines had (sneagan, 2026-10-29) ----
