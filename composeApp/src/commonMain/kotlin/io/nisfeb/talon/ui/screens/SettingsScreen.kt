@@ -206,7 +206,10 @@ fun SettingsScreen(
         HorizontalDivider()
 
         val visibleTabs = buildList {
+            // General holds the pages that open from Settings (apps, the
+            // sidebar); Appearance only how things look.
             add(SettingsTab.Appearance)
+            add(SettingsTab.General)
             add(SettingsTab.Home)
             add(SettingsTab.Chats)
             if (notificationHealth != null || relayConfig != null) {
@@ -240,7 +243,7 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-            if (safeTab == SettingsTab.Appearance) {
+            if (safeTab == SettingsTab.General) {
             // ── Which sections show, and in what order ─────────────
             //
             // Drills into SidebarSettingsScreen. First thing on the
@@ -303,9 +306,10 @@ fun SettingsScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            }
+            if (safeTab == SettingsTab.Appearance) {
             Text(
-                "Appearance",
+                "Theme",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1986,6 +1990,7 @@ private fun SystemPromptEditorDialog(
 /** Settings groups. Order here is the rail / tab-row order. */
 private enum class SettingsTab(val label: String) {
     Appearance("Appearance"),
+    General("General"),
     Home("Home"),
     Chats("Chats"),
     Notifications("Notifications"),

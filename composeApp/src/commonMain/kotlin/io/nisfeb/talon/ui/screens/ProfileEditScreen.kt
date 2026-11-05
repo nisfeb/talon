@@ -5,6 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -186,6 +190,12 @@ fun ProfileEditScreen(
         }
     }
 
+    val hasKeys = keys !== io.nisfeb.talon.ui.AzimuthRpc.None || signer != null
+    val profileSections = remember(hasKeys) {
+        ProfileSection.entries.filter { it != ProfileSection.Keys || hasKeys }
+    }
+    var section by remember { mutableStateOf(ProfileSection.Profile) }
+
     Column(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -202,171 +212,189 @@ fun ProfileEditScreen(
         }
         HorizontalDivider()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Avatar(
-                    label = nickname.ifBlank { ourPatp },
-                    url = avatarUrl,
-                    colorHex = color,
-                    size = 112.dp,
-                    onClick = onPickAvatar,
-                )
-                if (uploading) {
-                    CircularProgressIndicator(strokeWidth = 3.dp)
-                }
-            }
-            TextButton(
-                onClick = onPickAvatar,
-                enabled = !uploading,
-            ) { Text("Change photo") }
-
-            // A comet is its word name everywhere else, so it is here
-            // too, whole, above the @p it stands for.
-            io.nisfeb.talon.ui.Mnemonym.forShip(ourPatp)?.let { nym ->
-                Text(nym, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-            }
-            io.nisfeb.talon.ui.GroundwireLine(ourPatp)
-            // Tap to copy: a comet's @p is fifty-six characters nobody
-            // types, and some places still want it.
-            var patpCopied by remember(ourPatp) { mutableStateOf(false) }
-            Text(
-                if (patpCopied) "Copied $ourPatp" else ourPatp,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (patpCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.clickable {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(ourPatp))
-                    patpCopied = true
-                },
-            )
-
-            OutlinedTextField(
-                value = nickname,
-                onValueChange = { nickname = it },
-                label = { Text("Nickname") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = status,
-                onValueChange = { status = it },
-                label = { Text("Status") },
-                placeholder = { Text("What are you up to?") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = bio,
-                onValueChange = { bio = it },
-                label = { Text("Bio") },
-                minLines = 3,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "Color",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 6.dp),
-                )
-                ColorSwatchRow(
-                    selected = color,
-                    onPick = { color = it },
-                )
-            }
-
-            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
-
-            Spacer(Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    saving = true
-                    error = null
-                    scope.launch {
-                        runCatching {
-                            repo.updateProfile(
-                                nickname = nickname,
-                                bio = bio,
-                                avatarUrl = avatarUrl,
-                                status = status,
-                                // "—" is no colour: sent as a clear, not left as it was.
-                                color = color.orEmpty(),
+        // Each kind of thing in its own section, picked from a side menu
+        // (a row of tabs on a narrow screen): the profile people see, the
+        // ship's names, its keys, and the invite code.
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val wide = maxWidth >= 600.dp
+            val body: @Composable () -> Unit = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    when (section) {
+                        ProfileSection.Profile -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Avatar(
+                                        label = nickname.ifBlank { ourPatp },
+                                        url = avatarUrl,
+                                        colorHex = color,
+                                        size = 56.dp,
+                                        onClick = onPickAvatar,
+                                    )
+                                    if (uploading) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                                }
+                                TextButton(onClick = onPickAvatar, enabled = !uploading) { Text("Change photo") }
+                            }
+                            OutlinedTextField(
+                                value = nickname,
+                                onValueChange = { nickname = it },
+                                label = { Text("Nickname") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
                             )
-                        }.onFailure { e ->
-                            error = io.nisfeb.talon.util.problemOf("Couldn't save your profile", e)
-                        }.onSuccess { onBack() }
-                        saving = false
-                    }
-                },
-                enabled = !saving && !uploading,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (saving) "Saving…" else "Save") }
-
-            if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None || signer != null) {
-                HorizontalDivider()
-                // The ship's own networking keys, which are public: whatever
-                // registry attests the ship already publishes them, so anyone
-                // can read them. Shown here so they can be handed over when
-                // somebody asks.
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None) {
-                        Text(
-                            "Public keys",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        )
-                        val k = shipKeys
-                        if (k == null) {
-                            Text(
-                                keysProblem ?: "Reading your keys…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            OutlinedTextField(
+                                value = status,
+                                onValueChange = { status = it },
+                                label = { Text("Status") },
+                                placeholder = { Text("What are you up to?") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
                             )
-                        } else {
-                            Text(
-                                "Your ship's networking keys, as Azimuth holds them.",  // an Azimuth ship; a comet says so above
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            OutlinedTextField(
+                                value = bio,
+                                onValueChange = { bio = it },
+                                label = { Text("Bio") },
+                                minLines = 2,
+                                modifier = Modifier.fillMaxWidth(),
                             )
-                            Spacer(Modifier.height(6.dp))
-                            KeyLine("Signing", k.auth)
-                            KeyLine("Encryption", k.crypt)
-                            TextButton(onClick = {
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
-                                copied = true
-                            }) { Text(if (copied) "Copied" else "Copy keys") }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Color",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 12.dp),
+                                )
+                                ColorSwatchRow(selected = color, onPick = { color = it })
+                            }
+                            error?.let { io.nisfeb.talon.ui.ProblemLine(it) }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                Button(
+                                    onClick = {
+                                        saving = true
+                                        error = null
+                                        scope.launch {
+                                            runCatching {
+                                                repo.updateProfile(
+                                                    nickname = nickname,
+                                                    bio = bio,
+                                                    avatarUrl = avatarUrl,
+                                                    status = status,
+                                                    // "—" is no colour: sent as a clear, not left as it was.
+                                                    color = color.orEmpty(),
+                                                )
+                                            }.onFailure { e ->
+                                                error = io.nisfeb.talon.util.problemOf("Couldn't save your profile", e)
+                                            }.onSuccess { onBack() }
+                                            saving = false
+                                        }
+                                    },
+                                    enabled = !saving && !uploading,
+                                ) { Text(if (saving) "Saving…" else "Save") }
+                            }
+                        }
+                        ProfileSection.Identity -> {
+                            // A comet is its word name everywhere else, so it is
+                            // here too, whole, above the @p it stands for.
+                            io.nisfeb.talon.ui.Mnemonym.forShip(ourPatp)?.let { nym ->
+                                LabelledLine("Name", nym)
+                            }
+                            io.nisfeb.talon.ui.GroundwireLine(ourPatp)
+                            // Tap to copy: a comet's @p is fifty-six characters
+                            // nobody types, and some places still want it.
+                            var patpCopied by remember(ourPatp) { mutableStateOf(false) }
+                            Column(modifier = Modifier.clickable {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(ourPatp))
+                                patpCopied = true
+                            }) {
+                                Text("Ship", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    if (patpCopied) "Copied $ourPatp" else ourPatp,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (patpCopied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                        ProfileSection.Keys -> {
+                            // The ship's own networking keys, which are public:
+                            // whatever registry attests the ship already
+                            // publishes them, so anyone can read them.
+                            if (keys !== io.nisfeb.talon.ui.AzimuthRpc.None) {
+                                val k = shipKeys
+                                if (k == null) {
+                                    Text(
+                                        keysProblem ?: "Reading your keys…",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                } else {
+                                    Text(
+                                        "Your ship's networking keys, as Azimuth holds them.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    KeyLine("Signing", k.auth)
+                                    KeyLine("Encryption", k.crypt)
+                                    TextButton(onClick = {
+                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(io.nisfeb.talon.ui.shipKeyBlock(ourPatp, k)))
+                                        copied = true
+                                    }) { Text(if (copied) "Copied" else "Copy keys") }
+                                }
+                            }
+                            if (signer != null) {
+                                Text(
+                                    "Sign something with this ship's key, or check what someone else signed.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                TextButton(onClick = { signing = true }) { Text("Sign or check") }
+                            }
+                        }
+                        ProfileSection.Invite -> {
+                            // A code to post where people will see it. Someone
+                            // who runs a group scans it from the + screen.
+                            io.nisfeb.talon.ui.ShareQr(
+                                link = io.nisfeb.talon.urbit.TalonLink.forInviteMe(ourPatp),
+                                title = "Invite me",
+                                caption = "Post this anywhere. Someone who scans it in Groundwire can message you or invite you to their groups.",
+                                fileName = "invite-" + ourPatp.removePrefix("~"),
+                            )
                         }
                     }
-                    if (signer != null) {
-                        Text(
-                            "Sign something with this ship's key, or check what someone else signed.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = { signing = true }) { Text("Sign or check") }
-                    }
                 }
             }
-
-            HorizontalDivider()
-            // A code to post where people will see it. Someone who runs a
-            // group scans it from Talon's + screen and invites this ship.
-            io.nisfeb.talon.ui.ShareQr(
-                link = io.nisfeb.talon.urbit.TalonLink.forInviteMe(ourPatp),
-                title = "Invite me",
-                caption = "Post this anywhere. Someone who scans it in Groundwire can message you or invite you to their groups.",
-                fileName = "invite-" + ourPatp.removePrefix("~"),
-            )
+            if (wide) {
+                Row(Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier.width(176.dp).fillMaxHeight().padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        for (s in profileSections) SectionNavItem(s.label, s == section) { section = s }
+                    }
+                    androidx.compose.material3.VerticalDivider()
+                    Box(Modifier.weight(1f)) { body() }
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        for (s in profileSections) SectionNavItem(s.label, s == section) { section = s }
+                    }
+                    HorizontalDivider()
+                    body()
+                }
+            }
         }
     }
 
@@ -390,13 +418,13 @@ private fun ColorSwatchRow(
         )
     }
     FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(32.dp)
+                .size(20.dp)
                 .clip(CircleShape)
                 .border(
                     width = if (selected.isNullOrBlank()) 2.dp else 1.dp,
@@ -409,7 +437,7 @@ private fun ColorSwatchRow(
         ) {
             Text(
                 "—",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -417,11 +445,11 @@ private fun ColorSwatchRow(
             val isSel = selected?.equals(hex, ignoreCase = true) == true
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(20.dp)
                     .clip(CircleShape)
                     .background(parseSwatch(hex))
                     .border(
-                        width = if (isSel) 3.dp else 0.dp,
+                        width = if (isSel) 2.dp else 0.dp,
                         color = if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent,
                         shape = CircleShape,
                     )
@@ -446,5 +474,40 @@ private fun KeyLine(label: String, key: String) {
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(key, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+
+/** The profile screen's sections, one kind of thing each. */
+private enum class ProfileSection(val label: String) {
+    Profile("Profile"),
+    Identity("Identity"),
+    Keys("Public keys"),
+    Invite("Invite me"),
+}
+
+/** One section in a side menu or tab row: highlighted while it is open. */
+@Composable
+internal fun SectionNavItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelLarge.copy(
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        ),
+        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+/** A small label over its value. */
+@Composable
+private fun LabelledLine(label: String, value: String) {
+    Column {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }

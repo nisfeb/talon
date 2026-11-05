@@ -164,6 +164,7 @@ class SettingsScreenTest {
 
     @Test
     fun `density and the home list's order are stored as chosen`() = settings {
+        tap("Appearance")
         tap("Compact")
         assertEquals(Density.Compact, ui.density.value)
         tap("Cozy")
@@ -206,6 +207,7 @@ class SettingsScreenTest {
 
     @Test
     fun `a new theme saves only when named with good colours, is used, and is deleted`() = settings {
+        tap("Appearance")
         tap("New theme")
         onNodeWithText("Save and use").performScrollTo().assertIsNotEnabled()
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
@@ -229,6 +231,7 @@ class SettingsScreenTest {
 
     @Test
     fun `more colours start Auto, set from what was drawn, go back to Auto, and save whole`() = settings {
+        tap("Appearance")
         tap("New theme")
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
         tap("More colours")
