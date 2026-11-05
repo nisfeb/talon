@@ -15,7 +15,9 @@ import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.isMacOsHost
 import io.nisfeb.talon.util.nowMs
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -3840,6 +3842,16 @@ fun App(
                             rightPaneWidth = rightPaneWidthDp.dp,
                             onRightPaneWidthChange = { uiSettings.setRightPaneWidthDp(it.value) },
                             menuBadges = menuBadges,
+                            // Ship switcher at the foot of the rail; the list's
+                            // header drops its copy while the rail shows.
+                            railFooter = {
+                                io.nisfeb.talon.ui.TalonLogo(
+                                    contentDescription = "Switch ship",
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clickable { drawerScope.launch { drawerState.open() } },
+                                )
+                            },
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs
                             // list left, transcript right) — so it gets full

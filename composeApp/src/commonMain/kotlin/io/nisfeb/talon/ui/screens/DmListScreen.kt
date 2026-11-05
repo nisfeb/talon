@@ -1062,14 +1062,17 @@ fun DmListScreen(
                 }
             }
             // The brand mark on the right, where the ellipsis was, and
-            // it is what opens the ship picker.
-            io.nisfeb.talon.ui.TalonLogo(
-                contentDescription = "Switch ship",
-                modifier = Modifier
-                    .padding(end = 4.dp)
-                    .size(32.dp)
-                    .clickable { onOpenShipSwitcher() },
-            )
+            // it is what opens the ship picker. Where the rail shows, the
+            // rail holds it, at its foot, instead.
+            if (!io.nisfeb.talon.ui.LocalRailShown.current) {
+                io.nisfeb.talon.ui.TalonLogo(
+                    contentDescription = "Switch ship",
+                    modifier = Modifier
+                        .padding(end = 4.dp)
+                        .size(32.dp)
+                        .clickable { onOpenShipSwitcher() },
+                )
+            }
         }
         HorizontalDivider()
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }

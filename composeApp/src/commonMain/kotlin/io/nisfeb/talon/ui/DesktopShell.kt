@@ -94,6 +94,10 @@ fun DesktopShell(
     rightPaneWidth: Dp = DEFAULT_RIGHT_PANE_WIDTH,
     onRightPaneWidthChange: (Dp) -> Unit = {},
     menuBadges: MenuBadges = MenuBadges(),
+    // Pinned to the bottom of the rail, below the scrolling items: the
+    // ship switcher. While the rail shows, [LocalRailShown] is true so
+    // the list's header leaves its own copy out.
+    railFooter: (@Composable () -> Unit)? = null,
     // Full-width content that takes over the whole area beside the rail,
     // bypassing the list/detail split — for a screen that manages its own
     // panes (e.g. the assistant: its own conversations/jobs sidebar + a
@@ -131,6 +135,7 @@ fun DesktopShell(
         // the screen's edge instead of floating beside a bare strip.
         val leftInset = with(density) { sideInsets.getLeft(this, direction).toDp() }
         if (leftInset > 0.dp) Box(Modifier.fillMaxHeight().width(leftInset).background(MaterialTheme.colorScheme.surfaceVariant))
+        androidx.compose.runtime.CompositionLocalProvider(LocalRailShown provides true) {
         Row(modifier = Modifier.fillMaxSize().windowInsetsPadding(sideInsets)) {
             DesktopRail(
                 activeTab = activeRailTab,
@@ -138,6 +143,7 @@ fun DesktopShell(
                 enabledItems = enabledItems,
                 onItemClicked = onItemClicked,
                 menuBadges = menuBadges,
+                footer = railFooter,
             )
             // weight(1f) so the scaffold fills the remaining width AFTER
             // the rail's 64dp. fillMaxSize() here used to draw the
@@ -177,6 +183,7 @@ fun DesktopShell(
                 }
             }
         }
+        }
     }
 }
 
@@ -187,17 +194,22 @@ private fun DesktopRail(
     enabledItems: List<RailItem>,
     onItemClicked: (RailItem) -> Unit,
     menuBadges: MenuBadges,
+    footer: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = modifier.fillMaxHeight().width(RAIL_WIDTH),
     ) {
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxHeight(),
+      ) {
         Column(
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally,
             // Scrolls: a short window clipped Settings off the end (review B1-7).
-            modifier = Modifier.fillMaxHeight()
+            modifier = Modifier.weight(1f)
                 .verticalScroll(androidx.compose.foundation.rememberScrollState())
                 .padding(vertical = 8.dp),
         ) {
@@ -218,8 +230,18 @@ private fun DesktopRail(
                 Spacer(Modifier.height(4.dp))
             }
         }
+        footer?.let {
+            Box(Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) { it() }
+        }
+      }
     }
 }
+
+/**
+ * True inside [DesktopShell]'s expanded layout, where the rail shows. The
+ * chat list reads it to leave out the ship switcher the rail now holds.
+ */
+val LocalRailShown = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
