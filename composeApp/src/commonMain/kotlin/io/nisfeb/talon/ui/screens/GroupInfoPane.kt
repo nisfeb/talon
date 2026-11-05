@@ -1,6 +1,10 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package io.nisfeb.talon.ui.screens
 
 import io.nisfeb.talon.ui.submitOnEnter
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import io.nisfeb.talon.ui.pressable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -251,20 +255,21 @@ fun GroupInfoPane(
     LazyColumn(modifier = modifier.fillMaxWidth()) {
         item {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(channelTitle, style = MaterialTheme.typography.titleLarge)
+                io.nisfeb.talon.ui.Avatar(label = groupTitle ?: channelTitle, url = groupRow?.image, size = 72.dp)
+                Spacer(Modifier.height(10.dp))
+                Text(channelTitle, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold))
                 groupTitle?.let {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        "in $it",
+                        "in $it" + (memberCount?.let { n -> " · $n members" } ?: ""),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            HorizontalDivider()
         }
 
         item { PaneHeading(if (groupFlag != null) "This channel" else "This chat") }
@@ -289,29 +294,30 @@ fun GroupInfoPane(
         item {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 NotifyHeading(off = effectiveLevel(ownLevel, groupPref?.level) == NotifyLevel.NONE, text = "Notifications")
-                if (groupFlag != null) NotifyLevelOption(
-                    label = "Same as the group (${levelLabel(groupLevel)})",
-                    selected = ownLevel == null,
-                    enabled = canMutate,
-                    onClick = { save { it.clearNotifyLevel(whom) } },
-                )
-                // With no group there is nothing to follow: no level is the default.
-                val shown = if (groupFlag != null) ownLevel else ownLevel ?: NotifyLevel.DEFAULT
-                for (l in LEVELS) NotifyLevelOption(
-                    label = levelLabel(l),
-                    selected = shown == l,
-                    enabled = canMutate,
-                    onClick = { save { it.setNotifyLevel(whom, l) } },
-                )
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (groupFlag != null) NotifyLevelOption(
+                        label = "Same as the group (${levelLabel(groupLevel)})",
+                        selected = ownLevel == null,
+                        enabled = canMutate,
+                        onClick = { save { it.clearNotifyLevel(whom) } },
+                    )
+                    // With no group there is nothing to follow: no level is the default.
+                    val shown = if (groupFlag != null) ownLevel else ownLevel ?: NotifyLevel.DEFAULT
+                    for (l in LEVELS) NotifyLevelOption(
+                        label = levelLabel(l),
+                        selected = shown == l,
+                        enabled = canMutate,
+                        onClick = { save { it.setNotifyLevel(whom, l) } },
+                    )
+                }
                 saveProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
             }
         }
         item {
-            Text(
-                "Shared media",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
+            PaneHeading("Shared media")
         }
         item {
             MediaStatsGrid(
@@ -324,35 +330,30 @@ fun GroupInfoPane(
         // club, a channel not mapped yet), whose handlers would no-op.
         groupFlag?.let { flag ->
             item {
-                HorizontalDivider(Modifier.padding(top = 12.dp))
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text(
-                        groupTitle ?: flag,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text(
-                        "Group" + (memberCount?.let { " · $it members" } ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Spacer(Modifier.height(8.dp))
+                PaneHeading("Group · ${groupTitle ?: flag}")
             }
             item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     NotifyHeading(off = groupLevel == NotifyLevel.NONE, text = "Notifications for the whole group")
                     Text(
-                        "Every channel set to Same as the group follows this.",
+                        "Channels set to Same as the group follow this.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp),
                     )
-                    for (l in LEVELS) NotifyLevelOption(
-                        label = levelLabel(l),
-                        selected = groupLevel == l,
-                        enabled = canMutate,
-                        onClick = { save { it.setNotifyLevel(groupLevelKey(flag), l) } },
-                    )
+                    androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        for (l in LEVELS) NotifyLevelOption(
+                            label = levelLabel(l),
+                            selected = groupLevel == l,
+                            enabled = canMutate,
+                            onClick = { save { it.setNotifyLevel(groupLevelKey(flag), l) } },
+                        )
+                    }
                 }
-                HorizontalDivider(Modifier.padding(top = 8.dp))
             }
             // Members link → opens existing GroupAdminScreen via the
             // caller-supplied onOpenMembers handler.
@@ -410,7 +411,7 @@ fun GroupInfoPane(
                     Column(Modifier.weight(1f).padding(end = 8.dp)) {
                         Text("Group reference")
                         Text(
-                            "Paste it in Groundwire's or Tlon's join box to find the group, or in a chat to show it.",
+                            "Paste it in a join box to find the group, or in a chat to share it.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -562,22 +563,19 @@ private fun NotifyLevelOption(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    Row(
+    // A compact pill: the choices sit side by side instead of a stack of
+    // full-width rows, and the chosen one is filled.
+    Text(
+        if (selected) "✓ $label" else label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (selected) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
             .pressable(enabled = enabled, selected = selected, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            if (selected) "✓ $label" else label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (selected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-    }
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    )
 }
 
 /** The group behind a channel as the info pane knows it: none yet, then its flag and the channel's title, then its count and privacy. */
@@ -600,10 +598,12 @@ private fun levelLabel(level: String) = when (level) {
 
 @Composable
 private fun PaneHeading(text: String) {
+    // A quiet section label; the rows under it carry the weight.
     Text(
         text,
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.labelLarge.copy(letterSpacing = androidx.compose.ui.unit.TextUnit(0.4f, androidx.compose.ui.unit.TextUnitType.Sp)),
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
 
