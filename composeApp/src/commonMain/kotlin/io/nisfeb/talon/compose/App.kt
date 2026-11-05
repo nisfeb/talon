@@ -3856,12 +3856,10 @@ fun App(
                             // Ship switcher at the foot of the rail; the list's
                             // header drops its copy while the rail shows.
                             railFooter = {
-                                io.nisfeb.talon.ui.TalonLogo(
-                                    contentDescription = "Switch ship",
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clickable { drawerScope.launch { drawerState.open() } },
-                                )
+                                // The signed-in ship's own mark, coloured as in the switcher.
+                                val open = Modifier.size(32.dp).clickable { drawerScope.launch { drawerState.open() } }
+                                loggedInShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
+                                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
                             },
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs

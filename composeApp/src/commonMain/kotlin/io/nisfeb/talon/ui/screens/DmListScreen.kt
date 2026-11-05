@@ -1127,13 +1127,9 @@ fun DmListScreen(
             // it is what opens the ship picker. Where the rail shows, the
             // rail holds it, at its foot, instead.
             if (!io.nisfeb.talon.ui.LocalRailShown.current) {
-                io.nisfeb.talon.ui.TalonLogo(
-                    contentDescription = "Switch ship",
-                    modifier = Modifier
-                        .padding(end = 4.dp)
-                        .size(32.dp)
-                        .clickable { onOpenShipSwitcher() },
-                )
+                val open = Modifier.padding(end = 4.dp).size(32.dp).clickable { onOpenShipSwitcher() }
+                activeShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
+                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
             }
         }
         // Message search, as a small rounded bar at the top of the list:
@@ -1997,7 +1993,7 @@ internal fun ShipSwitcherDrawer(
                         .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(20.dp))
+                    io.nisfeb.talon.ui.ShipMark(ship, size = 22.dp)
                     Spacer(Modifier.size(12.dp))
                     Column {
                         if (!nickname.isNullOrBlank()) {
