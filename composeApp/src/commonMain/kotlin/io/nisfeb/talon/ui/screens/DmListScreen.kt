@@ -10,6 +10,7 @@ import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +49,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -846,13 +846,32 @@ fun DmListScreen(
             }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
-            io.nisfeb.talon.ui.IconButton(tip = if (editMode) "Finish reordering" else "Reorder", onClick = { editMode = !editMode }) {
-                Icon(
-                    imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
-                    contentDescription = if (editMode) "Finish reordering" else "Reorder",
-                    tint = if (editMode) MaterialTheme.colorScheme.primary
-                    else LocalContentColor.current,
-                )
+            // The pencil starts a new chat or group (it was a reorder
+            // toggle nobody could read; the + button it replaces is gone).
+            // While reordering, opened from the menu, it is the way out.
+            if (editMode) {
+                io.nisfeb.talon.ui.IconButton(tip = "Finish reordering", onClick = { editMode = false }) {
+                    Icon(
+                        imageVector = Icons.Filled.Done,
+                        contentDescription = "Finish reordering",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
+                io.nisfeb.talon.ui.IconButton(tip = "New chat or group", onClick = onNewMessage) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .border(1.5.dp, LocalContentColor.current, RoundedCornerShape(8.dp)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "New message",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
             var menuOpen by remember { mutableStateOf(false) }
             // Freshness-dot inputs. Per-feature data flows joined with
@@ -919,6 +938,15 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
+                    // Reordering groups and folders, which the header's
+                    // pencil used to toggle.
+                    DropdownMenuItem(
+                        text = { Text("Reorder") },
+                        onClick = {
+                            menuOpen = false
+                            editMode = true
+                        },
+                    )
                     // Assistant — opt-in, so gated on onOpenAssistant being
                     // wired (null when unsupported / off / no key).
                     if (RailItem.Assistant in kebabItems) {
@@ -1703,13 +1731,7 @@ fun DmListScreen(
         }
         }
     }
-        FloatingActionButton(
-            onClick = onNewMessage,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
-
+        // No floating + any more: the header's pencil starts a new chat.
     }
 
     folderSheetWhom?.let { whom ->
