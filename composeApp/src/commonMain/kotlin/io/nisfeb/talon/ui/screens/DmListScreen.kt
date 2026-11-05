@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -843,9 +844,6 @@ fun DmListScreen(
             // Whether this device hears from its ship: a Windows user's sync
             // stopped for three days with nothing to say so (2026-10-29).
             activeShip?.let { io.nisfeb.talon.ui.SyncStatusIcon(repo, it, onSignIn) }
-            io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
-                Icon(Icons.Filled.Search, contentDescription = "Search")
-            }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
             // The pencil starts a new chat or group (it was a reorder
@@ -1137,6 +1135,30 @@ fun DmListScreen(
                 )
             }
         }
+        // Message search, as a small rounded bar at the top of the list:
+        // the first letter typed opens the results with it, and emptying
+        // them comes back here.
+        var searchText by remember { mutableStateOf("") }
+        OutlinedTextField(
+            value = searchText,
+            onValueChange = { typed ->
+                if (typed.isNotBlank()) {
+                    SearchDraft.query = typed
+                    searchText = ""
+                    onOpenSearch()
+                } else searchText = typed
+            },
+            placeholder = { Text("Search", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            singleLine = true,
+            shape = RoundedCornerShape(20.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .heightIn(min = 40.dp)
+                .semantics { contentDescription = "Search" },
+        )
         HorizontalDivider()
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
         inviteNote?.let { note ->

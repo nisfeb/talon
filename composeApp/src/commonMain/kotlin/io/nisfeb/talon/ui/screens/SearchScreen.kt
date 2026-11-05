@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
 import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.nowMs
 
@@ -82,7 +84,16 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
-    var query by remember { mutableStateOf(SearchDraft.query.also { SearchDraft.query = "" }) }
+    // The text and the cursor: opened from the list's search bar with a
+    // letter already typed, the cursor goes after it, not before.
+    val opened = remember { SearchDraft.query.also { SearchDraft.query = "" } }
+    var field by remember {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(opened, androidx.compose.ui.text.TextRange(opened.length)))
+    }
+    val query = field.text
+    // Emptied after being opened with text, search gives the list back:
+    // no blank page with only a box in it.
+    LaunchedEffect(query) { if (opened.isNotEmpty() && query.isEmpty()) onBack() }
     var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
 
@@ -225,8 +236,10 @@ fun SearchScreen(
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { focus.requestFocus() }
             OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
+                value = field,
+                onValueChange = { field = it },
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Filled.Search, contentDescription = null) },
                 placeholder = {
                     // One line only: a long placeholder wrapped to two
                     // lines on a narrow phone, inflating the field so the
