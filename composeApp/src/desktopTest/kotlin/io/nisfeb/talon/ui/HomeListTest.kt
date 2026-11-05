@@ -96,7 +96,7 @@ class HomeListTest {
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
                             onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },
                             onOpenContacts = { did += "Contacts" },
-                            onOpenAdministration = { did += "Administration" }, onOpenInvites = { did += "Invites" },
+                            onOpenAdministration = { did += "Group Moderation" }, onOpenInvites = { did += "Invites" },
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
                             folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
@@ -423,7 +423,7 @@ class HomeListTest {
     @Test
     fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
         val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
-            "Administration", "Invites", "Settings", "Sign out")
+            "Group Moderation", "Invites", "Settings", "Sign out")
         for (place in places) {
             onNodeWithContentDescription("More").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }

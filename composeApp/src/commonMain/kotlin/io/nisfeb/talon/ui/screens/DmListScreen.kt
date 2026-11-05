@@ -1064,7 +1064,7 @@ fun DmListScreen(
                     }
                     if (RailItem.Administration in kebabItems) {
                         DropdownMenuItem(
-                            text = { Text("Administration") },
+                            text = { Text("Group Moderation") },
                             onClick = {
                                 menuOpen = false
                                 onOpenAdministration()

@@ -81,7 +81,7 @@ class GroupAdminListScreenTest {
 
     @Test
     fun `with nothing to run, it says so`() = admin(prepare = { scries["groups/v2/groups"] = "{}" }) {
-        showing("You're not an admin of any groups.")
+        showing("You don't run any groups yet. Start one above.")
     }
 
     // A group that could not be read was left out, so a group we run
@@ -91,7 +91,7 @@ class GroupAdminListScreenTest {
         admin(prepare = { scries.remove("groups/v2/groups/~nec/book-club") }) {
             showing("Couldn't load groups")
             assertTrue(shows("~nec/book-club could not be read"))
-            assertTrue(!shows("You're not an admin of any groups."))
+            assertTrue(!shows("You don't run any groups yet. Start one above."))
         }
 
     @Test
@@ -179,5 +179,10 @@ class GroupAdminListScreenTest {
         assertTrue(shows("Book Club") && !shows("Elsewhere"))
         assertTrue(ship.scried.none { it.startsWith("groups/v3/groups/~") || it.startsWith("groups/v2/groups/~") }, "${ship.scried}")
     }
-}
 
+    @Test
+    fun `the Start a group button opens the same new-group form as the plus`() = admin {
+        onNodeWithText("Start a group").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("New group") && shows("Title") }
+    }
+}

@@ -158,7 +158,7 @@ class AppShellTest {
     fun `every full-screen section opens from the rail and its Back returns to the list`() = app {
         for ((item, marker) in listOf(
             "My profile" to "Edit profile",
-            "Administration" to "Administration",
+            "Group Moderation" to "Group Moderation",
             "Invites" to "No pending invites",
             "Settings" to "Appearance",
         )) {
