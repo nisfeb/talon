@@ -451,25 +451,24 @@ fun LoginScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    onOpenShareQr?.let { openShare ->
-                        // Signing in on another device: opens the QR
-                        // generator screen. Lives inside
-                        // the form card so it reads as a related action
-                        // and not a stray link. Available on both
-                        // targets since QR generation is JVM-only and
-                        // ZXing core is wired into both leaves.
-                        Text(
-                            text = "Signing in on another device? Make a login QR →",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp)
-                                .clickable(enabled = !connecting) { openShare() },
-                        )
-                    }
                 }
+            }
+            onOpenShareQr?.let { openShare ->
+                // Signing in on another device: opens the QR generator
+                // screen. Sits just below the form card, with the other
+                // ways in, so the card holds only this sign-in. Available
+                // on both targets since QR generation is JVM-only and
+                // ZXing core is wired into both leaves.
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Signing in on another device? Make a login QR →",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !connecting) { openShare() },
+                )
             }
             onRunLocalShip?.let { run ->
                 Spacer(Modifier.height(12.dp))
