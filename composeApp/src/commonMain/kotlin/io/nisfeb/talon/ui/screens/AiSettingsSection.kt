@@ -286,7 +286,6 @@ fun OrrerySettingsSection(
 
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
-    Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
     if (orrery != null) ReadingRow(orrery, orreryHere, spend[AiFeature.OrreryTriage.name])
     if (orrery != null && orreryHere) EveningReminderRow(orrery)
