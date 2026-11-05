@@ -145,11 +145,11 @@ class CallOverlayTest {
     @Test
     fun `a placed call rings out until cancelled`() = overlay { calls ->
         calls.placeCall("~bus")
-        showing("Calling…")
+        showing("Calling")
         val id = sent("ring")
         onNodeWithContentDescription("Cancel").performClick()
         assertEquals(id, sent("hangup"))
-        waitUntil(timeoutMillis = 10_000) { !shows("Calling…") }
+        waitUntil(timeoutMillis = 10_000) { !shows("Calling") }
     }
 
     @Test

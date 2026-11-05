@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.Dp
@@ -543,13 +547,8 @@ private fun FullScreenRing(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-                    Icon(
-                        Icons.Filled.Call,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(56.dp),
-                    )
-                    Text(
+                    PulsingCallIcon(56.dp)
+                    RingingText(
                         subtitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -582,19 +581,69 @@ private fun FullScreenRing(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.padding(horizontal = 40.dp, vertical = 32.dp),
                 ) {
-                    Icon(
-                        Icons.Filled.Call,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp),
-                    )
-                    Text(subtitle, style = MaterialTheme.typography.titleMedium)
+                    PulsingCallIcon(36.dp)
+                    RingingText(subtitle, style = MaterialTheme.typography.titleMedium)
                     Text(title, style = MaterialTheme.typography.headlineSmall)
                     Box(Modifier.padding(top = 28.dp)) { actions() }
                 }
             }
         }
     }
+}
+
+/**
+ * The phone icon with a ring that swells and fades behind it, over and
+ * over, so a ringing call reads as live rather than as a still card.
+ */
+@Composable
+private fun PulsingCallIcon(size: androidx.compose.ui.unit.Dp) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "ring")
+    val t by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "ring phase",
+    )
+    val accent = MaterialTheme.colorScheme.primary
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size * 2)) {
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            val r0 = this.size.minDimension / 4f
+            val r = r0 + (this.size.minDimension / 2f - r0) * t
+            drawCircle(accent.copy(alpha = 0.35f * (1f - t)), radius = r)
+        }
+        Icon(Icons.Filled.Call, contentDescription = null, tint = accent, modifier = Modifier.size(size))
+    }
+}
+
+/**
+ * [text] with its trailing ellipsis drawn as dots that fill in one by
+ * one ("Calling", "Calling.", "Calling..", "Calling..."), the width held
+ * so the line does not shift. Text without one is shown as it is.
+ */
+@Composable
+private fun RingingText(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    color: Color = Color.Unspecified,
+    modifier: Modifier = Modifier,
+) {
+    val base = text.removeSuffix("…").removeSuffix("...")
+    if (base == text) { Text(text, style = style, color = color, modifier = modifier); return }
+    var dots by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(450); dots = (dots + 1) % 4 } }
+    Text(
+        androidx.compose.ui.text.buildAnnotatedString {
+            append(base)
+            append(".".repeat(dots))
+            // The dots not yet shown keep their room, invisibly.
+            withStyle(androidx.compose.ui.text.SpanStyle(color = Color.Transparent)) { append(".".repeat(3 - dots)) }
+        },
+        style = style,
+        color = color,
+        modifier = modifier.semantics { contentDescription = text },
+    )
 }
 
 @Composable
