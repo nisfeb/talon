@@ -806,11 +806,16 @@ fun SettingsScreen(
                     label = { Text("Rows") },
                 )
             }
-            // Behind the bubbles, a picture of the owner's. Rows draw on
-            // the page, so it is offered with bubbles alone. Colours, the
-            // page's and the bubbles', are a theme's, under Appearance.
+            // A picture of the owner's, behind Home and behind bubbles;
+            // rows draw on the page. Offered either way, since Home has no
+            // bubbles. Colours, the page's and the bubbles', are a theme's.
+            ChatBackgroundImageRow(uiSettings, chatBackgroundFiles)
+            Text(
+                "The picture goes behind Home, and behind chats shown as bubbles.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (chatBubbles) {
-                ChatBackgroundImageRow(uiSettings, chatBackgroundFiles)
                 Text(
                     "Your bubbles, your contacts' and everyone else's take their colours from your theme, under Appearance.",
                     style = MaterialTheme.typography.bodySmall,

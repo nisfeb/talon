@@ -244,9 +244,12 @@ class SettingsScreenTest {
 
         assertTrue(ui.chatBubbles.value)
         assertTrue(shows("Background") && shows("Choose a picture"), "a background picture is offered with bubbles")
+        assertTrue(shows("take their colours from your theme"))
         tap("Rows")
         assertFalse(ui.chatBubbles.value)
-        assertFalse(shows("Background"), "rows draw on the page, so none is offered")
+        // Home has no bubbles, so its picture is offered in rows too.
+        assertTrue(shows("Choose a picture"), "offered in rows, for Home")
+        assertFalse(shows("take their colours from your theme"), "the bubbles' note goes with them")
         tap("Bubbles")
         assertTrue(ui.chatBubbles.value)
     }

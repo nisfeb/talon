@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -1331,6 +1334,27 @@ class AppShellTest {
             // A tapped DM request in Activity goes the same way.
             io.nisfeb.talon.notify.OpenNoticeRequests.request("dm:~bus")
             waitUntil(timeoutMillis = 5_000) { busChatShown() && !showing("Mail runs in Grubbery") }
+        }
+    }
+
+    // sneagan, 2026-11-06: the background picture is Home's as well as the
+    // chats'. Set here in rows, where chats draw on the page, it is still
+    // behind Home, out to the window's edge.
+    @Test
+    fun `the background picture is behind Home, in rows as well`() {
+        val f = java.io.File(kotlin.io.path.createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        val ui = InMemoryUiSettings().apply { setChatBubbles(false); setChatBackgroundImage(f.absolutePath) }
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Home").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+            // The window's own root: the rail button's tip is a second one.
+            val window = onAllNodes(isRoot()).onFirst()
+            val root = window.fetchSemanticsNode().boundsInRoot
+            fun edge() = window.captureToImage().toPixelMap()[(root.right - 3).toInt(), (root.height / 2).toInt()]
+            waitUntil(timeoutMillis = 5_000) { edge() == androidx.compose.ui.graphics.Color.Red }
         }
     }
 

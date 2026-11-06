@@ -18,8 +18,8 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 /**
- * The picture behind a conversation's bubbles, kept on this device in the
- * app's data dir. It is this device's alone: a picture would have to go
+ * The picture behind Home and a conversation's bubbles, kept on this
+ * device in the app's data dir. It is this device's alone: a picture would have to go
  * through the ship to travel, and a colour behind the bubbles is the
  * theme's (sneagan, 2026-11-06).
  */
@@ -46,7 +46,7 @@ class ChatBackgroundFiles(private val dir: Path = "$dataDirPath/chat-background"
     }
 }
 
-/** The chat's picture, filling the box the list is in, when there is one. */
+/** The picture, filling the box it is drawn in (a chat's list, Home), when there is one. */
 @Composable
 fun BoxScope.ChatBackdrop(look: ChatLook) {
     val image = look.image ?: return

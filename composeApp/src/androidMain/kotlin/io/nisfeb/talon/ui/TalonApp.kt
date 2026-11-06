@@ -2286,7 +2286,9 @@ fun TalonApp(
                     onOpenChats = { homeOpen = false },
                     onOpenMailThread = { id -> homeOpen = false; pendingMailThread = id; mailOpen = true },
                     onOpenMail = { homeOpen = false; mailOpen = true },
-                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+                    backgroundImage = app.uiSettings.chatBackgroundImage.collectAsState().value,
+                    // No inset here: Home pads its own content, and its
+                    // picture runs under the system bars.
                 )
             }
 

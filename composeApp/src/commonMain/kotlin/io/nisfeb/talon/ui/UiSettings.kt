@@ -22,9 +22,9 @@ interface UiSettings {
     fun setChatBubbles(on: Boolean)
 
     /**
-     * The picture behind a conversation's bubbles: a file's path, kept by
-     * [ChatBackgroundFiles]; "" is none. This device's alone: it never
-     * syncs. A colour behind them is the theme's.
+     * The picture behind Home and behind a conversation's bubbles: a
+     * file's path, kept by [ChatBackgroundFiles]; "" is none. This
+     * device's alone: it never syncs. A colour behind them is the theme's.
      */
     val chatBackgroundImage: StateFlow<String>
     fun setChatBackgroundImage(path: String)

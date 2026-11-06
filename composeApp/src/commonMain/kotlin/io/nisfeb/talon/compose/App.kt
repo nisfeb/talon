@@ -3922,6 +3922,7 @@ fun App(
                                             uiSettings.setActiveRailTab(RailTab.Mail)
                                         },
                                         onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
+                                        backgroundImage = uiSettings.chatBackgroundImage.collectAsState().value,
                                     )
                                 }
                             } else if (activeRailTab == RailTab.Mail && !showAssistant && !showEvening) {
