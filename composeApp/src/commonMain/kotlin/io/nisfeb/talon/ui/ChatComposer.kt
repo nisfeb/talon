@@ -1112,7 +1112,9 @@ fun ChatComposer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                // More room at the end, so the field stops short of the
+                // edge on a phone (sneagan, 2026-11-06: too wide).
+                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
             // The buttons stay on the field's bottom line as it grows
             // (a user, 2026-11-02: the send button "should be bottom
             // aligned to stay put as the input field gets taller").
@@ -1400,16 +1402,18 @@ fun ChatComposer(
             val onPicture = LocalChatLook.current.image != null
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
-                // The disc before the size: after it, a background is
-                // drawn at the 48 dp touch target inside the button, and on
-                // a phone it ran over the text field.
-                modifier = Modifier.padding(bottom = BESIDE_FIELD).then(
+                // Its own 48 dp, with 8 dp clear of the field (sneagan,
+                // 2026-11-06: bigger, as its disc first was, and the field
+                // narrower). The disc goes before the size: after it, a
+                // background is drawn at the touch target inside the
+                // button, not the button.
+                modifier = Modifier.padding(start = 6.dp, bottom = BESIDE_FIELD_SEND).then(
                     if (!onPicture) Modifier
                     else Modifier.background(
                         if (sendable) sendAccent else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                         androidx.compose.foundation.shape.CircleShape,
                     ),
-                ).size(36.dp),
+                ).size(SEND),
             ) {
                 // A tick, not a paper plane. Editing and sending are
                 // different acts and the button is the only thing that
@@ -1417,7 +1421,7 @@ fun ChatComposer(
                 Icon(
                     if (isEditing) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
                     contentDescription = if (isEditing) "Save edit" else "Send",
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(24.dp),
                     tint = when {
                         sendable && onPicture -> MaterialTheme.colorScheme.onPrimary
                         sendable -> sendAccent
@@ -1431,6 +1435,12 @@ fun ChatComposer(
 
 /** What lifts a 36 dp button beside the field to the middle of its one-line height. */
 private val BESIDE_FIELD = (androidx.compose.material3.OutlinedTextFieldDefaults.MinHeight - 36.dp) / 2
+
+/** The send button: the size of its touch target. */
+private val SEND = 48.dp
+
+/** What lifts the send button to the middle of the field's one-line height. */
+private val BESIDE_FIELD_SEND = (androidx.compose.material3.OutlinedTextFieldDefaults.MinHeight - SEND) / 2
 
 @Composable
 private fun QuotePreviewRow(

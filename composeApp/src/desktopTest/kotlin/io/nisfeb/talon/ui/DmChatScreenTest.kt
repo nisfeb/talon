@@ -346,17 +346,30 @@ class DmChatScreenTest {
             onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("hi")
             waitForIdle()
             val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
-            // sneagan, 2026-11-06: on a phone the disc ran over the text
-            // field. It is the button's 36 dp, not the 48 dp touch target
-            // around it: 15 dp from the middle is disc, 21 dp is past it.
+            // sneagan, 2026-11-06: Send is 48 dp, as its disc first was,
+            // and the disc stays inside it: 20 dp from the middle is disc,
+            // 27 dp is past it.
             val now = onRoot().captureToImage().toPixelMap()
             val mid = send.center
             fun at(dx: Float) = now[(mid.x + dx * density.density).toInt(), mid.y.toInt()]
-            assertNear(c.primary, at(15f), "inside Send's 36 dp")
-            assertEquals(red, at(21f), "past Send's 36 dp, the picture")
+            assertNear(c.primary, at(20f), "inside Send's 48 dp")
+            assertEquals(red, at(27f), "past Send's 48 dp, the picture")
             val pick = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot.center
             assertEquals(red, now[(pick.x - 21 * density.density).toInt(), pick.y.toInt()], "past Attach's 36 dp, the picture")
         }
+    }
+
+    // sneagan, 2026-11-06: the field was too wide on a phone, and the
+    // send button too small. Send has its own 48 dp, 8 dp clear of the field.
+    @Test
+    fun `the send button has its own 48 dp, clear of the text field`() = chat(
+        seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+        val field = onNode(androidx.compose.ui.test.hasSetTextAction()).fetchSemanticsNode().boundsInRoot
+        val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot.center
+        val gap = (send.x - 24 * density.density) - field.right
+        assertEquals(8f * density.density, gap, 1f)
     }
 
     @Test
