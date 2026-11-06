@@ -72,6 +72,9 @@ class AndroidUiSettings(
     private val _chatBubbles = MutableStateFlow(prefs.getBoolean(KEY_CHAT_BUBBLES, true))
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
 
+    private val _chatBackground = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND, "") ?: "")
+    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+
     private val _accentSettings = MutableStateFlow(loadAccent())
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
@@ -273,6 +276,12 @@ class AndroidUiSettings(
         _chatBubbles.value = on
     }
 
+    override fun setChatBackground(hex: String) {
+        if (_chatBackground.value == hex) return
+        prefs.edit().putString(KEY_CHAT_BACKGROUND, hex).apply()
+        _chatBackground.value = hex
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         prefs.edit().apply {
@@ -412,6 +421,7 @@ class AndroidUiSettings(
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_CHAT_BUBBLES = "chat_bubbles"
+        private const val KEY_CHAT_BACKGROUND = "chat_background"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"

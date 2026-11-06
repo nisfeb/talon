@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
@@ -79,6 +82,10 @@ class DmChatScreenTest {
         drafts: DraftStore = InMemoryDraftStore(),
         ai: io.nisfeb.talon.ai.AiSettingsRepository = FakeAiSettings(),
         ui: io.nisfeb.talon.ui.UiSettings = InMemoryUiSettings(),
+        /** Ships put in the owner's contact book before the chat opens. */
+        book: List<String> = emptyList(),
+        /** Bubble colours as a theme would set them. */
+        bubbleColors: BubbleColors? = null,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -90,6 +97,7 @@ class DmChatScreenTest {
         val stream = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(stream)
         runBlocking { db.seed() }
+        runBlocking { book.forEach { repo.addContact(it) } }
         try {
             runComposeUiTest {
                 setContent {
@@ -100,6 +108,7 @@ class DmChatScreenTest {
                         },
                     ) {
                     TalonTheme(darkTheme = false) {
+                    androidx.compose.runtime.CompositionLocalProvider(LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current)) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
                             aiSettings = ai, uiSettings = ui,
@@ -108,6 +117,7 @@ class DmChatScreenTest {
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
                         )
+                    }
                     }
                     }
                 }
@@ -226,6 +236,45 @@ class DmChatScreenTest {
             ui.setChatBubbles(true)
             waitForIdle()
             assertTrue(left("from me") > left("from them") + 200f, "and back")
+        }
+    }
+
+    // sneagan, 2026-11-05: the owner's bubbles, their contacts' (a VIP
+    // colour) and everyone else's, from the theme, on a background of the
+    // owner's own. Read off the drawn pixels: inside each bubble's margin,
+    // and above every message, where only the background is.
+    @Test
+    fun `a contact's bubble takes the contacts' colour, others theirs, ours ours, on the chosen background`() {
+        val ui = InMemoryUiSettings().apply { setChatBackground("#FF0000") }
+        val green = Color(0xFF00FF00)
+        val blue = Color(0xFF0000FF)
+        val yellow = Color(0xFFFFFF00)
+        chat(
+            whom = "0v1.club",
+            ui = ui,
+            book = listOf("~nec"),
+            bubbleColors = BubbleColors(mine = yellow, contact = green, theirs = blue),
+            seed = {
+                messages().upsertAll(listOf(
+                    MessageEntity("0v1.club", "~nec/170141184501", "~nec", 1_000, """[{"inline":["from a contact"]}]""", "/chat"),
+                    MessageEntity("0v1.club", "~wes/170141184502", "~wes", 2_000, """[{"inline":["from a stranger"]}]""", "/chat"),
+                    MessageEntity("0v1.club", "~zod/170141184503", "~zod", 3_000, """[{"inline":["from me"]}]""", "/chat"),
+                ))
+            },
+        ) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from me").fetchSemanticsNodes().isNotEmpty() }
+            waitForIdle()
+            val pixels = onRoot().captureToImage().toPixelMap()
+            val inset = 6.dp.value * density.density
+            fun fillBeside(text: String): Color {
+                val b = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+                return pixels[(b.left - inset).toInt(), b.center.y.toInt()]
+            }
+            assertEquals(green, fillBeside("from a contact"), "a contact's bubble")
+            assertEquals(blue, fillBeside("from a stranger"), "anyone else's")
+            assertEquals(yellow, fillBeside("from me"), "ours")
+            val list = onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+            assertEquals(Color(0xFFFF0000), pixels[list.center.x.toInt(), (list.top + 4f).toInt()], "the background, above every message")
         }
     }
 

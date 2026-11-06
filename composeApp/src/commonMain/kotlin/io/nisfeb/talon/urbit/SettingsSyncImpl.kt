@@ -162,6 +162,7 @@ class SettingsSyncImpl(
         const val ENTRY_POWER_FEATURES = "power-features"
         const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
         const val ENTRY_CHAT_BUBBLES = "chat-bubbles"
+        const val ENTRY_CHAT_BACKGROUND = "chat-background"
         const val ENTRY_ACCENT = "accent"
         const val ENTRY_THEMES = "themes"
         // Installed fonts and the chosen family; the files themselves
@@ -341,6 +342,7 @@ class SettingsSyncImpl(
         watch(settings.powerFeaturesEnabled, ENTRY_POWER_FEATURES) { bool(it) }
         watch(settings.hideComposerButtons, ENTRY_HIDE_COMPOSER_BUTTONS) { bool(it) }
         watch(settings.chatBubbles, ENTRY_CHAT_BUBBLES) { bool(it) }
+        watch(settings.chatBackground, ENTRY_CHAT_BACKGROUND) { str(it) }
         watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER, ::encodeRailItemOrder)
         watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
         watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
@@ -407,6 +409,10 @@ class SettingsSyncImpl(
                 ?.let { applyLocal(entry, bool(it)) { settings.setHideComposerButtons(it) } }
             ENTRY_CHAT_BUBBLES -> obj["enabled"].asBool()
                 ?.let { applyLocal(entry, bool(it)) { settings.setChatBubbles(it) } }
+            // "" is the page's own; anything else must be a colour.
+            ENTRY_CHAT_BACKGROUND -> obj["value"].asStr()
+                ?.takeIf { it.isEmpty() || io.nisfeb.talon.ui.parseHexColor(it) != null }
+                ?.let { applyLocal(entry, str(it)) { settings.setChatBackground(it) } }
             ENTRY_RAIL_ITEM_ORDER -> {
                 val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() } ?: return
                 val items = names.mapNotNull { n ->
@@ -823,6 +829,7 @@ class SettingsSyncImpl(
             push(ENTRY_POWER_FEATURES, bool(settings.powerFeaturesEnabled.value))
             push(ENTRY_HIDE_COMPOSER_BUTTONS, bool(settings.hideComposerButtons.value))
             push(ENTRY_CHAT_BUBBLES, bool(settings.chatBubbles.value))
+            push(ENTRY_CHAT_BACKGROUND, str(settings.chatBackground.value))
             push(ENTRY_RAIL_ITEM_ORDER, encodeRailItemOrder(settings.railItemOrder.value))
             push(ENTRY_ACCENT, encodeAccent(settings.accentSettings.value))
             push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))

@@ -457,9 +457,14 @@ fun ThreadList(
                 }
             }) { Text(if (following) "Unfollow" else "Follow") }
         }
+        // Bubbles or rows, as the owner set for chats; the book picks the
+        // contacts' colour.
+        val chatLook = io.nisfeb.talon.ui.LocalChatLook.current
+        val book by repo.bookContacts.collectAsState()
+        val kindOf: (String) -> io.nisfeb.talon.ui.BubbleKind = { io.nisfeb.talon.ui.bubbleKindOf(it, ourPatp, book) }
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxSize().then(chatLook.background?.let { Modifier.background(it) } ?: Modifier),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
@@ -494,6 +499,7 @@ fun ThreadList(
                         onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
+                        bubbleKind = kindOf(p.author),
                         flashAmber = false,
                     )
                 }
@@ -526,6 +532,7 @@ fun ThreadList(
                     showHeader = row.showHeader,
                     highlighted = false,
                     flashAmber = row.m.id == flashReplyId,
+                    bubbleKind = kindOf(replyMsg.author),
                 )
             }
         }
@@ -751,7 +758,14 @@ private fun ThreadMessage(
     showHeader: Boolean,
     highlighted: Boolean,
     flashAmber: Boolean = false,
+    /** Whose words, for the bubble's colour. */
+    bubbleKind: io.nisfeb.talon.ui.BubbleKind = io.nisfeb.talon.ui.BubbleKind.Theirs,
 ) {
+    // Bubbles or rows, as chats are (the shells provide it).
+    val look = io.nisfeb.talon.ui.LocalChatLook.current
+    val bubbles = look.bubbles
+    val onRight = bubbles && bubbleKind == io.nisfeb.talon.ui.BubbleKind.Mine
+    val clock = remember(m.sentMs) { io.nisfeb.talon.util.formatClock(m.sentMs) }
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
     val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
@@ -768,8 +782,12 @@ private fun ThreadMessage(
             flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
         }
     }
-    val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
-        else MaterialTheme.colorScheme.surface
+    // In bubbles the rows let the chat's background through.
+    val baseColor = when {
+        highlighted -> MaterialTheme.colorScheme.surfaceVariant
+        bubbles -> Color.Transparent
+        else -> MaterialTheme.colorScheme.surface
+    }
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
     // Desktop only: track row hover so the trailing "⋯" can reveal on
     // hover (matches DmChatScreen.MessageRow).
@@ -802,12 +820,37 @@ private fun ThreadMessage(
                 },
             )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
+        horizontalArrangement = if (onRight) Arrangement.End else Arrangement.Start,
     ) {
+        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
+        // open the menu when tap-to-open is off (selection owns left-drag;
+        // SelectionContainer eats the row's right-click). A plain Icon, NOT
+        // IconButton — its 48dp min touch size inflates short rows.
+        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
+        // DmChatScreen.MessageRow: beside the bubble, on its inner side.
+        @Composable
+        fun androidx.compose.foundation.layout.RowScope.Dots() {
+            if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) return
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
+        }
+        if (onRight) Dots()
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
+            horizontalAlignment = if (onRight) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (showHeader) {
+            if (showHeader && !bubbles) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -836,9 +879,34 @@ private fun ThreadMessage(
                 onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
             )
             }
-            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
-                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
-            } else body()
+            val folded: @Composable () -> Unit = {
+                if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                    io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+                } else body()
+            }
+            if (bubbles) {
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind, under = look.background ?: MaterialTheme.colorScheme.surface) {
+                    val quiet = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.72f)
+                    // A thread is many people's: each run of theirs is named.
+                    if (showHeader && bubbleKind != io.nisfeb.talon.ui.BubbleKind.Mine) {
+                        Text(
+                            contactMap.byline(m.author, authorLabel, "").removeSuffix(" · "),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = quiet,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                    folded()
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(clock, style = MaterialTheme.typography.labelSmall, color = quiet)
+                        if (m.status == "pending") SendingIcon()
+                    }
+                }
+            } else folded()
             SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -892,26 +960,7 @@ private fun ThreadMessage(
                 actionMenu()
             }
         }
-        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
-        // open the menu when tap-to-open is off (selection owns left-drag;
-        // SelectionContainer eats the row's right-click). A plain Icon, NOT
-        // IconButton — its 48dp min touch size inflates short rows.
-        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
-        // DmChatScreen.MessageRow.
-        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = "Message actions",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Top)
-                    .alpha(if (hovered || menuExpanded) 1f else 0f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onMenuExpand)
-                    .padding(2.dp)
-                    .size(20.dp),
-            )
-        }
+        if (!onRight) Dots()
     }
 }
 

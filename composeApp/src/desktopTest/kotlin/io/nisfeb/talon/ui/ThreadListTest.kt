@@ -53,6 +53,7 @@ class ThreadListTest {
         parentId: String = parent,
         seed: suspend AppDatabase.() -> Unit = {},
         prepare: FakeShip.() -> Unit = {},
+        look: ChatLook = ChatLook(),
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-thread-").toFile()
@@ -71,6 +72,8 @@ class ThreadListTest {
                             override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
                             override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
                         },
+                        // What the shells provide from the bubbles setting.
+                        LocalChatLook provides look,
                     ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
@@ -108,6 +111,30 @@ class ThreadListTest {
                 .filter { "Text = " in it || "ScrollAxisRange" in it }.joinToString(" | ") { it.trim() }
             error("never showed \"$text\"; the screen showed: $screen")
         }
+    }
+
+    // sneagan, 2026-11-05: "threaded messages are always rows instead of
+    // respecting the bubble setting".
+    private val replies: suspend AppDatabase.() -> Unit = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~nec/170141184507", "~nec", "their answer", 2_000, parentId = parent))
+        messages().upsert(msg("~zod/170141184508", "~zod", "my answer", 3_000, parentId = parent))
+    }
+
+    private fun ComposeUiTest.left(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.left
+
+    @Test
+    fun `in bubbles a thread puts ours on the right, as a chat does`() = thread(seed = replies, look = ChatLook(bubbles = true)) { _, _ ->
+        shows("my answer")
+        assertTrue(left("my answer") > left("their answer") + 200f, "ours on the right")
+        assertTrue(onAllNodesWithText("~nec", substring = true).fetchSemanticsNodes().isNotEmpty(), "theirs named")
+    }
+
+    @Test
+    fun `in rows a thread puts every message on the left under its byline`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
+        shows("my answer")
+        assertEquals(left("their answer"), left("my answer"))
+        assertTrue(onAllNodesWithText("~zod", substring = true).fetchSemanticsNodes().isNotEmpty(), "ours under its byline")
     }
 
     @Test

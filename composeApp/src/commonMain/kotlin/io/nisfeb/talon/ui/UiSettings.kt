@@ -21,6 +21,10 @@ interface UiSettings {
     val chatBubbles: StateFlow<Boolean>
     fun setChatBubbles(on: Boolean)
 
+    /** A conversation's background in bubbles, as "#RRGGBB"; "" is the page's own. Syncs, as bubbles do. */
+    val chatBackground: StateFlow<String>
+    fun setChatBackground(hex: String)
+
     /**
      * Theme accent color preferences. The effective tint that drives
      * every primary-colored UI element (send icon, focus rings, ship
@@ -319,6 +323,12 @@ class InMemoryUiSettings(
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
     override fun setChatBubbles(on: Boolean) {
         _chatBubbles.value = on
+    }
+
+    private val _chatBackground = MutableStateFlow("")
+    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+    override fun setChatBackground(hex: String) {
+        _chatBackground.value = hex
     }
 
     private val _accentSettings = MutableStateFlow(initialAccent)

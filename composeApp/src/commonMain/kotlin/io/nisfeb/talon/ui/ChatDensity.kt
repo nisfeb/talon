@@ -104,8 +104,17 @@ fun chatDensityLocals(uiSettings: UiSettings): Array<ProvidedValue<*>> {
     val chat = ChatDensity.forMode(mode)
     val base = LocalDensity.current
     val scaled = remember(base, chat, userFontScale) { scaledDensity(base, chat, userFontScale, isWholeWindowZoom) }
-    return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled)
+    // How conversations draw their messages, for the screens that have no
+    // settings of their own to read it from (a thread).
+    val bubbles by uiSettings.chatBubbles.collectAsState()
+    val background by uiSettings.chatBackground.collectAsState()
+    val look = remember(bubbles, background) { chatLookOf(bubbles, background) }
+    return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled, LocalChatLook provides look)
 }
+
+/** The look the two settings make: a background only in bubbles, and only a colour that parses. */
+fun chatLookOf(bubbles: Boolean, background: String): ChatLook =
+    ChatLook(bubbles, if (bubbles) parseHexColor(background) else null)
 
 /**
  * [base] with the preset's text scale and the user's own [userScale].

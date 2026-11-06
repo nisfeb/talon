@@ -216,8 +216,10 @@ class SettingsScreenTest {
         assertEquals(!before, ui.swipeQuotes.value)
 
         assertTrue(ui.chatBubbles.value)
+        assertTrue(shows("Background"), "a background is offered with bubbles")
         tap("Rows")
         assertFalse(ui.chatBubbles.value)
+        assertFalse(shows("Background"), "rows draw on the page, so none is offered")
         tap("Bubbles")
         assertTrue(ui.chatBubbles.value)
     }
@@ -256,7 +258,7 @@ class SettingsScreenTest {
         tap("New theme")
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
         tap("More colours")
-        assertEquals(6, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all six derived")
+        assertEquals(9, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all nine derived")
         // Set Links: it starts from the standard blue.
         val autoRows = onAllNodesWithText("Set")
         autoRows[5].performScrollTo().performClick()
@@ -272,6 +274,24 @@ class SettingsScreenTest {
         waitForIdle()
         tap("Save and use")
         assertEquals("", ui.themeSettings.value.active!!.link, "back to Auto")
+    }
+
+    // sneagan, 2026-11-05: the theme tooling sets the owner's bubbles, their
+    // contacts' and everyone else's.
+    @Test
+    fun `a theme sets its bubbles' colours, a contact's among them, from what Auto drew`() = settings {
+        tap("Appearance")
+        tap("New theme")
+        onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
+        tap("More colours")
+        assertTrue(shows("My bubbles") && shows("Contacts' bubbles") && shows("Others' bubbles"))
+        // The eighth extra is the contacts' bubbles.
+        onAllNodesWithText("Set")[7].performScrollTo().performClick()
+        waitForIdle()
+        tap("Save and use")
+        val saved = ui.themeSettings.value.active!!
+        assertTrue(parseHexColor(saved.bubbleContact.orEmpty()) != null, "set: ${saved.bubbleContact}")
+        assertEquals("" to "", saved.bubbleMine to saved.bubbleTheirs, "the others written as Auto")
     }
 
     @Test

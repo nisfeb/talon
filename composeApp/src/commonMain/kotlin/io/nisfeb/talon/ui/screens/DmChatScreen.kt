@@ -246,6 +246,10 @@ fun DmChatScreen(
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val chatBubbles by uiSettings.chatBubbles.collectAsState()
+    val chatBackground by uiSettings.chatBackground.collectAsState()
+    val chatLook = remember(chatBubbles, chatBackground) { io.nisfeb.talon.ui.chatLookOf(chatBubbles, chatBackground) }
+    // The owner's contact book: their bubbles take the contacts' colour.
+    val book by repo.bookContacts.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient(io.nisfeb.talon.ai.AiFeature.CatchUp) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
@@ -1212,7 +1216,8 @@ fun DmChatScreen(
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            // Bubbles may sit on a background of the owner's own.
+            modifier = Modifier.fillMaxSize().then(chatLook.background?.let { Modifier.background(it) } ?: Modifier),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
@@ -1264,6 +1269,8 @@ fun DmChatScreen(
                             onAvatarTap = onAvatarTap,
                             flashAmber = item.row.m.id == flashMessageId,
                             bubbles = chatBubbles,
+                            bubbleKind = io.nisfeb.talon.ui.bubbleKindOf(item.row.m.author, ourPatp, book),
+                            bubbleUnder = chatLook.background ?: MaterialTheme.colorScheme.surface,
                         )
                     }
                 }
@@ -1685,6 +1692,10 @@ private fun MessageRow(
     flashAmber: Boolean = false,
     /** Bubbles, or the classic rows: [io.nisfeb.talon.ui.UiSettings.chatBubbles]. */
     bubbles: Boolean = true,
+    /** Whose words, for the bubble's colour. */
+    bubbleKind: io.nisfeb.talon.ui.BubbleKind = io.nisfeb.talon.ui.BubbleKind.Theirs,
+    /** What the bubbles sit on, for their ink. */
+    bubbleUnder: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
@@ -1837,50 +1848,33 @@ private fun MessageRow(
                 } else body()
             }
             if (bubbles) {
-                val corner = 18.dp
-                val tail = 6.dp
-                androidx.compose.material3.Surface(
-                    // Theirs on the raised colour, not surfaceVariant: the
-                    // quotes, link cards and polls inside a message draw on
-                    // that, and vanished into a bubble of the same grey.
-                    color = if (mine) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                        else MaterialTheme.colorScheme.surfaceContainerHighest,
-                    // The text's own colour (a custom theme's "text"), not
-                    // the muted ink a Surface would give its variant colour.
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    shape = if (mine) RoundedCornerShape(corner, corner, tail, corner)
-                        else RoundedCornerShape(corner, corner, corner, tail),
-                ) {
-                    Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 5.dp)) {
-                        // Their name opens the first bubble of a run wherever
-                        // more than one other person talks: a group's channel
-                        // or a club. In a 1:1 DM, only when it says more than
-                        // the name (a bot that is offline). Ours need none.
-                        val nameLine = contactMap.byline(m.author, authorLabel, "").removeSuffix(" · ")
-                        if (!mine && row.showHeader && (!m.whom.startsWith("~") || nameLine != authorLabel)) {
-                            Text(
-                                nameLine,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                                // The byline's colour: the accent was 2:1 on a light page.
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(bottom = 2.dp),
-                            )
-                        }
-                        folded()
-                        // The time inside the bubble, at its foot, with the
-                        // send state beside it.
-                        Row(
-                            modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                clock,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (m.status == "pending") SendingIcon()
-                        }
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind, under = bubbleUnder) {
+                    // Their name opens the first bubble of a run wherever
+                    // more than one other person talks: a group's channel
+                    // or a club. In a 1:1 DM, only when it says more than
+                    // the name (a bot that is offline). Ours need none.
+                    val nameLine = contactMap.byline(m.author, authorLabel, "").removeSuffix(" · ")
+                    // In the bubble's own ink, softened: a theme or a
+                    // background can make the bubble any colour.
+                    val quiet = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.72f)
+                    if (!mine && row.showHeader && (!m.whom.startsWith("~") || nameLine != authorLabel)) {
+                        Text(
+                            nameLine,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = quiet,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                    folded()
+                    // The time inside the bubble, at its foot, with the
+                    // send state beside it.
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(clock, style = MaterialTheme.typography.labelSmall, color = quiet)
+                        if (m.status == "pending") SendingIcon()
                     }
                 }
             } else {

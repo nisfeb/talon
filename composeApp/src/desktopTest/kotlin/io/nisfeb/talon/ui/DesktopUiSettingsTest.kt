@@ -14,6 +14,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -70,6 +71,13 @@ class DesktopUiSettingsTest {
         assertFalse(file.exists(), "the default again touches nothing")
         newStore().setChatBubbles(false)
         assertFalse(newStore().chatBubbles.value)
+    }
+
+    @Test
+    fun `a chat background persists and survives reload, and the page is the default`() {
+        assertEquals("", newStore().chatBackground.value)
+        newStore().setChatBackground("#0B1120")
+        assertEquals("#0B1120", newStore().chatBackground.value)
     }
 
     @Test

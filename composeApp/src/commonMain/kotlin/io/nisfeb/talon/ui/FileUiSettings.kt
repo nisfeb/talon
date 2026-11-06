@@ -42,6 +42,7 @@ class FileUiSettings(
     private data class Persisted(
         val hideComposerButtons: Boolean = false,
         val chatBubbles: Boolean = true,
+        val chatBackground: String = "",
         // Accent settings — `enabled` is nullable so we can tell
         // "user never opted in" apart from "user explicitly off",
         // matching the contract in [AccentSettings].
@@ -101,6 +102,9 @@ class FileUiSettings(
 
     private val _chatBubbles = MutableStateFlow(initial.chatBubbles)
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+
+    private val _chatBackground = MutableStateFlow(initial.chatBackground)
+    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
 
     private val _accentSettings = MutableStateFlow(
         AccentSettings(
@@ -299,6 +303,12 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setChatBackground(hex: String) {
+        if (_chatBackground.value == hex) return
+        _chatBackground.value = hex
+        persistCurrent()
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         _accentSettings.value = settings
@@ -381,6 +391,7 @@ class FileUiSettings(
             Persisted(
                 hideComposerButtons = _hideComposerButtons.value,
                 chatBubbles = _chatBubbles.value,
+                chatBackground = _chatBackground.value,
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,

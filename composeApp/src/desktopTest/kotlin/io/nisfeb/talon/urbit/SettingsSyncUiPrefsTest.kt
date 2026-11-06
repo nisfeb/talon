@@ -132,6 +132,25 @@ class SettingsSyncUiPrefsTest {
         assertTrue(pushed("chat-bubbles").isEmpty(), "applying is not an edit: ${pushed("chat-bubbles")}")
     }
 
+    // The background behind bubbles travels with them.
+    @Test
+    fun `a chat background goes up as the ship's own body, and one from another device is taken, not nonsense`() = live {
+        watching()
+        ui.setChatBackground("#0B1120")
+        settled { pushed("chat-background").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"chat-background","value":"{\"value\":\"#0B1120\"}"}}""",
+            pushed("chat-background").single(),
+        )
+        arrives("chat-background", """{"value":"#123456"}""")
+        settled { ui.chatBackground.value == "#123456" }
+        arrives("chat-background", """{"value":"navy"}""")
+        delay(300)
+        assertEquals("#123456", ui.chatBackground.value, "not a colour, so nothing changes")
+        arrives("chat-background", """{"value":""}""")
+        settled { ui.chatBackground.value == "" }
+    }
+
     // ─── fonts ────────────────────────────────────────────────────
 
     private fun fontJson(vararg ids: String, family: String? = null, removed: List<String> = emptyList()) =

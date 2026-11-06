@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.ui.graphics.compositeOver
 import io.nisfeb.talon.ui.theme.LINK_BLUE
 import io.nisfeb.talon.ui.theme.linkColor
 import io.nisfeb.talon.util.nowMs
@@ -166,6 +167,7 @@ fun SettingsScreen(
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val chatBubbles by uiSettings.chatBubbles.collectAsState()
+    val chatBackground by uiSettings.chatBackground.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -800,6 +802,17 @@ fun SettingsScreen(
                     selected = !chatBubbles,
                     onClick = { uiSettings.setChatBubbles(false) },
                     label = { Text("Rows") },
+                )
+            }
+            // Behind the bubbles, a colour of the owner's: Auto is the page.
+            // Rows draw on the page, so it is offered with bubbles alone.
+            // The bubbles' own colours are a theme's, under Appearance.
+            if (chatBubbles) {
+                OptionalColorRow("Background", chatBackground, MaterialTheme.colorScheme.surface) { uiSettings.setChatBackground(it) }
+                Text(
+                    "Your bubbles, your contacts' and everyone else's take their colours from your theme, under Appearance.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -2143,7 +2156,7 @@ internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
 }
 
 /**
- * The six colours a theme may set beyond its five, closed until asked
+ * The nine colours a theme may set beyond its five, closed until asked
  * for: each reads Auto (derived) until set, and goes back to Auto.
  */
 @Composable
@@ -2152,7 +2165,10 @@ private fun MoreColors(
     onDraft: (io.nisfeb.talon.ui.theme.CustomTheme) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val set = listOf(draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link).count { !it.isNullOrEmpty() }
+    val set = listOf(
+        draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link,
+        draft.bubbleMine, draft.bubbleContact, draft.bubbleTheirs,
+    ).count { !it.isNullOrEmpty() }
     TextButton(onClick = { open = !open }) {
         Text(if (open) "Fewer colours" else if (set > 0) "More colours ($set set)" else "More colours")
     }
@@ -2165,6 +2181,10 @@ private fun MoreColors(
     OptionalColorRow("Error", draft.error, now.error) { onDraft(draft.copy(error = it)) }
     OptionalColorRow("Selection", draft.selection, now.primary) { onDraft(draft.copy(selection = it)) }
     OptionalColorRow("Links", draft.link, LINK_BLUE) { onDraft(draft.copy(link = it)) }
+    // Message bubbles: Auto starts from what a bubble draws on this theme's page.
+    OptionalColorRow("My bubbles", draft.bubbleMine, now.primary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleMine = it)) }
+    OptionalColorRow("Contacts' bubbles", draft.bubbleContact, now.tertiary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleContact = it)) }
+    OptionalColorRow("Others' bubbles", draft.bubbleTheirs, now.surfaceContainerHighest) { onDraft(draft.copy(bubbleTheirs = it)) }
 }
 
 /** A colour that is Auto (derived) until set, with the way back to Auto. */
