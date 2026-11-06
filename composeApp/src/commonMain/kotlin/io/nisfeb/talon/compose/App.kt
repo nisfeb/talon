@@ -3744,6 +3744,7 @@ fun App(
                                             .collectAsState().value,
                                         folderItemOrder = uiSettings.folderItemOrder
                                             .collectAsState().value,
+                                        groupCards = uiSettings.groupCards.collectAsState().value,
                                         focusSearchRequest = focusSearchRequest,
                                         onFocusSearchHandled = { focusSearchRequest = false },
                                         showNewDmRequest = showNewDmRequest,

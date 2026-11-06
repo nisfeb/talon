@@ -252,6 +252,12 @@ class SettingsScreenTest {
         assertFalse(shows("take their colours from your theme"), "the bubbles' note goes with them")
         tap("Bubbles")
         assertTrue(ui.chatBubbles.value)
+
+        assertFalse(ui.groupCards.value, "groups are a list until asked")
+        tap("Cards")
+        assertTrue(ui.groupCards.value)
+        tap("List")
+        assertFalse(ui.groupCards.value)
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()

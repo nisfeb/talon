@@ -71,6 +71,9 @@ class HomeListTest {
         shown: androidx.compose.runtime.State<Boolean> = androidx.compose.runtime.mutableStateOf(true),
         /** Groups by their latest activity, as a phone set to Recent has them; else the saved order. */
         recent: Boolean = false,
+        /** Groups as cards rather than heads over their channels. */
+        cards: Boolean = false,
+        drafts: InMemoryDraftStore = InMemoryDraftStore(),
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
@@ -92,7 +95,7 @@ class HomeListTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
                         if (shown.value) DmListScreen(
-                            db = db, repo = repo, drafts = InMemoryDraftStore(),
+                            db = db, repo = repo, drafts = drafts,
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             onOpenConversation = { opened += it }, onOpenSearch = { did += "Search" }, onNewMessage = {},
                             onSignOut = { did += "Sign out" }, onOpenSelfProfile = { did += "My profile" },
@@ -104,6 +107,7 @@ class HomeListTest {
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
                             folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
+                            groupCards = cards,
                         )
                     }
                 }
@@ -265,6 +269,66 @@ class HomeListTest {
         tap("general")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    // ---- Groups as cards (sneagan, 2026-11-06) ----
+
+    /** A group of five channels: one unread, one with our own newest words, two quiet. */
+    private val garden: suspend AppDatabase.() -> Unit = {
+        groups().upsertGroups(listOf(GroupEntity("~bus/garden", "The Garden", null)))
+        groups().upsertChannelGroups(listOf("general", "plans", "photos", "recipes", "books").map {
+            ChannelGroupEntity("chat/~bus/$it", "~bus/garden", title = it)
+        })
+        messages().upsert(msg("chat/~bus/photos", "170141184501", "~bus", "look at the roses", 1_000))
+        messages().upsert(msg("chat/~bus/plans", "170141184502", "~wes", "saturday works", 2_000))
+        messages().upsert(msg("chat/~bus/general", "170141184503", "~nec", "see you at 7", 3_000))
+        messages().upsert(msg("chat/~bus/recipes", "170141184504", "~zod", "I will bring bread", 4_000))
+        unreads().upsert(UnreadEntity("chat/~bus/plans", count = 2, notifyCount = 0, recencyMs = 2_000))
+    }
+
+    @Test
+    fun `as a card, a group shows its newest words with who said them, and a tap opens the channel most worth reading`() = home(seed = garden, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        shows("The Garden")
+        shows("You: I will bring bread", substring = true)
+        assertTrue(onAllNodesWithText("5 channels", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+        tap("The Garden")
+        waitForIdle()
+        assertEquals(listOf("chat/~bus/plans"), opened, "the unread channel, before the newest words")
+    }
+
+    @Test
+    fun `a card's chips open their own channel, and +2 shows the rest without opening anything`() = home(seed = garden, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        // Unread first, then by their newest words: plans, recipes, general.
+        shows("plans")
+        assertTrue(onAllNodesWithText("books").fetchSemanticsNodes().isEmpty(), "past the first three")
+        tap("+2")
+        shows("books")
+        shows("photos")
+        assertEquals(emptyList(), opened, "showing more chips opens no chat")
+        tap("Fewer")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("books").fetchSemanticsNodes().isEmpty() }
+        tap("general")
+        waitForIdle()
+        assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    @Test
+    fun `a card names who has been talking, newest first, and not us`() = home(seed = garden, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        waitUntil(timeoutMillis = 20_000) {
+            onAllNodes(androidx.compose.ui.test.hasContentDescription("Recently: ~nec, ~wes, ~bus")).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun `a draft waiting in a channel is on the card`() {
+        val drafts = InMemoryDraftStore().apply { save("chat/~bus/general", "bring the cake") }
+        home(seed = garden, cards = true, drafts = drafts) {
+            tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+            shows("Draft in general: bring the cake", substring = true)
+        }
     }
 
     // "when you scroll down, open a group, enter a channel, and go back it

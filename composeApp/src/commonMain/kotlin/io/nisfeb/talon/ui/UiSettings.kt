@@ -22,6 +22,16 @@ interface UiSettings {
     fun setChatBubbles(on: Boolean)
 
     /**
+     * The home list's groups as cards (a bigger picture, the newest words
+     * with who said them, the channels as chips, a tap straight into a
+     * channel) rather than the list of heads that open onto their
+     * channels. A taste, so it syncs. Off by default: nobody's list
+     * changes unasked.
+     */
+    val groupCards: StateFlow<Boolean>
+    fun setGroupCards(on: Boolean)
+
+    /**
      * The picture behind Home and behind a conversation's bubbles: a
      * file's path, kept by [ChatBackgroundFiles]; "" is none. This
      * device's alone: it never syncs. A colour behind them is the theme's.
@@ -335,6 +345,12 @@ class InMemoryUiSettings(
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
     override fun setChatBubbles(on: Boolean) {
         _chatBubbles.value = on
+    }
+
+    private val _groupCards = MutableStateFlow(false)
+    override val groupCards: StateFlow<Boolean> = _groupCards.asStateFlow()
+    override fun setGroupCards(on: Boolean) {
+        _groupCards.value = on
     }
 
     private val _chatBackgroundImage = MutableStateFlow("")

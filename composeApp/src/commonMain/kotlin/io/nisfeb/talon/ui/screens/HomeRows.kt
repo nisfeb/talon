@@ -36,6 +36,30 @@ sealed interface HomeRow {
     }
 }
 
+/**
+ * Where a group's card opens: the channel with the most unread, else the
+ * one with the newest words. Null for a group with no channels yet.
+ */
+fun cardTarget(children: List<HomeRow.GroupChild>): String? =
+    children.filter { it.unread > 0 }.maxByOrNull { it.unread }?.whom
+        ?: children.maxByOrNull { it.m?.sentMs ?: Long.MIN_VALUE }?.whom
+
+/**
+ * Who has spoken in a group lately, newest first: the authors of its
+ * channels' newest words, the owner left out, at most [max].
+ *
+ * ponytail: one author per channel, from the newest-per-channel read the
+ * list already makes; a group of one channel shows a single face. A shared
+ * read of recent authors would fill it out, at a query on every write.
+ */
+fun recentFaces(children: List<HomeRow.GroupChild>, ourShip: String, max: Int = 3): List<String> =
+    children.mapNotNull { it.m }
+        .sortedByDescending { it.sentMs }
+        .map { it.author }
+        .filter { it != ourShip }
+        .distinct()
+        .take(max)
+
 fun buildHomeRows(
     allConvs: List<Pair<MessageEntity, Int>>,
     contactMap: ContactMap,

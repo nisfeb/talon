@@ -74,6 +74,13 @@ class DesktopUiSettingsTest {
     }
 
     @Test
+    fun `group cards persist and survive reload, and the list is the default`() {
+        assertFalse(newStore().groupCards.value)
+        newStore().setGroupCards(true)
+        assertTrue(newStore().groupCards.value)
+    }
+
+    @Test
     fun `a chat background picture persists and survives reload, and there is none at first`() {
         assertEquals("", newStore().chatBackgroundImage.value)
         newStore().setChatBackgroundImage("/kept/a.img")

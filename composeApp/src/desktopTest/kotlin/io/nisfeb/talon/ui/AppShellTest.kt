@@ -1358,6 +1358,25 @@ class AppShellTest {
         }
     }
 
+    // sneagan, 2026-11-06: groups as cards, set in settings, on the app's
+    // own list; a tap on a card opens its channel.
+    @Test
+    fun `with group cards on, a group is a card on the list, and a tap opens its channel`() {
+        val ui = InMemoryUiSettings().apply { setGroupCards(true) }
+        app(ui = ui, seed = {
+            groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null)))
+            groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/general", "~bus/crew", title = "general")))
+            messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~bus", 1_000, """[{"inline":["lunch plans"]}]""", "/chat"))
+        }) {
+            home()
+            onNodeWithText("Groups").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("~bus: lunch plans") }
+            assertTrue(!showing("1 channel"), "a card, not the head over its channel")
+            onNodeWithText("The Crew").performClick()
+            waitUntil(timeoutMillis = 10_000) { present("Message actions") }
+        }
+    }
+
     // A chat opened from a tab that shows one beside it stays on that tab.
     @Test
     fun `a chat asked for from Bookmarks opens beside the bookmarks`() {

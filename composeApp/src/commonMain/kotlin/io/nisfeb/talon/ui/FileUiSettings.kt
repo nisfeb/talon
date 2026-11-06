@@ -42,6 +42,7 @@ class FileUiSettings(
     private data class Persisted(
         val hideComposerButtons: Boolean = false,
         val chatBubbles: Boolean = true,
+        val groupCards: Boolean = false,
         val chatBackgroundImage: String = "",
         val recentSearches: List<String> = emptyList(),
         // Accent settings — `enabled` is nullable so we can tell
@@ -103,6 +104,9 @@ class FileUiSettings(
 
     private val _chatBubbles = MutableStateFlow(initial.chatBubbles)
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+
+    private val _groupCards = MutableStateFlow(initial.groupCards)
+    override val groupCards: StateFlow<Boolean> = _groupCards.asStateFlow()
 
     private val _chatBackgroundImage = MutableStateFlow(initial.chatBackgroundImage)
     override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
@@ -307,6 +311,12 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setGroupCards(on: Boolean) {
+        if (_groupCards.value == on) return
+        _groupCards.value = on
+        persistCurrent()
+    }
+
     override fun setChatBackgroundImage(path: String) {
         if (_chatBackgroundImage.value == path) return
         _chatBackgroundImage.value = path
@@ -401,6 +411,7 @@ class FileUiSettings(
             Persisted(
                 hideComposerButtons = _hideComposerButtons.value,
                 chatBubbles = _chatBubbles.value,
+                groupCards = _groupCards.value,
                 chatBackgroundImage = _chatBackgroundImage.value,
                 recentSearches = _recentSearches.value,
                 accentEnabled = accent.enabled,

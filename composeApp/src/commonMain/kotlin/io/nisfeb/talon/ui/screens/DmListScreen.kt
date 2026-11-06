@@ -78,6 +78,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -223,6 +224,9 @@ fun DmListScreen(
      *  [groupChannelOrder]. */
     folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
         io.nisfeb.talon.ui.FolderItemOrder.Manual,
+    /** Groups as cards rather than heads over their channels: see
+     *  [io.nisfeb.talon.ui.UiSettings.groupCards]. */
+    groupCards: Boolean = false,
     /** When set to true by a keyboard-shortcut handler upstream, open
      *  the search screen and reset the flag. DmListScreen has no
      *  inline search field — Ctrl+K navigates to the full SearchScreen
@@ -1471,7 +1475,28 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    Column {
+                                    if (groupCards) GroupCard(
+                                        row = row,
+                                        children = childrenSnapshot,
+                                        contactMap = contactMap,
+                                        ourShip = activeShip,
+                                        draftOf = { drafts[it] },
+                                        openWhom = openWhom,
+                                        onOpen = onRowOpen,
+                                        // The toggle itself, not the head's lambda:
+                                        // that one opens a chat on expanding, and
+                                        // showing more chips must not.
+                                        onShowAll = onGroupHeadToggle,
+                                        onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        editMode = editMode,
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
+                                            onDragStarted = {
+                                                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                expandedGroups = expandedGroups - row.flag
+                                            },
+                                            onDragStopped = { onDragStopped() },
+                                        ),
+                                    ) else Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
                                         }.collectAsState(initial = null)
@@ -1666,7 +1691,28 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    Column {
+                                    if (groupCards) GroupCard(
+                                        row = row,
+                                        children = childrenSnapshot,
+                                        contactMap = contactMap,
+                                        ourShip = activeShip,
+                                        draftOf = { drafts[it] },
+                                        openWhom = openWhom,
+                                        onOpen = onRowOpen,
+                                        // The toggle itself, not the head's lambda:
+                                        // that one opens a chat on expanding, and
+                                        // showing more chips must not.
+                                        onShowAll = onGroupHeadToggle,
+                                        onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        editMode = editMode,
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
+                                            onDragStarted = {
+                                                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                expandedGroups = expandedGroups - row.flag
+                                            },
+                                            onDragStopped = { onDragStopped() },
+                                        ),
+                                    ) else Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
                                         }.collectAsState(initial = null)
@@ -2731,6 +2777,183 @@ private fun SectionHeader(label: String) {
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * A group as a card, the home list's Cards view (sneagan, 2026-11-06,
+ * after the bubbles pleased the people who asked for a friendlier groups
+ * list): its picture larger, the newest words with who said them, who
+ * has been talking, and its channels as chips. A tap goes straight into
+ * the channel that most wants reading ([cardTarget]); "+N" shows the
+ * rest of the chips.
+ */
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun GroupCard(
+    row: HomeRow.GroupHead,
+    children: List<HomeRow.GroupChild>,
+    contactMap: ContactMap,
+    ourShip: String?,
+    draftOf: (String) -> String?,
+    openWhom: String?,
+    onOpen: (String) -> Unit,
+    onShowAll: (String) -> Unit,
+    onLongClick: ((String) -> Unit)?,
+    editMode: Boolean,
+    dragHandleModifier: Modifier?,
+) {
+    val glow = focusGlow(children.any { it.whom == openWhom })
+    val target = remember(children) { cardTarget(children) }
+    val faces = remember(children, ourShip) { recentFaces(children, ourShip.orEmpty()) }
+    val clicks = if (editMode && dragHandleModifier != null) dragHandleModifier
+    else Modifier.combinedClickableWithSecondary(
+        onClick = { target?.let(onOpen) },
+        onLongClick = onLongClick?.let { { it(row.flag) } },
+    )
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.background(glow).then(clicks).padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val isHexTint = row.image?.startsWith("#") == true
+            Avatar(
+                label = row.title,
+                url = if (isHexTint) null else row.image,
+                colorHex = if (isHexTint) row.image else null,
+                size = 52.dp,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        row.title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // One face says no more than the line under the
+                    // title already does.
+                    if (faces.size >= 2) FacePile(faces, contactMap)
+                    if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
+                }
+                CardLatest(children, contactMap, ourShip, draftOf)
+                val few = children.size > CARD_CHIPS + 1 && !row.expanded
+                val shown = if (few) children.take(CARD_CHIPS) else children
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    shown.forEach { child ->
+                        CardChip(
+                            label = contactMap.channelShortName(child.whom),
+                            unread = child.unread,
+                            onClick = { onOpen(child.whom) },
+                        )
+                    }
+                    if (few) CardChip(label = "+${children.size - CARD_CHIPS}", unread = 0, onClick = { onShowAll(row.flag) })
+                    else if (children.size > CARD_CHIPS + 1) CardChip(label = "Fewer", unread = 0, onClick = { onShowAll(row.flag) })
+                }
+            }
+            if (editMode && dragHandleModifier != null) {
+                Icon(
+                    imageVector = TalonIcons.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterVertically).size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/** The chips a card shows before "+N": the channels most worth reading, unread first. */
+private const val CARD_CHIPS = 3
+
+/** The card's line of news: a draft waiting, else the newest words and who said them. */
+@Composable
+private fun CardLatest(
+    children: List<HomeRow.GroupChild>,
+    contactMap: ContactMap,
+    ourShip: String?,
+    draftOf: (String) -> String?,
+) {
+    val drafted = children.firstNotNullOfOrNull { c -> draftOf(c.whom)?.trim()?.takeIf { it.isNotEmpty() }?.let { c.whom to it } }
+    val newest = children.mapNotNull { it.m }.maxByOrNull { it.sentMs }
+    when {
+        drafted != null -> Text(
+            "Draft in ${contactMap.channelShortName(drafted.first)}: ${drafted.second.replace('\n', ' ').take(160)}",
+            style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        newest != null -> {
+            val who = if (newest.author == ourShip) "You" else contactMap.displayName(newest.author)
+            val words = remember(newest.id, newest.contentJson, newest.title) {
+                StoryCache.previewFor(newest).take(200).replace('\n', ' ')
+            }
+            Text(
+                listOf(if (words.isBlank()) "$who posted" else "$who: $words", formatRelative(newest.sentMs))
+                    .joinToString(" · ").applyEmojiSpans(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        else -> Text(
+            "Nothing said yet",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Who has been talking: their faces, overlapping, newest on top; said aloud as their names. */
+@Composable
+private fun FacePile(ships: List<String>, contactMap: ContactMap) {
+    val names = ships.map { contactMap.displayName(it) }
+    Box(Modifier.clearAndSetSemantics { contentDescription = "Recently: ${names.joinToString(", ")}" }) {
+        ships.asReversed().forEachIndexed { i, ship ->
+            val place = ships.size - 1 - i
+            Avatar(
+                label = contactMap.displayName(ship),
+                url = contactMap.avatar(ship),
+                colorHex = contactMap.shipColor(ship),
+                size = 22.dp,
+                modifier = Modifier.padding(start = (place * 14).dp),
+            )
+        }
+    }
+}
+
+/** A channel on a card: its name, and its unread count when it has one. */
+@Composable
+private fun CardChip(label: String, unread: Int, onClick: () -> Unit) {
+    androidx.compose.material3.Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+        color = if (unread > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (unread > 0) {
+                Text(
+                    "$unread",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
     }
 }
 

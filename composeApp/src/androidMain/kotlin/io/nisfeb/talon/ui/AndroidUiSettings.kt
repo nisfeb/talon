@@ -72,6 +72,9 @@ class AndroidUiSettings(
     private val _chatBubbles = MutableStateFlow(prefs.getBoolean(KEY_CHAT_BUBBLES, true))
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
 
+    private val _groupCards = MutableStateFlow(prefs.getBoolean(KEY_GROUP_CARDS, false))
+    override val groupCards: StateFlow<Boolean> = _groupCards.asStateFlow()
+
     private val _chatBackgroundImage = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND_IMAGE, "") ?: "")
     override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
 
@@ -283,6 +286,12 @@ class AndroidUiSettings(
         _chatBubbles.value = on
     }
 
+    override fun setGroupCards(on: Boolean) {
+        if (_groupCards.value == on) return
+        prefs.edit().putBoolean(KEY_GROUP_CARDS, on).apply()
+        _groupCards.value = on
+    }
+
     override fun setChatBackgroundImage(path: String) {
         if (_chatBackgroundImage.value == path) return
         prefs.edit().putString(KEY_CHAT_BACKGROUND_IMAGE, path).apply()
@@ -434,6 +443,7 @@ class AndroidUiSettings(
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_CHAT_BUBBLES = "chat_bubbles"
+        private const val KEY_GROUP_CARDS = "group_cards"
         private const val KEY_CHAT_BACKGROUND_IMAGE = "chat_background_image"
         private const val KEY_RECENT_SEARCHES = "recent_searches"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
