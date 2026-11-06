@@ -814,6 +814,10 @@ private fun ThreadMessage(
             // hover tint (desktop) so it's clear which message the "⋯" acts on.
             .background(
                 when {
+                    // In bubbles the row is the window's width, and a tint
+                    // across all of it said little: the "⋯" beside the bubble
+                    // says which message the pointer is on (sneagan).
+                    bubbles -> Color.Transparent
                     menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
                     else -> Color.Transparent

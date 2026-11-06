@@ -1739,6 +1739,10 @@ private fun MessageRow(
             // "⋯" acts on when rows are short or the window is wide.
             .background(
                 when {
+                    // In bubbles the row is the window's width, and a tint
+                    // across all of it said little: the "⋯" beside the bubble
+                    // says which message the pointer is on (sneagan).
+                    bubbles -> Color.Transparent
                     menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
                     else -> Color.Transparent

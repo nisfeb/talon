@@ -278,6 +278,40 @@ class DmChatScreenTest {
         }
     }
 
+    // sneagan, 2026-11-05: in bubbles the hover tint ran the window's
+    // width; the "⋯" beside the bubble is what says which message it is.
+    @Test
+    fun `in bubbles, hovering a message tints nothing across the window`() = chat(
+        seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+        val words = onNodeWithText("from them").fetchSemanticsNode().boundsInRoot
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        // Three quarters across the row: past the bubble, short of the
+        // "⋯" at a row's end, where only the row's own background is.
+        fun farSide() = onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
+        val before = farSide()
+        onNodeWithText("from them").performMouseInput { moveTo(center) }
+        waitForIdle()
+        assertEquals(before, farSide(), "no tint across the row")
+    }
+
+    // Rows keep theirs: the whole row is the message there.
+    @Test
+    fun `in rows, hovering a message still tints its row`() {
+        val ui = InMemoryUiSettings().apply { setChatBubbles(false) }
+        chat(seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }, ui = ui) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+            val words = onNodeWithText("from them").fetchSemanticsNode().boundsInRoot
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            fun farSide() = onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
+            val before = farSide()
+            onNodeWithText("from them").performMouseInput { moveTo(center) }
+            waitForIdle()
+            assertTrue(before != farSide(), "the row tints, so the check above can see one")
+        }
+    }
+
     // A club is a DM of three or more: who said each run is the one thing
     // its bubbles must not drop (review, 2026-11-05: isDirect is true for
     // clubs too, so the names went).
