@@ -374,8 +374,8 @@ class HomeListTest {
         val hall = onNodeWithText("The Hall").fetchSemanticsNode().boundsInRoot
         assertEquals(root.left, garden.left, 0.5f)
         assertEquals(root.right, garden.right, 0.5f)
-        val between = hall.top - garden.bottom
-        assertTrue(between in 0f..(1.5f * density.density), "touching, with a rule of 1 dp: $between")
+        // Touching but for the rule: 1 dp, no more, no less.
+        assertEquals(1f * density.density, hall.top - garden.bottom, 0.5f)
     }
 
     @Test
