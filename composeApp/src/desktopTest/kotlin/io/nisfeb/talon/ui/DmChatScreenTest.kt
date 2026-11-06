@@ -335,9 +335,18 @@ class DmChatScreenTest {
             assertNear(c.tertiary.copy(alpha = 0.22f).compositeOver(c.surface), beside("from a contact"), "the bubble, solid on the page")
             assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), beside("Today"), "the day's pill")
             // sneagan, 2026-11-06: the picture runs on under the composer,
-            // whose bar lets it through.
+            // which has no bar of its own, and Send is on a disc of the
+            // accent once there is something to send.
             val root = onRoot().fetchSemanticsNode().boundsInRoot
-            assertNear(c.surface.copy(alpha = 0.85f).compositeOver(red), pixels[2, (root.bottom - 3).toInt()], "the composer's bar, on the picture")
+            assertEquals(red, pixels[2, (root.bottom - 3).toInt()], "the picture, under the composer")
+            // A bare button sits on a disc of the page, so it shows.
+            val attach = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot
+            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), pixels[(attach.left - 3 * density.density).toInt(), attach.center.y.toInt()], "Attach, on its disc")
+            onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("hi")
+            waitForIdle()
+            val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
+            val disc = onRoot().captureToImage().toPixelMap()[(send.left - 3 * density.density).toInt(), send.center.y.toInt()]
+            assertNear(c.primary, disc, "Send, on its disc")
         }
     }
 

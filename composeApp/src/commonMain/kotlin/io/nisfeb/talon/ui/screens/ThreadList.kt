@@ -542,7 +542,7 @@ fun ThreadList(
                 )
             }
         }
-        // On a picture the composer's bar is the edge.
+        // On a picture the composer floats on it, with no rule above.
         if (chatLook.image == null) HorizontalDivider()
         io.nisfeb.talon.ui.ChatComposer(
             state = composerState,

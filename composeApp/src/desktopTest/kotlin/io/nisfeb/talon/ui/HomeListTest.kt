@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.performTextReplacement
@@ -325,21 +326,56 @@ class HomeListTest {
         assertEquals(listOf("chat/~bus/plans"), opened, "the unread channel, before the newest words")
     }
 
+    /** Twelve channels with long names: more than one line of chips holds. */
+    private val hall: suspend AppDatabase.() -> Unit = {
+        groups().upsertGroups(listOf(GroupEntity("~bus/hall", "The Hall", null)))
+        groups().upsertChannelGroups((1..12).map {
+            ChannelGroupEntity("chat/~bus/c$it", "~bus/hall", title = "a-long-channel-name-" + "$it".padStart(2, '0'))
+        })
+        messages().upsert(msg("chat/~bus/c1", "170141184501", "~nec", "hello", 1_000))
+    }
+
+    // sneagan, 2026-11-06: the chips ran onto a second line before "+N",
+    // and the card was too tall. One line, then the count of the rest.
     @Test
-    fun `a card's chips open their own channel, and +2 shows the rest without opening anything`() = home(seed = garden, cards = true) {
-        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
-        // Unread first, then by their newest words: plans, recipes, general.
-        shows("plans")
-        assertTrue(onAllNodesWithText("books").fetchSemanticsNodes().isEmpty(), "past the first three")
-        tap("+2")
-        shows("books")
-        shows("photos")
+    fun `a card's channels take one line, then +N, which shows the rest without opening anything`() = home(seed = hall, cards = true) {
+        tap("Groups")
+        shows("a-long-channel-name-01")
+        val more = androidx.compose.ui.test.SemanticsMatcher("a +N chip") { n ->
+            val text = androidx.compose.ui.semantics.SemanticsProperties.Text
+            text in n.config && n.config[text].any { t -> Regex("\\+\\d+").matches(t.text) }
+        }
+        waitUntil(timeoutMillis = 20_000) { onAllNodes(more).fetchSemanticsNodes().isNotEmpty() }
+        fun chips() = onAllNodesWithText("a-long-channel-name-", substring = true).fetchSemanticsNodes()
+        val first = chips()
+        assertTrue(first.size in 1 until 12, "some, not all: ${first.size}")
+        assertEquals(1, first.map { it.boundsInRoot.top }.distinct().size, "on one line")
+        val hidden = onAllNodes(more).fetchSemanticsNodes().single()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.Text].single().text.drop(1).toInt()
+        assertEquals(12, first.size + hidden, "+N counts the rest")
+        onNode(more).performClick()
+        waitUntil(timeoutMillis = 5_000) { chips().size == 12 }
         assertEquals(emptyList(), opened, "showing more chips opens no chat")
         tap("Fewer")
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("books").fetchSemanticsNodes().isEmpty() }
-        tap("general")
+        waitUntil(timeoutMillis = 5_000) { chips().size == first.size }
+        tap("a-long-channel-name-02")
         waitForIdle()
-        assertEquals(listOf("chat/~bus/general"), opened)
+        assertEquals(listOf("chat/~bus/c2"), opened, "a chip opens its own channel")
+    }
+
+    // sneagan, 2026-11-06: edge to edge, touching, a fine rule between.
+    @Test
+    fun `cards run edge to edge and touch, with only a rule between`() = home(seed = { garden(); hall() }, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        shows("The Garden")
+        shows("The Hall")
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        val garden = onNodeWithText("The Garden").fetchSemanticsNode().boundsInRoot
+        val hall = onNodeWithText("The Hall").fetchSemanticsNode().boundsInRoot
+        assertEquals(root.left, garden.left, 0.5f)
+        assertEquals(root.right, garden.right, 0.5f)
+        val between = hall.top - garden.bottom
+        assertTrue(between in 0f..(1.5f * density.density), "touching, with a rule of 1 dp: $between")
     }
 
     @Test
@@ -348,6 +384,10 @@ class HomeListTest {
         waitUntil(timeoutMillis = 20_000) {
             onAllNodes(androidx.compose.ui.test.hasContentDescription("Recently: ~nec, ~wes, ~bus")).fetchSemanticsNodes().isNotEmpty()
         }
+        // sneagan, 2026-11-06: twice the first 22 dp.
+        // The pile itself, not the card that merges it.
+        val pile = onNode(androidx.compose.ui.test.hasContentDescription("Recently: ~nec, ~wes, ~bus"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(44f * density.density, pile.height, 1f)
     }
 
     @Test

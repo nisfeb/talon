@@ -2815,13 +2815,15 @@ private fun GroupCard(
         onClick = { target?.let(onOpen) },
         onLongClick = onLongClick?.let { { it(row.flag) } },
     )
+    // Edge to edge, each against the next with a fine rule between
+    // (sneagan, 2026-11-06), rather than rounded cards apart.
     androidx.compose.material3.Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
+        Column {
         Row(
-            modifier = Modifier.background(glow).then(clicks).padding(12.dp),
+            modifier = Modifier.fillMaxWidth().background(glow).then(clicks).padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val isHexTint = row.image?.startsWith("#") == true
@@ -2832,35 +2834,47 @@ private fun GroupCard(
                 size = 52.dp,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // The faces beside the name and the news rather than over
+                // them, so their size costs the card no height.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        row.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // One face says no more than the line under the
-                    // title already does.
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                row.title,
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
+                        }
+                        CardLatest(children, contactMap, ourShip, draftOf)
+                    }
+                    // One face says no more than the line beside it already does.
                     if (faces.size >= 2) FacePile(faces, contactMap)
-                    if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
                 }
-                CardLatest(children, contactMap, ourShip, draftOf)
-                val few = children.size > CARD_CHIPS + 1 && !row.expanded
-                val shown = if (few) children.take(CARD_CHIPS) else children
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    shown.forEach { child ->
+                if (children.isNotEmpty()) {
+                    val chip: @Composable (HomeRow.GroupChild) -> Unit = { child ->
                         CardChip(
                             label = contactMap.channelShortName(child.whom),
                             unread = child.unread,
                             onClick = { onOpen(child.whom) },
                         )
                     }
-                    if (few) CardChip(label = "+${children.size - CARD_CHIPS}", unread = 0, onClick = { onShowAll(row.flag) })
-                    else if (children.size > CARD_CHIPS + 1) CardChip(label = "Fewer", unread = 0, onClick = { onShowAll(row.flag) })
+                    // One line of chips, then "+N" for the rest (sneagan:
+                    // two lines made the card too tall). Shown whole, they
+                    // wrap, with a way back.
+                    if (!row.expanded) OneRowChips(
+                        count = children.size,
+                        chip = { chip(children[it]) },
+                        more = { hidden -> CardChip(label = "+$hidden", unread = 0, onClick = { onShowAll(row.flag) }) },
+                    ) else androidx.compose.foundation.layout.FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(CHIP_GAP),
+                        verticalArrangement = Arrangement.spacedBy(CHIP_GAP),
+                    ) {
+                        children.forEach { chip(it) }
+                        CardChip(label = "Fewer", unread = 0, onClick = { onShowAll(row.flag) })
+                    }
                 }
             }
             if (editMode && dragHandleModifier != null) {
@@ -2872,11 +2886,65 @@ private fun GroupCard(
                 )
             }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
     }
 }
 
-/** The chips a card shows before "+N": the channels most worth reading, unread first. */
-private const val CARD_CHIPS = 3
+/** Between a card's chips. */
+private val CHIP_GAP = 4.dp
+
+/**
+ * As many of [count] chips as fit on one line, in order, then [more] for
+ * the rest when they do not all fit. Widths come from copies kept out of
+ * the semantics tree and never placed (a chip measured and left unplaced
+ * was still read out); only the chips shown are composed for real. The
+ * "+N" is sized at its widest, every chip hidden, to leave it room.
+ */
+@Composable
+private fun OneRowChips(
+    count: Int,
+    chip: @Composable (Int) -> Unit,
+    more: @Composable (hidden: Int) -> Unit,
+) {
+    androidx.compose.ui.layout.SubcomposeLayout { constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val gap = CHIP_GAP.roundToPx()
+        fun sized(key: String, content: @Composable () -> Unit) =
+            subcompose(key) { Box(Modifier.clearAndSetSemantics {}) { content() } }.first().measure(loose).width
+        fun real(key: String, maxWidth: Int = loose.maxWidth, content: @Composable () -> Unit) =
+            subcompose(key) { content() }.first().measure(loose.copy(maxWidth = maxWidth))
+        val widths = (0 until count).map { i -> sized("size $i") { chip(i) } }
+        val all = widths.sum() + gap * (count - 1)
+        val placed = if (all <= constraints.maxWidth) {
+            (0 until count).map { i -> real("chip $i") { chip(i) } }
+        } else {
+            val widest = sized("widest") { more(count) }
+            var used = 0
+            var shown = 0
+            while (shown < count && used + widths[shown] + gap + widest <= constraints.maxWidth) {
+                used += widths[shown] + gap
+                shown++
+            }
+            // The first always shows, cut short if it must be: a name
+            // wider than the card alone was only "+1".
+            val head = if (shown > 0) (0 until shown).map { i -> real("chip $i") { chip(i) } } else {
+                shown = 1
+                val room = constraints.maxWidth - if (count > 1) gap + widest else 0
+                listOf(real("chip 0", room.coerceAtLeast(0)) { chip(0) })
+            }
+            head + if (shown < count) listOf(real("more") { more(count - shown) }) else emptyList()
+        }
+        val height = placed.maxOfOrNull { it.height } ?: 0
+        layout(constraints.maxWidth, height) {
+            var x = 0
+            placed.forEach {
+                it.placeRelative(x, (height - it.height) / 2)
+                x += it.width + gap
+            }
+        }
+    }
+}
 
 /** The card's line of news: a draft waiting, else the newest words and who said them. */
 @Composable
@@ -2929,23 +2997,28 @@ private fun FacePile(ships: List<String>, contactMap: ContactMap) {
                 label = contactMap.displayName(ship),
                 url = contactMap.avatar(ship),
                 colorHex = contactMap.shipColor(ship),
-                size = 22.dp,
-                modifier = Modifier.padding(start = (place * 14).dp),
+                size = FACE,
+                modifier = Modifier.padding(start = FACE_STEP * place),
             )
         }
     }
 }
 
+/** A face in a card's pile (sneagan, 2026-11-06: twice the first 22 dp), and how far each sits from the last. */
+private val FACE = 44.dp
+private val FACE_STEP = 28.dp
+
 /** A channel on a card: its name, and its unread count when it has one. */
 @Composable
 private fun CardChip(label: String, unread: Int, onClick: () -> Unit) {
+    // A soft rectangle rather than a pill, and snug, so more fit on a line.
     androidx.compose.material3.Surface(
         onClick = onClick,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
         color = if (unread > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {

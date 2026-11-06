@@ -786,7 +786,6 @@ fun ChatComposer(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .chatComposerBar()
             // Disabled while an attachment is staged (there is one slot) or
             // the voice preview has replaced the composer via early-return:
             // the drop target sits on this outer Column, so without the
@@ -820,14 +819,18 @@ fun ChatComposer(
         // the last try said behind the button.
         val slow = repo.shipSlow.collectAsState(initial = null).value
         if (slow != null) {
-            NoteLine(
-                io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
-                calm = true,
-                details = slow.details,
-            )
+            Box(Modifier.chatPanel()) {
+                NoteLine(
+                    io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
+                    calm = true,
+                    details = slow.details,
+                )
+            }
         }
         state.sendError?.let { err ->
-            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
+            Box(Modifier.chatPanel()) {
+                NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
+            }
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
@@ -1051,6 +1054,7 @@ fun ChatComposer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .chatPanel()
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1147,7 +1151,7 @@ fun ChatComposer(
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             takePaste(clipboardPaste())
                         },
-                        modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                        modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
                     ) {
                         Icon(
                             TalonIcons.ContentPaste,
@@ -1160,7 +1164,7 @@ fun ChatComposer(
             if (!hideComposerButtons) {
                 io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
                 ) {
                     if (state.uploading) {
                         CircularProgressIndicator(
@@ -1177,7 +1181,7 @@ fun ChatComposer(
                 }
                 io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
                 ) {
                     Icon(
                         TalonIcons.AttachFile,
@@ -1186,7 +1190,7 @@ fun ChatComposer(
                     )
                 }
                 if (voiceComposer != null) {
-                    Box(Modifier.padding(bottom = BESIDE_FIELD)) {
+                    Box(Modifier.padding(bottom = BESIDE_FIELD).chatButton()) {
                         voiceComposer(
                             canSend && !state.uploading,
                             { path, durationMs ->
@@ -1391,9 +1395,18 @@ fun ChatComposer(
             val sendable = canSend && !state.saving &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
+            // On a picture, in a disc of the accent, so it shows on any
+            // photo (sneagan, 2026-11-06); on the page, the tinted icon.
+            val onPicture = LocalChatLook.current.image != null
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
-                modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).then(
+                    if (!onPicture) Modifier
+                    else Modifier.background(
+                        if (sendable) sendAccent else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        androidx.compose.foundation.shape.CircleShape,
+                    ),
+                ),
             ) {
                 // A tick, not a paper plane. Editing and sending are
                 // different acts and the button is the only thing that
@@ -1402,8 +1415,11 @@ fun ChatComposer(
                     if (isEditing) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
                     contentDescription = if (isEditing) "Save edit" else "Send",
                     modifier = Modifier.size(22.dp),
-                    tint = if (sendable) sendAccent
-                    else LocalContentColor.current,
+                    tint = when {
+                        sendable && onPicture -> MaterialTheme.colorScheme.onPrimary
+                        sendable -> sendAccent
+                        else -> LocalContentColor.current
+                    },
                 )
             }
         }
@@ -1428,6 +1444,7 @@ private fun QuotePreviewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .height(IntrinsicSize.Min)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1472,6 +1489,7 @@ internal fun AttachmentStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1545,6 +1563,7 @@ private fun VoicePreviewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

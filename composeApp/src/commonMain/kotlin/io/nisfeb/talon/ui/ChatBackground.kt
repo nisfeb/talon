@@ -71,10 +71,19 @@ fun Modifier.chatLabel(): Modifier =
         .padding(horizontal = 8.dp, vertical = 2.dp)
 
 /**
- * The composer's bar: on a picture, the page's colour at 85%, so its
- * buttons, notes and quote read while the picture still shows through.
+ * A row of the composer (a note, the quote, what is being edited): on a
+ * picture, on a rounded panel of the page's colour. The composer has no
+ * bar of its own over a picture (sneagan, 2026-11-06), so this is what
+ * lets those rows read.
  */
 @Composable
-fun Modifier.chatComposerBar(): Modifier =
+fun Modifier.chatPanel(): Modifier =
     if (LocalChatLook.current.image == null) this
-    else background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+    else padding(horizontal = 8.dp, vertical = 2.dp)
+        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
+
+/** A bare icon button on a picture: on a small disc of the page's colour, so it shows. */
+@Composable
+fun Modifier.chatButton(): Modifier =
+    if (LocalChatLook.current.image == null) this
+    else background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), androidx.compose.foundation.shape.CircleShape)

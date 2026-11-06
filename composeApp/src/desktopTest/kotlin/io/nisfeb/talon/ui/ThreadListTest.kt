@@ -148,10 +148,9 @@ class ThreadListTest {
                 return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.bottom - 4f).toInt()]
             }
             waitUntil(timeoutMillis = 5_000) { belowEveryReply() == androidx.compose.ui.graphics.Color.Red }
-            // Under the composer too, through its bar.
+            // Under the composer too, which has no bar of its own.
             val root = onRoot().fetchSemanticsNode().boundsInRoot
-            val foot = onRoot().captureToImage().toPixelMap()[2, (root.bottom - 3).toInt()]
-            assertTrue(foot.red > 0.5f && foot.red > foot.green + 0.05f, "the picture shows through the composer's bar: $foot")
+            assertEquals(androidx.compose.ui.graphics.Color.Red, onRoot().captureToImage().toPixelMap()[2, (root.bottom - 3).toInt()])
         }
     }
 
