@@ -463,12 +463,14 @@ fun ThreadList(
         val chatLook = io.nisfeb.talon.ui.LocalChatLook.current
         val book by repo.bookContacts.collectAsState()
         val kindOf: (String) -> io.nisfeb.talon.ui.BubbleKind = { io.nisfeb.talon.ui.bubbleKindOf(it, ourPatp, book) }
-        // The owner's picture behind the bubbles, as in the chat.
-        androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxSize()) {
+        // The owner's picture behind the bubbles and under the composer,
+        // as in the chat.
+        androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
         ChatBackdrop(chatLook)
+        Column(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
@@ -540,8 +542,8 @@ fun ThreadList(
                 )
             }
         }
-        }
-        HorizontalDivider()
+        // On a picture the composer's bar is the edge.
+        if (chatLook.image == null) HorizontalDivider()
         io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
@@ -563,6 +565,8 @@ fun ThreadList(
             powerFeaturesEnabled = powerFeaturesEnabled,
             strategy = threadStrategy,
         )
+        } // the column over the picture
+        } // the picture's box
     }
 
     pendingDelete?.let { target ->

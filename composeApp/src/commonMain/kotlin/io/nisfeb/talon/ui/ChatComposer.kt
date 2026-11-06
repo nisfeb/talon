@@ -786,6 +786,7 @@ fun ChatComposer(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .chatComposerBar()
             // Disabled while an attachment is staged (there is one slot) or
             // the voice preview has replaced the composer via early-return:
             // the drop target sits on this outer Column, so without the

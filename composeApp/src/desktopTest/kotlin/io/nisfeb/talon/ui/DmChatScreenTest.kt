@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import okio.Path.Companion.toPath
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.graphics.Color
@@ -329,6 +334,40 @@ class DmChatScreenTest {
             }
             assertNear(c.tertiary.copy(alpha = 0.22f).compositeOver(c.surface), beside("from a contact"), "the bubble, solid on the page")
             assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), beside("Today"), "the day's pill")
+            // sneagan, 2026-11-06: the picture runs on under the composer,
+            // whose bar lets it through.
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            assertNear(c.surface.copy(alpha = 0.85f).compositeOver(red), pixels[2, (root.bottom - 3).toInt()], "the composer's bar, on the picture")
+        }
+    }
+
+    @Test
+    fun `who is typing sits on a pill over a picture, and across the page without one`() {
+        val picture = picture(0xFF0000).toPath()
+        var colors: androidx.compose.material3.ColorScheme? = null
+        val onPicture = mutableStateOf(true)
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    colors = androidx.compose.material3.MaterialTheme.colorScheme
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalChatLook provides ChatLook(bubbles = true, image = if (onPicture.value) picture else null),
+                    ) {
+                        androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().background(red)) {
+                            io.nisfeb.talon.ui.screens.TypingLine("~nec is typing…")
+                        }
+                    }
+                }
+            }
+            waitForIdle()
+            fun beside(): Color {
+                val b = onNodeWithText("~nec is typing…").fetchSemanticsNode().boundsInRoot
+                return onRoot().captureToImage().toPixelMap()[(b.left - 4 * density.density).toInt(), b.center.y.toInt()]
+            }
+            assertNear(colors!!.surface.copy(alpha = 0.9f).compositeOver(red), beside(), "on a pill")
+            onPicture.value = false
+            waitForIdle()
+            assertEquals(red, beside(), "no pill on the page")
         }
     }
 

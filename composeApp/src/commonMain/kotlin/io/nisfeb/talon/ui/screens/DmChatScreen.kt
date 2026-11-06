@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
 import io.nisfeb.talon.ui.ChatBackdrop
 import io.nisfeb.talon.ui.chatLabel
 import androidx.compose.foundation.border
@@ -871,8 +873,10 @@ fun DmChatScreen(
         }
 
     Column(
+        // The foot's inset is padded inside the picture's box below, so
+        // the picture runs to the bottom of the screen.
         modifier = modifier
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -1039,14 +1043,17 @@ fun DmChatScreen(
                 },
             )
         }
+        // The owner's picture behind the bubbles, down to the bottom of
+        // the screen under the composer (sneagan, 2026-11-06), and the
+        // look this screen read for everything drawn over it.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        ChatBackdrop(chatLook)
+        androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalChatLook provides chatLook) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
         Box(
             modifier = Modifier.weight(1f).fillMaxSize()
                 .onGloballyPositioned { listTop = it.positionInRoot().y },
         ) {
-        // The owner's picture behind the bubbles, and the look this
-        // screen read for everything drawn over it.
-        ChatBackdrop(chatLook)
-        androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalChatLook provides chatLook) {
         // Empty-state placeholder. Triggers when the refresh has
         // finished and we still have no rows — usually a
         // never-DMed peer where the ship has no writ history. We
@@ -1313,7 +1320,6 @@ fun DmChatScreen(
                 )
             }
         }
-        } // close the look's provider
         } // close empty-state Box
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
         io.nisfeb.talon.ui.ChatComposer(
@@ -1397,6 +1403,9 @@ fun DmChatScreen(
             },
             strategy = dmStrategy,
         )
+        } // the column over the picture
+        } // the look's provider
+        } // the picture's box
     }
 
     reactionDetailsTarget?.let { reactions ->
@@ -2690,13 +2699,22 @@ private fun TypingIndicator(
             "${names.size} people are active"
         }
     }
+    TypingLine(label)
+}
+
+/** Who is typing, above the composer; on a picture, on a pill, so it reads (sneagan, 2026-11-06). */
+@Composable
+internal fun TypingLine(label: String) {
+    val onPicture = io.nisfeb.talon.ui.LocalChatLook.current.image != null
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier = (if (onPicture) Modifier else Modifier.fillMaxWidth())
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .chatLabel(),
     )
 }
 

@@ -69,3 +69,12 @@ fun Modifier.chatLabel(): Modifier =
     if (LocalChatLook.current.image == null) this
     else background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(50))
         .padding(horizontal = 8.dp, vertical = 2.dp)
+
+/**
+ * The composer's bar: on a picture, the page's colour at 85%, so its
+ * buttons, notes and quote read while the picture still shows through.
+ */
+@Composable
+fun Modifier.chatComposerBar(): Modifier =
+    if (LocalChatLook.current.image == null) this
+    else background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
