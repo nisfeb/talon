@@ -342,6 +342,18 @@ class DmChatScreenTest {
         }
     }
 
+    /**
+     * The pixel three quarters across [text]'s row, where it is now: the
+     * list settles after the text first shows (the row rose 40 px), and a
+     * place read before then is no longer the row.
+     */
+    private fun ComposeUiTest.farSide(text: String): Color {
+        waitForIdle()
+        val words = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        return onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
+    }
+
     // sneagan, 2026-11-05: in bubbles the hover tint ran the window's
     // width; the "⋯" beside the bubble is what says which message it is.
     @Test
@@ -349,15 +361,12 @@ class DmChatScreenTest {
         seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) },
     ) { _, _ ->
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
-        val words = onNodeWithText("from them").fetchSemanticsNode().boundsInRoot
-        val root = onRoot().fetchSemanticsNode().boundsInRoot
         // Three quarters across the row: past the bubble, short of the
         // "⋯" at a row's end, where only the row's own background is.
-        fun farSide() = onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
-        val before = farSide()
+        val before = farSide("from them")
         onNodeWithText("from them").performMouseInput { moveTo(center) }
         waitForIdle()
-        assertEquals(before, farSide(), "no tint across the row")
+        assertEquals(before, farSide("from them"), "no tint across the row")
     }
 
     // Rows keep theirs: the whole row is the message there.
@@ -366,17 +375,11 @@ class DmChatScreenTest {
         val ui = InMemoryUiSettings().apply { setChatBubbles(false) }
         chat(seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }, ui = ui) { _, _ ->
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
-            val words = onNodeWithText("from them").fetchSemanticsNode().boundsInRoot
-            val root = onRoot().fetchSemanticsNode().boundsInRoot
-            fun farSide() = onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
-            // Off the row first: run after other tests, the pointer can
-            // start on it, and the row is tinted before it is hovered.
-            onRoot().performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(1f, 1f)) }
-            waitForIdle()
-            val before = farSide()
+            val before = farSide("from them")
             onNodeWithText("from them").performMouseInput { moveTo(center) }
             waitForIdle()
-            assertTrue(before != farSide(), "the row tints, so the check above can see one")
+            val after = farSide("from them")
+            assertTrue(before != after, "the row tints, so the check above can see one: $before, then $after")
         }
     }
 
