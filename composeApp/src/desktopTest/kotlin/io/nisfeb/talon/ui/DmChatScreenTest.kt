@@ -332,13 +332,16 @@ class DmChatScreenTest {
         }
     }
 
+    // The picture is shown first, so its going is rows' doing, not a load
+    // that had not finished yet.
     @Test
     fun `rows draw on the page, with no picture behind them`() {
-        val ui = InMemoryUiSettings().apply { setChatBubbles(false); setChatBackgroundImage(picture(0xFF0000)) }
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
         chat(ui = ui, seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }) { _, _ ->
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
-            waitForIdle()
-            assertTrue(aboveEveryMessage() != red, "rows ignore the picture")
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
+            ui.setChatBubbles(false)
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() != red }
         }
     }
 
