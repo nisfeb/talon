@@ -17,13 +17,13 @@ import androidx.compose.ui.unit.dp
 
 /**
  * How a conversation draws its messages: as bubbles or as rows
- * ([UiSettings.chatBubbles]), and, in bubbles, on the background the
- * owner chose ([UiSettings.chatBackground]; null is the page's own).
+ * ([UiSettings.chatBubbles]), and, in bubbles, over the picture the
+ * owner chose ([UiSettings.chatBackgroundImage]; null is the page).
  * Both shells provide it through [chatDensityLocals]; a screen that has
  * the settings itself provides its own for what it draws.
  */
 @Immutable
-data class ChatLook(val bubbles: Boolean = true, val background: Color? = null)
+data class ChatLook(val bubbles: Boolean = true, val image: okio.Path? = null)
 
 val LocalChatLook = staticCompositionLocalOf { ChatLook() }
 
@@ -90,11 +90,12 @@ fun readableInk(fill: Color, under: Color, text: Color): Color {
 fun MessageBubble(
     kind: BubbleKind,
     modifier: Modifier = Modifier,
-    /** What the bubble sits on, for its ink: the chat's background, else the page. */
-    under: Color = LocalChatLook.current.background ?: MaterialTheme.colorScheme.surface,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val fill = bubbleFill(kind)
+    // Auto's fills are see-through; on a picture they are made solid,
+    // or the photo would show through and no ink could be sure to read.
+    val fill = onChatPicture(bubbleFill(kind))
+    val under = MaterialTheme.colorScheme.surface
     val corner = 18.dp
     val tail = 6.dp
     Surface(

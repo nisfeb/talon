@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.ChatBackdrop
+import io.nisfeb.talon.ui.chatLabel
 import androidx.compose.foundation.border
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
@@ -246,8 +248,8 @@ fun DmChatScreen(
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val chatBubbles by uiSettings.chatBubbles.collectAsState()
-    val chatBackground by uiSettings.chatBackground.collectAsState()
-    val chatLook = remember(chatBubbles, chatBackground) { io.nisfeb.talon.ui.chatLookOf(chatBubbles, chatBackground) }
+    val chatBackgroundImage by uiSettings.chatBackgroundImage.collectAsState()
+    val chatLook = remember(chatBubbles, chatBackgroundImage) { io.nisfeb.talon.ui.chatLookOf(chatBubbles, chatBackgroundImage) }
     // The owner's contact book: their bubbles take the contacts' colour.
     val book by repo.bookContacts.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
@@ -1041,6 +1043,10 @@ fun DmChatScreen(
             modifier = Modifier.weight(1f).fillMaxSize()
                 .onGloballyPositioned { listTop = it.positionInRoot().y },
         ) {
+        // The owner's picture behind the bubbles, and the look this
+        // screen read for everything drawn over it.
+        ChatBackdrop(chatLook)
+        androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalChatLook provides chatLook) {
         // Empty-state placeholder. Triggers when the refresh has
         // finished and we still have no rows — usually a
         // never-DMed peer where the ship has no writ history. We
@@ -1216,8 +1222,7 @@ fun DmChatScreen(
 
         LazyColumn(
             state = listState,
-            // Bubbles may sit on a background of the owner's own.
-            modifier = Modifier.fillMaxSize().then(chatLook.background?.let { Modifier.background(it) } ?: Modifier),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
@@ -1270,7 +1275,6 @@ fun DmChatScreen(
                             flashAmber = item.row.m.id == flashMessageId,
                             bubbles = chatBubbles,
                             bubbleKind = io.nisfeb.talon.ui.bubbleKindOf(item.row.m.author, ourPatp, book),
-                            bubbleUnder = chatLook.background ?: MaterialTheme.colorScheme.surface,
                         )
                     }
                 }
@@ -1309,6 +1313,7 @@ fun DmChatScreen(
                 )
             }
         }
+        } // close the look's provider
         } // close empty-state Box
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
         io.nisfeb.talon.ui.ChatComposer(
@@ -1695,7 +1700,6 @@ private fun MessageRow(
     /** Whose words, for the bubble's colour. */
     bubbleKind: io.nisfeb.talon.ui.BubbleKind = io.nisfeb.talon.ui.BubbleKind.Theirs,
     /** What the bubbles sit on, for their ink. */
-    bubbleUnder: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surface,
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
@@ -1852,7 +1856,7 @@ private fun MessageRow(
                 } else body()
             }
             if (bubbles) {
-                io.nisfeb.talon.ui.MessageBubble(bubbleKind, under = bubbleUnder) {
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind) {
                     // Their name opens the first bubble of a run wherever
                     // more than one other person talks: a group's channel
                     // or a club. In a 1:1 DM, only when it says more than
@@ -2142,7 +2146,7 @@ private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .background(io.nisfeb.talon.ui.onChatPicture(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)))
             .clickable(onClick = onDismiss)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
@@ -2172,7 +2176,7 @@ private fun DateDividerRow(label: String) {
             label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp).chatLabel(),
         )
         HorizontalDivider(modifier = Modifier.weight(1f))
     }
@@ -2729,9 +2733,9 @@ internal fun SendingIcon() {
  */
 @Composable
 internal fun SendStateNote(status: String?) {
-    when (status) {
-        "failed" -> SendFailedNote()
-        "queued" -> QueuedNote()
+    if (status != "failed" && status != "queued") return
+    Box(Modifier.chatLabel()) {
+        if (status == "failed") SendFailedNote() else QueuedNote()
     }
 }
 

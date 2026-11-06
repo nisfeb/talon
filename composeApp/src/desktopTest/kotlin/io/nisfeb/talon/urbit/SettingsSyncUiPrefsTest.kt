@@ -138,29 +138,26 @@ class SettingsSyncUiPrefsTest {
         watching()
         ui.setRecentSearches(listOf("from:~nec lunch"))
         // A change made after is heard going up, so the searches had their chance.
-        ui.setChatBackground("#0B1120")
-        settled { pushed("chat-background").isNotEmpty() }
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
         val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
         assertTrue(sent.none { "lunch" in it }, "$sent")
     }
 
-    // The background behind bubbles travels with them.
+    // The picture behind the bubbles is this device's: it never goes up,
+    // and the colour 1.8.40-rc2 sent up is no setting any more.
     @Test
-    fun `a chat background goes up as the ship's own body, and one from another device is taken, not nonsense`() = live {
+    fun `the background picture never goes to the ship, and an old background colour changes nothing`() = live {
         watching()
-        ui.setChatBackground("#0B1120")
-        settled { pushed("chat-background").isNotEmpty() }
-        assertEquals(
-            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"chat-background","value":"{\"value\":\"#0B1120\"}"}}""",
-            pushed("chat-background").single(),
-        )
+        ui.setChatBackgroundImage("/kept/a.img")
+        // A change made after is heard going up, so the picture had its chance.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "kept/a.img" in it || "chat-background" in it }, "$sent")
         arrives("chat-background", """{"value":"#123456"}""")
-        settled { ui.chatBackground.value == "#123456" }
-        arrives("chat-background", """{"value":"navy"}""")
         delay(300)
-        assertEquals("#123456", ui.chatBackground.value, "not a colour, so nothing changes")
-        arrives("chat-background", """{"value":""}""")
-        settled { ui.chatBackground.value == "" }
+        assertEquals("/kept/a.img", ui.chatBackgroundImage.value)
     }
 
     // ─── fonts ────────────────────────────────────────────────────

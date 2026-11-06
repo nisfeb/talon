@@ -42,7 +42,7 @@ class FileUiSettings(
     private data class Persisted(
         val hideComposerButtons: Boolean = false,
         val chatBubbles: Boolean = true,
-        val chatBackground: String = "",
+        val chatBackgroundImage: String = "",
         val recentSearches: List<String> = emptyList(),
         // Accent settings — `enabled` is nullable so we can tell
         // "user never opted in" apart from "user explicitly off",
@@ -104,8 +104,8 @@ class FileUiSettings(
     private val _chatBubbles = MutableStateFlow(initial.chatBubbles)
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
 
-    private val _chatBackground = MutableStateFlow(initial.chatBackground)
-    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+    private val _chatBackgroundImage = MutableStateFlow(initial.chatBackgroundImage)
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
 
     private val _recentSearches = MutableStateFlow(initial.recentSearches)
     override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
@@ -307,9 +307,9 @@ class FileUiSettings(
         persistCurrent()
     }
 
-    override fun setChatBackground(hex: String) {
-        if (_chatBackground.value == hex) return
-        _chatBackground.value = hex
+    override fun setChatBackgroundImage(path: String) {
+        if (_chatBackgroundImage.value == path) return
+        _chatBackgroundImage.value = path
         persistCurrent()
     }
 
@@ -401,7 +401,7 @@ class FileUiSettings(
             Persisted(
                 hideComposerButtons = _hideComposerButtons.value,
                 chatBubbles = _chatBubbles.value,
-                chatBackground = _chatBackground.value,
+                chatBackgroundImage = _chatBackgroundImage.value,
                 recentSearches = _recentSearches.value,
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,

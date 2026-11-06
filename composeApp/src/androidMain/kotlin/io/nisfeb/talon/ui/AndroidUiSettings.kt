@@ -72,8 +72,8 @@ class AndroidUiSettings(
     private val _chatBubbles = MutableStateFlow(prefs.getBoolean(KEY_CHAT_BUBBLES, true))
     override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
 
-    private val _chatBackground = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND, "") ?: "")
-    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+    private val _chatBackgroundImage = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND_IMAGE, "") ?: "")
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
 
     // One search a line: the search field is a single line, so a line
     // break is never in one.
@@ -283,10 +283,10 @@ class AndroidUiSettings(
         _chatBubbles.value = on
     }
 
-    override fun setChatBackground(hex: String) {
-        if (_chatBackground.value == hex) return
-        prefs.edit().putString(KEY_CHAT_BACKGROUND, hex).apply()
-        _chatBackground.value = hex
+    override fun setChatBackgroundImage(path: String) {
+        if (_chatBackgroundImage.value == path) return
+        prefs.edit().putString(KEY_CHAT_BACKGROUND_IMAGE, path).apply()
+        _chatBackgroundImage.value = path
     }
 
     override fun setRecentSearches(searches: List<String>) {
@@ -434,7 +434,7 @@ class AndroidUiSettings(
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_CHAT_BUBBLES = "chat_bubbles"
-        private const val KEY_CHAT_BACKGROUND = "chat_background"
+        private const val KEY_CHAT_BACKGROUND_IMAGE = "chat_background_image"
         private const val KEY_RECENT_SEARCHES = "recent_searches"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"

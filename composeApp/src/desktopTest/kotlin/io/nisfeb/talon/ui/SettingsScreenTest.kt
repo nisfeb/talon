@@ -55,6 +55,10 @@ class SettingsScreenTest {
     private val theme = InMemoryThemePreference()
     private val patpChanges = mutableListOf<Boolean>()
     private val did = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val pictures = okio.FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "talon-settings-pictures-${System.nanoTime()}"
+
+    @kotlin.test.AfterTest
+    fun cleanPictures() = okio.FileSystem.SYSTEM.deleteRecursively(pictures)
 
     private fun settings(
         health: NotificationHealth? = null,
@@ -65,6 +69,8 @@ class SettingsScreenTest {
         fontRepo: FontRepo? = null,
         allGroups: (suspend (String) -> Int)? = null,
         startOnLocalShip: Boolean = false,
+        // Never the app's own data dir: Remove empties this one.
+        files: io.nisfeb.talon.ui.ChatBackgroundFiles = io.nisfeb.talon.ui.ChatBackgroundFiles(pictures),
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -84,12 +90,33 @@ class SettingsScreenTest {
                         homePinCandidates = pinCandidates,
                         onSetAllGroupsNotify = allGroups,
                         startOnLocalShip = startOnLocalShip,
+                        chatBackgroundFiles = files,
                     )
                 }
             }
         }
         waitForIdle()
         block()
+    }
+
+    // sneagan, 2026-11-06: a picture behind the bubbles, not a colour;
+    // colours are the theme's.
+    @Test
+    fun `a background picture shows small, and Remove takes it off this device`() {
+        val files = io.nisfeb.talon.ui.ChatBackgroundFiles(pictures)
+        ui.setChatBackgroundImage(files.write(byteArrayOf(1, 2, 3)))
+        settings(files = files) {
+            tap("Chats")
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodes(androidx.compose.ui.test.hasContentDescription("Your background picture")).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(shows("Change"))
+            tap("Remove")
+            waitForIdle()
+            assertEquals("", ui.chatBackgroundImage.value)
+            assertEquals(emptyList(), okio.FileSystem.SYSTEM.list(pictures), "the file goes with it")
+            assertTrue(shows("Choose a picture"))
+        }
     }
 
     private fun ComposeUiTest.tap(text: String) {
@@ -216,7 +243,7 @@ class SettingsScreenTest {
         assertEquals(!before, ui.swipeQuotes.value)
 
         assertTrue(ui.chatBubbles.value)
-        assertTrue(shows("Background"), "a background is offered with bubbles")
+        assertTrue(shows("Background") && shows("Choose a picture"), "a background picture is offered with bubbles")
         tap("Rows")
         assertFalse(ui.chatBubbles.value)
         assertFalse(shows("Background"), "rows draw on the page, so none is offered")

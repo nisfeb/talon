@@ -53,6 +53,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import androidx.compose.ui.graphics.compositeOver
 import io.ktor.client.engine.mock.respond
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -86,6 +87,8 @@ class DmChatScreenTest {
         book: List<String> = emptyList(),
         /** Bubble colours as a theme would set them. */
         bubbleColors: BubbleColors? = null,
+        /** Handed the theme's colours, for a test that reads pixels. */
+        scheme: (androidx.compose.material3.ColorScheme) -> Unit = {},
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -108,6 +111,7 @@ class DmChatScreenTest {
                         },
                     ) {
                     TalonTheme(darkTheme = false) {
+                    scheme(androidx.compose.material3.MaterialTheme.colorScheme)
                     androidx.compose.runtime.CompositionLocalProvider(LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current)) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
@@ -239,13 +243,34 @@ class DmChatScreenTest {
         }
     }
 
+    /** A picture of one colour, kept where a chosen one would be. */
+    private fun picture(rgb: Int): String {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color(rgb); fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        return f.absolutePath
+    }
+
+    private fun assertNear(expected: Color, actual: Color, what: String) {
+        val off = maxOf(kotlin.math.abs(expected.red - actual.red), kotlin.math.abs(expected.green - actual.green), kotlin.math.abs(expected.blue - actual.blue))
+        assertTrue(off < 3f / 255f, "$what: expected $expected, was $actual")
+    }
+
+    private val red = Color(0xFFFF0000)
+
+    private fun ComposeUiTest.aboveEveryMessage(): Color {
+        val list = onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+        return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.top + 4f).toInt()]
+    }
+
     // sneagan, 2026-11-05: the owner's bubbles, their contacts' (a VIP
-    // colour) and everyone else's, from the theme, on a background of the
-    // owner's own. Read off the drawn pixels: inside each bubble's margin,
-    // and above every message, where only the background is.
+    // colour) and everyone else's, from the theme; and 2026-11-06, on a
+    // picture of the owner's. Read off the drawn pixels: inside each
+    // bubble's margin, and above every message, where only the picture is.
     @Test
-    fun `a contact's bubble takes the contacts' colour, others theirs, ours ours, on the chosen background`() {
-        val ui = InMemoryUiSettings().apply { setChatBackground("#FF0000") }
+    fun `a contact's bubble takes the contacts' colour, others theirs, ours ours, on the chosen picture`() {
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
         val green = Color(0xFF00FF00)
         val blue = Color(0xFF0000FF)
         val yellow = Color(0xFFFFFF00)
@@ -263,7 +288,7 @@ class DmChatScreenTest {
             },
         ) { _, _ ->
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from me").fetchSemanticsNodes().isNotEmpty() }
-            waitForIdle()
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
             val pixels = onRoot().captureToImage().toPixelMap()
             val inset = 6.dp.value * density.density
             fun fillBeside(text: String): Color {
@@ -273,8 +298,47 @@ class DmChatScreenTest {
             assertEquals(green, fillBeside("from a contact"), "a contact's bubble")
             assertEquals(blue, fillBeside("from a stranger"), "anyone else's")
             assertEquals(yellow, fillBeside("from me"), "ours")
-            val list = onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
-            assertEquals(Color(0xFFFF0000), pixels[list.center.x.toInt(), (list.top + 4f).toInt()], "the background, above every message")
+        }
+    }
+
+    // Auto's fills are see-through; on a picture they are made solid, and
+    // what is written straight on the chat (the day) sits on a pill.
+    @Test
+    fun `on a picture the bubbles are solid and the day is on a pill`() {
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
+        var colors: androidx.compose.material3.ColorScheme? = null
+        val now = System.currentTimeMillis()
+        chat(
+            whom = "0v1.club",
+            ui = ui,
+            book = listOf("~nec"),
+            scheme = { colors = it },
+            seed = {
+                messages().upsert(MessageEntity("0v1.club", "~nec/170141184501", "~nec", now - 60_000, """[{"inline":["from a contact"]}]""", "/chat"))
+            },
+        ) { _, _ ->
+            // The day comes once the chat knows where its history starts.
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Today").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
+            val c = colors!!
+            val pixels = onRoot().captureToImage().toPixelMap()
+            val inset = 4.dp.value * density.density
+            fun beside(text: String): Color {
+                val b = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+                return pixels[(b.left - inset).toInt(), b.center.y.toInt()]
+            }
+            assertNear(c.tertiary.copy(alpha = 0.22f).compositeOver(c.surface), beside("from a contact"), "the bubble, solid on the page")
+            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), beside("Today"), "the day's pill")
+        }
+    }
+
+    @Test
+    fun `rows draw on the page, with no picture behind them`() {
+        val ui = InMemoryUiSettings().apply { setChatBubbles(false); setChatBackgroundImage(picture(0xFF0000)) }
+        chat(ui = ui, seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+            waitForIdle()
+            assertTrue(aboveEveryMessage() != red, "rows ignore the picture")
         }
     }
 
@@ -305,6 +369,10 @@ class DmChatScreenTest {
             val words = onNodeWithText("from them").fetchSemanticsNode().boundsInRoot
             val root = onRoot().fetchSemanticsNode().boundsInRoot
             fun farSide() = onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
+            // Off the row first: run after other tests, the pointer can
+            // start on it, and the row is tinted before it is hovered.
+            onRoot().performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(1f, 1f)) }
+            waitForIdle()
             val before = farSide()
             onNodeWithText("from them").performMouseInput { moveTo(center) }
             waitForIdle()

@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -128,6 +131,24 @@ class ThreadListTest {
         shows("my answer")
         assertTrue(left("my answer") > left("their answer") + 200f, "ours on the right")
         assertTrue(onAllNodesWithText("~nec", substring = true).fetchSemanticsNodes().isNotEmpty(), "theirs named")
+    }
+
+    // sneagan, 2026-11-06: the picture behind the chat's bubbles is behind
+    // a thread's too, below its last reply where nothing else is.
+    @Test
+    fun `in bubbles a thread sits on the owner's picture`() {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        thread(seed = replies, look = ChatLook(bubbles = true, image = okio.Path.Companion.run { f.absolutePath.toPath() })) { _, _ ->
+            shows("my answer")
+            fun belowEveryReply(): androidx.compose.ui.graphics.Color {
+                val list = onNode(androidx.compose.ui.test.hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+                return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.bottom - 4f).toInt()]
+            }
+            waitUntil(timeoutMillis = 5_000) { belowEveryReply() == androidx.compose.ui.graphics.Color.Red }
+        }
     }
 
     @Test

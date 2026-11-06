@@ -48,6 +48,7 @@ import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import okio.Path.Companion.toPath
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.horizontalScroll
 import io.nisfeb.talon.ui.theme.hex
@@ -154,6 +155,8 @@ fun SettingsScreen(
     startOnLocalShip: Boolean = false,
     /** Open on the AI tab: the way in from a failure the balance caused. */
     startOnAi: Boolean = false,
+    /** Where the picture behind the bubbles is kept. */
+    chatBackgroundFiles: io.nisfeb.talon.ui.ChatBackgroundFiles = io.nisfeb.talon.ui.ChatBackgroundFiles.default,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
     /** Fired after the word-names toggle flips; hosts push the new
      *  value to %settings so the choice follows the user. Local apply
@@ -167,7 +170,6 @@ fun SettingsScreen(
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val chatBubbles by uiSettings.chatBubbles.collectAsState()
-    val chatBackground by uiSettings.chatBackground.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -804,11 +806,11 @@ fun SettingsScreen(
                     label = { Text("Rows") },
                 )
             }
-            // Behind the bubbles, a colour of the owner's: Auto is the page.
-            // Rows draw on the page, so it is offered with bubbles alone.
-            // The bubbles' own colours are a theme's, under Appearance.
+            // Behind the bubbles, a picture of the owner's. Rows draw on
+            // the page, so it is offered with bubbles alone. Colours, the
+            // page's and the bubbles', are a theme's, under Appearance.
             if (chatBubbles) {
-                OptionalColorRow("Background", chatBackground, MaterialTheme.colorScheme.surface) { uiSettings.setChatBackground(it) }
+                ChatBackgroundImageRow(uiSettings, chatBackgroundFiles)
                 Text(
                     "Your bubbles, your contacts' and everyone else's take their colours from your theme, under Appearance.",
                     style = MaterialTheme.typography.bodySmall,
@@ -2203,6 +2205,55 @@ private fun OptionalColorRow(label: String, value: String?, auto: androidx.compo
             TextButton(onClick = { onValue("") }) { Text("Auto") }
         }
     }
+}
+
+/** The picture behind the bubbles: chosen from this device's, kept on it, and never synced. */
+@Composable
+private fun ChatBackgroundImageRow(uiSettings: UiSettings, files: io.nisfeb.talon.ui.ChatBackgroundFiles) {
+    val image by uiSettings.chatBackgroundImage.collectAsState()
+    val pick = io.nisfeb.talon.util.rememberImagePicker()
+    val scope = rememberCoroutineScope()
+    var picking by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    val choose: () -> Unit = {
+        scope.launch {
+            // Set before the picker suspends: two taps would both get in.
+            if (picking) return@launch
+            picking = true
+            problem = null
+            runCatching {
+                // Kept and set with no wait between, so leaving the
+                // screen can lose the pick but never half of it.
+                pick()?.let { picked ->
+                    val path = files.write(picked.bytes)
+                    uiSettings.setChatBackgroundImage(path)
+                    files.keepOnly(path)
+                }
+            }.onFailure { problem = io.nisfeb.talon.util.problemOf("Couldn't use that picture", it) }
+            picking = false
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Background", Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+        if (image.isEmpty()) {
+            Text("None", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = choose, enabled = !picking) { Text("Choose a picture") }
+        } else {
+            coil3.compose.AsyncImage(
+                model = image.toPath(),
+                contentDescription = "Your background picture",
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = choose, enabled = !picking) { Text("Change") }
+            TextButton(onClick = {
+                uiSettings.setChatBackgroundImage("")
+                files.keepOnly("")
+            }) { Text("Remove") }
+        }
+    }
+    problem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
 }
 
 /** Name, light or dark, five colors, six optional ones, and a live preview of the derived scheme. */

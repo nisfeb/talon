@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.ChatBackdrop
 import androidx.compose.foundation.border
 import io.nisfeb.talon.util.formatMonthDayClock
 
@@ -462,9 +463,12 @@ fun ThreadList(
         val chatLook = io.nisfeb.talon.ui.LocalChatLook.current
         val book by repo.bookContacts.collectAsState()
         val kindOf: (String) -> io.nisfeb.talon.ui.BubbleKind = { io.nisfeb.talon.ui.bubbleKindOf(it, ourPatp, book) }
+        // The owner's picture behind the bubbles, as in the chat.
+        androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxSize()) {
+        ChatBackdrop(chatLook)
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxSize().then(chatLook.background?.let { Modifier.background(it) } ?: Modifier),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
@@ -535,6 +539,7 @@ fun ThreadList(
                     bubbleKind = kindOf(replyMsg.author),
                 )
             }
+        }
         }
         HorizontalDivider()
         io.nisfeb.talon.ui.ChatComposer(
@@ -782,7 +787,7 @@ private fun ThreadMessage(
             flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
         }
     }
-    // In bubbles the rows let the chat's background through.
+    // In bubbles the rows let the chat's picture through.
     val baseColor = when {
         highlighted -> MaterialTheme.colorScheme.surfaceVariant
         bubbles -> Color.Transparent
@@ -889,7 +894,7 @@ private fun ThreadMessage(
                 } else body()
             }
             if (bubbles) {
-                io.nisfeb.talon.ui.MessageBubble(bubbleKind, under = look.background ?: MaterialTheme.colorScheme.surface) {
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind) {
                     val quiet = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.72f)
                     // A thread is many people's: each run of theirs is named.
                     if (showHeader && bubbleKind != io.nisfeb.talon.ui.BubbleKind.Mine) {

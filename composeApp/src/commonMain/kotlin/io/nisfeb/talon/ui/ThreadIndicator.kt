@@ -67,7 +67,7 @@ fun ThreadIndicator(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(bg)
+            .background(onChatPicture(bg))
             // Said aloud as well as tinted: only a thread that counts has it.
             .semantics { if (hasUnread) stateDescription = "New replies" }
             .clickable(onClick = onClick)

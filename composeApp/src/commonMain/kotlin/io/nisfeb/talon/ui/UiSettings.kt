@@ -21,9 +21,13 @@ interface UiSettings {
     val chatBubbles: StateFlow<Boolean>
     fun setChatBubbles(on: Boolean)
 
-    /** A conversation's background in bubbles, as "#RRGGBB"; "" is the page's own. Syncs, as bubbles do. */
-    val chatBackground: StateFlow<String>
-    fun setChatBackground(hex: String)
+    /**
+     * The picture behind a conversation's bubbles: a file's path, kept by
+     * [ChatBackgroundFiles]; "" is none. This device's alone: it never
+     * syncs. A colour behind them is the theme's.
+     */
+    val chatBackgroundImage: StateFlow<String>
+    fun setChatBackgroundImage(path: String)
 
     /**
      * The last searches run on this device, newest first, at most five
@@ -333,10 +337,10 @@ class InMemoryUiSettings(
         _chatBubbles.value = on
     }
 
-    private val _chatBackground = MutableStateFlow("")
-    override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
-    override fun setChatBackground(hex: String) {
-        _chatBackground.value = hex
+    private val _chatBackgroundImage = MutableStateFlow("")
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+    override fun setChatBackgroundImage(path: String) {
+        _chatBackgroundImage.value = path
     }
 
     private val _recentSearches = MutableStateFlow<List<String>>(emptyList())

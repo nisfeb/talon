@@ -74,10 +74,19 @@ class DesktopUiSettingsTest {
     }
 
     @Test
-    fun `a chat background persists and survives reload, and the page is the default`() {
-        assertEquals("", newStore().chatBackground.value)
-        newStore().setChatBackground("#0B1120")
-        assertEquals("#0B1120", newStore().chatBackground.value)
+    fun `a chat background picture persists and survives reload, and there is none at first`() {
+        assertEquals("", newStore().chatBackgroundImage.value)
+        newStore().setChatBackgroundImage("/kept/a.img")
+        assertEquals("/kept/a.img", newStore().chatBackgroundImage.value)
+    }
+
+    // 1.8.40-rc2 kept a background colour; its file must still load whole.
+    @Test
+    fun `a file from when the background was a colour keeps its other settings`() {
+        file.writeText("""{"chatBubbles":false,"chatBackground":"#0B1120"}""")
+        val store = newStore()
+        assertFalse(store.chatBubbles.value)
+        assertEquals("", store.chatBackgroundImage.value)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import okio.Path.Companion.toPath
 import androidx.compose.ui.graphics.Color
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,10 +29,9 @@ class MessageBubbleTest {
     }
 
     @Test
-    fun `a background is the bubbles', only a colour that parses, and none in rows`() {
-        assertEquals(ChatLook(bubbles = true, background = Color(0xFF0B1120)), chatLookOf(true, "#0B1120"))
-        assertNull(chatLookOf(true, "").background, "Auto is the page")
-        assertNull(chatLookOf(true, "navy").background)
-        assertEquals(ChatLook(bubbles = false, background = null), chatLookOf(false, "#0B1120"), "rows draw on the page")
+    fun `a picture is behind bubbles only, and none when unset`() {
+        assertEquals(ChatLook(bubbles = true, image = "/kept/a.img".toPath()), chatLookOf(true, "/kept/a.img"))
+        assertNull(chatLookOf(true, "").image, "none set is the page")
+        assertEquals(ChatLook(bubbles = false, image = null), chatLookOf(false, "/kept/a.img"), "rows draw on the page")
     }
 }
