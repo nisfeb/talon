@@ -26,6 +26,14 @@ interface UiSettings {
     fun setChatBackground(hex: String)
 
     /**
+     * The last searches run on this device, newest first, at most five
+     * (see [io.nisfeb.talon.ui.screens.withRecentSearch]). This device's
+     * alone: they never sync (sneagan, 2026-11-05).
+     */
+    val recentSearches: StateFlow<List<String>>
+    fun setRecentSearches(searches: List<String>)
+
+    /**
      * Theme accent color preferences. The effective tint that drives
      * every primary-colored UI element (send icon, focus rings, ship
      * pip, FilterChip selected state, etc) is derived from this plus
@@ -329,6 +337,12 @@ class InMemoryUiSettings(
     override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
     override fun setChatBackground(hex: String) {
         _chatBackground.value = hex
+    }
+
+    private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+    override fun setRecentSearches(searches: List<String>) {
+        _recentSearches.value = searches
     }
 
     private val _accentSettings = MutableStateFlow(initialAccent)

@@ -5,6 +5,10 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -140,9 +144,15 @@ class SearchScreenTest {
         // The group and the person land on their own: clicked before they
         // were there, the test failed on a slow machine.
         waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") }
+        // Each one opened keeps the search it came from.
         onNodeWithText("Lunch Crew").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a group")
+        ui.setRecentSearches(emptyList())
         onNodeWithText("Lunch Club").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a person")
+        ui.setRecentSearches(emptyList())
         onNodeWithText("lunch at noon").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a message")
         assertEquals(listOf("group ~bus/crew", "dm ~nec", "msg ~bus 1 null"), opened)
     }
 
@@ -203,6 +213,50 @@ class SearchScreenTest {
 
         type("lunch since:1w", "since ")
         waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && !shows("lunch plans tomorrow") }
+    }
+
+    // The last five searches, kept on this device, so a long one with
+    // operators is run again without typing it (sneagan, 2026-11-05).
+    @Test
+    fun `a search a result was opened from is kept, and runs again from the empty field`() = search {
+        type("lunch from:~nec", "lunch plans tomorrow")
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        onNodeWithText("lunch plans tomorrow").performClick()
+        assertEquals(listOf("lunch from:~nec"), ui.recentSearches.value)
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch plans tomorrow") }
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("RECENT SEARCHES") }
+        onNodeWithText("lunch from:~nec").performClick()
+        onNode(hasSetTextAction()).assertTextContains("lunch from:~nec")
+        waitUntil(timeoutMillis = 5_000) { shows("from ~nec") && shows("lunch plans tomorrow") }
+        assertTrue(!shows("lunch at noon"), "run again whole, operators and all")
+    }
+
+    @Test
+    fun `Enter keeps a search, newest first, and the cross takes one off`() = search {
+        type("lunch", "lunch at noon")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        type("dinner", "dinner later")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        assertEquals(listOf("dinner", "lunch"), ui.recentSearches.value)
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("RECENT SEARCHES") }
+        assertTrue(top("dinner") < top("lunch"))
+        onNodeWithContentDescription("Remove dinner from recent searches").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("dinner") }
+        assertEquals(listOf("lunch"), ui.recentSearches.value)
+        onNodeWithContentDescription("Remove lunch from recent searches").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Type at least two characters.") }
+    }
+
+    @Test
+    fun `typing alone keeps nothing`() = search {
+        type("lunch", "lunch at noon")
+        type("dinner", "dinner later")
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("Type at least two characters.") }
+        assertEquals(emptyList(), ui.recentSearches.value)
     }
 
     @Test

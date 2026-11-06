@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.nowMs
@@ -61,6 +62,18 @@ internal object SearchDraft {
 }
 
 
+/**
+ * [searches] with [query] put first, as Search keeps its recent ones: a
+ * repeat moves up rather than showing twice, and five at most are kept.
+ * Under two characters is no search, so nothing changes.
+ */
+internal fun withRecentSearch(searches: List<String>, query: String, max: Int = 5): List<String> {
+    // A pasted line break would split the one-a-line Android store.
+    val q = query.replace('\n', ' ').trim()
+    if (q.length < 2) return searches
+    return (listOf(q) + searches.filter { it != q }).take(max)
+}
+
 /** When Search last ran an indexer pass, for the life of the process. */
 internal var lastSearchPassMs = Long.MIN_VALUE / 2
 /** Search runs a pass on opening at most this often. */
@@ -101,6 +114,9 @@ fun SearchScreen(
     LaunchedEffect(query) { if (fromBar && opened.isNotEmpty() && query.isEmpty()) onBack() }
     var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
+    val recents by uiSettings.recentSearches.collectAsState()
+    // Kept when it was worth something: a result opened from it, or Enter.
+    val keep = { uiSettings.setRecentSearches(withRecentSearch(uiSettings.recentSearches.value, query)) }
 
     // Debounce typing — `db.messages().search(...)` is a full-table LIKE
     // scan with no index. On a 50K-row archive every keystroke would
@@ -256,6 +272,8 @@ fun SearchScreen(
                     )
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keep() }),
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp).focusRequester(focus),
             )
         }
@@ -314,26 +332,41 @@ fun SearchScreen(
             SearchSyntaxDialog(onDismiss = { showSyntaxHelp = false })
         }
         HorizontalDivider()
-        if (trimmed.length < 2 && highlightsEnabled && highlights.value.isNotEmpty()) {
-            // No query yet, but the user has highlights — show them
-            // as the empty state. Same row component as a search hit.
+        val showHighlights = highlightsEnabled && highlights.value.isNotEmpty()
+        if (trimmed.length < 2 && (recents.isNotEmpty() || showHighlights)) {
+            // No query yet: the recent searches to run again, then the
+            // user's highlights. Highlights use the search hit's row.
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                item(key = "__highlights_header", contentType = "header") {
-                    SectionHeader("Highlights")
-                }
-                items(
-                    items = highlights.value,
-                    key = { "hl:${it.whom}:${it.id}" },
-                    contentType = { "hl" },
-                ) { m ->
-                    ResultRow(m, contactMap) {
-                        SearchDraft.query = query
-                        onOpenMessage(m.whom, m.id, m.parentId)
+                if (recents.isNotEmpty()) {
+                    item(key = "__recent_header", contentType = "header") {
+                        SectionHeader("Recent searches")
                     }
-                    HorizontalDivider()
+                    items(items = recents, key = { "recent:$it" }, contentType = { "recent" }) { q ->
+                        RecentRow(
+                            query = q,
+                            onRun = { field = androidx.compose.ui.text.input.TextFieldValue(q, androidx.compose.ui.text.TextRange(q.length)) },
+                            onRemove = { uiSettings.setRecentSearches(uiSettings.recentSearches.value - q) },
+                        )
+                    }
+                }
+                if (showHighlights) {
+                    item(key = "__highlights_header", contentType = "header") {
+                        SectionHeader("Highlights")
+                    }
+                    items(
+                        items = highlights.value,
+                        key = { "hl:${it.whom}:${it.id}" },
+                        contentType = { "hl" },
+                    ) { m ->
+                        ResultRow(m, contactMap) {
+                            SearchDraft.query = query
+                            onOpenMessage(m.whom, m.id, m.parentId)
+                        }
+                        HorizontalDivider()
+                    }
                 }
             }
         } else if (trimmed.length < 2) {
@@ -376,7 +409,7 @@ fun SearchScreen(
                     ) { g ->
                         GroupRow(
                             group = g,
-                            onClick = { onOpenGroup(g.flag) },
+                            onClick = { keep(); onOpenGroup(g.flag) },
                         )
                         HorizontalDivider()
                     }
@@ -393,7 +426,7 @@ fun SearchScreen(
                         PersonRow(
                             contact = p,
                             hasChatHistory = p.ship in activeWhomSet,
-                            onClick = { SearchDraft.query = query; onOpenConversation(p.ship) },
+                            onClick = { keep(); SearchDraft.query = query; onOpenConversation(p.ship) },
                         )
                         HorizontalDivider()
                     }
@@ -408,6 +441,7 @@ fun SearchScreen(
                         contentType = { "hit" },
                     ) { m ->
                         ResultRow(m, contactMap) {
+                            keep()
                             SearchDraft.query = query
                             onOpenMessage(m.whom, m.id, m.parentId)
                         }
@@ -415,6 +449,34 @@ fun SearchScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RecentRow(query: String, onRun: () -> Unit, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onRun).padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            androidx.compose.material.icons.Icons.Filled.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            query,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+        )
+        androidx.compose.material3.IconButton(onClick = onRemove) {
+            Icon(
+                androidx.compose.material.icons.Icons.Filled.Close,
+                contentDescription = "Remove $query from recent searches",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

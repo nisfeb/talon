@@ -43,6 +43,7 @@ class FileUiSettings(
         val hideComposerButtons: Boolean = false,
         val chatBubbles: Boolean = true,
         val chatBackground: String = "",
+        val recentSearches: List<String> = emptyList(),
         // Accent settings — `enabled` is nullable so we can tell
         // "user never opted in" apart from "user explicitly off",
         // matching the contract in [AccentSettings].
@@ -105,6 +106,9 @@ class FileUiSettings(
 
     private val _chatBackground = MutableStateFlow(initial.chatBackground)
     override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
+
+    private val _recentSearches = MutableStateFlow(initial.recentSearches)
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
 
     private val _accentSettings = MutableStateFlow(
         AccentSettings(
@@ -309,6 +313,12 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setRecentSearches(searches: List<String>) {
+        if (_recentSearches.value == searches) return
+        _recentSearches.value = searches
+        persistCurrent()
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         _accentSettings.value = settings
@@ -392,6 +402,7 @@ class FileUiSettings(
                 hideComposerButtons = _hideComposerButtons.value,
                 chatBubbles = _chatBubbles.value,
                 chatBackground = _chatBackground.value,
+                recentSearches = _recentSearches.value,
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,

@@ -132,6 +132,18 @@ class SettingsSyncUiPrefsTest {
         assertTrue(pushed("chat-bubbles").isEmpty(), "applying is not an edit: ${pushed("chat-bubbles")}")
     }
 
+    // Recent searches are this device's alone (sneagan, 2026-11-05).
+    @Test
+    fun `recent searches never go to the ship`() = live {
+        watching()
+        ui.setRecentSearches(listOf("from:~nec lunch"))
+        // A change made after is heard going up, so the searches had their chance.
+        ui.setChatBackground("#0B1120")
+        settled { pushed("chat-background").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "lunch" in it }, "$sent")
+    }
+
     // The background behind bubbles travels with them.
     @Test
     fun `a chat background goes up as the ship's own body, and one from another device is taken, not nonsense`() = live {

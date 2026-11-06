@@ -81,6 +81,13 @@ class DesktopUiSettingsTest {
     }
 
     @Test
+    fun `recent searches persist and survive reload, and there are none at first`() {
+        assertEquals(emptyList(), newStore().recentSearches.value)
+        newStore().setRecentSearches(listOf("from:~nec lunch", "dinner"))
+        assertEquals(listOf("from:~nec lunch", "dinner"), newStore().recentSearches.value)
+    }
+
+    @Test
     fun `corrupt JSON falls back to default`() {
         file.writeText("not json")
         val store = newStore()

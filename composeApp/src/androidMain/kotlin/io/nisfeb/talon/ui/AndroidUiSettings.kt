@@ -75,6 +75,13 @@ class AndroidUiSettings(
     private val _chatBackground = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND, "") ?: "")
     override val chatBackground: StateFlow<String> = _chatBackground.asStateFlow()
 
+    // One search a line: the search field is a single line, so a line
+    // break is never in one.
+    private val _recentSearches = MutableStateFlow(
+        prefs.getString(KEY_RECENT_SEARCHES, "").orEmpty().split('\n').filter { it.isNotBlank() },
+    )
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+
     private val _accentSettings = MutableStateFlow(loadAccent())
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
@@ -282,6 +289,12 @@ class AndroidUiSettings(
         _chatBackground.value = hex
     }
 
+    override fun setRecentSearches(searches: List<String>) {
+        if (_recentSearches.value == searches) return
+        prefs.edit().putString(KEY_RECENT_SEARCHES, searches.joinToString("\n")).apply()
+        _recentSearches.value = searches
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         prefs.edit().apply {
@@ -422,6 +435,7 @@ class AndroidUiSettings(
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
         private const val KEY_CHAT_BUBBLES = "chat_bubbles"
         private const val KEY_CHAT_BACKGROUND = "chat_background"
+        private const val KEY_RECENT_SEARCHES = "recent_searches"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"
