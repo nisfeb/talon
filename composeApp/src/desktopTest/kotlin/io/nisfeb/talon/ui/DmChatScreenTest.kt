@@ -339,14 +339,23 @@ class DmChatScreenTest {
             // accent once there is something to send.
             val root = onRoot().fetchSemanticsNode().boundsInRoot
             assertEquals(red, pixels[2, (root.bottom - 3).toInt()], "the picture, under the composer")
-            // A bare button sits on a disc of the page, so it shows.
-            val attach = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot
-            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), pixels[(attach.left - 3 * density.density).toInt(), attach.center.y.toInt()], "Attach, on its disc")
+            // A bare button sits on a disc of the page, so it shows: 15 dp
+            // from its middle, inside its 36 dp, past its 22 dp icon.
+            val attach = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot.center
+            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), pixels[(attach.x - 15 * density.density).toInt(), attach.y.toInt()], "Attach, on its disc")
             onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("hi")
             waitForIdle()
             val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
-            val disc = onRoot().captureToImage().toPixelMap()[(send.left - 3 * density.density).toInt(), send.center.y.toInt()]
-            assertNear(c.primary, disc, "Send, on its disc")
+            // sneagan, 2026-11-06: on a phone the disc ran over the text
+            // field. It is the button's 36 dp, not the 48 dp touch target
+            // around it: 15 dp from the middle is disc, 21 dp is past it.
+            val now = onRoot().captureToImage().toPixelMap()
+            val mid = send.center
+            fun at(dx: Float) = now[(mid.x + dx * density.density).toInt(), mid.y.toInt()]
+            assertNear(c.primary, at(15f), "inside Send's 36 dp")
+            assertEquals(red, at(21f), "past Send's 36 dp, the picture")
+            val pick = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot.center
+            assertEquals(red, now[(pick.x - 21 * density.density).toInt(), pick.y.toInt()], "past Attach's 36 dp, the picture")
         }
     }
 

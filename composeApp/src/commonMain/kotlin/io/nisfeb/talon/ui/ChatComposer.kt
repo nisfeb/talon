@@ -1151,7 +1151,7 @@ fun ChatComposer(
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             takePaste(clipboardPaste())
                         },
-                        modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
+                        modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                     ) {
                         Icon(
                             TalonIcons.ContentPaste,
@@ -1164,7 +1164,7 @@ fun ChatComposer(
             if (!hideComposerButtons) {
                 io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                 ) {
                     if (state.uploading) {
                         CircularProgressIndicator(
@@ -1181,7 +1181,7 @@ fun ChatComposer(
                 }
                 io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).chatButton(),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                 ) {
                     Icon(
                         TalonIcons.AttachFile,
@@ -1400,13 +1400,16 @@ fun ChatComposer(
             val onPicture = LocalChatLook.current.image != null
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
-                modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp).then(
+                // The disc before the size: after it, a background is
+                // drawn at the 48 dp touch target inside the button, and on
+                // a phone it ran over the text field.
+                modifier = Modifier.padding(bottom = BESIDE_FIELD).then(
                     if (!onPicture) Modifier
                     else Modifier.background(
                         if (sendable) sendAccent else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                         androidx.compose.foundation.shape.CircleShape,
                     ),
-                ),
+                ).size(36.dp),
             ) {
                 // A tick, not a paper plane. Editing and sending are
                 // different acts and the button is the only thing that

@@ -82,7 +82,11 @@ fun Modifier.chatPanel(): Modifier =
     else padding(horizontal = 8.dp, vertical = 2.dp)
         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f), RoundedCornerShape(12.dp))
 
-/** A bare icon button on a picture: on a small disc of the page's colour, so it shows. */
+/**
+ * A bare icon button on a picture: on a small disc of the page's colour,
+ * so it shows. Put it before the button's size: after it, it is drawn at
+ * the 48 dp touch target inside a Material button, not the button.
+ */
 @Composable
 fun Modifier.chatButton(): Modifier =
     if (LocalChatLook.current.image == null) this
