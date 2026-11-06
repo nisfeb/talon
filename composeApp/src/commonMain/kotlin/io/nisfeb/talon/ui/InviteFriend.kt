@@ -114,7 +114,12 @@ fun InviteFriendCard(ship: String?, name: String? = null, modifier: Modifier = M
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Wraps: three buttons in one row on a phone squeezed the last
+            // to a column of single letters.
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Button(enabled = ship != null, onClick = { note = invite() }) { Text("Invite a friend") }
                 if (ship != null) {
                     OutlinedButton(onClick = {
