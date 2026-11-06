@@ -320,7 +320,11 @@ class HomeListTest {
         tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
         shows("The Garden")
         shows("You: I will bring bread", substring = true)
-        assertTrue(onAllNodesWithText("5 channels", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+        assertTrue(onAllNodesWithText("· active", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+        // Only the channel with news is named (sneagan: chips for every
+        // channel were disliked).
+        shows("New in plans 2")
+        assertTrue(onAllNodesWithText("photos", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet channel is not named")
         tap("The Garden")
         waitForIdle()
         assertEquals(listOf("chat/~bus/plans"), opened, "the unread channel, before the newest words")
@@ -335,32 +339,24 @@ class HomeListTest {
         messages().upsert(msg("chat/~bus/c1", "170141184501", "~nec", "hello", 1_000))
     }
 
-    // sneagan, 2026-11-06: the chips ran onto a second line before "+N",
-    // and the card was too tall. One line, then the count of the rest.
+    // sneagan, 2026-11-06: the channels as chips were disliked. "N
+    // channels" opens the list's own channel rows, and opening them
+    // opens no chat.
     @Test
-    fun `a card's channels take one line, then +N, which shows the rest without opening anything`() = home(seed = hall, cards = true) {
+    fun `N channels opens a card's channel rows without opening anything, and a row opens its channel`() = home(seed = hall, cards = true) {
         tap("Groups")
-        shows("a-long-channel-name-01")
-        val more = androidx.compose.ui.test.SemanticsMatcher("a +N chip") { n ->
-            val text = androidx.compose.ui.semantics.SemanticsProperties.Text
-            text in n.config && n.config[text].any { t -> Regex("\\+\\d+").matches(t.text) }
-        }
-        waitUntil(timeoutMillis = 20_000) { onAllNodes(more).fetchSemanticsNodes().isNotEmpty() }
-        fun chips() = onAllNodesWithText("a-long-channel-name-", substring = true).fetchSemanticsNodes()
-        val first = chips()
-        assertTrue(first.size in 1 until 12, "some, not all: ${first.size}")
-        assertEquals(1, first.map { it.boundsInRoot.top }.distinct().size, "on one line")
-        val hidden = onAllNodes(more).fetchSemanticsNodes().single()
-            .config[androidx.compose.ui.semantics.SemanticsProperties.Text].single().text.drop(1).toInt()
-        assertEquals(12, first.size + hidden, "+N counts the rest")
-        onNode(more).performClick()
-        waitUntil(timeoutMillis = 5_000) { chips().size == 12 }
-        assertEquals(emptyList(), opened, "showing more chips opens no chat")
-        tap("Fewer")
-        waitUntil(timeoutMillis = 5_000) { chips().size == first.size }
+        shows("12 channels")
+        fun rows() = onAllNodesWithText("a-long-channel-name-", substring = true).fetchSemanticsNodes()
+        assertEquals(0, rows().size, "no channel names on the card")
+        assertTrue(onAllNodesWithText("New in", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet group's card has no line of news")
+        tap("12 channels")
+        waitUntil(timeoutMillis = 5_000) { rows().size == 12 }
+        assertEquals(emptyList(), opened, "showing the channels opens no chat")
         tap("a-long-channel-name-02")
         waitForIdle()
-        assertEquals(listOf("chat/~bus/c2"), opened, "a chip opens its own channel")
+        assertEquals(listOf("chat/~bus/c2"), opened, "a row opens its own channel")
+        tap("12 channels")
+        waitUntil(timeoutMillis = 5_000) { rows().isEmpty() }
     }
 
     // sneagan, 2026-11-06: edge to edge, touching, a fine rule between.
@@ -398,7 +394,7 @@ class HomeListTest {
     }, cards = true) {
         tap("Friends", substring = true)
         shows("You: I will bring bread", substring = true)
-        assertTrue(onAllNodesWithText("5 channels", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+        assertTrue(onAllNodesWithText("· active", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
     }
 
     @Test

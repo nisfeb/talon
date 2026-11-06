@@ -44,6 +44,16 @@ fun cardTarget(children: List<HomeRow.GroupChild>): String? =
     children.filter { it.unread > 0 }.maxByOrNull { it.unread }?.whom
         ?: children.maxByOrNull { it.m?.sentMs ?: Long.MIN_VALUE }?.whom
 
+/**
+ * A card's line of news: its channels with something unread, in the
+ * order the card lists them, with how many, as "New in plans 2 ·
+ * general 5". Null when nothing is new, and the card is two lines.
+ */
+fun newInLine(children: List<HomeRow.GroupChild>, nameOf: (String) -> String): String? =
+    children.filter { it.unread > 0 }
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ", prefix = "New in ") { "${nameOf(it.whom)} ${it.unread}" }
+
 fun buildHomeRows(
     allConvs: List<Pair<MessageEntity, Int>>,
     contactMap: ContactMap,

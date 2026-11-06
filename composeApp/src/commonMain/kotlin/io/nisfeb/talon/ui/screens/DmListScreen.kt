@@ -78,7 +78,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1488,9 +1487,10 @@ fun DmListScreen(
                                         onOpen = onRowOpen,
                                         // The toggle itself, not the head's lambda:
                                         // that one opens a chat on expanding, and
-                                        // showing more chips must not.
+                                        // showing the channels must not.
                                         onShowAll = onGroupHeadToggle,
                                         onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        onChannelLongPress = onRowLongPress,
                                         editMode = editMode,
                                         dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
@@ -1704,9 +1704,10 @@ fun DmListScreen(
                                         onOpen = onRowOpen,
                                         // The toggle itself, not the head's lambda:
                                         // that one opens a chat on expanding, and
-                                        // showing more chips must not.
+                                        // showing the channels must not.
                                         onShowAll = onGroupHeadToggle,
                                         onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        onChannelLongPress = onRowLongPress,
                                         editMode = editMode,
                                         dragHandleModifier = if (!canReorder) null else reorderHandle(
                                             onDragStarted = {
@@ -2787,12 +2788,14 @@ private fun SectionHeader(label: String) {
 /**
  * A group as a card, the home list's Cards view (sneagan, 2026-11-06,
  * after the bubbles pleased the people who asked for a friendlier groups
- * list): its picture larger, the newest words with who said them, and
- * its channels as chips. A tap goes straight into the channel that most
- * wants reading ([cardTarget]); "+N" shows the rest of the chips. The
- * faces of recent speakers were tried and taken off (sneagan, 2026-11-06).
+ * list): its picture larger, the newest words with who said them, and a
+ * line naming only the channels with something new ([newInLine]). A tap
+ * goes straight into the channel that most wants reading ([cardTarget]);
+ * "N channels" opens all of them as the list's own channel rows. Tried
+ * and taken off: the faces of recent speakers, and channels as chips,
+ * which readers disliked (sneagan, 2026-11-06).
  */
-@OptIn(ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupCard(
     row: HomeRow.GroupHead,
@@ -2804,11 +2807,13 @@ private fun GroupCard(
     onOpen: (String) -> Unit,
     onShowAll: (String) -> Unit,
     onLongClick: ((String) -> Unit)?,
+    onChannelLongPress: (String) -> Unit,
     editMode: Boolean,
     dragHandleModifier: Modifier?,
 ) {
-    val glow = focusGlow(children.any { it.whom == openWhom })
+    val glow = focusGlow(!row.expanded && children.any { it.whom == openWhom })
     val target = remember(children) { cardTarget(children) }
+    val news = remember(children, contactMap) { newInLine(children) { contactMap.channelShortName(it) } }
     val clicks = if (editMode && dragHandleModifier != null) dragHandleModifier
     else Modifier.combinedClickableWithSecondary(
         onClick = { target?.let(onOpen) },
@@ -2842,30 +2847,19 @@ private fun GroupCard(
                         modifier = Modifier.weight(1f),
                     )
                     if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
+                    // A group of one channel has nothing to open: the
+                    // card is the way in.
+                    if (children.size > 1) ChannelsToggle(children.size, row.expanded) { onShowAll(row.flag) }
                 }
                 CardLatest(children, contactMap, ourShip, draftOf)
-                if (children.isNotEmpty()) {
-                    val chip: @Composable (HomeRow.GroupChild) -> Unit = { child ->
-                        CardChip(
-                            label = contactMap.channelShortName(child.whom),
-                            unread = child.unread,
-                            onClick = { onOpen(child.whom) },
-                        )
-                    }
-                    // One line of chips, then "+N" for the rest (sneagan:
-                    // two lines made the card too tall). Shown whole, they
-                    // wrap, with a way back.
-                    if (!row.expanded) OneRowChips(
-                        count = children.size,
-                        chip = { chip(children[it]) },
-                        more = { hidden -> CardChip(label = "+$hidden", unread = 0, onClick = { onShowAll(row.flag) }) },
-                    ) else androidx.compose.foundation.layout.FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(CHIP_GAP),
-                        verticalArrangement = Arrangement.spacedBy(CHIP_GAP),
-                    ) {
-                        children.forEach { chip(it) }
-                        CardChip(label = "Fewer", unread = 0, onClick = { onShowAll(row.flag) })
-                    }
+                if (news != null) {
+                    Text(
+                        news,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             if (editMode && dragHandleModifier != null) {
@@ -2877,63 +2871,48 @@ private fun GroupCard(
                 )
             }
         }
+        // Opened, the list's own channel rows, set in under the text.
+        if (row.expanded && children.size > 1) {
+            children.forEach { child ->
+                GroupChannelRow(
+                    whom = child.whom,
+                    m = child.m,
+                    unread = child.unread,
+                    contactMap = contactMap,
+                    draft = draftOf(child.whom),
+                    onClick = onOpen,
+                    onLongClick = onChannelLongPress,
+                    open = child.whom == openWhom,
+                    startPadding = 80.dp,
+                )
+            }
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
     }
 }
 
-/** Between a card's chips. */
-private val CHIP_GAP = 4.dp
-
-/**
- * As many of [count] chips as fit on one line, in order, then [more] for
- * the rest when they do not all fit. Widths come from copies kept out of
- * the semantics tree and never placed (a chip measured and left unplaced
- * was still read out); only the chips shown are composed for real. The
- * "+N" is sized at its widest, every chip hidden, to leave it room.
- */
+/** "N channels", and which way it opens: shows the card's channel rows, or puts them away. */
 @Composable
-private fun OneRowChips(
-    count: Int,
-    chip: @Composable (Int) -> Unit,
-    more: @Composable (hidden: Int) -> Unit,
-) {
-    androidx.compose.ui.layout.SubcomposeLayout { constraints ->
-        val loose = constraints.copy(minWidth = 0, minHeight = 0)
-        val gap = CHIP_GAP.roundToPx()
-        fun sized(key: String, content: @Composable () -> Unit) =
-            subcompose(key) { Box(Modifier.clearAndSetSemantics {}) { content() } }.first().measure(loose).width
-        fun real(key: String, maxWidth: Int = loose.maxWidth, content: @Composable () -> Unit) =
-            subcompose(key) { content() }.first().measure(loose.copy(maxWidth = maxWidth))
-        val widths = (0 until count).map { i -> sized("size $i") { chip(i) } }
-        val all = widths.sum() + gap * (count - 1)
-        val placed = if (all <= constraints.maxWidth) {
-            (0 until count).map { i -> real("chip $i") { chip(i) } }
-        } else {
-            val widest = sized("widest") { more(count) }
-            var used = 0
-            var shown = 0
-            while (shown < count && used + widths[shown] + gap + widest <= constraints.maxWidth) {
-                used += widths[shown] + gap
-                shown++
-            }
-            // The first always shows, cut short if it must be: a name
-            // wider than the card alone was only "+1".
-            val head = if (shown > 0) (0 until shown).map { i -> real("chip $i") { chip(i) } } else {
-                shown = 1
-                val room = constraints.maxWidth - if (count > 1) gap + widest else 0
-                listOf(real("chip 0", room.coerceAtLeast(0)) { chip(0) })
-            }
-            head + if (shown < count) listOf(real("more") { more(count - shown) }) else emptyList()
-        }
-        val height = placed.maxOfOrNull { it.height } ?: 0
-        layout(constraints.maxWidth, height) {
-            var x = 0
-            placed.forEach {
-                it.placeRelative(x, (height - it.height) / 2)
-                x += it.width + gap
-            }
-        }
+private fun ChannelsToggle(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .clickable(onClickLabel = if (expanded) "Hide channels" else "Show channels", onClick = onToggle)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "$count channels",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            imageVector = TalonIcons.ExpandMore,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = if (expanded) 180f else 0f },
+        )
     }
 }
 
@@ -2977,32 +2956,6 @@ private fun CardLatest(
     }
 }
 
-
-/** A channel on a card: its name, and its unread count when it has one. */
-@Composable
-private fun CardChip(label: String, unread: Int, onClick: () -> Unit) {
-    // A soft rectangle rather than a pill, and snug, so more fit on a line.
-    androidx.compose.material3.Surface(
-        onClick = onClick,
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
-        color = if (unread > 0) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceVariant,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (unread > 0) {
-                Text(
-                    "$unread",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -3122,6 +3075,8 @@ private fun GroupChannelRow(
     onLongClick: (String) -> Unit,
     /** Open beside the list: see [focusGlow]. */
     open: Boolean = false,
+    /** From the row's start to its text: under a group head, or under a card's text. */
+    startPadding: androidx.compose.ui.unit.Dp = 56.dp,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
     val glow = focusGlow(open)
@@ -3145,7 +3100,7 @@ private fun GroupChannelRow(
                 onClick = { onClick(whom) },
                 onLongClick = { onLongClick(whom) },
             )
-            .padding(start = 56.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = startPadding, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
