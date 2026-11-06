@@ -1,4 +1,8 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ui.reorderHandle
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -750,8 +755,12 @@ fun DmListScreen(
         }
     }
 
+    // The search bar stays tucked away until pulled for: past the top of
+    // the list, by a finger or the wheel. See [io.nisfeb.talon.ui.RevealOnPull].
+    val searchBarPx = with(androidx.compose.ui.platform.LocalDensity.current) { SEARCH_BAR_HEIGHT.toPx() }
+    val searchReveal = remember(searchBarPx) { io.nisfeb.talon.ui.RevealOnPull(searchBarPx) }
     Box(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().nestedScroll(searchReveal)) {
         // Indeterminate progress strip while the repo is doing its
         // first-run bootstrap (init-posts + activity scries on a
         // freshly-opened ship). Without it, the 10-30s of silent
@@ -789,7 +798,13 @@ fun DmListScreen(
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+                // A screen reader cannot pull the list: search is offered here.
+                .semantics {
+                    customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction("Search") { onOpenSearch(); true })
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // The hamburger takes the left, where the logo used to be.
@@ -847,6 +862,14 @@ fun DmListScreen(
                     )
                 }
             } else {
+                // The search bar is pulled out of the list on a touch
+                // screen; a wheel past the top never reaches it, so a
+                // pointer gets search here, as before the bar.
+                if (!io.nisfeb.talon.ui.isTouchPrimary) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search messages")
+                    }
+                }
                 // A phone has no More menu, where reordering moved: its
                 // way in sits beside the pencil, ungated as the pencil was.
                 if (io.nisfeb.talon.ui.isDrawerNavigation) {
@@ -1127,34 +1150,6 @@ fun DmListScreen(
                     ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
             }
         }
-        // Message search, as a small rounded bar at the top of the list:
-        // the first letter typed opens the results with it, and emptying
-        // them comes back here.
-        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
-        OutlinedTextField(
-            value = searchText,
-            onValueChange = { typed ->
-                // An input method's word goes over once it is committed:
-                // handed over while composing, its first keystroke went
-                // raw ("n" for に, a lone jamo) and the rest was lost.
-                if (typed.composition == null && typed.text.isNotBlank()) {
-                    SearchDraft.query = typed.text
-                    SearchDraft.fromBar = true
-                    searchText = androidx.compose.ui.text.input.TextFieldValue()
-                    onOpenSearch()
-                } else searchText = typed
-            },
-            placeholder = { Text("Search", maxLines = 1) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            singleLine = true,
-            shape = RoundedCornerShape(20.dp),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-                .heightIn(min = 40.dp)
-                .semantics { contentDescription = "Search" },
-        )
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
         inviteNote?.let { note ->
             LaunchedEffect(note) { kotlinx.coroutines.delay(5_000); inviteNote = null }
@@ -1280,10 +1275,23 @@ fun DmListScreen(
             selectedFolderId == null && selectedSpecial == SpecialTab.All
         ) threadsTab()
         else
+        // A wheel's scroll ends with no fling: settle the bar when the list rests.
+        LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) searchReveal.settle() }
+        // Message search, as a small rounded bar over the top of the list,
+        // tucked away until pulled for: the first letter typed opens the
+        // results with it, and emptying them comes back here. Over the list,
+        // not above it: only the list's top padding grows as it slides in,
+        // so nothing moves under the finger that pulls it (a layout that
+        // moved fed the drag its own movement, without end).
+        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        val shown = searchReveal.shownPx
+        val shownDp = with(androidx.compose.ui.platform.LocalDensity.current) { shown.toDp() }
+        Box {
         LazyColumn(
             state = listState,
-            // Room under the last row for the new-message button.
-            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
+            // Room under the last row for the new-message button, and over
+            // the first for as much of the search bar as shows.
+            contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // Claims the triage noticed, above everything: each is one tap
@@ -1760,6 +1768,43 @@ fun DmListScreen(
                     }
                 }
             }
+        }
+        if (shown > 0f) Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(shownDp)
+                .clipToBounds()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+        OutlinedTextField(
+            value = searchText,
+            onValueChange = { typed ->
+                // An input method's word goes over once it is committed:
+                // handed over while composing, its first keystroke went
+                // raw ("n" for に, a lone jamo) and the rest was lost.
+                if (typed.composition == null && typed.text.isNotBlank()) {
+                    SearchDraft.query = typed.text
+                    SearchDraft.fromBar = true
+                    searchText = androidx.compose.ui.text.input.TextFieldValue()
+                    onOpenSearch()
+                } else searchText = typed
+            },
+            placeholder = { Text("Search", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            singleLine = true,
+            shape = RoundedCornerShape(20.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            // Its own height, sliding down from under the header as it shows.
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .wrapContentHeight(align = Alignment.Bottom, unbounded = true)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .heightIn(min = 40.dp)
+                .semantics { contentDescription = "Search" },
+        )
+        }
         }
         // Only valid for the All tab: the Unread / Mentions tabs render
         // a different flat list, so unreadIndices (built from homeRows)
@@ -3149,3 +3194,6 @@ private suspend fun createFolderLogged(
         io.nisfeb.talon.util.Log.e("Folders", "creating \"$name\" failed", it)
     }
 }
+
+/** The chat list's search bar, all of it: the field and its margin. */
+private val SEARCH_BAR_HEIGHT = 64.dp

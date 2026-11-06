@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
@@ -46,6 +48,7 @@ import io.nisfeb.talon.data.DmInviteEntity
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 /**
  * The home list, from what is stored: conversations with their last
@@ -91,7 +94,7 @@ class HomeListTest {
                         if (shown.value) DmListScreen(
                             db = db, repo = repo, drafts = InMemoryDraftStore(),
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
-                            onOpenConversation = { opened += it }, onOpenSearch = {}, onNewMessage = {},
+                            onOpenConversation = { opened += it }, onOpenSearch = { did += "Search" }, onNewMessage = {},
                             onSignOut = { did += "Sign out" }, onOpenSelfProfile = { did += "My profile" },
                             onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
@@ -196,6 +199,32 @@ class HomeListTest {
         shows("Unread")
         waitForIdle()
         assertTrue(onAllNodesWithText("Mentions").fetchSemanticsNodes().isEmpty(), "no Mentions tab for a DM")
+    }
+
+    // sneagan, 2026-11-05: the list's search bar "needs to hide when not
+    // in use. maybe scroll down to access it". Tucked away at first; on a
+    // touch screen pulled out of the list (RevealOnPullTest), and with a
+    // pointer, the header's search opens Search. (A wheel past the top
+    // never reaches the list's nested scroll, so it cannot pull the bar.)
+    @Test
+    fun `the search bar is tucked away, and a pointer opens search from the header`() = home(seed = {
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hello?", 1_000))
+    }) {
+        assertFalse(onAllNodes(hasSetTextAction() and hasContentDescription("Search")).fetchSemanticsNodes().isNotEmpty(), "tucked away at first")
+        onNodeWithContentDescription("Search messages").performClick()
+        waitForIdle()
+        assertTrue("Search" in did)
+    }
+
+    // A screen reader cannot pull a list: the header offers search itself.
+    @Test
+    fun `with the bar tucked away, the header offers search to a screen reader`() = home(seed = {}) {
+        fun actionsOf(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.CustomAccessibilityAction> =
+            if (androidx.compose.ui.semantics.SemanticsActions.CustomActions in n.config) n.config[androidx.compose.ui.semantics.SemanticsActions.CustomActions] else emptyList()
+        val header = onNode(androidx.compose.ui.test.SemanticsMatcher("offers Search") { n -> actionsOf(n).any { a -> a.label == "Search" } })
+        val action = actionsOf(header.fetchSemanticsNode()).first { a -> a.label == "Search" }
+        runOnIdle { action.action() }
+        assertTrue("Search" in did)
     }
 
     @Test
