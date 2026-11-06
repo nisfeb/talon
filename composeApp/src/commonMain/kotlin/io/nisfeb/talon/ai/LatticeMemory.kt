@@ -366,17 +366,27 @@ class LatticeApi(private val owner: HttpClient, private val bare: HttpClient, ba
 
 /**
  * What one assistant run has of the owner's lattice: the [tools], the
- * [instructions] and the session's [index] for its prompt, and a recall
- * of each question ([ask]).
+ * [instructions] and the session's [index] for its prompt, the owner's
+ * [skills] index ([LatticeSkills]), and a recall of each question ([ask]).
  */
 class LatticeMind(
     val tools: List<Tool>,
     private val instructions: String,
     private val index: String?,
+    private val skills: List<SkillEntry> = emptyList(),
+    /** The key has skills write, so the prompt tells of skill_save. */
+    private val canSaveSkills: Boolean = false,
+    /** For the voice assistant ([spoken]): its skill index is [LatticeSkills.forVoice]'s. */
+    private val voice: Boolean = false,
     private val recall: suspend (String) -> String?,
 ) {
-    /** The prompt's part: how memory works, then the index where it loaded. */
-    val prompt: String get() = listOfNotNull(instructions.ifBlank { null }, index).joinToString("\n\n")
+    /** The prompt's part: how memory works, the index where it loaded, then the skills where there are any. */
+    val prompt: String get() = listOfNotNull(
+        instructions.ifBlank { null },
+        index,
+        if (voice) LatticeSkills.block(LatticeSkills.forVoice(skills), canSave = false, spoken = true)
+        else LatticeSkills.block(skills, canSaveSkills),
+    ).joinToString("\n\n")
 
     /**
      * The question with what memory recalls of it before it, for the
@@ -396,10 +406,19 @@ class LatticeMind(
 
     /**
      * For a locked phone: the tools stay, their reads waiting for the
-     * fingerprint, but the index and what is recalled do not reach
-     * whoever is speaking.
+     * fingerprint, but the index, the skills and what is recalled do not
+     * reach whoever is speaking.
      */
-    fun locked(): LatticeMind = LatticeMind(tools, instructions, null) { null }
+    fun locked(): LatticeMind = LatticeMind(tools, instructions, null, emptyList(), false, voice) { null }
+
+    /**
+     * For the voice assistant, whose every turn pays for its prompt: the
+     * skills tagged voice, or the index trimmed to a budget
+     * ([LatticeSkills.forVoice]), and no skill_save, which nobody
+     * dictates.
+     */
+    fun spoken(): LatticeMind =
+        LatticeMind(tools.filterNot { it.spec.name in LatticeSkills.WRITES }, instructions, index, skills, false, true, recall)
 
     companion object {
         /** No lattice on the ship: nothing said of memory at all. */
@@ -434,7 +453,11 @@ class LatticeKeys(
         }
         val lattice = api.keyed(token) { revoked(token) }
         val index = index(lattice)
-        return LatticeMind(LatticeMemory.tools(lattice), LatticeMemory.prompt, index?.let(LatticeMemory::sessionBlock)) { q ->
+        // A key without the skills scope has no index and no skill tool.
+        val (skills, canSave) = (skills(lattice, token) as? SkillAccess.Listed)?.let { it.skills to it.canSave } ?: (emptyList<SkillEntry>() to false)
+        // skill_read only where there is a skill to read; skill_save wherever the key may save.
+        val skillTools = LatticeSkills.tools(lattice, canSave).filter { skills.isNotEmpty() || it.spec.name in LatticeSkills.WRITES }
+        return LatticeMind(LatticeMemory.tools(lattice) + skillTools, LatticeMemory.prompt, index?.let(LatticeMemory::sessionBlock), skills, canSave) { q ->
             if (!LatticeMemory.worthRecalling(q)) null
             else LatticeMemory.recallBlock(lattice.get("know-recall", mapOf("task" to q.trim().take(1500), "k" to "3", "sensitive" to "0")))
         }
@@ -504,6 +527,68 @@ class LatticeKeys(
         }
     }
 
+    /**
+     * Whether this install's key reads skills, for Settings' hint: asks
+     * lattice now, and records a refusal in [SKILLS_REFUSED]. Null where
+     * there is no key or lattice did not answer.
+     */
+    suspend fun skillsReadable(): Boolean? {
+        val k = keys.get(ship)?.takeUnless { it.revoked } ?: return null
+        SKILLS_LOCK.withLock { SKILLS.remove(ship) }
+        // Asked afresh: a grant the owner just made shows at once.
+        return when (skills(api.keyed(k.token) { revoked(k.token) }, k.token)) {
+            is SkillAccess.Listed -> true
+            SkillAccess.Refused -> false
+            SkillAccess.Unknown -> null
+        }
+    }
+
+    /**
+     * The owner's skills as [token] may see them, cached per ship for
+     * [INDEX_FOR_MS] and until the app comes to the front ([refreshSkills]).
+     * A 403 is the key's skills scope being none: no index and no tool,
+     * said once in the log and shown in Settings. Whether the key may
+     * save is asked with a skill-save lattice refuses either way: a key
+     * without skills write gets 403 for the route, one with it 400 for
+     * the empty name, and nothing is written.
+     */
+    private suspend fun skills(lattice: LatticeClient, token: String): SkillAccess {
+        val generation = skillsGeneration
+        SKILLS_LOCK.withLock { SKILLS[ship] }?.takeIf { it.generation == generation && now() - it.at < INDEX_FOR_MS }?.let { return it.access }
+        val got: SkillAccess = try {
+            val text = within(20_000) { lattice.get("skills") }
+            if (text == null) SkillAccess.Unknown
+            else {
+                val canSave = try {
+                    within(10_000) { lattice.post("skill-save", mapOf("name" to "")) }
+                    false
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: LatticeError.Refused) {
+                    e.status == 400
+                } catch (e: Throwable) {
+                    false
+                }
+                SkillAccess.Listed(LatticeSkills.parseIndex(text), canSave)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LatticeError.Refused) {
+            if (e.status == 403) SkillAccess.Refused else SkillAccess.Unknown
+        } catch (e: Throwable) {
+            SkillAccess.Unknown
+        }
+        val refused = SKILLS_REFUSED.value
+        if (got == SkillAccess.Refused && token !in refused) {
+            io.nisfeb.talon.util.Log.i("LatticeKeys", "lattice refused skills for Talon's key (no skills scope): the assistants run without the owner's skills")
+            SKILLS_REFUSED.value = refused + token
+        } else if (got is SkillAccess.Listed && token in refused) {
+            SKILLS_REFUSED.value = refused - token
+        }
+        if (got != SkillAccess.Unknown) SKILLS_LOCK.withLock { SKILLS[ship] = CachedSkills(now(), generation, got) }
+        return got
+    }
+
     private fun name() = "Talon on $platform"
 
     companion object {
@@ -517,6 +602,23 @@ class LatticeKeys(
 
         /** When each key this process minted was made: a 401 soon after is lattice not having stored it yet. */
         private val minted = mutableMapOf<String, Long>()
+        /** The skills as last read, per ship ([skills]). */
+        private class CachedSkills(val at: Long, val generation: Int, val access: SkillAccess)
+        private val SKILLS = mutableMapOf<String, CachedSkills>()
+        private val SKILLS_LOCK = Mutex()
+
+        /** Bumped by [refreshSkills]: a cached index from before it is read again. */
+        @kotlin.concurrent.Volatile
+        private var skillsGeneration = 0
+
+        /** The keys (tokens) lattice refused skills to: Settings says so beside the key. */
+        val SKILLS_REFUSED = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+        /** The app came to the front: the next assistant reads the skills again, a skill or a grant made elsewhere included. */
+        fun refreshSkills() {
+            skillsGeneration++
+        }
+
         const val NEW_KEY_GRACE_MS = 2 * 60_000L
         const val INDEX_FOR_MS = 10 * 60_000L
 
@@ -528,6 +630,8 @@ class LatticeKeys(
         internal fun forget() {
             absent.clear()
             INDEXES.clear()
+            SKILLS.clear()
+            SKILLS_REFUSED.value = emptySet()
             minted.clear()
         }
     }

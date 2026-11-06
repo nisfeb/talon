@@ -1387,6 +1387,8 @@ fun TalonApp(
                     mailRepo.setForeground(true)
                     calendarRepo.setForeground(true)
                     orreryRepo.setForeground(true)
+                    // The next assistant reads the owner's skills again.
+                    io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
@@ -2364,6 +2366,13 @@ fun TalonApp(
                         io.nisfeb.talon.ai.LatticeKeys(
                             app.db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(app.session.http, app.ktorHttp, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
                         ).renew()
+                    }
+                },
+                latticeSkillsReadable = app.sessionStore.active()?.let { s ->
+                    {
+                        io.nisfeb.talon.ai.LatticeKeys(
+                            app.db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(app.session.http, app.ktorHttp, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
+                        ).skillsReadable()
                     }
                 },
                 groupsInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
