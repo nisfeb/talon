@@ -831,7 +831,7 @@ fun SettingsScreen(
             )
             Text(
                 "A list puts each group's channels under it. Cards show each group with its newest " +
-                    "words, who has been talking and its channels as chips, and a tap goes straight in.",
+                    "words and its channels, and a tap goes straight in.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

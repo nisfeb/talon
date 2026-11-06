@@ -378,16 +378,16 @@ class HomeListTest {
         assertEquals(1f * density.density, hall.top - garden.bottom, 0.5f)
     }
 
+    // sneagan, 2026-11-06: the faces of recent speakers came off the cards.
     @Test
-    fun `a card names who has been talking, newest first, and not us`() = home(seed = garden, cards = true) {
+    fun `a card shows no faces of who has been talking`() = home(seed = garden, cards = true) {
         tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
-        waitUntil(timeoutMillis = 20_000) {
-            onAllNodes(androidx.compose.ui.test.hasContentDescription("Recently: ~nec, ~wes, ~bus")).fetchSemanticsNodes().isNotEmpty()
+        shows("You: I will bring bread", substring = true)
+        val faces = androidx.compose.ui.test.SemanticsMatcher("a face pile") { n ->
+            val cd = androidx.compose.ui.semantics.SemanticsProperties.ContentDescription
+            cd in n.config && n.config[cd].any { it.startsWith("Recently") }
         }
-        // sneagan, 2026-11-06: twice the first 22 dp.
-        // The pile itself, not the card that merges it.
-        val pile = onNode(androidx.compose.ui.test.hasContentDescription("Recently: ~nec, ~wes, ~bus"), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertEquals(44f * density.density, pile.height, 1f)
+        assertTrue(onAllNodes(faces, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test

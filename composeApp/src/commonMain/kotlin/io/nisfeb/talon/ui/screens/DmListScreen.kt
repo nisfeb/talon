@@ -2787,10 +2787,10 @@ private fun SectionHeader(label: String) {
 /**
  * A group as a card, the home list's Cards view (sneagan, 2026-11-06,
  * after the bubbles pleased the people who asked for a friendlier groups
- * list): its picture larger, the newest words with who said them, who
- * has been talking, and its channels as chips. A tap goes straight into
- * the channel that most wants reading ([cardTarget]); "+N" shows the
- * rest of the chips.
+ * list): its picture larger, the newest words with who said them, and
+ * its channels as chips. A tap goes straight into the channel that most
+ * wants reading ([cardTarget]); "+N" shows the rest of the chips. The
+ * faces of recent speakers were tried and taken off (sneagan, 2026-11-06).
  */
 @OptIn(ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -2809,7 +2809,6 @@ private fun GroupCard(
 ) {
     val glow = focusGlow(children.any { it.whom == openWhom })
     val target = remember(children) { cardTarget(children) }
-    val faces = remember(children, ourShip) { recentFaces(children, ourShip.orEmpty()) }
     val clicks = if (editMode && dragHandleModifier != null) dragHandleModifier
     else Modifier.combinedClickableWithSecondary(
         onClick = { target?.let(onOpen) },
@@ -2834,25 +2833,17 @@ private fun GroupCard(
                 size = 52.dp,
             )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // The faces beside the name and the news rather than over
-                // them, so their size costs the card no height.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                row.title,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
-                        }
-                        CardLatest(children, contactMap, ourShip, draftOf)
-                    }
-                    // One face says no more than the line beside it already does.
-                    if (faces.size >= 2) FacePile(faces, contactMap)
+                    Text(
+                        row.title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
                 }
+                CardLatest(children, contactMap, ourShip, draftOf)
                 if (children.isNotEmpty()) {
                     val chip: @Composable (HomeRow.GroupChild) -> Unit = { child ->
                         CardChip(
@@ -2986,27 +2977,6 @@ private fun CardLatest(
     }
 }
 
-/** Who has been talking: their faces, overlapping, newest on top; said aloud as their names. */
-@Composable
-private fun FacePile(ships: List<String>, contactMap: ContactMap) {
-    val names = ships.map { contactMap.displayName(it) }
-    Box(Modifier.clearAndSetSemantics { contentDescription = "Recently: ${names.joinToString(", ")}" }) {
-        ships.asReversed().forEachIndexed { i, ship ->
-            val place = ships.size - 1 - i
-            Avatar(
-                label = contactMap.displayName(ship),
-                url = contactMap.avatar(ship),
-                colorHex = contactMap.shipColor(ship),
-                size = FACE,
-                modifier = Modifier.padding(start = FACE_STEP * place),
-            )
-        }
-    }
-}
-
-/** A face in a card's pile (sneagan, 2026-11-06: twice the first 22 dp), and how far each sits from the last. */
-private val FACE = 44.dp
-private val FACE_STEP = 28.dp
 
 /** A channel on a card: its name, and its unread count when it has one. */
 @Composable
