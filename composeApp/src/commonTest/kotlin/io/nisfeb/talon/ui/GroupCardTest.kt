@@ -36,7 +36,8 @@ class GroupCardTest {
             child("a", author = "~nec", sent = 3),
             child("b", author = "~zod", sent = 9),
             child("c", author = "~wes", sent = 5),
-            child("d", author = "~nec", sent = 1),
+            // ~nec again, newer than ~bus: once only, or ~bus is lost.
+            child("d", author = "~nec", sent = 4),
             child("e", author = "~bus", sent = 2),
             child("f", author = "~dev", sent = 0),
             child("g"),

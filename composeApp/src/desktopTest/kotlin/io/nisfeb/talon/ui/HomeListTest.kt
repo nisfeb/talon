@@ -323,6 +323,17 @@ class HomeListTest {
     }
 
     @Test
+    fun `in a folder of the owner's, a group is a card too`() = home(seed = {
+        garden()
+        val id = folders().createFolder(io.nisfeb.talon.data.FolderEntity(name = "Friends"))
+        folders().addMemberRaw(id, "~bus/garden", 0, io.nisfeb.talon.data.FolderMemberEntity.KIND_GROUP)
+    }, cards = true) {
+        tap("Friends", substring = true)
+        shows("You: I will bring bread", substring = true)
+        assertTrue(onAllNodesWithText("5 channels", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+    }
+
+    @Test
     fun `a draft waiting in a channel is on the card`() {
         val drafts = InMemoryDraftStore().apply { save("chat/~bus/general", "bring the cake") }
         home(seed = garden, cards = true, drafts = drafts) {
