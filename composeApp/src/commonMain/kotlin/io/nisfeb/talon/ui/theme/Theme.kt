@@ -150,6 +150,7 @@ fun TalonTheme(
         val provided = listOfNotNull(
             LocalLinkColor provides customTheme?.linkColor(),
             io.nisfeb.talon.ui.LocalBubbleColors provides (customTheme?.bubbleColors() ?: io.nisfeb.talon.ui.BubbleColors()),
+            io.nisfeb.talon.ui.LocalBadgeColor provides customTheme?.badgeColor(),
             selection?.let {
                 androidx.compose.foundation.text.selection.LocalTextSelectionColors provides
                     androidx.compose.foundation.text.selection.TextSelectionColors(handleColor = it, backgroundColor = it.copy(alpha = 0.4f))

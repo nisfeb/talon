@@ -2156,7 +2156,7 @@ internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
 }
 
 /**
- * The nine colours a theme may set beyond its five, closed until asked
+ * The ten colours a theme may set beyond its five, closed until asked
  * for: each reads Auto (derived) until set, and goes back to Auto.
  */
 @Composable
@@ -2167,7 +2167,7 @@ private fun MoreColors(
     var open by remember { mutableStateOf(false) }
     val set = listOf(
         draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link,
-        draft.bubbleMine, draft.bubbleContact, draft.bubbleTheirs,
+        draft.bubbleMine, draft.bubbleContact, draft.bubbleTheirs, draft.badge,
     ).count { !it.isNullOrEmpty() }
     TextButton(onClick = { open = !open }) {
         Text(if (open) "Fewer colours" else if (set > 0) "More colours ($set set)" else "More colours")
@@ -2185,6 +2185,7 @@ private fun MoreColors(
     OptionalColorRow("My bubbles", draft.bubbleMine, now.primary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleMine = it)) }
     OptionalColorRow("Contacts' bubbles", draft.bubbleContact, now.tertiary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleContact = it)) }
     OptionalColorRow("Others' bubbles", draft.bubbleTheirs, now.surfaceContainerHighest) { onDraft(draft.copy(bubbleTheirs = it)) }
+    OptionalColorRow("Unread badges", draft.badge, now.primary) { onDraft(draft.copy(badge = it)) }
 }
 
 /** A colour that is Auto (derived) until set, with the way back to Auto. */

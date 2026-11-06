@@ -66,9 +66,9 @@ class CustomThemeExtrasTest {
     }
 
     @Test
-    fun `Talon writes all nine, Auto as empty, and a theme of five writes none`() {
+    fun `Talon writes all ten, Auto as empty, and a theme of five writes none`() {
         val written = Json.parseToJsonElement(ThemeSettings(listOf(five.explicit())).toJson()).jsonObject["themes"]!!.jsonArray[0].jsonObject
-        for (k in listOf("text", "muted", "raised", "error", "selection", "link", "bubbleMine", "bubbleContact", "bubbleTheirs")) assertEquals("\"\"", written[k].toString(), k)
+        for (k in listOf("text", "muted", "raised", "error", "selection", "link", "bubbleMine", "bubbleContact", "bubbleTheirs", "badge")) assertEquals("\"\"", written[k].toString(), k)
         val old = Json.parseToJsonElement(ThemeSettings(listOf(five)).toJson()).jsonObject["themes"]!!.jsonArray[0].jsonObject
         assertTrue(old.keys.none { it in setOf("text", "link") }, "$old")
         assertEquals("", CustomTheme.blank(dark = true, id = "x").link, "a new theme is written whole")
@@ -88,6 +88,14 @@ class CustomThemeExtrasTest {
         val arriving = five.copy(text = "")
         assertEquals("#00FF00", arriving.keepingLocalExtras(set).bubbleContact)
         assertEquals("", five.copy(bubbleContact = "").keepingLocalExtras(set).bubbleContact, "empty is Auto, chosen")
+    }
+
+    // sneagan, 2026-11-05: unread counts in the theme's colour, or one it sets.
+    @Test
+    fun `the unread badge is the primary unless a theme sets it`() {
+        assertNull(five.badgeColor(), "Auto")
+        assertEquals(Color(0xFFDC2626), five.copy(badge = "#DC2626").badgeColor())
+        assertEquals("#DC2626", five.keepingLocalExtras(five.copy(badge = "#DC2626")).badge)
     }
 
     @Test

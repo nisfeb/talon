@@ -258,7 +258,7 @@ class SettingsScreenTest {
         tap("New theme")
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
         tap("More colours")
-        assertEquals(9, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all nine derived")
+        assertEquals(10, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all ten derived")
         // Set Links: it starts from the standard blue.
         val autoRows = onAllNodesWithText("Set")
         autoRows[5].performScrollTo().performClick()
@@ -284,7 +284,7 @@ class SettingsScreenTest {
         tap("New theme")
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
         tap("More colours")
-        assertTrue(shows("My bubbles") && shows("Contacts' bubbles") && shows("Others' bubbles"))
+        assertTrue(shows("My bubbles") && shows("Contacts' bubbles") && shows("Others' bubbles") && shows("Unread badges"))
         // The eighth extra is the contacts' bubbles.
         onAllNodesWithText("Set")[7].performScrollTo().performClick()
         waitForIdle()

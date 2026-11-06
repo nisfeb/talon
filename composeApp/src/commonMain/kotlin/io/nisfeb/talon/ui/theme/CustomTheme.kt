@@ -49,19 +49,22 @@ data class CustomTheme(
     val bubbleContact: String? = null,
     /** Everyone else's bubbles; derived is the raised colour. */
     val bubbleTheirs: String? = null,
+    /** Unread counts' bubbles; derived is [primary], as they always were. */
+    val badge: String? = null,
 ) {
     val valid: Boolean
         get() = name.isNotBlank() &&
             listOf(primary, secondary, tertiary, background, surface).all { parseHexColor(it) != null } &&
             extras.all { it.isNullOrEmpty() || parseHexColor(it) != null }
 
-    private val extras get() = listOf(text, muted, raised, error, selection, link, bubbleMine, bubbleContact, bubbleTheirs)
+    private val extras get() = listOf(text, muted, raised, error, selection, link, bubbleMine, bubbleContact, bubbleTheirs, badge)
 
     /** With every extra written: "" for derived. What Talon saves. */
     fun explicit(): CustomTheme = copy(
         text = text.orEmpty(), muted = muted.orEmpty(), raised = raised.orEmpty(),
         error = error.orEmpty(), selection = selection.orEmpty(), link = link.orEmpty(),
         bubbleMine = bubbleMine.orEmpty(), bubbleContact = bubbleContact.orEmpty(), bubbleTheirs = bubbleTheirs.orEmpty(),
+        badge = badge.orEmpty(),
     )
 
     /** This theme with [local]'s value for each extra the writer did not know. */
@@ -70,6 +73,7 @@ data class CustomTheme(
         error = error ?: local.error, selection = selection ?: local.selection, link = link ?: local.link,
         bubbleMine = bubbleMine ?: local.bubbleMine, bubbleContact = bubbleContact ?: local.bubbleContact,
         bubbleTheirs = bubbleTheirs ?: local.bubbleTheirs,
+        badge = badge ?: local.badge,
     )
 
     companion object {
@@ -125,6 +129,9 @@ fun CustomTheme.linkColor(): Color? = extra(link)
 
 /** The theme's selection highlight where it sets one; null keeps Material's, from primary. */
 fun CustomTheme.selectionColor(): Color? = extra(selection)
+
+/** The unread badge's colour the theme sets; null is Auto, the primary. */
+fun CustomTheme.badgeColor(): Color? = extra(badge)
 
 /** The bubble colours the theme sets, each null where it is Auto. */
 fun CustomTheme.bubbleColors(): io.nisfeb.talon.ui.BubbleColors =

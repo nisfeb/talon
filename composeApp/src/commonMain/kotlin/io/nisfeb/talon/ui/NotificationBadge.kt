@@ -23,13 +23,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Every notification bubble in the app: red, with the count written in
- * it, "99+" past 99. One look in light and dark, and in every theme, so
- * it never reads as the accent.
+ * Every notification bubble in the app, with the count written in it,
+ * "99+" past 99: in the theme's colour, the primary as the unread pills
+ * always were, unless the theme sets its own (sneagan, 2026-11-05: not
+ * the redesign's red, or the theme overrides it). See [LocalBadgeColor].
  */
-// #DC2626: white on it is 4.8:1, past AA for the bubble's small bold
-// count; #E5484D was 3.9:1.
-val NotificationRed = Color(0xFFDC2626)
+val LocalBadgeColor = androidx.compose.runtime.staticCompositionLocalOf<Color?> { null }
+
+/** The badge's fill: the theme's own, else its primary. */
+@Composable
+fun badgeFill(): Color = LocalBadgeColor.current ?: MaterialTheme.colorScheme.primary
 
 /** The text a bubble shows for [count]: the number, or "99+" past 99. */
 fun notificationBadgeLabel(count: Int): String = if (count > 99) "99+" else count.toString()
@@ -39,19 +42,22 @@ fun notificationBadgeLabel(count: Int): String = if (count > 99) "99+" else coun
 fun NotificationBadge(count: Int, modifier: Modifier = Modifier) {
     if (count < 1) return
     val label = notificationBadgeLabel(count)
+    val fill = badgeFill()
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(NotificationRed)
+            .background(fill)
             .padding(horizontal = 6.dp)
             // The count once: the text inside is not read again after it.
             .clearAndSetSemantics { contentDescription = "$label unread" },
     ) {
         Text(
             label,
-            color = Color.White,
+            // The primary's own ink, or black or white on a theme's colour.
+            color = if (LocalBadgeColor.current == null) MaterialTheme.colorScheme.onPrimary
+                else readableInk(fill, fill, Color.White),
             fontSize = 11.sp,
             lineHeight = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -71,7 +77,7 @@ fun NotificationDot(modifier: Modifier = Modifier) {
         modifier = modifier
             .size(10.dp)
             .clip(CircleShape)
-            .background(NotificationRed)
+            .background(badgeFill())
             .semantics { contentDescription = "Unread" },
     )
 }
