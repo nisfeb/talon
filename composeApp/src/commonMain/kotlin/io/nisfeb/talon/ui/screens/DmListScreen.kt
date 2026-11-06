@@ -1278,7 +1278,10 @@ fun DmListScreen(
         else if (threadsTab != null && selectedHomeTab == HomeTab.Threads &&
             selectedFolderId == null && selectedSpecial == SpecialTab.All
         ) threadsTab()
-        else
+        // Braced: everything down to the list's search bar is the chats'
+        // own list. Unbraced, the else took only the next line, and the
+        // list was drawn over the threads and party tabs, taking their taps.
+        else {
         // A wheel's scroll ends with no fling: settle the bar when the list rests.
         LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) searchReveal.settle() }
         // Message search, as a small rounded bar over the top of the list,
@@ -1852,6 +1855,7 @@ fun DmListScreen(
         )
         }
         }
+        } // the chats' own list
         // Only valid for the All tab: the Unread / Mentions tabs render
         // a different flat list, so unreadIndices (built from homeRows)
         // would not line up with listState. Folder views are short

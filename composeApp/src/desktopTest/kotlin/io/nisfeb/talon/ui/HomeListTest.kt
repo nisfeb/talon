@@ -74,6 +74,9 @@ class HomeListTest {
         /** Groups as cards rather than heads over their channels. */
         cards: Boolean = false,
         drafts: InMemoryDraftStore = InMemoryDraftStore(),
+        /** The shells' own lists for these tabs; null hides the tab. */
+        threadsTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
+        partyLinesTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
@@ -108,6 +111,8 @@ class HomeListTest {
                             activeShip = "~zod", allShips = listOf("~zod"),
                             folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
                             groupCards = cards,
+                            threadsTab = threadsTab,
+                            partyLinesTab = partyLinesTab,
                         )
                     }
                 }
@@ -269,6 +274,29 @@ class HomeListTest {
         tap("general")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    // sneagan, 2026-11-06: the Threads tab lay under the chats' own empty
+    // list ("No direct messages yet"), which took its taps. A dangling
+    // else: the search bar's lines (e9aa110a) went between it and the
+    // list, so the list was drawn on every tab.
+    @Test
+    fun `the Threads and Party lines tabs show their own list, alone, and it takes taps`() {
+        var taps = 0
+        home(
+            seed = {},
+            threadsTab = { androidx.compose.material3.TextButton(onClick = { taps++ }) { androidx.compose.material3.Text("A followed thread") } },
+            partyLinesTab = { androidx.compose.material3.Text("A party line") },
+        ) {
+            tap("Threads", substring = true)
+            tap("A followed thread")
+            waitForIdle()
+            assertEquals(1, taps, "the tab's own list takes the tap")
+            assertTrue(onAllNodesWithText("No direct messages yet", substring = true).fetchSemanticsNodes().isEmpty(), "no chats list over it")
+            tap("Party lines")
+            shows("A party line")
+            assertTrue(onAllNodesWithText("No direct messages yet", substring = true).fetchSemanticsNodes().isEmpty())
+        }
     }
 
     // ---- Groups as cards (sneagan, 2026-11-06) ----
