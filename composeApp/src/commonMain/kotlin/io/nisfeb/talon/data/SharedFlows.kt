@@ -9,8 +9,17 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 
-/** Where the shared flows run; each stops five seconds after its last collector leaves. */
-internal val sharing = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+/**
+ * Where the shared flows run; each stops five seconds after its last
+ * collector leaves. With a handler: a query still in those five seconds
+ * when its database closes (a ship switch closes the old one after two)
+ * failed "Connection pool is closed" with no one to catch it, which on
+ * Android ends the process, and in tests failed the next test to start.
+ */
+internal val sharing = CoroutineScope(
+    SupervisorJob() + Dispatchers.Default +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e -> io.nisfeb.talon.util.Log.w("SharedFlows", "a shared flow stopped: ${e.message}") },
+)
 
 private val latest = OneSlot<AppDatabase, Flow<List<MessageEntity>>> { db ->
     db.messages().conversationLatest()
