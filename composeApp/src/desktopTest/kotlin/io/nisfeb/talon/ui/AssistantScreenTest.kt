@@ -396,7 +396,12 @@ class AssistantScreenTest {
         ask("and the next one?")
         waitUntil(timeoutMillis = 10_000) { shows("It is on Thursday now.") }
         val last = asked.last()
-        assertTrue("when is the book club?" !in last, "a new conversation carries none of the old: ${last.take(400)}")
+        // Where the old words sat, if they did: once in ten CI runs they
+        // came back, and the first 400 characters (the tools) said nothing.
+        val at = last.indexOf("when is the book club?")
+        assertTrue(at < 0, "a new conversation carries none of the old: request ${asked.size} of ${asked.size}, around it: " +
+            last.substring(maxOf(0, at - 300), minOf(last.length, at + 200)) +
+            " | each request's last words: " + asked.map { it.takeLast(120) })
     }
 
     // ─── what it does, and what it had said ───────────────────────
