@@ -2430,8 +2430,10 @@ class AppShellTest {
             up.set(true)
             // Groups is up: the chats are read, not only the channel resumed.
             // Resumed, the list said it could not load them until a restart.
-            waitUntil(timeoutMillis = 20_000) { !showing("Couldn't load your chats") }
-            assertTrue(showing("No direct messages yet") || showing("No groups yet"), "the list, read")
+            // The banner goes as the next pass starts, a beat before the list
+            // is read: the list's own words are the sign.
+            waitUntil(timeoutMillis = 20_000) { showing("No direct messages yet") || showing("No groups yet") }
+            assertTrue(!showing("Couldn't load your chats"), "the list, read")
         }
     }
 }
