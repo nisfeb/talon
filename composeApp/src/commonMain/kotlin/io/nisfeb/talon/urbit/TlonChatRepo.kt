@@ -1627,32 +1627,46 @@ class TlonChatRepo(
         scheduleDrain(pause)
     }
 
-    /** True while the drain job is waiting out its backoff, not yet sending. */
-    @kotlin.concurrent.Volatile private var drainSleeping = false
+    /**
+     * Held to read and set [drainJob] and [drainSleeper]: a reconnect's
+     * wake and a failed drain's handover both found no drain, both
+     * launched one, and the one not kept retried on its own for good.
+     */
+    private val drainSchedule = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    /** The drain job while it waits out its backoff, not yet sending. */
+    private var drainSleeper: Job? = null
 
     /**
      * Drain after [afterMs]. A drain already scheduled stands, unless it is
      * still asleep and [wake] says the ship has answered since.
      */
     private fun scheduleDrain(afterMs: Long, wake: Boolean = false) {
-        val job = drainJob
-        if (job?.isActive == true) {
-            if (!(wake && drainSleeping)) return
-            job.cancel()
-        }
-        drainJob = pushScope.launch {
-            drainsAlive.update { it + 1 }
-            try {
-                drainSleeping = true
-                try {
-                    delay(if (afterMs == 0L) 0L else jittered(afterMs))
-                } finally {
-                    drainSleeping = false
-                }
-                drainQueue()
-            } finally {
-                drainsAlive.update { it - 1 }
+        kotlinx.atomicfu.locks.synchronized(drainSchedule) {
+            val job = drainJob
+            if (job?.isActive == true) {
+                if (!(wake && drainSleeper === job)) return
+                job.cancel()
             }
+            // Started once it is drainJob and the sleeper, so it cannot wake
+            // and send before either says so.
+            val next = pushScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                drainsAlive.update { it + 1 }
+                try {
+                    val self = coroutineContext[Job]
+                    try {
+                        delay(if (afterMs == 0L) 0L else jittered(afterMs))
+                    } finally {
+                        kotlinx.atomicfu.locks.synchronized(drainSchedule) { if (drainSleeper === self) drainSleeper = null }
+                    }
+                    drainQueue()
+                } finally {
+                    drainsAlive.update { it - 1 }
+                }
+            }
+            drainJob = next
+            drainSleeper = next
+            next.start()
         }
     }
 
@@ -1775,7 +1789,7 @@ class TlonChatRepo(
             drop()
             return true
         }
-        drainJob = null
+        kotlinx.atomicfu.locks.synchronized(drainSchedule) { drainJob = null }
         stillSlow(t)
         return false
     }
