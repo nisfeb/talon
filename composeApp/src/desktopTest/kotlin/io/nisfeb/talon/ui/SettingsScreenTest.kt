@@ -24,7 +24,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.CallEngineProvider

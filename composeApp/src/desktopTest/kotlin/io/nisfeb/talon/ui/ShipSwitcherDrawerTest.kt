@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.ui.screens.ShipSwitcherDrawer
 import io.nisfeb.talon.ui.theme.TalonTheme
 import java.util.concurrent.CopyOnWriteArrayList

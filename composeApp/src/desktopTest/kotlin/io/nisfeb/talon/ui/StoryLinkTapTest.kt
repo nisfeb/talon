@@ -6,7 +6,7 @@ import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.urbit.StoryPart
 import kotlin.test.Test
