@@ -495,7 +495,7 @@ class LatticeKeys(
 
     private suspend fun key(): Key = MINTING.withLock {
         keys.get(ship)?.let { return if (it.revoked) Key.Revoked else Key.Ready(it.token) }
-        if (ship in absent) return Key.Absent
+        absent[ship]?.takeIf { it.generation == skillsGeneration && now() - it.at < INDEX_FOR_MS }?.let { return Key.Absent }
         try {
             // Minted and kept together, or a screen left midway leaves a key
             // on the ship that nobody holds, and the next open mints another.
@@ -508,8 +508,11 @@ class LatticeKeys(
             api.landed(m.token)
             Key.Ready(m.token)
         } catch (e: LatticeError.Refused) {
-            // No lattice on the ship: not asked again this run of the app.
-            if (e.status == 404) absent += ship
+            // No lattice on the ship: not asked again for a while, nor until
+            // the app next comes to the front. Kept for the whole run, a
+            // Lattice installed after the first ask (from Apps, say) went
+            // unseen by the assistants until the app was restarted.
+            if (e.status == 404) absent[ship] = NoLattice(now(), skillsGeneration)
             if (e.status == 404) Key.Absent else Key.Failed(e.reason)
         } catch (e: LatticeError.Unreachable) {
             Key.Failed("no answer from the ship")
@@ -604,7 +607,9 @@ class LatticeKeys(
     companion object {
         /** One mint at a time in this process: the assistant and a dictation starting together make one key, not two. */
         private val MINTING = Mutex()
-        private val absent = mutableSetOf<String>()
+        /** When a ship was found to have no lattice, and in which [skillsGeneration]. */
+        private class NoLattice(val at: Long, val generation: Int)
+        private val absent = mutableMapOf<String, NoLattice>()
 
         /** The index as last read, per ship: a session's start, not each question's. */
         private val INDEXES = mutableMapOf<String, Pair<Long, String>>()
@@ -624,7 +629,11 @@ class LatticeKeys(
         /** The keys (tokens) lattice refused skills to: Settings says so beside the key. */
         val SKILLS_REFUSED = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
 
-        /** The app came to the front: the next assistant reads the skills again, a skill or a grant made elsewhere included. */
+        /**
+         * The app came to the front: the next assistant reads the skills
+         * again, a skill or a grant made elsewhere included, and asks again
+         * for a lattice it found missing.
+         */
         fun refreshSkills() {
             skillsGeneration++
         }
