@@ -101,6 +101,9 @@ class DmChatScreenTest {
         touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
+        // One test's rows for ~bus opened the next one's chat until its own
+        // came, and its first page was judged on them (CI, 2026-11-07).
+        io.nisfeb.talon.ui.screens.forgetChatRowsSnapshot()
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()

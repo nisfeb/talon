@@ -864,7 +864,8 @@ class TlonChatRepoStartupTest {
                 until("the stream again") { streams() > before }
                 until("the kept change sent") { ship.pokesTo("settings").any { "~bus" in it.json.toString() } }
                 assertEquals(1, channelsStreamed().size, "resumed, not a new channel")
-                assertEquals(emptyList(), db.settingsOutbox().all())
+                // Kept until the ship took it: its ack comes after the poke.
+                until("the outbox empty") { db.settingsOutbox().all().isEmpty() }
             }
         } finally {
             repo.stop()
