@@ -697,6 +697,8 @@ class CallController(
                                         // never name an empty line.
                                         val asked = _pendingJoin.value
                                         _pendingJoin.value = null
+                                        // Refused: no grant is still to come.
+                                        lastAskKey = null
                                         val name = up.name.ifEmpty {
                                             asked?.substringAfter('/').orEmpty()
                                         }
@@ -1847,6 +1849,7 @@ class CallController(
         }.onFailure {
             // Never asked; nothing can ever answer.
             _pendingJoin.value = null
+            lastAskKey = null
             Log.e(TAG, "join-room poke failed", it)
             onDenied?.invoke(name, "your ship declined to ask")
         }
@@ -1869,6 +1872,8 @@ class CallController(
     fun cancelJoin() {
         joinToken++
         _pendingJoin.value = null
+        // Or a grant within LATE_GRANT_MS still took the line.
+        lastAskKey = null
     }
 
     /** Disarms a superseded ask's deadline, ringToken-style. */
