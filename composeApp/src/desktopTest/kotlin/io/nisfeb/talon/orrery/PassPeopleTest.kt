@@ -78,7 +78,7 @@ class PassPeopleTest {
             assertFalse("person/sampel-palnet" in ids || "person/bus" in ids, "no twin: $ids")
         } finally {
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

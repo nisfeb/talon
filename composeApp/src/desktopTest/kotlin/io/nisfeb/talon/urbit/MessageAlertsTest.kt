@@ -40,7 +40,7 @@ class MessageAlertsTest {
     @AfterTest
     fun close() {
         alerting.cancel()
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         dir.deleteRecursively()
     }
 

@@ -583,9 +583,9 @@ compose.desktop {
                 infoPlist {
                     extraKeysRawXml = """
                         <key>NSMicrophoneUsageDescription</key>
-                        <string>Talon uses the microphone for voice calls.</string>
+                        <string>Groundwire uses the microphone for voice calls.</string>
                         <key>NSCameraUsageDescription</key>
-                        <string>Talon uses the camera for video calls.</string>
+                        <string>Groundwire uses the camera for video calls.</string>
                     """
                 }
             }

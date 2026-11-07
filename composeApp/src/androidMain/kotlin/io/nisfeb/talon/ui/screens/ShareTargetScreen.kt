@@ -126,7 +126,7 @@ fun ShareTargetScreen(
 
         if (filtered.isEmpty()) {
             Text(
-                if (query.isBlank()) "No conversations yet — open a chat in Talon first."
+                if (query.isBlank()) "No conversations yet — open a chat in Groundwire first."
                 else "No matches.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

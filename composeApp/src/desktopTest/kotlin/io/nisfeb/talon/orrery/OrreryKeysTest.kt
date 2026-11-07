@@ -71,7 +71,7 @@ class OrreryKeysTest {
             block(repo, db)
         } finally {
             scope.coroutineContext[Job]!!.let { it.cancel(); it.join() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

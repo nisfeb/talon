@@ -423,8 +423,14 @@ class OrreryRepo(
         // ship switch started a loop and a beacon for the ship just left.
         attaching = scope.launch {
             probe()
-            _enabled.value = db.orreryAccounts().get(ship) != null
-            if (_enabled.value) startLoop()
+            // Raised only: detach() above lowered it, and an enable() since
+            // is newer than this read. Assigned, a read from before
+            // enable's row landed put the switch back off with the pipe
+            // feeding, and the next enable minted a second key.
+            if (db.orreryAccounts().get(ship) != null && !_enabled.value) {
+                _enabled.value = true
+                startLoop()
+            }
             // A ship with no pipe has nowhere to send a move, and its
             // screen has no switch to stop them: the phone kept waking
             // for every one after a switch from a ship that had a pipe.
@@ -2316,7 +2322,7 @@ internal fun probeProblemLine(e: Throwable): String = when (e) {
         ?.let { "Orrery on your ship could not answer: $it." } ?: "Orrery on your ship could not answer."
     is OrreryError.Garbled -> "Your ship's answer about Orrery could not be read."
     else -> "Your ship did not answer."
-} + " Talon asks again by itself."
+} + " Groundwire asks again by itself."
 
 /** The first pause before a failed check for orrery is tried again, and the most it grows to. */
 internal const val PROBE_RETRY_FIRST_MS = 30_000L

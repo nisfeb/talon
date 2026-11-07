@@ -13,7 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -45,7 +45,7 @@ class NewDmScreenTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun newDm(book: Set<String> = setOf("~mitlyn-ditrel"), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         setContent {
@@ -61,7 +61,7 @@ class NewDmScreenTest {
         block()
     }
 
-    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("~ship, a word name, or a group reference")).performTextInput(text)
+    private fun ComposeUiTest.type(text: String) = onNode(hasSetTextAction() and hasText("Name, ~ship or group code")).performTextInput(text)
 
     @Test
     fun `a ship typed with or without its sig starts a conversation`() = newDm {
@@ -73,7 +73,7 @@ class NewDmScreenTest {
     @Test
     fun `words that are not a ship cannot start one`() = newDm {
         type("hello there")
-        onNodeWithText("Start").assertIsNotEnabled()
+        onNodeWithText("Start").assertDoesNotExist()
     }
 
     @Test
@@ -103,7 +103,7 @@ class NewDmScreenTest {
     @Test
     fun `a pasted group reference offers to join the group, and joins once confirmed`() = newDm {
         type("/1/group/~bus/the-club")
-        onNodeWithText("Start").assertIsNotEnabled()
+        onNodeWithText("Start").assertDoesNotExist()
         onNodeWithText("Join group ~bus/the-club").performClick()
         onNodeWithText("Join group?").assertExists()
         assertEquals(emptyList(), did, "nothing before the confirm")

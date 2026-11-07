@@ -15,7 +15,9 @@ import io.nisfeb.talon.util.ioDispatcher
 import io.nisfeb.talon.util.isMacOsHost
 import io.nisfeb.talon.util.nowMs
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -311,7 +313,7 @@ fun App(
     // nothing to wait for.
     var landingProgress by remember { mutableStateOf<io.nisfeb.talon.ui.LandingProgress?>(null) }
     var landingHidden by remember { mutableStateOf(false) }
-    var settingsStartOnAccount by remember { mutableStateOf(false) }
+    var settingsStartOnLocalShip by remember { mutableStateOf(false) }
     var settingsStartOnAi by remember { mutableStateOf(false) }
     // Every full-screen section is a flag made here, so the resets and
     // the back gesture cannot miss one. See Sections for the bug this ends.
@@ -335,7 +337,7 @@ fun App(
     // so a stale anchor can't paint on the wrong chat.
     var openChatFocusMessageId by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from LoginScreen
-     *  ("Signing in on another device? Make a login QR →") on cold launch
+     *  ("Signing in on another device? Make a Login QR →") on cold launch
      *  and from Settings once a ship is logged in. Full-screen, so a
      *  section: as a dialog, Escape and back closed what lay behind it. */
     var shareLoginQrOpen by remember { sections.flag() }
@@ -728,7 +730,7 @@ fun App(
     LaunchedEffect(showAssistant) { if (!showAssistant) assistantListen = false }
     LaunchedEffect(showSettings) {
         if (!showSettings) {
-            settingsStartOnAccount = false
+            settingsStartOnLocalShip = false
             settingsStartOnAi = false
         }
     }
@@ -1553,7 +1555,11 @@ fun App(
                         mailRepo.setForeground(front)
                         calendarRepo.setForeground(front)
                         orreryRepo.setForeground(front)
-                        if (front && !was) repo.forceReconnect()
+                        if (front && !was) {
+                            repo.forceReconnect()
+                            // The next assistant reads the owner's skills again.
+                            io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
+                        }
                         was = front
                     }
                 } else {
@@ -1565,6 +1571,7 @@ fun App(
                             mailRepo.setForeground(focused)
                             calendarRepo.setForeground(focused)
                             orreryRepo.setForeground(focused)
+                            if (focused) io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
                         }
                 }
             }
@@ -2125,7 +2132,7 @@ fun App(
                         progress = progress,
                         terminalLine = lastLine,
                         onOpenTerminal = {
-                            settingsStartOnAccount = true
+                            settingsStartOnLocalShip = true
                             showSettings = true
                         },
                         onDismiss = { landingProgress = null; landingHidden = true },
@@ -2645,6 +2652,13 @@ fun App(
                                 ).renew()
                             }
                         },
+                        latticeSkillsReadable = sessionStore.active()?.let { s ->
+                            {
+                                io.nisfeb.talon.ai.LatticeKeys(
+                                    db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(session.http, http, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
+                                ).skillsReadable()
+                            }
+                        },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
                             { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("The ship could not be asked.") }
                         },
@@ -2701,6 +2715,8 @@ fun App(
                             ship?.let { sessionStore.all().firstOrNull { it.ship == ship } }?.shipUrl
                         }
                         SettingsScreen(
+                            // Every group's level at once, synced like a group's own.
+                            onSetAllGroupsNotify = { level -> repo.setEveryGroupLevel(level) },
                             orrery = orreryRepo,
                             armillary = armillaryRepo,
                             mailRepo = mailRepo,
@@ -2736,7 +2752,7 @@ fun App(
                             ),
                             onBack = {
                                 showSettings = false
-                                settingsStartOnAccount = false
+                                settingsStartOnLocalShip = false
                                 settingsStartOnAi = false
                             },
                             // wires it to dailyDigest.generateAndNotifyAsync
@@ -2746,7 +2762,7 @@ fun App(
                             onOpenShareLoginQr = { shareLoginQrOpen = true },
                             onOpenLoops = { showLoops = true },
                             localShip = localShip,
-                            startOnAccount = settingsStartOnAccount,
+                            startOnLocalShip = settingsStartOnLocalShip,
                             startOnAi = settingsStartOnAi,
                             onAlwaysPatpChanged = { on ->
                                 repo.pushScope.launch {
@@ -2786,6 +2802,7 @@ fun App(
                     showInvites -> GroupInvitesScreen(
                         repo = repo,
                         onBack = { showInvites = false },
+                        ourShip = loggedInShip,
                     )
                     showCalendar -> io.nisfeb.talon.ui.screens.CalendarScreen(
                         openPushTag = noticeCalendarTag,
@@ -3049,10 +3066,12 @@ fun App(
                                         notebookEditPostId = null
                                     },
                                     editPostId = notebookEditPostId,
-                                    initialTitle = notebookEditTitle,
-                                    initialImage = notebookEditImage,
-                                    initialBody = notebookEditBody,
-                                    originalSentMs = notebookEditSentMs,
+                                    // An edit's words only for an edit: kept after it, a New
+                                    // post opened as a copy of the last post edited.
+                                    initialTitle = if (notebookEditPostId != null) notebookEditTitle else "",
+                                    initialImage = if (notebookEditPostId != null) notebookEditImage else "",
+                                    initialBody = if (notebookEditPostId != null) notebookEditBody else "",
+                                    originalSentMs = if (notebookEditPostId != null) notebookEditSentMs else 0L,
                                 )
                             })
                             openChat?.startsWith("diary/") == true && openNotebookPostId != null -> ({
@@ -3739,6 +3758,7 @@ fun App(
                                             .collectAsState().value,
                                         folderItemOrder = uiSettings.folderItemOrder
                                             .collectAsState().value,
+                                        groupCards = uiSettings.groupCards.collectAsState().value,
                                         focusSearchRequest = focusSearchRequest,
                                         onFocusSearchHandled = { focusSearchRequest = false },
                                         showNewDmRequest = showNewDmRequest,
@@ -3840,6 +3860,14 @@ fun App(
                             rightPaneWidth = rightPaneWidthDp.dp,
                             onRightPaneWidthChange = { uiSettings.setRightPaneWidthDp(it.value) },
                             menuBadges = menuBadges,
+                            // Ship switcher at the foot of the rail; the list's
+                            // header drops its copy while the rail shows.
+                            railFooter = {
+                                // The signed-in ship's own mark, coloured as in the switcher.
+                                val open = Modifier.size(32.dp).clickable { drawerScope.launch { drawerState.open() } }
+                                loggedInShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
+                                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
+                            },
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs
                             // list left, transcript right) — so it gets full
@@ -3909,6 +3937,7 @@ fun App(
                                             uiSettings.setActiveRailTab(RailTab.Mail)
                                         },
                                         onOpenMail = { uiSettings.setActiveRailTab(RailTab.Mail) },
+                                        backgroundImage = uiSettings.chatBackgroundImage.collectAsState().value,
                                     )
                                 }
                             } else if (activeRailTab == RailTab.Mail && !showAssistant && !showEvening) {

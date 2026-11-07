@@ -40,7 +40,7 @@ class DesktopEmbeddingIndexerTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @AfterTest
-    fun close() { scope.cancel(); db.close(); dir.deleteRecursively() }
+    fun close() { scope.cancel(); io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
 
     /** A word per dimension, and one dimension every text has, so a text
      *  matches a query by the words they share. Counts its calls. */

@@ -102,7 +102,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -147,7 +147,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -205,7 +205,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -252,7 +252,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -297,7 +297,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -354,7 +354,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -418,7 +418,7 @@ class PassKeepsTest {
                 kotlin.test.assertTrue(urls.none { "openrouter.ai" in it }, "$jev: $urls")
             } finally {
                 kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-                db.close()
+                io.nisfeb.talon.urbit.closeAfter(db)
                 dir.deleteRecursively()
             }
         }
@@ -473,7 +473,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -510,7 +510,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -559,7 +559,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -599,7 +599,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -648,7 +648,7 @@ class PassKeepsTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

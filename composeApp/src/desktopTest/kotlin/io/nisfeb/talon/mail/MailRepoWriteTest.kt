@@ -318,6 +318,40 @@ class MailRepoWriteTest {
         }
     }
 
+    // Tapping Inbox while another folder's read was out made that page the
+    // inbox's baseline: the next inbox read announced every unread thread
+    // already seen, three notices and "and N more".
+    @Test
+    fun `a folder read that lands after Inbox was tapped is not the inbox's baseline`() {
+        val sentTakes = kotlinx.coroutines.CompletableDeferred<Unit>()
+        withRepo({ req ->
+            val path = req.url.encodedPath
+            when {
+                path.endsWith("/api/inbox") && req.url.parameters["view"] == "inbox" ->
+                    jsonOk(this, pageWith(row("0v1", "one"), unread("0v5", "seen already"), unread("0v6", "and this")))
+                path.endsWith("/api/inbox") -> { sentTakes.await(); jsonOk(this, pageWith(row("0v2", "sent"))) }
+                path.endsWith("/api/whoami") -> jsonOk(this, whoami)
+                else -> respondError(HttpStatusCode.NotFound, """{"error":"not found"}""")
+            }
+        }) { r, hits ->
+            val news = CopyOnWriteArrayList<MailNotification>()
+            r.onNewMail = { news += it }
+            r.attach("https://ship.example")
+            settle(r)
+            fun inboxReads() = hits.count { it.endsWith("/api/inbox") }
+            val before = inboxReads()
+            r.selectFolder(MailFolder.View(MailView.SENT))
+            until("the sent read to go out") { inboxReads() > before }
+            // Back to the inbox before Sent's answer comes.
+            r.selectFolder(MailFolder.View(MailView.INBOX))
+            sentTakes.complete(Unit)
+            until("the inbox read after it") { inboxReads() >= before + 2 && !r.loading.value }
+            delay(200)
+            assertEquals(emptyList(), news.map { it.threadId }, "mail unread since the start was announced as new")
+            assertEquals(MailFolder.View(MailView.INBOX), r.folder.value)
+        }
+    }
+
     // A 403 stopped the poll, and signing in again to the same ship never
     // started it: mail was read only when somebody opened it.
     @Test
@@ -367,7 +401,7 @@ class MailRepoWriteTest {
         r.keepDraft(draft, listOf(file))
         until("the draft kept here") { r.unsent.value.isNotEmpty() }
         val kept = r.unsent.value.single()
-        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Talon closes.", kept.line)
+        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Groundwire closes.", kept.line)
         // What the list's Open gives back: the text, and the file.
         val reopened = io.nisfeb.talon.ui.screens.unsentIntent(kept)
         assertEquals("half a thought" to listOf("notes.txt"), reopened.body to reopened.edits.files.map { it.displayName })

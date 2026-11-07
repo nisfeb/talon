@@ -3,7 +3,7 @@ package io.nisfeb.talon.ui
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.font.FontFamily
 import io.nisfeb.talon.ui.theme.TalonTheme
 import java.io.File

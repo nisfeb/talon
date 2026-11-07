@@ -11,7 +11,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -267,7 +266,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                 scope.launch {
                     // The phone sends only while "Send where I am" is on: turned on here, its prompts with it.
                     if (sending != null && !sending.on.value && !sending.start()) {
-                        problem = "Talon needs location access all the time to send where you are."
+                        problem = "Groundwire needs location access all the time to send where you are."
                         busy = false
                         return@launch
                     }

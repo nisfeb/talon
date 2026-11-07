@@ -6,7 +6,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -39,6 +39,16 @@ class GroupInvitesScreenTest {
     private fun invites(prepare: FakeShip.() -> Unit = {}, block: ComposeUiTest.(FakeShip) -> Unit) =
         invitesWith(prepare) { ship, _ -> block(ship) }
 
+    /** What the invite card handed the share sheet; [shareSheet] says whether there is one. */
+    private val shared = mutableListOf<String>()
+    private var shareSheet = true
+    private val sharer = TextSharer { text, _ -> if (shareSheet) { shared += text; true } else false }
+    private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val clipboard = object : androidx.compose.ui.platform.ClipboardManager {
+        override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
+        override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
+    }
+
     private fun invitesWith(prepare: FakeShip.() -> Unit = {}, block: ComposeUiTest.(FakeShip, TlonChatRepo) -> Unit) {
         val tmp = createTempDirectory(prefix = "talon-invites-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
@@ -49,14 +59,21 @@ class GroupInvitesScreenTest {
         ship.channel.events().launchIn(scope)
         try {
             runComposeUiTest {
-                setContent { TalonTheme(darkTheme = false) { GroupInvitesScreen(repo = repo, onBack = {}) } }
+                setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalTextSharer provides sharer,
+                        androidx.compose.ui.platform.LocalClipboardManager provides clipboard,
+                    ) {
+                        TalonTheme(darkTheme = false) { GroupInvitesScreen(repo = repo, onBack = {}, ourShip = "~zod", ourName = "Zod") }
+                    }
+                }
                 waitUntil(timeoutMillis = 5_000) { repo.invitesFlow.value != null || shows("Couldn't load invites") }
                 block(ship, repo)
             }
         } finally {
             runBlocking { repo.stopAndJoinForTest() }
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -139,7 +156,7 @@ class GroupInvitesScreenTest {
     @Test
     fun `declining tells the ship and the invite goes`() = invites { ship ->
         onNodeWithText("Decline").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("No pending invites.") }
+        waitUntil(timeoutMillis = 5_000) { shows("No pending invites to groups.") }
         val no = ship.pokesTo("groups").single()
         assertTrue(no.mark == "invite-decline" && "~nec/garden" in no.json.toString(), no.toString())
     }
@@ -171,7 +188,7 @@ class GroupInvitesScreenTest {
 
     @Test
     fun `nothing waiting says so, and a refresh asks again`() = invites(prepare = { scries["groups-ui/v7/init"] = """{"foreigns":{}}""" }) { ship ->
-        assertTrue(shows("No pending invites."))
+        assertTrue(shows("No pending invites to groups."))
         val asked = ship.scried.count { it == "groups-ui/v7/init" }
         onNodeWithContentDescription("Refresh").performClick()
         waitUntil(timeoutMillis = 5_000) { ship.scried.count { it == "groups-ui/v7/init" } > asked }
@@ -180,7 +197,7 @@ class GroupInvitesScreenTest {
     @Test
     fun `invites the ship will not give say so rather than spinning, and Try again asks again`() = invites(prepare = { scries.remove("groups-ui/v7/init") }) { ship ->
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't load invites") }
-        assertTrue(!shows("No pending invites."), "no answer is not no invites")
+        assertTrue(!shows("No pending invites to groups."), "no answer is not no invites")
         ship.scries["groups-ui/v7/init"] = init
         onNodeWithText("Try again").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("from ~nec") }
@@ -192,5 +209,25 @@ class GroupInvitesScreenTest {
         onNodeWithContentDescription("Refresh").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't refresh") }
         assertTrue(shows("The Garden"), "the invite is still there")
+    }
+
+    @Test
+    fun `one tap hands the whole invite to the share sheet`() = invites {
+        onNodeWithText("Invite a friend").performClick()
+        waitForIdle()
+        val m = shared.single()
+        assertTrue(m.startsWith("It's Zod.") && "Add me: ~zod" in m && GROUNDWIRE_INSTALL_URL in m, m)
+    }
+
+    @Test
+    fun `with no share sheet the invite is copied, and the owner is told`() {
+        shareSheet = false
+        invites {
+            onNodeWithText("Invite a friend").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Invite copied") }
+            assertTrue(shared.isEmpty())
+            val m = copied.single()
+            assertTrue("Add me: ~zod" in m && GROUNDWIRE_INSTALL_URL in m, "the whole invite, not an empty copy: $m")
+        }
     }
 }

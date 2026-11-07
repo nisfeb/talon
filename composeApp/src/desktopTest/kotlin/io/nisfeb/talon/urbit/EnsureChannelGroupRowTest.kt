@@ -48,7 +48,7 @@ class EnsureChannelGroupRowTest {
     @AfterTest
     fun tearDown() {
         runCatching { repo.stop() }
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db, repo) }
         tmpDir.deleteRecursively()
     }
 

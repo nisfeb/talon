@@ -1,5 +1,10 @@
 package io.nisfeb.talon.ui.screens
 
+import io.nisfeb.talon.ui.ChatBackdrop
+import io.nisfeb.talon.ui.chatLabel
+import io.nisfeb.talon.ui.onChatPicture
+import okio.Path.Companion.toPath
+import androidx.compose.runtime.CompositionLocalProvider
 import kotlinx.datetime.number
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ui.onSecondaryClick
@@ -196,6 +201,8 @@ fun HomeScreen(
     onOpenChats: () -> Unit,
     onOpenMailThread: (threadId: String) -> Unit,
     onOpenMail: () -> Unit,
+    /** The owner's background picture, a path; "" is none. See [io.nisfeb.talon.ui.UiSettings.chatBackgroundImage]. */
+    backgroundImage: String = "",
     modifier: Modifier = Modifier,
 ) {
     val latest by remember(db) { db.latestPerConversation() }
@@ -237,10 +244,18 @@ fun HomeScreen(
         onLayoutChanged(layout.with(w))
     }
 
+    // The owner's picture, edge to edge behind the page, and what is drawn
+    // on it made to read there, as over a chat's bubbles (sneagan,
+    // 2026-11-06). Home has no bubbles, so it shows in rows as well.
+    val picture = remember(backgroundImage) { backgroundImage.takeIf { it.isNotEmpty() }?.toPath() }
+    val look = io.nisfeb.talon.ui.LocalChatLook.current.copy(image = picture)
+    Box(modifier.fillMaxSize()) {
+    ChatBackdrop(look)
+    CompositionLocalProvider(io.nisfeb.talon.ui.LocalChatLook provides look) {
     // Every screen pads for the safe area itself, and this one did not:
     // on a phone with a notch it ran up under the clock. A parent that
     // has already padded consumes the inset, so this adds nothing there.
-    BoxWithConstraints(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         val placedWidgets = remember(layout) {
             layout.shown.sortedWith(compareBy({ it.row }, { it.col }))
         }
@@ -265,7 +280,7 @@ fun HomeScreen(
                 .padding(PAGE_PADDING),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.chatLabel(), verticalAlignment = Alignment.CenterVertically) {
                 // Home had no way out but the back gesture, which is
                 // the one screen where that matters most: it is where
                 // the menu sends people first.
@@ -301,6 +316,7 @@ fun HomeScreen(
                     "Nothing on the home page. Settings, under Home, has the list.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.chatLabel(),
                 )
             }
 
@@ -467,6 +483,8 @@ fun HomeScreen(
             }
         }
     }
+    } // the look's provider
+    } // the picture's box
 }
 
 /**
@@ -860,7 +878,8 @@ private fun Panel(
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        // See-through on the page; solid on a picture, so its rows read.
+        color = onChatPicture(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -1076,7 +1095,7 @@ private fun ClockWeatherPanel(
         skyFor(nowMsState, place, weather)
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+        color = onChatPicture(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)),
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -1255,7 +1274,7 @@ private fun AssistantPanel(onOpen: ((Boolean) -> Unit)?, onLongPress: () -> Unit
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val side = minOf(maxWidth, maxHeight)
         Surface(
-            color = if (onOpen != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f),
+            color = if (onOpen != null) MaterialTheme.colorScheme.primary else onChatPicture(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.30f)),
             shape = RoundedCornerShape(side / 5),
             modifier = Modifier.size(side),
         ) {

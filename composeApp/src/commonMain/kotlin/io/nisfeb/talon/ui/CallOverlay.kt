@@ -1,5 +1,11 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.text.withStyle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.Dp
@@ -148,6 +154,8 @@ fun CallOverlay(
                 container = MaterialTheme.colorScheme.error,
                 content = MaterialTheme.colorScheme.onError,
                 onClick = { controller.hangup() },
+                // The red hang-up says it; the word under it is not needed.
+                showLabel = false,
             )
         }
 
@@ -226,12 +234,12 @@ fun CallStrip(
         }
 
         is CallUiState.Ended -> {
-            PartyLineBarContent(
-                state = PartyState.Failed(s.peer, s.reason),
-                    modifier = modifier,
-                nameFor = nameFor,
-                headline = "${nameFor(s.peer)} — ${s.reason}",
+            CallEndedPill(
+                // The reason after a colon, not after their name: "Bus hung up"
+                // blamed them for the owner's own hang-up or decline.
+                text = "Call with ${nameFor(s.peer)} ended: ${s.reason}",
                 onDismiss = { controller.dismissEnded() },
+                modifier = modifier,
             )
             LaunchedEffect(s) {
                 delay(ENDED_NOTICE_MS)
@@ -362,7 +370,7 @@ internal fun rememberCallWiring(
                 askRecord = null
                 controller.beginCallRecording { recordProblem = it }
             },
-            text = "Recording captures both voices. Talon first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
+            text = "Recording captures both voices. Groundwire first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
                 "in your chat with ${nameFor(peer)}, and records only once your ship has sent it. " +
                 "A transcript is made by Armillary's speech model, only if you publish one afterwards.",
         )
@@ -483,7 +491,7 @@ private fun TrunkInstallPrompt(controller: CallController) {
                 when (val s = install) {
                     is TrunkInstall.Installing -> Text(
                         "Installing… this can take a minute. You can close " +
-                            "this and keep using Talon; it carries on in the " +
+                            "this and keep using Groundwire; it carries on in the " +
                             "background and we'll tell you if it fails.",
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -543,13 +551,8 @@ private fun FullScreenRing(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-                    Icon(
-                        Icons.Filled.Call,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(56.dp),
-                    )
-                    Text(
+                    PulsingCallIcon(56.dp)
+                    RingingText(
                         subtitle,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -577,20 +580,114 @@ private fun FullScreenRing(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 12.dp,
             ) {
+                // A card sized like a notification, not a poster: the
+                // name leads, the state under it, one row of buttons.
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 40.dp, vertical = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .widthIn(min = 260.dp, max = 340.dp)
+                        .padding(horizontal = 28.dp, vertical = 22.dp),
                 ) {
-                    Icon(
-                        Icons.Filled.Call,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp),
+                    PulsingCallIcon(24.dp)
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
-                    Text(subtitle, style = MaterialTheme.typography.titleMedium)
-                    Text(title, style = MaterialTheme.typography.headlineSmall)
-                    Box(Modifier.padding(top = 28.dp)) { actions() }
+                    RingingText(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box(Modifier.padding(top = 16.dp)) { actions() }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The phone icon with a ring that swells and fades behind it, over and
+ * over, so a ringing call reads as live rather than as a still card.
+ */
+@Composable
+private fun PulsingCallIcon(size: androidx.compose.ui.unit.Dp) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "ring")
+    val t by pulse.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "ring phase",
+    )
+    val accent = MaterialTheme.colorScheme.primary
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(size * 2)) {
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            val r0 = this.size.minDimension / 4f
+            val r = r0 + (this.size.minDimension / 2f - r0) * t
+            drawCircle(accent.copy(alpha = 0.35f * (1f - t)), radius = r)
+        }
+        Icon(Icons.Filled.Call, contentDescription = null, tint = accent, modifier = Modifier.size(size))
+    }
+}
+
+/**
+ * [text] with its trailing ellipsis drawn as dots that fill in one by
+ * one ("Calling", "Calling.", "Calling..", "Calling..."), the width held
+ * so the line does not shift. Text without one is shown as it is.
+ */
+@Composable
+private fun RingingText(
+    text: String,
+    style: androidx.compose.ui.text.TextStyle,
+    color: Color = Color.Unspecified,
+    modifier: Modifier = Modifier,
+) {
+    val base = text.removeSuffix("…").removeSuffix("...")
+    if (base == text) { Text(text, style = style, color = color, modifier = modifier); return }
+    var dots by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(450); dots = (dots + 1) % 4 } }
+    Text(
+        androidx.compose.ui.text.buildAnnotatedString {
+            append(base)
+            append(".".repeat(dots))
+            // The dots not yet shown keep their room, invisibly.
+            withStyle(androidx.compose.ui.text.SpanStyle(color = Color.Transparent)) { append(".".repeat(3 - dots)) }
+        },
+        style = style,
+        color = color,
+        modifier = modifier.semantics { contentDescription = text },
+    )
+}
+
+/**
+ * How a call that just ended is said: a small rounded note centred over
+ * the chat, a phone glyph, one line and a close, not a full-width coloured
+ * bar with a Dismiss button. It goes away by itself.
+ */
+@Composable
+private fun CallEndedPill(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shadowElevation = 2.dp,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            ) {
+                Icon(TalonIcons.CallEnd, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                io.nisfeb.talon.ui.IconButton(tip = "Dismiss", onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Dismiss", modifier = Modifier.size(14.dp))
                 }
             }
         }
@@ -604,6 +701,8 @@ private fun RoundAction(
     container: androidx.compose.ui.graphics.Color,
     content: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
+    /** The label under the button; off where the icon says it alone (hanging up a ringing call). */
+    showLabel: Boolean = true,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         FilledIconButton(
@@ -615,15 +714,17 @@ private fun RoundAction(
             // the call UI is redesigned, at which point this should come
             // back as a deliberate key binding rather than whatever the
             // focus order happened to be.
-            modifier = Modifier.size(72.dp).focusProperties { canFocus = false },
+            // Normal sizes on a desktop card; a phone's ring keeps a big
+            // target for a thumb answering in a hurry.
+            modifier = Modifier.size(if (io.nisfeb.talon.ui.isTouchPrimary) 72.dp else 56.dp).focusProperties { canFocus = false },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = container,
                 contentColor = content,
             ),
         ) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(32.dp))
+            Icon(icon, contentDescription = label, modifier = Modifier.size(if (io.nisfeb.talon.ui.isTouchPrimary) 32.dp else 24.dp))
         }
-        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+        if (showLabel) Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

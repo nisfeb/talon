@@ -41,7 +41,7 @@ import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import io.nisfeb.talon.ui.Switch
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.material3.TimeInput
@@ -200,7 +200,7 @@ fun LoopsList(
                     if (isBackgroundSchedulingSupported) {
                         "Runs on your LLM key, on this device."
                     } else {
-                        "Runs on your LLM key, on this device — only while Talon is open."
+                        "Runs on your LLM key, on this device — only while Groundwire is open."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -332,6 +332,9 @@ fun LoopDetail(
     val loopDao = remember(db) { db.loops() }
     var loop by remember(initialLoop.id) { mutableStateOf(initialLoop) }
     var editing by remember(initialLoop.id) { mutableStateOf(initialLoop.id == 0L) }
+    // A save on its way: the loop has its id only once the ship has the
+    // push, so a second Save before then made a second loop.
+    var saving by remember(initialLoop.id) { mutableStateOf(false) }
 
     // "Run now" is fire-and-forget and takes a few seconds (an LLM call); it
     // lands a fresh run row + a notification when done. Track from the click
@@ -361,9 +364,12 @@ fun LoopDetail(
             LoopForm(
                 modifier = Modifier.weight(1f),
                 initial = loop,
+                saving = saving,
                 onCancel = { if (loop.id == 0L) onClose() else editing = false },
-                onSave = { r ->
-                    scope.launch {
+                onSave = save@{ r ->
+                    if (saving) return@save
+                    saving = true
+                    scope.launch { try {
                         val now = nowMs()
                         val row = if (loop.id == 0L) {
                             loop.copy(
@@ -407,7 +413,7 @@ fun LoopDetail(
                         // this pane (Run now, history, Delete) targets id -1.
                         loop = if (row.id == 0L) row.copy(id = id) else row
                         editing = false
-                    }
+                    } finally { saving = false } }
                 },
             )
         }
@@ -575,6 +581,8 @@ private fun LoopRunHistory(db: AppDatabase, loopId: Long) {
 @Composable
 private fun LoopForm(
     initial: LoopEntity,
+    /** A save is on its way: Save waits for it. */
+    saving: Boolean = false,
     onCancel: () -> Unit,
     onSave: (LoopFormResult) -> Unit,
     modifier: Modifier = Modifier,
@@ -716,7 +724,7 @@ private fun LoopForm(
                         ),
                     )
                 },
-                enabled = name.isNotBlank() && prompt.isNotBlank(),
+                enabled = name.isNotBlank() && prompt.isNotBlank() && !saving,
             ) { Text("Save") }
             OutlinedButton(onClick = onCancel) { Text("Cancel") }
         }

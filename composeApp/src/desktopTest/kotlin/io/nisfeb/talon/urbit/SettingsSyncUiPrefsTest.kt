@@ -25,6 +25,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -46,7 +47,7 @@ class SettingsSyncUiPrefsTest {
     @AfterTest
     fun close() {
         runBlocking { watchers.coroutineContext.job.cancelAndJoin() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
@@ -105,6 +106,76 @@ class SettingsSyncUiPrefsTest {
         ui.setPowerFeaturesEnabled(ui.powerFeaturesEnabled.value)
         delay(300)
         assertEquals(sent, pushed("power-features").size, "the same value again is not a change")
+    }
+
+    // Bubbles or rows is a taste, not a screen size, so it travels. The
+    // body is %settings' own: the value a cord of JSON, as Tlon writes it.
+    @Test
+    fun `rows chosen here go up as the ship's own body`() = live {
+        watching()
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"chat-bubbles","value":"{\"enabled\":false}"}}""",
+            pushed("chat-bubbles").single(),
+        )
+    }
+
+    // Cards or a list for groups is a taste, like bubbles, so it travels.
+    @Test
+    fun `group cards chosen here go up as the ship's own body, and from another device are taken, not sent back`() = live {
+        watching()
+        ui.setGroupCards(true)
+        settled { pushed("group-cards").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"group-cards","value":"{\"enabled\":true}"}}""",
+            pushed("group-cards").single(),
+        )
+        arrives("group-cards", """{"enabled":false}""")
+        settled { !ui.groupCards.value }
+        arrives("group-cards", """{"enabled":"yes"}""")
+        delay(300)
+        assertFalse(ui.groupCards.value, "nonsense changes nothing")
+        assertEquals(1, pushed("group-cards").size, "applying is not an edit")
+    }
+
+    @Test
+    fun `rows chosen on another device are taken here and not sent back`() = live {
+        watching()
+        arrives("chat-bubbles", """{"enabled":false}""")
+        settled { !ui.chatBubbles.value }
+        arrives("chat-bubbles", """{"enabled":"yes"}""")
+        delay(300)
+        assertFalse(ui.chatBubbles.value, "nonsense changes nothing")
+        assertTrue(pushed("chat-bubbles").isEmpty(), "applying is not an edit: ${pushed("chat-bubbles")}")
+    }
+
+    // Recent searches are this device's alone (sneagan, 2026-11-05).
+    @Test
+    fun `recent searches never go to the ship`() = live {
+        watching()
+        ui.setRecentSearches(listOf("from:~nec lunch"))
+        // A change made after is heard going up, so the searches had their chance.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "lunch" in it }, "$sent")
+    }
+
+    // The picture behind the bubbles is this device's: it never goes up,
+    // and the colour 1.8.40-rc2 sent up is no setting any more.
+    @Test
+    fun `the background picture never goes to the ship, and an old background colour changes nothing`() = live {
+        watching()
+        ui.setChatBackgroundImage("/kept/a.img")
+        // A change made after is heard going up, so the picture had its chance.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "kept/a.img" in it || "chat-background" in it }, "$sent")
+        arrives("chat-background", """{"value":"#123456"}""")
+        delay(300)
+        assertEquals("/kept/a.img", ui.chatBackgroundImage.value)
     }
 
     // ─── fonts ────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ fun LocalShipSetupScreen(
             )
             Text(
                 "A comet is an Urbit identity that lives on this computer. " +
-                    "It is yours as long as this computer keeps it; Talon runs it whenever the app is open.",
+                    "It is yours as long as this computer keeps it; the app runs it whenever it is open.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -108,7 +108,7 @@ fun LocalShipSetupScreen(
                     if (b.firstBoot) {
                         Text(
                             "For the first few minutes after it boots, the ship installs updates and uses most of a CPU core. " +
-                                "Talon may stutter or freeze for a minute at a time until it settles.",
+                                "Groundwire may stutter or freeze for a minute at a time until it settles.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,

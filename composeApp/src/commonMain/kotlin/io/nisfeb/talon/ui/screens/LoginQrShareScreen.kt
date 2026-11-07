@@ -98,7 +98,7 @@ fun LoginQrShareScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
-                "Generate login QR",
+                "Generate Login QR",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp),
             )
@@ -114,7 +114,7 @@ fun LoginQrShareScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Enter your ship URL and +code. Scan the QR with Talon on " +
+                "Enter your ship URL and +code. Scan the QR with Groundwire on " +
                     "your other device to sign in there, or copy the link.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

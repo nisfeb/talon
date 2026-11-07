@@ -101,7 +101,7 @@ class QuickDictationActivity : ComponentActivity() {
     private val converse by lazy { intent.getBooleanExtra(EXTRA_CONVERSE, false) }
 
     private val askForMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) begin() else problem.value = "Talon needs the microphone to hear a dictation."
+        if (granted) begin() else problem.value = "Groundwire needs the microphone to hear a dictation."
     }
 
     private fun begin() = if (converse) QuickDictation.converse(this) else QuickDictation.listen(this)
@@ -324,7 +324,7 @@ class QuickDictationActivity : ComponentActivity() {
     @Composable
     private fun Blocked(why: String) {
         Text(why, style = MaterialTheme.typography.headlineSmall)
-        BigButton("Open Talon", null) {
+        BigButton("Open Groundwire", null) {
             startActivity(Intent(this@QuickDictationActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             finish()
         }

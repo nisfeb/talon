@@ -1,6 +1,6 @@
 TEAM_ID=
 BUNDLE_ID=io.nisfeb.talon
-APP_NAME=Talon
+APP_NAME=Groundwire
 
 // Compose Multiplatform 1.11 dropped the iosX64 (Intel-simulator) Kotlin
 // target, so the ComposeApp framework only builds arm64. Without this,

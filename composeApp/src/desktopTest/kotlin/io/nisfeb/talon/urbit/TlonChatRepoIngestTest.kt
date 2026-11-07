@@ -41,7 +41,7 @@ class TlonChatRepoIngestTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = closeAfter(db, repo)
 
     private suspend fun fact(json: String) =
         repo.applyEvent(Json.parseToJsonElement("""{"id":1,"response":"diff","json":$json}"""))

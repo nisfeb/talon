@@ -49,7 +49,7 @@ class SettingsSyncBootstrapTest {
     private val sync = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
         val events = ship.channel.events().launchIn(this)

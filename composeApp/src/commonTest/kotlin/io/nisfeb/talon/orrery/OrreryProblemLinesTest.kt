@@ -31,10 +31,10 @@ class OrreryProblemLinesTest {
 
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
-        assertEquals("Your ship did not answer. Talon asks again by itself.", probeProblemLine(down))
-        assertEquals("Orrery on your ship could not answer: crash. Talon asks again by itself.", probeProblemLine(OrreryError.Refused(500, "crash")))
-        assertEquals("Orrery on your ship could not answer. Talon asks again by itself.", probeProblemLine(OrreryError.Refused(500, "<html></html>")))
-        assertEquals("Your ship's answer about Orrery could not be read. Talon asks again by itself.", probeProblemLine(OrreryError.Garbled(RuntimeException())))
+        assertEquals("Your ship did not answer. Groundwire asks again by itself.", probeProblemLine(down))
+        assertEquals("Orrery on your ship could not answer: crash. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "crash")))
+        assertEquals("Orrery on your ship could not answer. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "<html></html>")))
+        assertEquals("Your ship's answer about Orrery could not be read. Groundwire asks again by itself.", probeProblemLine(OrreryError.Garbled(RuntimeException())))
     }
 
     @Test

@@ -251,6 +251,14 @@ fun CalendarScreen(
      *  draft as it opened on that occurrence. Every occurrence moves as
      *  far as that one was moved. */
     var editingSeries by remember { mutableStateOf<Pair<EventDraft, EventDraft>?>(null) }
+    /**
+     * Which open of the editor is the latest. An event's read can take a
+     * busy ship seconds: tap Edit on one, then + and type, and the first
+     * read landing made the editor that event's, so Save wrote the new
+     * one's words over it. Every open counts here, and a read applies only
+     * to the open it was for.
+     */
+    var opens by remember { mutableStateOf(0) }
     var zones by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(availability) { if (availability == CalendarAvailability.PRESENT) zones = repo.zones() }
     var managing by remember { mutableStateOf(false) }
@@ -351,6 +359,7 @@ fun CalendarScreen(
 
     val readOnlyNote = "That calendar is shared with you read-only; its host makes the changes."
     fun openNew() {
+        opens++
         val nowHere = Instant.fromEpochMilliseconds(nowMs()).toLocalDateTime(zone)
         val minute = if (selected == nowHere.date && nowHere.hour < 23) (nowHere.hour + 1) * 60 else 9 * 60
         editing = null to EventDraft(
@@ -366,6 +375,7 @@ fun CalendarScreen(
     val OPENING = "Opening the editor..."
 
     fun openById(id: String, idx: Int?, startMs: Long?, allDay: Boolean) {
+        val open = ++opens
         scope.launch {
             // Only where the read is actually slow, and never in front
             // of it: the tap used to leave the screen exactly as it was
@@ -374,6 +384,11 @@ fun CalendarScreen(
             val slow = launch { kotlinx.coroutines.delay(150); status = OPENING }
             val json = repo.eventDetail(id)
             slow.cancel()
+            // Something else was opened while this was read: that one stays.
+            if (open != opens || editing != null) {
+                if (status == OPENING) status = null
+                return@launch
+            }
             val d = json?.let { draftFromEvent(it, selected) }
             if (d == null) { status = "That event could not be read for editing."; return@launch }
             if (status == OPENING) status = null
@@ -391,6 +406,7 @@ fun CalendarScreen(
     fun openRow(r: CalendarRow) {
         if (r.isTask) {
             taskDraft(r, selected)?.let { d ->
+                opens++
                 editing = r.id to d
                 editingIdx = null
                 editingAt = null
@@ -705,6 +721,7 @@ fun CalendarScreen(
                 pending = pendingTasks,
                 onAdd = ::addTask,
                 onMore = { n, due, c, note ->
+                    opens++
                     editing = null to EventDraft(
                         name = n, note = note, cat = EventCat.TODO, date = due ?: today, due = due,
                         cal = c, tags = tagFilter.toList(),

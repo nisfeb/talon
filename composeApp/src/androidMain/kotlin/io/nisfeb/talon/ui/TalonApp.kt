@@ -773,7 +773,7 @@ fun TalonApp(
     var orreryItem by remember { mutableStateOf<String?>(null) }
     var profileSheetShip by remember { mutableStateOf<String?>(null) }
     /** Login-handoff QR generator. Reachable from the LoginScreen
-     *  "Make a login QR" link (pre-login) and from settings
+     *  "Make a Login QR" link (pre-login) and from settings
      *  once a ship is logged in. Full-screen, so a section. */
     var shareLoginQrOpen by remember { sections.flag() }
 
@@ -820,6 +820,19 @@ fun TalonApp(
         profileSheetShip = null
         viewerImageUrl = null
         viewerImageList = null
+    }
+    // The ship the open chat and sections were opened on. Only the drawer
+    // put them down before a switch: a ring's, call back's or sign-in's
+    // notification goes straight to app.switchShip, and adding a ship logs
+    // in, so the old ship's chat stayed open on the new one, sent as it,
+    // and was saved as its last chat. Put down here for every switch,
+    // ahead of the deep link below, which then opens what it came for.
+    var navShip by remember { mutableStateOf(loggedInShip) }
+    LaunchedEffect(loggedInShip) {
+        if (loggedInShip != navShip) {
+            if (navShip != null) closeSections()
+            navShip = loggedInShip
+        }
     }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
@@ -1371,7 +1384,11 @@ fun TalonApp(
     // host — and reliably lost to the 30s RPC timeout, polluting
     // logcat with `catchUp bootstrap failed: IOException: Canceled`
     // on every foreground entry. forceReconnect alone covers the gap.
-    DisposableEffect(Unit) {
+    // Keyed on the repos: they are the session's, made again on every ship
+    // switch and login. Under Unit the observer kept the first ship's, so
+    // the new ones were never told the app went behind (their polls ran on
+    // in the background) or came back.
+    DisposableEffect(mailRepo, calendarRepo, orreryRepo) {
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -1387,6 +1404,8 @@ fun TalonApp(
                     mailRepo.setForeground(true)
                     calendarRepo.setForeground(true)
                     orreryRepo.setForeground(true)
+                    // The next assistant reads the owner's skills again.
+                    io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
                 }
                 // Background: stop treating the open chat as read so DMs
                 // arriving while away still badge + notify.
@@ -1716,10 +1735,6 @@ fun TalonApp(
         // the chat. Search and New message are drawn under the chat they
         // open, so the chat's back still comes before theirs.
         val sectionOnTop = sections.anyOpenExcept(searchSection, newDmSection)
-        PlatformBackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
-            notebookComposeOpen = false
-            notebookEditPostId = null
-        }
         // See App.kt: post / compose state is per channel, and a deep
         // link's anchor names the post to open in a gallery or notebook.
         LaunchedEffect(openWhom) {
@@ -1742,11 +1757,19 @@ fun TalonApp(
                 }
             }
         }
-        PlatformBackHandler(enabled = openNotebookPostId != null && !sectionOnTop) { openNotebookPostId = null }
-        PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
-        PlatformBackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
         PlatformBackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
         PlatformBackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
+        // After the chat handler, as in App.kt: a notebook or gallery post
+        // is drawn over its channel, and its compose over the post, and
+        // the later registration wins. Before the chat's, back from a post
+        // closed the whole channel.
+        PlatformBackHandler(enabled = openNotebookPostId != null && !notebookComposeOpen && !sectionOnTop) { openNotebookPostId = null }
+        PlatformBackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
+            notebookComposeOpen = false
+            notebookEditPostId = null
+        }
+        PlatformBackHandler(enabled = openGalleryPostId != null && !galleryComposeOpen && !sectionOnTop) { openGalleryPostId = null }
+        PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
         // After the chat handler: an open note is *inside* a notes/
         // channel, so both are enabled and the later registration has to
         // be this one or back would close the whole notebook.
@@ -2286,7 +2309,9 @@ fun TalonApp(
                     onOpenChats = { homeOpen = false },
                     onOpenMailThread = { id -> homeOpen = false; pendingMailThread = id; mailOpen = true },
                     onOpenMail = { homeOpen = false; mailOpen = true },
-                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
+                    backgroundImage = app.uiSettings.chatBackgroundImage.collectAsState().value,
+                    // No inset here: Home pads its own content, and its
+                    // picture runs under the system bars.
                 )
             }
 
@@ -2310,6 +2335,7 @@ fun TalonApp(
             invitesOpen -> GroupInvitesScreen(
                 repo = app.repo,
                 onBack = { invitesOpen = false },
+                ourShip = activeShip,
                 modifier = mod,
             )
 
@@ -2366,6 +2392,13 @@ fun TalonApp(
                         ).renew()
                     }
                 },
+                latticeSkillsReadable = app.sessionStore.active()?.let { s ->
+                    {
+                        io.nisfeb.talon.ai.LatticeKeys(
+                            app.db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(app.session.http, app.ktorHttp, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
+                        ).skillsReadable()
+                    }
+                },
                 groupsInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(app.session.http, url) ?: error("The ship could not be asked.") }
                 },
@@ -2418,7 +2451,10 @@ fun TalonApp(
                 // No Orrery tools while Orrery is off.
                 orrery = orreryRepo.takeIf { orreryGate == true },
                 listenOnOpen = assistantListen,
-                onTopUp = openTopUp,
+                // Put down first, as the chat and calendar ways out are:
+                // the Assistant is drawn over Settings here, so Top up
+                // opened it out of sight and the next back shut it.
+                onTopUp = { assistantOpen = false; openTopUp() },
                 session = assistantSession,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },
@@ -2476,6 +2512,8 @@ fun TalonApp(
                     io.nisfeb.talon.notify.AndroidSystemNotificationProbe(app)
                 }
                 SettingsScreen(
+                    // Every group's level at once, synced like a group's own.
+                    onSetAllGroupsNotify = { level -> app.repo.setEveryGroupLevel(level) },
                     orrery = orreryRepo,
                     armillary = armillaryRepo,
                     mailRepo = mailRepo,
@@ -2653,10 +2691,12 @@ fun TalonApp(
                         notebookEditPostId = null
                     },
                     editPostId = notebookEditPostId,
-                    initialTitle = notebookEditTitle,
-                    initialImage = notebookEditImage,
-                    initialBody = notebookEditBody,
-                    originalSentMs = notebookEditSentMs,
+                    // An edit's words only for an edit: kept after it, a New
+                    // post opened as a copy of the last post edited.
+                    initialTitle = if (notebookEditPostId != null) notebookEditTitle else "",
+                    initialImage = if (notebookEditPostId != null) notebookEditImage else "",
+                    initialBody = if (notebookEditPostId != null) notebookEditBody else "",
+                    originalSentMs = if (notebookEditPostId != null) notebookEditSentMs else 0L,
                     modifier = mod,
                 )
                 openNotebookPostId != null -> NotebookPostScreen(
@@ -3163,6 +3203,7 @@ fun TalonApp(
                     .collectAsState().value,
                 folderItemOrder = app.uiSettings.folderItemOrder
                     .collectAsState().value,
+                groupCards = app.uiSettings.groupCards.collectAsState().value,
                 kebabItems = RailItem.entries.toSet(),
                 revealGroupFlag = revealGroupRequest,
                 onRevealGroupHandled = { revealGroupRequest = null },

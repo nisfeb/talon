@@ -193,7 +193,7 @@ class LoopRunner(
     companion object {
         const val RUN_HISTORY_KEEP = 20
         const val NOTIFY_BODY_CHARS = 200
-        const val CUT_SHORT = "Stopped before it finished: it ran out of time, or Talon was stopped. " +
+        const val CUT_SHORT = "Stopped before it finished: it ran out of time, or Groundwire was stopped. " +
             "It may have done part of it. It runs again at its next time."
 
 

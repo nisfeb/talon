@@ -195,6 +195,20 @@ class ComposerState(initialDraftText: String) {
      * editor.
      */
     var editing by mutableStateOf<EditTarget?>(null)
+
+    /**
+     * Edit a post in the composer: its [text] in the box, the caret at the
+     * end where one usually picks up, and the words it displaces kept to
+     * come back after. An edit opened over another keeps the words the
+     * first displaced: it took the first edit's changed text as the
+     * draft, and the half-typed message was lost. Not while one is saving.
+     */
+    fun beginEdit(postId: String, sentMs: Long, contentJson: String?, text: String) {
+        if (saving) return
+        val prior = editing?.priorDraftText ?: draft.text
+        draft = TextFieldValue(text, TextRange(text.length))
+        editing = EditTarget(postId, sentMs, contentJson, prior)
+    }
 }
 
 /** A message being edited in place. */
@@ -819,14 +833,18 @@ fun ChatComposer(
         // the last try said behind the button.
         val slow = repo.shipSlow.collectAsState(initial = null).value
         if (slow != null) {
-            NoteLine(
-                io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
-                calm = true,
-                details = slow.details,
-            )
+            Box(Modifier.chatPanel()) {
+                NoteLine(
+                    io.nisfeb.talon.util.shipSlowLine(slow.queued, slow.health),
+                    calm = true,
+                    details = slow.details,
+                )
+            }
         }
         state.sendError?.let { err ->
-            NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
+            Box(Modifier.chatPanel()) {
+                NoteLine(err, calm = state.sendErrorCalm, details = state.sendErrorDetails)
+            }
         }
         if (slashSuggestions.isNotEmpty() && slashTrigger != null) {
             SlashPicker(
@@ -1050,6 +1068,7 @@ fun ChatComposer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .chatPanel()
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1059,7 +1078,9 @@ fun ChatComposer(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = {
+                // Not while saving: the edit lands all the same, and Cancel
+                // threw away the words a failed save is tried again with.
+                TextButton(enabled = !state.saving, onClick = {
                     val prior = state.editing?.priorDraftText.orEmpty()
                     state.editing = null
                     state.draft = TextFieldValue(prior, TextRange(prior.length))
@@ -1107,7 +1128,9 @@ fun ChatComposer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                // More room at the end, so the field stops short of the
+                // edge on a phone (sneagan, 2026-11-06: too wide).
+                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
             // The buttons stay on the field's bottom line as it grows
             // (a user, 2026-11-02: the send button "should be bottom
             // aligned to stay put as the input field gets taller").
@@ -1146,7 +1169,7 @@ fun ChatComposer(
                     io.nisfeb.talon.ui.IconButton(tip = "Paste image", onClick = {
                             takePaste(clipboardPaste())
                         },
-                        modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                        modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                     ) {
                         Icon(
                             TalonIcons.ContentPaste,
@@ -1159,7 +1182,7 @@ fun ChatComposer(
             if (!hideComposerButtons) {
                 io.nisfeb.talon.ui.IconButton(tip = "Attach image", onClick = onPickImage,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                 ) {
                     if (state.uploading) {
                         CircularProgressIndicator(
@@ -1176,7 +1199,7 @@ fun ChatComposer(
                 }
                 io.nisfeb.talon.ui.IconButton(tip = "Attach file", onClick = onPickFile,
                     enabled = canSend && !state.uploading,
-                    modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                    modifier = Modifier.padding(bottom = BESIDE_FIELD).chatButton().size(36.dp),
                 ) {
                     Icon(
                         TalonIcons.AttachFile,
@@ -1185,7 +1208,7 @@ fun ChatComposer(
                     )
                 }
                 if (voiceComposer != null) {
-                    Box(Modifier.padding(bottom = BESIDE_FIELD)) {
+                    Box(Modifier.padding(bottom = BESIDE_FIELD).chatButton()) {
                         voiceComposer(
                             canSend && !state.uploading,
                             { path, durationMs ->
@@ -1205,6 +1228,19 @@ fun ChatComposer(
                 enabled = canSend,
                 textStyle = MaterialTheme.typography.bodyMedium,
                 visualTransformation = composerLook,
+                // A filled pill, as the big messengers draw it: no outline
+                // at rest, a soft one in the accent while typing. Filled with
+                // the raised colour: surfaceVariant on the light page was
+                // 1.09:1, a field with no edge once it lost focus.
+                shape = RoundedCornerShape(22.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    disabledBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                ),
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(fieldFocus)
@@ -1377,9 +1413,23 @@ fun ChatComposer(
             val sendable = canSend && !state.saving &&
                 (state.draft.text.isNotBlank() || state.pendingQuote != null ||
                     (state.pendingAttachment != null && !state.uploading))
+            // On a picture, in a disc of the accent, so it shows on any
+            // photo (sneagan, 2026-11-06); on the page, the tinted icon.
+            val onPicture = LocalChatLook.current.image != null
             io.nisfeb.talon.ui.IconButton(tip = if (isEditing) "Save edit" else "Send", onClick = { doSend() },
                 enabled = sendable,
-                modifier = Modifier.padding(bottom = BESIDE_FIELD).size(36.dp),
+                // Its own 48 dp, with 8 dp clear of the field (sneagan,
+                // 2026-11-06: bigger, as its disc first was, and the field
+                // narrower). The disc goes before the size: after it, a
+                // background is drawn at the touch target inside the
+                // button, not the button.
+                modifier = Modifier.padding(start = 6.dp, bottom = BESIDE_FIELD_SEND).then(
+                    if (!onPicture) Modifier
+                    else Modifier.background(
+                        if (sendable) sendAccent else MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        androidx.compose.foundation.shape.CircleShape,
+                    ),
+                ).size(SEND),
             ) {
                 // A tick, not a paper plane. Editing and sending are
                 // different acts and the button is the only thing that
@@ -1387,9 +1437,12 @@ fun ChatComposer(
                 Icon(
                     if (isEditing) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
                     contentDescription = if (isEditing) "Save edit" else "Send",
-                    modifier = Modifier.size(22.dp),
-                    tint = if (sendable) sendAccent
-                    else LocalContentColor.current,
+                    modifier = Modifier.size(24.dp),
+                    tint = when {
+                        sendable && onPicture -> MaterialTheme.colorScheme.onPrimary
+                        sendable -> sendAccent
+                        else -> LocalContentColor.current
+                    },
                 )
             }
         }
@@ -1398,6 +1451,12 @@ fun ChatComposer(
 
 /** What lifts a 36 dp button beside the field to the middle of its one-line height. */
 private val BESIDE_FIELD = (androidx.compose.material3.OutlinedTextFieldDefaults.MinHeight - 36.dp) / 2
+
+/** The send button: the size of its touch target. */
+private val SEND = 48.dp
+
+/** What lifts the send button to the middle of the field's one-line height. */
+private val BESIDE_FIELD_SEND = (androidx.compose.material3.OutlinedTextFieldDefaults.MinHeight - SEND) / 2
 
 @Composable
 private fun QuotePreviewRow(
@@ -1414,6 +1473,7 @@ private fun QuotePreviewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .height(IntrinsicSize.Min)
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1458,6 +1518,7 @@ internal fun AttachmentStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1531,6 +1592,7 @@ private fun VoicePreviewRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .chatPanel()
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

@@ -129,7 +129,7 @@ class UrbUnfurlKeptTest {
             db.urbUnfurls().put(UrbUnfurlEntity("urb://~zod/x", "T", null, 1))
             assertEquals(UrbUnfurlEntity("urb://~zod/x", "T", null, 1), db.urbUnfurls().get("urb://~zod/x"))
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 }

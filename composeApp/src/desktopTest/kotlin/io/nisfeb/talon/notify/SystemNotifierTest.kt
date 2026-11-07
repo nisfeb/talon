@@ -26,7 +26,7 @@ class SystemNotifierTest {
 
     @Test fun `gdbus's positionals come after a double dash`() {
         val args = gdbusNotifyArgs("/icon.png", "-title", "-body")
-        assertEquals(listOf("--", "Talon", "0", "/icon.png", "-title", "-body", "[]", "{}", "-1"), args.dropWhile { it != "--" })
+        assertEquals(listOf("--", "Groundwire", "0", "/icon.png", "-title", "-body", "[]", "{}", "-1"), args.dropWhile { it != "--" })
         assertEquals(listOf("gdbus", "call", "--session"), args.take(3))
     }
 

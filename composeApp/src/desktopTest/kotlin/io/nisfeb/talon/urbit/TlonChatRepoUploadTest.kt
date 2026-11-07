@@ -31,7 +31,7 @@ class TlonChatRepoUploadTest {
     private val png = byteArrayOf(1, 2, 3, 4)
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = closeAfter(db, repo, hostedRepo)
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
         val events = ship.channel.events().launchIn(this)

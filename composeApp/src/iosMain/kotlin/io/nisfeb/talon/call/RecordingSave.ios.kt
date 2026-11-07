@@ -20,6 +20,6 @@ actual suspend fun saveFile(bytes: ByteArray, name: String, extension: String, m
             FileSystem.SYSTEM.createDirectories(dir)
             val safe = name.map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '-' }.joinToString("").ifBlank { "file" }
             FileSystem.SYSTEM.write(dir / "$safe.$extension") { write(bytes) }
-            "the Files app, Talon folder"
+            "the Files app, Groundwire, Talon folder"
         }.getOrNull()
     }

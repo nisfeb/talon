@@ -37,7 +37,7 @@ fun UnreadDividerRow() {
             "New",
             style = MaterialTheme.typography.labelSmall,
             color = tint,
-            modifier = Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier.padding(horizontal = 10.dp).chatLabel(),
         )
         HorizontalDivider(modifier = Modifier.weight(1f), color = tint)
     }

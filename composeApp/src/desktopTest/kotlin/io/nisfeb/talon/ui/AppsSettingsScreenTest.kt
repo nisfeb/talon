@@ -9,7 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -88,7 +88,7 @@ class AppsSettingsScreenTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -157,7 +157,7 @@ class AppsSettingsScreenTest {
             row("Orrery", "not installed")
             onNodeWithText("Install").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Added Orrery to your Grubbery shell.") }
-            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under AI.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under Assistant.") }
             assertTrue("add orrery" in did)
         }
     }
@@ -207,7 +207,7 @@ class AppsSettingsScreenTest {
             Result.success(Unit)
         }) {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Make a new key").fetchSemanticsNodes().isNotEmpty() }
-            onNodeWithText("Lattice refused Talon's key", substring = true).assertExists()
+            onNodeWithText("Lattice refused this app's key", substring = true).assertExists()
             onNodeWithText("Make a new key").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Made a new key. The assistants remember again.").fetchSemanticsNodes().isNotEmpty() }
             assertEquals(listOf("renew"), did.filter { it == "renew" })

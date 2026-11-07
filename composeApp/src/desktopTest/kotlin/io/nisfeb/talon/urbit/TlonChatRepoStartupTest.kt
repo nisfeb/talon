@@ -30,7 +30,7 @@ class TlonChatRepoStartupTest {
     private val ship = FakeShip("~zod")
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun started(prepare: FakeShip.() -> Unit, block: suspend (TlonChatRepo) -> Unit) = runBlocking<Unit> {
         ship.prepare()
@@ -39,13 +39,15 @@ class TlonChatRepoStartupTest {
         try {
             withTimeout(60_000) { block(repo) }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 
     private suspend fun until(what: String, check: suspend () -> Boolean) {
         runCatching { withTimeout(30_000) { while (!check()) delay(50) } }
-            .onFailure { error("never saw: $what") }
+            // What the ship was asked, last first: a CI run that gave up here
+            // (the second stream, once in five) left nothing else to go on.
+            .onFailure { error("never saw: $what. Last requests: ${ship.requests.takeLast(40).reversed()}") }
     }
 
     private fun essay(author: String, text: String, sent: Long) =
@@ -474,6 +476,49 @@ class TlonChatRepoStartupTest {
         assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
+    // The drain a reconnect launched on the side, failing, dropped drainJob
+    // while the sleeping retry lived on: each reconnect on a slow ship added
+    // a retry chain, every one of them asking the ship again.
+    @Test
+    fun `reconnects on a slow ship keep one retry going, not one each`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        // Nothing reaches the ship, so nothing it takes wakes the drain early.
+        ship.lose = { java.io.IOException("Request timeout has expired") }
+        fun tries() = ship.attempted.count { it.app == "chat" }
+        repo.send("~bus", "are you there")
+        until("the send tried") { tries() >= 1 }
+        repeat(3) {
+            val before = tries()
+            val s = streams()
+            ship.endStreams()
+            until("the stream again") { streams() > s }
+            until("the retry the reconnect woke") { tries() > before }
+        }
+        // The one that tried hands over to its next and ends; an orphan
+        // sleeps a backoff of a second or more.
+        kotlinx.coroutines.delay(300)
+        assertEquals(1, repo.drainsAliveForTest, "retry chains")
+    }
+
+    // A watch lost on every channel (a ship timing every PUT out) gave
+    // each up, and the next pass began 2 s later with a new channel and the
+    // whole pass again, for as long as it lasted.
+    @Test
+    fun `a watch lost on every channel backs off`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = NOTEBOOKS
+        loseWatch = { w -> if (w == RECIPES) java.io.IOException("lost") else null }
+    }) { _ ->
+        until("the first channel given up") { channelsPut().size >= 2 }
+        kotlinx.coroutines.delay(12_000)
+        // 2 s, then 4, then 8, each jittered: two more at most in twelve
+        // seconds, not one every one to three.
+        assertTrue(channelsPut().size <= 4, "a new channel every few seconds: ${channelsPut().size}")
+    }
+
     // The new channel's subscribe lost on the way: eyre never made it, so
     // its stream is a 404 and the channel is given up. The pass's later
     // watches (a notebook's here) made it on the ship after all, and it
@@ -592,7 +637,7 @@ class TlonChatRepoStartupTest {
                 assertEquals(refused, ship.streamsOpened.count { it.first == channelsStreamed().first() }, "not asked again")
             }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 
@@ -660,14 +705,14 @@ class TlonChatRepoStartupTest {
         val first = TlonChatRepo(db).apply { start(session()) }
         try {
             until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
-        } finally { first.stop() }
+        } finally { first.stopAndJoinForTest() }
         db.messages().forgetLinkSearchText()
         val next = TlonChatRepo(db).apply { start(session()) }
         try {
             until("the second stream") { streams() >= 2 }
             delay(500)
             assertNull(text(), "a later launch scanned for rows to fill")
-        } finally { next.stop() }
+        } finally { next.stopAndJoinForTest() }
     }
 
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
@@ -819,10 +864,11 @@ class TlonChatRepoStartupTest {
                 until("the stream again") { streams() > before }
                 until("the kept change sent") { ship.pokesTo("settings").any { "~bus" in it.json.toString() } }
                 assertEquals(1, channelsStreamed().size, "resumed, not a new channel")
-                assertEquals(emptyList(), db.settingsOutbox().all())
+                // Kept until the ship took it: its ack comes after the poke.
+                until("the outbox empty") { db.settingsOutbox().all().isEmpty() }
             }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 

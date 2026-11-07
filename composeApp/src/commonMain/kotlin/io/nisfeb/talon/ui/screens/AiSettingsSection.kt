@@ -23,7 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import io.nisfeb.talon.ui.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import io.nisfeb.talon.ui.Switch
 import androidx.compose.material3.Text
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.Composable
@@ -141,7 +141,7 @@ fun AiSettingsSection(
         else {
             // No buying here, and no pointing anywhere to buy (the store's
             // rule): a ship that already has Armillary connects this device.
-            Quiet("AI in Talon runs through Armillary on your ship. Connect this device to use what your ship already has.")
+            Quiet("AI in Groundwire runs through Armillary on your ship. Connect this device to use what your ship already has.")
             OutlinedButton(enabled = armillary != null, onClick = connect) { Text("Connect this device") }
         }
     } else {
@@ -228,36 +228,41 @@ fun OrrerySettingsSection(
     var confirmOff by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
 
-    OrreryAbout()
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Use Orrery", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
-            Quiet(
-                when {
-                    busy -> "Turning Orrery off."
-                    on -> "On, for all your devices."
-                    missing -> "Orrery is not on your ship. Install it from the Apps page."
-                    else -> "Off, for all your devices. Nothing of Orrery runs."
-                },
+    // Off: what it reads, then one obvious button that allows it; consent
+    // comes before the button, not folded under it. On: a switch to turn
+    // it off again, which asks first, with the account folded away.
+    if (!on) {
+        if (!missing) OrreryAbout(folded = false)
+        io.nisfeb.talon.ui.Button(
+            enabled = !busy && !missing,
+            onClick = { note = null; edit { it.copy(orrery = true) } },
+        ) { Text("Enable Groundwire Assistant") }
+        Quiet(
+            if (missing) "The assistant (Orrery) is not on your ship. Install it from the Apps page."
+            else "A private notebook about your life, kept on your own ship. Off, for all your devices.",
+        )
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Groundwire Assistant", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                Quiet(if (busy) "Turning it off." else "On, for all your devices.")
+            }
+            Switch(
+                checked = true,
+                enabled = !busy,
+                onCheckedChange = { want -> note = null; if (!want) confirmOff = true },
             )
         }
-        Switch(
-            checked = on,
-            enabled = !busy && !missing,
-            onCheckedChange = { want ->
-                note = null
-                if (want) edit { it.copy(orrery = true) } else confirmOff = true
-            },
-        )
+        OrreryAbout(folded = true)
     }
     note?.let { Quiet(it, error = true) }
     if (confirmOff) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmOff = false },
-            title = { Text("Turn Orrery off?") },
+            title = { Text("Turn the assistant off?") },
             text = {
                 Text(
-                    "On all your devices, Talon stops reading and sending, and your ship stops reading your chats " +
+                    "On all your devices, Groundwire stops reading and sending, and your ship stops reading your chats " +
                         "and email and writing your brief. Each device's key to Orrery is taken back. What Orrery " +
                         "already wrote down stays on your ship until you delete it there.",
                 )
@@ -283,7 +288,6 @@ fun OrrerySettingsSection(
 
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
-    Heading("Settings")
     if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
     if (orrery != null) ReadingRow(orrery, orreryHere, spend[AiFeature.OrreryTriage.name])
     if (orrery != null && orreryHere) EveningReminderRow(orrery)
@@ -345,12 +349,18 @@ private fun EveningReminderRow(orrery: OrreryRepo) {
 /** The times offered for the evening reminder; orrery's own default is 20:00. */
 private val REMINDER_TIMES = listOf("18:00", "19:00", "19:30", "20:00", "20:30", "21:00", "21:30", "22:00")
 
-/** What Orrery is and what turning it on allows, for someone who has never heard of it. */
+/** What Orrery is and what turning it on allows: shown whole before it is on, folded until asked for after. */
 @Composable
-private fun OrreryAbout() {
-    Heading("Orrery")
+private fun OrreryAbout(folded: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    if (folded) {
+        TextButton(onClick = { open = !open }) {
+            Text(if (open) "What it reads and keeps \u25B4" else "What it reads and keeps \u25BE")
+        }
+        if (!open) return
+    }
     Text(
-        "Orrery is a private notebook about your life, kept on your own ship. When it is on, Talon and your ship " +
+        "Orrery is a private notebook about your life, kept on your own ship. When it is on, Groundwire and your ship " +
             "notice things that matter in your conversations, like where someone is, a plan you made, or something " +
             "a friend is going through, and write them down in Orrery. Orrery then helps you keep track: it can " +
             "remind you, write you a daily brief, and suggest things to do.",
@@ -363,17 +373,17 @@ private fun OrreryAbout() {
         // choose" undersold what the switch allows.
         "Your ship read your chats and email: every direct message unless you pick which ones, the group " +
             "channels you pick, and your mail. You can turn each of these off in Orrery's own settings on your ship.",
-        "Talon read your calls and your contacts' status lines on each of your devices, and share your contacts " +
+        "Groundwire read your calls and your contacts' status lines on each of your devices, and share your contacts " +
             "and, if you allow it, where you are.",
-        "An AI model do the reading. Talon reads on this device. Your ship reads with the models your Armillary " +
+        "An AI model do the reading. Groundwire reads on this device. Your ship reads with the models your Armillary " +
             "vendor picks, which keep nothing, unless you choose others in Orrery's own settings.",
-        "Orrery keep what it finds on your ship. It is not sent to the makers of Talon or anyone else.",
+        "Orrery keep what it finds on your ship. It is not sent to the makers of Groundwire or anyone else.",
         "Orrery suggest things like a calendar entry or a message. Nothing is done until you approve it " +
             "under Actions.",
     ).forEach { Text("\u2022 $it", style = MaterialTheme.typography.bodyMedium) }
     Quiet(
-        "Turning it off stops all of it, on every device: Talon stops reading and sending, your ship stops " +
-            "reading your chats and email and writing your brief, and Orrery disappears from Talon. What Orrery " +
+        "Turning it off stops all of it, on every device: Groundwire stops reading and sending, your ship stops " +
+            "reading your chats and email and writing your brief, and Orrery disappears from Groundwire. What Orrery " +
             "already wrote down stays on your ship until you delete it there.",
     )
 }
@@ -601,7 +611,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
         }
     }
     if (noPublicUrl) Quiet(
-        "Your ship has no public URL, so Talon reaches Armillary through the address you signed in with. " +
+        "Your ship has no public URL, so Groundwire reaches Armillary through the address you signed in with. " +
             "Set Public URL in Armillary's Payments view so your other apps can reach it too.",
         error = true,
     )
@@ -987,7 +997,7 @@ internal fun checkoutPage(p: Payment?, row: Checkout?): String? {
 
 /** The AI section's first line. [canBuy] false names no top up (isArmillaryPurchaseSupported). */
 internal fun armillaryIntro(canBuy: Boolean): String =
-    "Talon's AI comes through Armillary on your ship: " + (if (canBuy) "you top up, your ship pays for what you use, " else "your ship pays for what you use, ") +
+    "Groundwire's AI comes through Armillary on your ship: " + (if (canBuy) "you top up, your ship pays for what you use, " else "your ship pays for what you use, ") +
         "and every feature below runs on the models your vendor picks. They keep nothing they read."
 
 /** The assistant's row, naming quick dictation only where there is any (isQuickDictationSupported). */
@@ -1173,7 +1183,7 @@ private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
         }
         // A phone leaves the reading to a computer that has been on it lately.
         if (isTouchPrimary && fed && yielding) {
-            Quiet("A computer running Talon has been reading in the last two hours, so this phone leaves the reading to it. Facts still go up from here.")
+            Quiet("A computer running Groundwire has been reading in the last two hours, so this phone leaves the reading to it. Facts still go up from here.")
         }
         if (io.nisfeb.talon.ui.isLocationSharingSupported) LocationRow()
         // Every device lists the shares and stops them; only a phone starts one.
@@ -1201,14 +1211,14 @@ private fun LocationRow() {
             // It said "Never the coordinates", but since orrery 69 each fix also
             // goes up to the metre, for the leave alert (2026-11-01).
             Quiet("When this phone moves a few hundred metres, it tells Orrery on your ship where you are, to the metre, for leave alerts and the shares you start. What Orrery learns about you keeps only the place, or the neighbourhood or town.")
-            if (on && !sharing.allowed()) Quiet("Location access for Talon is off, or not all the time, so nothing is sent.", error = true)
+            if (on && !sharing.allowed()) Quiet("Location access for Groundwire is off, or not all the time, so nothing is sent.", error = true)
             if (on && !sharing.names) Quiet("This phone cannot look place names up, so only places Orrery knows are sent.")
         }
         Switch(checked = on, onCheckedChange = { want ->
             note = null
             scope.launch {
                 if (!want) sharing.stop()
-                else if (!sharing.start()) note = "Talon needs location access all the time to hear a move with the app closed."
+                else if (!sharing.start()) note = "Groundwire needs location access all the time to hear a move with the app closed."
             }
         })
     }
@@ -1227,7 +1237,7 @@ private fun HealthRow() {
         Column(Modifier.weight(1f)) {
             Text("Send my health", style = MaterialTheme.typography.bodyMedium)
             Quiet("Each day's steps, workouts and sleep from Health Connect: totals and times, never heart rate or where. Your ship keeps them to itself.")
-            if (on && !background) Quiet("Health Connect lets Talon read only while it is open, so today goes up when you open Talon.")
+            if (on && !background) Quiet("Health Connect lets Groundwire read only while it is open, so today goes up when you open Groundwire.")
         }
         Switch(checked = on, onCheckedChange = { want ->
             note = null
@@ -1235,7 +1245,7 @@ private fun HealthRow() {
                 when {
                     !want -> sharing.stop()
                     !sharing.available() -> note = "Health Connect is not on this phone, or needs an update."
-                    !sharing.start() -> note = "Talon needs to read steps, exercise and sleep in Health Connect."
+                    !sharing.start() -> note = "Groundwire needs to read steps, exercise and sleep in Health Connect."
                 }
             }
         })

@@ -73,7 +73,7 @@ fun LocalShipSection(localShip: LocalShip) {
         Text("Local ship (beta)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
         Text(
-            "A comet that lives on this computer. Talon runs it while the app is open; " +
+            "A comet that lives on this computer. The app runs it while it is open; " +
                 "it is yours only as long as this computer keeps it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

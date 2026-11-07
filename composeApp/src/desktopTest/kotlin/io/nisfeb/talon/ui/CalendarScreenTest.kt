@@ -17,7 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -59,6 +59,8 @@ class CalendarScreenTest {
     @Volatile private var shipTakes: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     /** The ship's one-event read never answers: a busy ship, at its worst. */
     @Volatile private var holdDetail = false
+    /** The ship's one-event read waits for this: a busy ship, until it completes. */
+    @Volatile private var detailTakes: kotlinx.coroutines.CompletableDeferred<Unit>? = null
     /** The ship's calendar keeps reminders: its rows, its event read and its config say so. */
     @Volatile private var reminders = false
     /** The heads-up the ship holds, where it keeps reminders. */
@@ -87,6 +89,7 @@ class CalendarScreenTest {
         if (down) return@MockEngine respond(io.nisfeb.talon.mail.NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))
         if (!path.startsWith("/grubbery/api/poke/")) reads += path
         if (holdDetail && path.endsWith("/event.json")) kotlinx.coroutines.awaitCancellation()
+        if (path.endsWith("/event.json")) detailTakes?.await()
         when {
             path.startsWith("/grubbery/api/poke/") && refuse -> { shipTakes?.await(); respond("", HttpStatusCode.BadRequest) }
             path.startsWith("/grubbery/api/poke/") -> {
@@ -445,6 +448,32 @@ class CalendarScreenTest {
     private fun wallMs(d: java.time.LocalDate, h: Int) = d.atTime(h, 0).toInstant(java.time.ZoneOffset.UTC).toEpochMilli()
 
     // "I've moved Magnus fencing to 5pm on the calendar twice and it still doesn't save."
+    // A busy ship's read of an event opened the editor over whatever was
+    // opened while it was on its way: Edit on the Dentist, then + and a
+    // name typed, and the Dentist's read landing made the editor the
+    // Dentist's, so Save wrote the new event over it.
+    @Test
+    fun `a slow event read does not take over an editor opened since`() {
+        val takes = kotlinx.coroutines.CompletableDeferred<Unit>()
+        detailTakes = takes
+        calendar {
+            open("Dentist")
+            onNodeWithText("Edit").performClick()
+            waitForIdle()
+            newEvent()
+            field("Name").performTextInput("Lunch with Bus")
+            takes.complete(Unit)
+            // The Dentist's read has landed and been put aside.
+            waitUntil(timeoutMillis = 5_000) { reads.count { it.endsWith("/event.json") } >= 1 }
+            Thread.sleep(300)
+            waitForIdle()
+            save()
+            val added = wrote("add-event")
+            assertTrue("Lunch with Bus" in added, added)
+            assertTrue(writes.none { "edit-event" in it.second }, "the new event was written over the Dentist: $writes")
+        }
+    }
+
     @Test
     fun `a series moved to five, every occurrence, moves on the ship`() = calendar {
         moveLesson(scope = null, hour = "17")
@@ -810,7 +839,7 @@ class CalendarScreenTest {
             runBlocking { chat.stopAndJoinForTest() }
             scope.cancel()
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

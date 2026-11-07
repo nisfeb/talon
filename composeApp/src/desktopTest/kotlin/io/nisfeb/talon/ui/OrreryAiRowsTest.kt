@@ -16,7 +16,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -151,7 +151,7 @@ class OrreryAiRowsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -187,7 +187,7 @@ class OrreryAiRowsTest {
     fun `a check that failed is said under the reading row, and that it is asked again`() {
         probe = HttpStatusCode.BadGateway
         rows(answered = false) { _, orrery ->
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Talon asks again by itself.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Groundwire asks again by itself.") }
             assertTrue(shows("Checking your ship for Orrery."))
             assertFalse(shows("Bad Gateway"), "never the proxy's page")
             assertEquals(OrreryAvailability.UNKNOWN, orrery.availability.value)

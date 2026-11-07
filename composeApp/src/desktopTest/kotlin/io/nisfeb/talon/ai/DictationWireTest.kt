@@ -119,7 +119,7 @@ class DictationWireTest {
             assertTrue(OrreryRepo.attached() !== repo)
         } finally {
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

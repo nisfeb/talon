@@ -68,6 +68,10 @@ fun SyncStatusIcon(repo: TlonChatRepo, ship: String, onSignIn: (() -> Unit)?) {
     val headline = syncHeadline(status, handle, nowMs())
     var open by remember { mutableStateOf(false) }
     val problem = status is SyncStatus.Unreachable || status is SyncStatus.SignedOut
+    // Nothing while all is well: a cloud with a tick on every screen said
+    // nothing anyone needed. It shows while the ship is not heard from,
+    // the login lapsed, or messages wait to go out.
+    if (status is SyncStatus.Connected && !status.syncing && status.pending == 0) return
     Box {
         IconButton(tip = headline, onClick = { open = true }) {
             Icon(

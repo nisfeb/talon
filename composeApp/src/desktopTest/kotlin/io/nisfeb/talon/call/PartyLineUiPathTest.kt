@@ -118,8 +118,8 @@ class PartyLineUiPathTest {
             partyB.leave()
             ctlA.stop()
             ctlB.stop()
-            runCatching { dbA.close() }
-            runCatching { dbB.close() }
+            runCatching { io.nisfeb.talon.urbit.closeAfter(dbA, repoA) }
+            runCatching { io.nisfeb.talon.urbit.closeAfter(dbB, repoB) }
         }
     }
 }

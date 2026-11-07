@@ -73,7 +73,7 @@ class SyncStateMigrationTest {
             db.marks().put(MarkEntity(MarkDao.POSTS_READ, 5))
             db.marks().put(MarkEntity(MarkDao.POSTS_READ, 7))
             assertEquals(7, db.marks().get(MarkDao.POSTS_READ))
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         } finally {
             dir.deleteRecursively()
         }

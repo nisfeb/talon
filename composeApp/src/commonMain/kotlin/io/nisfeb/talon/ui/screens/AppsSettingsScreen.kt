@@ -76,6 +76,8 @@ fun AppsSettingsScreen(
     latticeKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
     /** A new key in place of one the owner revoked. Null hides the offer. */
     onNewLatticeKey: (suspend () -> Result<Unit>)? = null,
+    /** Asks lattice whether the key reads skills ([io.nisfeb.talon.ai.LatticeKeys.skillsReadable]); a refusal is shown beside the key. */
+    latticeSkillsReadable: (suspend () -> Boolean?)? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -97,6 +99,10 @@ fun AppsSettingsScreen(
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     val memoryKey = latticeKey?.collectAsState(initial = null)?.value
+    val skillsRefused by io.nisfeb.talon.ai.LatticeKeys.SKILLS_REFUSED.collectAsState()
+    LaunchedEffect(memoryKey?.token, memoryKey?.revoked, latticeSkillsReadable) {
+        if (memoryKey != null && !memoryKey.revoked) latticeSkillsReadable?.let { runSuspendCatching { it() } }
+    }
     var groups by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
@@ -247,11 +253,19 @@ fun AppsSettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Assistant memory", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (key.revoked) "Lattice refused Talon's key: it was revoked. The assistants have no memory until there is a new one."
+                            if (key.revoked) "Lattice refused this app's key: it was revoked. The assistants have no memory until there is a new one."
                             else "The assistants remember in Lattice with this install's own key.",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (key.revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // A key minted before lattice had skills reads none until the owner grants it.
+                        if (!key.revoked && key.token in skillsRefused) {
+                            Text(
+                                "This key can't read skills. Grant it skills read in Lattice, Settings, Agent keys, and the assistants get your skills.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     val renew = onNewLatticeKey
                     if (busy == "memory") {
@@ -286,7 +300,7 @@ fun AppsSettingsScreen(
             if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (orreryOn) "Talon is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    if (orreryOn) "Groundwire is feeding Orrery. Its settings are under Assistant." else "Feed Orrery from Settings, under Assistant.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

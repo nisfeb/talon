@@ -18,7 +18,7 @@ actual fun Modifier.fileDropTarget(
  *
  * Only ever called from an explicit user action (the composer's paste
  * button), never speculatively: touching `image` counts as a read and
- * iOS shows the "Talon pasted from …" banner for it. [clipboardHasImage]
+ * iOS shows the "Groundwire pasted from …" banner for it. [clipboardHasImage]
  * is the cheap, banner-free check used to decide whether to *offer*
  * the action.
  */

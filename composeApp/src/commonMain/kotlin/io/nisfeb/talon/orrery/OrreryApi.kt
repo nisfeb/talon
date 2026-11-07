@@ -250,7 +250,7 @@ class OrreryApi(
             .getOrElse { e ->
                 val refused = e as? OrreryError.Refused
                 return Instructed(note = when (refused?.status) {
-                    503 -> "Orrery has no model key on your ship, so nothing read that. Set one for its generator under Orrery in Settings."
+                    503 -> "Orrery has no model key on your ship, so nothing read that. Set one for its generator under Assistant in Settings."
                     429 -> "Orrery has made all of today's model calls. Try again tomorrow."
                     502 -> "Orrery's model did not answer: ${refused.reason}"
                     else -> refused?.reason ?: e.message ?: "The ship did not answer."

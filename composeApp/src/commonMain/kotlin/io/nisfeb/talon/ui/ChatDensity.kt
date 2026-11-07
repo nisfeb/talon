@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import okio.Path.Companion.toPath
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ProvidedValue
 import androidx.compose.runtime.collectAsState
@@ -104,8 +105,17 @@ fun chatDensityLocals(uiSettings: UiSettings): Array<ProvidedValue<*>> {
     val chat = ChatDensity.forMode(mode)
     val base = LocalDensity.current
     val scaled = remember(base, chat, userFontScale) { scaledDensity(base, chat, userFontScale, isWholeWindowZoom) }
-    return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled)
+    // How conversations draw their messages, for the screens that have no
+    // settings of their own to read it from (a thread).
+    val bubbles by uiSettings.chatBubbles.collectAsState()
+    val image by uiSettings.chatBackgroundImage.collectAsState()
+    val look = remember(bubbles, image) { chatLookOf(bubbles, image) }
+    return arrayOf(LocalChatDensity provides chat, LocalDensity provides scaled, LocalChatLook provides look)
 }
+
+/** The look the two settings make: a picture only behind bubbles. Rows draw on the page. */
+fun chatLookOf(bubbles: Boolean, image: String): ChatLook =
+    ChatLook(bubbles, image.takeIf { bubbles && it.isNotEmpty() }?.toPath())
 
 /**
  * [base] with the preset's text scale and the user's own [userScale].

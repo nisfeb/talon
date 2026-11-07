@@ -10,7 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -66,7 +66,7 @@ class SettingsRelayTest {
             }
         }
         onAllNodesWithText("Notifications")[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Push relay") }
+        waitUntil(timeoutMillis = 5_000) { shows("Background delivery") }
         block()
     }
 
@@ -152,10 +152,10 @@ class SettingsRelayTest {
         panel(shipPoke = { pokes += it.toString() }) {
             assertTrue(shows("Notifications come from ~zod"))
             val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
-            val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
+            val relay = onNodeWithText("Background delivery").fetchSemanticsNode().boundsInRoot.top
             assertTrue(row < relay, "above the relay panel, not inside it")
             onNodeWithText("Use the relay").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Talon relay") }
+            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }
             assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
             assertTrue(shows("Use my ship"))
         }

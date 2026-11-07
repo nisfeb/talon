@@ -81,9 +81,13 @@ internal fun PaneDragHandle(
             .draggable(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { delta -> onDragDelta(delta) },
-            )
-            .background(MaterialTheme.colorScheme.outlineVariant),
-    ) { /* visual only */ }
+            ),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        // A hairline, centred in a wider grab area: the 6dp grey bar
+        // read as a heavy rule between the list and the chat.
+        Box(Modifier.fillMaxHeight().width(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)))
+    }
 }
 
 /** Material3 expanded-window threshold. Tablets in landscape +

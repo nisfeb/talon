@@ -11,7 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -148,7 +148,7 @@ class DisappearingMessagesTest {
             }
         } finally {
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -389,7 +389,7 @@ class DisappearingMessagesTest {
             assertEquals(setOf(general, pics), hooks.crons.keys)
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -412,7 +412,7 @@ class DisappearingMessagesTest {
             check(hooks, ship, repo.createChannel(flag, "chat", "Fresh"))
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -449,7 +449,7 @@ class DisappearingMessagesTest {
             assertTrue(hookPokes(ship).none { "\"add\"" in it || "\"edit\"" in it }, "the hook was already there")
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -528,7 +528,7 @@ class DisappearingMessagesTest {
             }
         } finally {
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

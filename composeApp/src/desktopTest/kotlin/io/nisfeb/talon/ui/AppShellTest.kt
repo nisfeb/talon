@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -21,7 +24,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.dp
@@ -90,6 +93,9 @@ class AppShellTest {
         // test's opening frame ("pending composition has not been
         // applied"), only in the full suite. HomeListTest does the same.
         io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
+        // And each chat's rows, kept the same way: another test's "hello
+        // there" under this one's id opened this test's chat.
+        io.nisfeb.talon.ui.screens.forgetChatRowsSnapshot()
         // Hosts' answers for references outside this ship's groups are kept a session: another test's are not this one's.
         io.nisfeb.talon.ui.OutsideCites.clear()
         // A ship with nothing yet: an empty feed and no invites, which is
@@ -158,7 +164,7 @@ class AppShellTest {
     fun `every full-screen section opens from the rail and its Back returns to the list`() = app {
         for ((item, marker) in listOf(
             "My profile" to "Edit profile",
-            "Administration" to "Administration",
+            "Group Moderation" to "Group Moderation",
             "Invites" to "No pending invites",
             "Settings" to "Appearance",
         )) {
@@ -285,7 +291,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
             // Settings' Orrery page: the first "Orrery", in its list of pages
             // (Appearance lists the rail's items, Orrery among them).
-            onAllNodesWithText("Orrery")[0].performClick()
+            onAllNodesWithText("Assistant")[0].performClick()
             waitUntil(timeoutMillis = 10_000) { showing("Sharing where you are with") }
             // A ship with no chat here asks in Settings.
             assertTrue(showing("~nec wants to share where they are"), "the ask, where there is no chat for it")
@@ -389,8 +395,12 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("hello there") }
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
-        onNode(hasSetTextAction()).performClick() // typing in the chat
-        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Escape) }
+        // The chat's composer: the list's search bar is a text field too.
+        // The chat's composer, by what it is, not where it sits: the
+        // list's search bar is a text field too.
+        val composer = hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")
+        onNode(composer).performClick() // typing in the chat
+        onNode(composer).performKeyInput { pressKey(Key.Escape) }
         waitUntil(timeoutMillis = 5_000) { showing("Select a chat to begin") }
     }
 
@@ -545,16 +555,18 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("hello there") }
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
-        onNode(hasSetTextAction()).performClick()
+        onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performClick()
         Thread.sleep(300)
-        onNode(hasSetTextAction()).assertIsFocused()
+        onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).assertIsFocused()
     }
 
     @Test
     fun `Home, Mail and Calendar take the whole area, and each says what the ship lacks`() = app {
         onNodeWithContentDescription("Home").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
-        assertTrue(showing("Install the calendar") && !present("New message"), "the home page, not the list")
+        // "Set a location" is this device's and shows at once; the calendar's
+        // offer waits for the ship's 404, a moment later on a slow runner.
+        waitUntil(timeoutMillis = 5_000) { showing("Set a location") && showing("Install the calendar") }
+        assertTrue(!present("New message"), "the home page, not the list")
         onNodeWithContentDescription("Mail").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
         onNodeWithContentDescription("Calendar").performClick()
@@ -587,7 +599,9 @@ class AppShellTest {
     @Test
     fun `with no rail the More menu opens Home`() = app(width = 600.dp) {
         onNodeWithContentDescription("More").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        // An entry only the open menu has: "Sign out of" is in the ship
+        // switcher, which is composed while closed, so it proved nothing.
+        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
         assertTrue(!showing("Orrery"), "Orrery is off")
         onNodeWithText("Home").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
@@ -598,7 +612,9 @@ class AppShellTest {
     @Test
     fun `with the rail the More menu has no second Home`() = app {
         onNodeWithContentDescription("More").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
+        // An entry only the open menu has: "Sign out of" is in the ship
+        // switcher, which is composed while closed, so it proved nothing.
+        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
         assertTrue(onAllNodesWithText("Home").fetchSemanticsNodes().isEmpty())
     }
 
@@ -619,7 +635,7 @@ class AppShellTest {
         onNodeWithText("Reply in thread").performClick()
         // The parent, in the chat and again at the head of its thread.
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("shall we meet").fetchSemanticsNodes().size >= 2 }
-        assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
+        assertTrue(onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size >= 2, "the chat's composer and the thread's, side by side")
     }
 
     // "Dropdown instead of panes": in a window too narrow for list, chat
@@ -644,10 +660,10 @@ class AppShellTest {
         val threadOpen = { onAllNodesWithText("Thread").fetchSemanticsNodes().isNotEmpty() }
         waitUntil(timeoutMillis = 5_000) { threadOpen() }
         assertTrue(showing("DMs"), "the list stays")
-        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the thread's composer alone, over the chat")
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size, "the thread's composer alone, over the chat")
         onNodeWithContentDescription("Close").performClick()
         waitUntil(timeoutMillis = 5_000) { !threadOpen() }
-        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size, "the chat's composer is back")
+        kotlin.test.assertEquals(1, onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size, "the chat's composer is back")
         assertTrue(present("Message actions"), "the chat is back")
     }
 
@@ -1247,6 +1263,7 @@ class AppShellTest {
     @Test
     fun `Message on a contact just added leaves Contacts for the conversation`() = app { ship ->
         onNodeWithContentDescription("More").performClick()
+        onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
         onNodeWithText("~patp, or a word name").performTextInput("~bus")
@@ -1325,6 +1342,46 @@ class AppShellTest {
         }
     }
 
+    // sneagan, 2026-11-06: the background picture is Home's as well as the
+    // chats'. Set here in rows, where chats draw on the page, it is still
+    // behind Home, out to the window's edge.
+    @Test
+    fun `the background picture is behind Home, in rows as well`() {
+        val f = java.io.File(kotlin.io.path.createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        val ui = InMemoryUiSettings().apply { setChatBubbles(false); setChatBackgroundImage(f.absolutePath) }
+        app(ui = ui, seed = busSaid) {
+            onNodeWithContentDescription("Home").performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
+            // The window's own root: the rail button's tip is a second one.
+            val window = onAllNodes(isRoot()).onFirst()
+            val root = window.fetchSemanticsNode().boundsInRoot
+            fun edge() = window.captureToImage().toPixelMap()[(root.right - 3).toInt(), (root.height / 2).toInt()]
+            waitUntil(timeoutMillis = 5_000) { edge() == androidx.compose.ui.graphics.Color.Red }
+        }
+    }
+
+    // sneagan, 2026-11-06: groups as cards, set in settings, on the app's
+    // own list; a tap on a card opens its channel.
+    @Test
+    fun `with group cards on, a group is a card on the list, and a tap opens its channel`() {
+        val ui = InMemoryUiSettings().apply { setGroupCards(true) }
+        app(ui = ui, seed = {
+            groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null)))
+            groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/general", "~bus/crew", title = "general")))
+            messages().upsert(MessageEntity("chat/~bus/general", "170141184506", "~bus", 1_000, """[{"inline":["lunch plans"]}]""", "/chat"))
+        }) {
+            home()
+            onNodeWithText("Groups").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("~bus: lunch plans") }
+            assertTrue(!showing("1 channel"), "a card, not the head over its channel")
+            onNodeWithText("The Crew").performClick()
+            waitUntil(timeoutMillis = 10_000) { present("Message actions") }
+        }
+    }
+
     // A chat opened from a tab that shows one beside it stays on that tab.
     @Test
     fun `a chat asked for from Bookmarks opens beside the bookmarks`() {
@@ -1345,12 +1402,12 @@ class AppShellTest {
     fun `Escape leaves the login QR for the Settings it was opened from`() = app {
         onNodeWithContentDescription("Settings").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
-        onNodeWithText("Account").performClick()
+        onNodeWithText("Urbit").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Login QR generator") }
         onNodeWithText("Login QR generator").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Generate login QR") }
+        waitUntil(timeoutMillis = 5_000) { showing("Generate Login QR") }
         press(Key.Escape)
-        waitUntil(timeoutMillis = 5_000) { !showing("Generate login QR") }
+        waitUntil(timeoutMillis = 5_000) { !showing("Generate Login QR") }
         assertTrue(showing("Appearance") && !present("Chats"), "Settings, where it was opened")
         press(Key.Escape)
         home()
@@ -1376,6 +1433,7 @@ class AppShellTest {
 
     private fun ComposeUiTest.addOnContacts(who: String) {
         onNodeWithContentDescription("More").performClick()
+        onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
         onNodeWithText("~patp, or a word name").performTextInput(who)
@@ -1454,9 +1512,10 @@ class AppShellTest {
         val store = twoShips()
         val relay = io.nisfeb.talon.notify.InMemoryRelaySettings().apply { setDeviceIdFor("~zod", "dev-zod") }
         app(sessions = { store }, relay = relay) { ship ->
-            onAllNodesWithContentDescription("More").onFirst().performClick()
-            waitUntil(timeoutMillis = 5_000) { showing("Sign out") }
-            onNodeWithText("Sign out").performClick()
+            // Sign out lives with the ships, behind the switcher's mark.
+            onAllNodesWithContentDescription("Switch ship").onFirst().performClick()
+            waitUntil(timeoutMillis = 5_000) { showing("Sign out of") }
+            onNodeWithText("Sign out of", substring = true).performClick()
             waitUntil(timeoutMillis = 10_000) { store.activeShip() == "~bus" && present("New message") }
             assertTrue(!showing("Connect"), "the other ship, not the login form")
             assertEquals(listOf("~bus"), store.all().map { it.ship })
@@ -1902,22 +1961,31 @@ class AppShellTest {
 
     private val quickSync = io.nisfeb.talon.ui.SyncThresholds(heardRecentlyMs = 3_000, connectGraceMs = 2_000)
 
+    /** The header's sync mark, by any of its headlines. It goes only when
+     *  the ship is connected, synced and nothing waits to go out, so its
+     *  absence is that state, not merely the absence of a problem. */
+    private fun ComposeUiTest.syncMarkShown() =
+        listOf("Signed out of ~zod", "Connecting to ~zod", "Syncing with ~zod", "Sending ", "Can't reach ~zod")
+            .any { onAllNodesWithContentDescription(it, substring = true).fetchSemanticsNodes().isNotEmpty() }
+
     @Test
-    fun `the header says the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+    fun `the header says nothing while the ship is heard from, and when it is not, since when, with Try now`() = app(sync = quickSync, setup = { heartbeat(500) }) { ship ->
+        home()
+        waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
         Thread.sleep(4_000)
         waitForIdle()
-        assertTrue(present("Connected to ~zod") && !showing("Can't reach"), "the heartbeat keeps it connected on a quiet ship")
+        assertTrue(!showing("Can't reach") && !syncMarkShown(), "the heartbeat keeps it connected on a quiet ship, and all well shows no mark")
         // The network goes: the stream drops and every new one is refused.
         ship.refuseStream = true
         kotlinx.coroutines.runBlocking { ship.endStreams() }
         waitUntil(timeoutMillis = 15_000) { showing("Can't reach ~zod since") }
-        assertTrue(showing("Talon keeps trying."))
+        assertTrue(showing("Groundwire keeps trying."))
         assertTrue(onAllNodesWithContentDescription("Can't reach ~zod since", substring = true).fetchSemanticsNodes().isNotEmpty(), "the mark says it too")
         // Back, and asked at once.
         ship.refuseStream = false
         onNodeWithText("Try now").performClick()
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") && !showing("Can't reach") }
+        // Back to connected and synced, not only out of the banner.
+        waitUntil(timeoutMillis = 10_000) { !showing("Can't reach") && !syncMarkShown() }
     }
 
     // The reporter's case, as far as the code shows one: the ship refused
@@ -1927,7 +1995,9 @@ class AppShellTest {
     fun `a lapsed login put off with Cancel is said, and Sign in brings the form back`() {
         val store = twoShips()
         app(sessions = { store }, sync = quickSync, setup = { heartbeat(500) }) { ship ->
-            waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
+            home()
+            // Connected first: the reporter's login lapsed after it was.
+            waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
             ship.signedOut = true
             kotlinx.coroutines.runBlocking { ship.endStreams() }
             waitUntil(timeoutMillis = 20_000) { showing("You were signed out of ~zod. Sign in again") }
@@ -1941,11 +2011,12 @@ class AppShellTest {
     }
 
     @Test
-    fun `while all is well there is no banner, only the mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
-        waitUntil(timeoutMillis = 10_000) { present("Connected to ~zod") }
-        onNodeWithContentDescription("Connected to ~zod").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Heard from it") }
-        assertTrue(!showing("Can't reach") && !showing("Signed out of"))
+    fun `while all is well there is no banner and no mark`() = app(sync = quickSync, setup = { heartbeat(500) }) {
+        home()
+        waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
+        Thread.sleep(4_000)
+        waitForIdle()
+        assertTrue(!showing("Can't reach") && !showing("Signed out of") && !syncMarkShown())
     }
 
     // ---- A 1:1 call's meeting view, cameras and share: what party lines had (sneagan, 2026-10-29) ----
@@ -2208,7 +2279,7 @@ class AppShellTest {
         onNodeWithText(item).performClick()
     }
 
-    private fun ComposeUiTest.composers() = onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size
+    private fun ComposeUiTest.composers() = onAllNodes(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).fetchSemanticsNodes().size
 
     @Test
     fun `a call's meeting shows its DM beside the call, and what is written there goes`() {
@@ -2220,7 +2291,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { busChatShown() }
             assertTrue(present("Hang up") && present("Minimize the call"), "still in the meeting")
             assertEquals(1, composers(), "the chat is drawn once, beside the meeting, not again under it")
-            onNode(hasSetTextAction()).performTextInput("see you there")
+            onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performTextInput("see you there")
             onNodeWithContentDescription("Send").performClick()
             waitUntil(timeoutMillis = 10_000) { chatSaid(ship, "see you there") }
             // Out of the meeting, the chat is where it was, with what was said.
@@ -2243,7 +2314,7 @@ class AppShellTest {
             waitUntil(timeoutMillis = 5_000) { busChatShown() }
             // Long enough that a slow runner still hides the pane first.
             ship.holdPoke = 5_000
-            onNode(hasSetTextAction()).performTextInput("held a moment")
+            onNode(hasSetTextAction() and !androidx.compose.ui.test.hasContentDescription("Search")).performTextInput("held a moment")
             onNodeWithContentDescription("Send").performClick()
             meetingOption("Hide chat")
             waitForIdle()
@@ -2334,10 +2405,18 @@ class AppShellTest {
 
     @Test
     fun `a ship without Groups has it installed on the way in, and its chats are read once it is there`() = quickDefaultApps {
+        val up = java.util.concurrent.atomic.AtomicBoolean(false)
         app(defaultApps = true, setup = {
             answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") """[{"name":"lattice","synced":true}]""" else null }
-            // %groups answers once the install has come.
-            answerScry = { p -> if (p == "groups/v2/groups" && pokesTo("hood").isNotEmpty()) "{}" else null }
+            // %groups, and the chats it holds, once it is up.
+            answerScry = { p ->
+                if (!up.get()) null
+                else when {
+                    p == "groups/v2/groups" -> "{}"
+                    "init-posts" in p -> """{"chat":{},"channels":{}}"""
+                    else -> null
+                }
+            }
         }) { ship ->
             waitUntil(timeoutMillis = 20_000) { ship.pokesTo("hood").isNotEmpty() }
             val install = ship.pokesTo("hood").first()
@@ -2346,9 +2425,15 @@ class AppShellTest {
                 listOf("groups", "~nisfeb", "groups"),
                 listOf("local", "ship", "desk").map { install.json.jsonObject[it]!!.jsonPrimitive.content },
             )
-            val streams = ship.streamsOpened.size
-            // The chats it had nothing to read from before: a new channel reads them.
-            waitUntil(timeoutMillis = 20_000) { ship.streamsOpened.size > streams }
+            // The first pass had nothing to read the chats from.
+            waitUntil(timeoutMillis = 20_000) { showing("Couldn't load your chats") }
+            up.set(true)
+            // Groups is up: the chats are read, not only the channel resumed.
+            // Resumed, the list said it could not load them until a restart.
+            // The banner goes as the next pass starts, a beat before the list
+            // is read: the list's own words are the sign.
+            waitUntil(timeoutMillis = 20_000) { showing("No direct messages yet") || showing("No groups yet") }
+            assertTrue(!showing("Couldn't load your chats"), "the list, read")
         }
     }
 }

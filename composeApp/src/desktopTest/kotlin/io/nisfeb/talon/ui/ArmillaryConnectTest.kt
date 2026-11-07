@@ -13,7 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -174,7 +174,7 @@ class ArmillaryConnectTest {
         val ai = settings()
         show(ai, repo(ai))
         onNodeWithText("Checking your ship.").assertExists()
-        onNodeWithText("Your ship did not answer. Talon asks again by itself.").assertExists()
+        onNodeWithText("Your ship did not answer. Groundwire asks again by itself.").assertExists()
         assertFalse(shows("Bad Gateway"), "never the proxy's page")
     }
 

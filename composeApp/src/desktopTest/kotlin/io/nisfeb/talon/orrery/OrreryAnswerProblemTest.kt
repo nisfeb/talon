@@ -77,7 +77,7 @@ class OrreryAnswerProblemTest {
             assertNull(repo.error.value, "its own failure ($failed) is the probe's to clear")
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

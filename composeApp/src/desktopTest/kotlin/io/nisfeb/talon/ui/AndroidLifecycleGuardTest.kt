@@ -95,6 +95,47 @@ class AndroidLifecycleGuardTest {
         assertTrue("LeaveAlarm.schedule(app)" in gate && "LeaveAlarm.stop(app)" in gate, gate)
     }
 
+    // Implicit state machines, 2026-11-07: the observer kept the first
+    // ship's repos, so after a switch the new ones polled in the background.
+    @Test
+    fun `the foreground observer follows each ship's repos`() {
+        assertTrue("DisposableEffect(mailRepo, calendarRepo, orreryRepo) {\n        val lifecycle = ProcessLifecycleOwner.get().lifecycle" in talonApp)
+        assertFalse("DisposableEffect(Unit) {\n        val lifecycle = ProcessLifecycleOwner.get().lifecycle" in talonApp)
+    }
+
+    // Orrery turned off on another device: the workers sent on until the app was opened.
+    @Test
+    fun `Orrery off stops location and health sends from the background`() {
+        for ((file, send, stop) in listOf(
+            Triple("orrery/LocationWatch.kt", "sendLocation(", "LocationWatch.set(applicationContext, false)"),
+            Triple("orrery/HealthWatch.kt", "sendHealth(", "HealthWatch.set(app, false)"),
+        )) {
+            val work = read("$android/$file").substringAfter("override suspend fun doWork(): Result {")
+            val gate = work.indexOf("if (!app.aiSettings.state.value.orreryOn()) {")
+            val sent = work.indexOf(send)
+            assertTrue(gate in 0 until sent, "$file sends before it asks whether Orrery is on")
+            assertTrue(stop in work.substring(gate, sent), "$file does not stop itself when Orrery is off")
+        }
+    }
+
+    // A ring's notification for another ship switched without the
+    // drawer's reset: the old ship's chat stayed open on the new one.
+    @Test
+    fun `every ship switch puts the old ship's chat down before the deep link opens its own`() {
+        val reset = talonApp.indexOf("LaunchedEffect(loggedInShip) {\n        if (loggedInShip != navShip) {\n            if (navShip != null) closeSections()")
+        val deepLink = talonApp.indexOf("LaunchedEffect(\n        initialForShip,")
+        assertTrue(reset >= 0, "no reset on a ship switch")
+        assertTrue(reset < deepLink, "the reset runs after the deep link, and wipes what it opened")
+        val close = talonApp.substringAfter("fun closeSections() {").substringBefore("\n    }\n")
+        assertTrue("openWhom = null" in close && "openThread = null" in close && "sections.closeAll()" in close, close)
+    }
+
+    // The Assistant is drawn over Settings on Android: Top up opened it out of sight.
+    @Test
+    fun `Top up from the Assistant puts it down so Settings shows`() {
+        assertTrue("onTopUp = { assistantOpen = false; openTopUp() }" in talonApp)
+    }
+
     // B3-8
     @Test
     fun `an update starts the stream as a reboot does`() {
@@ -191,7 +232,7 @@ class AndroidLifecycleGuardTest {
         assertTrue("actual val needsPushForBackgroundRing: Boolean = false" in read("composeApp/src/iosMain/kotlin/io/nisfeb/talon/ui/Capabilities.ios.kt"))
         val settings = read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/ui/screens/SettingsScreen.kt")
         val tab = settings.substringAfter("if (safeTab == SettingsTab.Notifications) {").substringBefore("ShipNotificationsRow(relayConfig)")
-        assertTrue("io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush" in tab && "Without push, calls ring only while Talon is open." in tab, tab)
+        assertTrue("io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush" in tab && "Without push, calls ring only while Groundwire is open." in tab, tab)
         // Push alone decides it: mail keeps the process, not a ring.
         assertTrue("keepAlive = noPush || mailAvailabilityState.value == io.nisfeb.talon.mail.MailAvailability.PRESENT" in talonApp)
         val noPush = talonApp.substringAfter("noPush = io.nisfeb.talon.notify.keepAliveNeeded(").substringBefore(")\n")

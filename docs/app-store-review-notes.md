@@ -19,7 +19,7 @@ ENCRYPTION
 Standard HTTPS/TLS only. ITSAppUsesNonExemptEncryption is false.
 
 PUSH NOTIFICATIONS
-iOS needs a server to deliver notifications, so the developer runs a push relay (a user may run their own). A ship that supports it sends its own notifications through the relay's APNs gateway, which keeps only the push token and badge count. Otherwise, when notifications are turned on, Talon gives the relay the ship's address and sign-in code once. The relay keeps only the session cookie it gets for them (encrypted) and watches the ship. Each notification (sender and a one-line preview) is passed to APNs, not stored. Unregister (Settings, Notification health) deletes the registration and the session.
+iOS needs a server to deliver notifications, so the developer runs a push relay (a user may run their own). A ship that supports it sends its own notifications through the relay's APNs gateway, which keeps only the push token and badge count. Otherwise, when notifications are turned on, Talon gives the relay the ship's address and sign-in code once. The relay keeps only the session cookie it gets for them (encrypted) and watches the ship. Each notification (sender and a one-line preview) is passed to APNs, not stored. Unregister (Settings, Notifications, Background delivery) deletes the registration and the session.
 
 OPTIONAL AI FEATURES
 Inert until the user's ship has Armillary credit. Paying turns the features on, and the top-up sheet says what they send. Each has its own switch to turn it off. Every call asks the model provider for endpoints that keep nothing (zero data retention).

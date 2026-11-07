@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -121,7 +122,7 @@ fun NewDmScreen(
                 is io.nisfeb.talon.urbit.TalonLink.InviteMe ->
                     if (onInviteShip != null) onInviteShip(link.ship)
                     else scanProblem = "That is an invite code, and invites aren't available here."
-                else -> if (raw != null) scanProblem = "That is not a Talon group or invite code."
+                else -> if (raw != null) scanProblem = "That is not a Groundwire group or invite code."
             }
         }
     } else null
@@ -172,7 +173,10 @@ fun NewDmScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("~ship, a word name, or a group reference") },
+                placeholder = { Text("Name, ~ship or group code", maxLines = 1) },
+                prefix = { Text("To: ", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                textStyle = MaterialTheme.typography.bodyMedium,
                 // Not single-line: a comet's @p is fifty-six characters
                 // and its full name is twelve words, and either one
                 // scrolled off the end of a single line with no way to
@@ -188,10 +192,9 @@ fun NewDmScreen(
                     if (typedGroup != null) pendingJoinFlag = typedGroup else onPickPeer(asPatp)
                 },
             )
-            TextButton(
-                onClick = { onPickPeer(asPatp) },
-                enabled = isValidPatp,
-            ) { Text("Start") }
+            // Only there once what is typed names someone: a greyed Start
+            // sat beside every empty box.
+            if (isValidPatp) io.nisfeb.talon.ui.Button(onClick = { onPickPeer(asPatp) }) { Text("Start") }
         }
         resolveHint?.let {
             Text(
@@ -254,41 +257,56 @@ fun NewDmScreen(
             }
         }
         addProblem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
-        HorizontalDivider()
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
+            if (filtered.isNotEmpty()) item(key = "__head") {
+                Text(
+                    if (query.isBlank()) "Suggested" else "People",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                )
+            }
+            // Every row the same shape: a name in the first line, its
+            // handle under it only where the name is a nickname. Rows
+            // without one were half the height of rows with one.
             items(items = filtered, key = { it.ship }) { c ->
+                val handle = io.nisfeb.talon.ui.shipHandle(c.ship)
+                val name = c.nickname?.takeIf { it.isNotBlank() }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 60.dp)
                         .clickable { onPickPeer(c.ship) }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Avatar(
-                        label = c.nickname ?: c.ship,
+                        label = name ?: c.ship,
                         url = c.avatarUrl,
-                        size = 36.dp,
+                        size = 40.dp,
                     )
                     Column(Modifier.weight(1f)) {
-                        if (c.nickname != null) {
+                        Text(
+                            name ?: handle,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        if (name != null) {
                             Text(
-                                c.nickname,
-                                style = MaterialTheme.typography.bodyMedium
-                                    .copy(fontWeight = FontWeight.SemiBold),
+                                handle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                         }
-                        Text(
-                            io.nisfeb.talon.ui.shipHandle(c.ship),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
-                HorizontalDivider()
             }
             item { Spacer(Modifier.height(16.dp)) }
         }

@@ -69,6 +69,22 @@ class AndroidUiSettings(
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
 
+    private val _chatBubbles = MutableStateFlow(prefs.getBoolean(KEY_CHAT_BUBBLES, true))
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+
+    private val _groupCards = MutableStateFlow(prefs.getBoolean(KEY_GROUP_CARDS, false))
+    override val groupCards: StateFlow<Boolean> = _groupCards.asStateFlow()
+
+    private val _chatBackgroundImage = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND_IMAGE, "") ?: "")
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+
+    // One search a line: the search field is a single line, so a line
+    // break is never in one.
+    private val _recentSearches = MutableStateFlow(
+        prefs.getString(KEY_RECENT_SEARCHES, "").orEmpty().split('\n').filter { it.isNotBlank() },
+    )
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+
     private val _accentSettings = MutableStateFlow(loadAccent())
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
@@ -264,6 +280,30 @@ class AndroidUiSettings(
         _hideComposerButtons.value = hidden
     }
 
+    override fun setChatBubbles(on: Boolean) {
+        if (_chatBubbles.value == on) return
+        prefs.edit().putBoolean(KEY_CHAT_BUBBLES, on).apply()
+        _chatBubbles.value = on
+    }
+
+    override fun setGroupCards(on: Boolean) {
+        if (_groupCards.value == on) return
+        prefs.edit().putBoolean(KEY_GROUP_CARDS, on).apply()
+        _groupCards.value = on
+    }
+
+    override fun setChatBackgroundImage(path: String) {
+        if (_chatBackgroundImage.value == path) return
+        prefs.edit().putString(KEY_CHAT_BACKGROUND_IMAGE, path).apply()
+        _chatBackgroundImage.value = path
+    }
+
+    override fun setRecentSearches(searches: List<String>) {
+        if (_recentSearches.value == searches) return
+        prefs.edit().putString(KEY_RECENT_SEARCHES, searches.joinToString("\n")).apply()
+        _recentSearches.value = searches
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         prefs.edit().apply {
@@ -402,6 +442,10 @@ class AndroidUiSettings(
 
     private companion object {
         private const val KEY_HIDE_COMPOSER_BUTTONS = "hide_composer_buttons"
+        private const val KEY_CHAT_BUBBLES = "chat_bubbles"
+        private const val KEY_GROUP_CARDS = "group_cards"
+        private const val KEY_CHAT_BACKGROUND_IMAGE = "chat_background_image"
+        private const val KEY_RECENT_SEARCHES = "recent_searches"
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"

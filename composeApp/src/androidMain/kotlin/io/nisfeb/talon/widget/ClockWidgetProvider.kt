@@ -196,7 +196,7 @@ class ClockWidgetProvider : AppWidgetProvider() {
     ) {
         val sky = WidgetSky.skyFor(atMs, settings.place, body)
         val note = when {
-            settings.place == null -> "Set a location in Talon"
+            settings.place == null -> "Set a location in Groundwire"
             body == null -> "No forecast yet"
             sky.currentC == null -> "Forecast unreadable"
             else -> null

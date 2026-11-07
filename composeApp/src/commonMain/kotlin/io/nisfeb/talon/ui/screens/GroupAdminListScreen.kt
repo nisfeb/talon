@@ -75,7 +75,7 @@ fun GroupAdminListScreen(
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
             Text(
-                "Administration",
+                "Group Moderation",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 modifier = Modifier.padding(start = 4.dp).weight(1f),
             )
@@ -97,6 +97,12 @@ fun GroupAdminListScreen(
             }
         }
         HorizontalDivider()
+        // Starting a group, said in words: the + above was the only way in.
+        io.nisfeb.talon.ui.Button(
+            enabled = !creating,
+            onClick = { newGroupOpen = true },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        ) { Text("Start a group") }
         when {
             loading -> Row(
                 modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -111,7 +117,7 @@ fun GroupAdminListScreen(
             }
 
             groups.isEmpty() -> Text(
-                "You're not an admin of any groups.",
+                "You don't run any groups yet. Start one above.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),

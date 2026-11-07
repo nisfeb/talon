@@ -85,7 +85,7 @@ object IosVoipBridge {
     fun lateMove(tag: String, move: String, ship: String?, finished: (String?) -> Unit) {
         lateScope.launch {
             val failed = runCatching { io.nisfeb.talon.orrery.IosLateMoves.run(tag, move, ship) }
-                .getOrElse { "That did not go through. Open Talon to try it again." }
+                .getOrElse { "That did not go through. Open Groundwire to try it again." }
             platform.darwin.dispatch_async(platform.darwin.dispatch_get_main_queue()) { finished(failed) }
         }
     }
@@ -178,7 +178,7 @@ class IosPushTokenProvider : PushTokenProvider {
     }
 
     override suspend fun missingTokenReason(): String =
-        "Apple has not given Talon a push token yet. Check this ${io.nisfeb.talon.ui.iosDeviceName} is online, open Talon again, and try once more."
+        "Apple has not given Groundwire a push token yet. Check this ${io.nisfeb.talon.ui.iosDeviceName} is online, open Groundwire again, and try once more."
 
     override fun alertsIn(endpoint: String): Boolean = endpoint.substringAfter('|', "").isNotBlank()
 

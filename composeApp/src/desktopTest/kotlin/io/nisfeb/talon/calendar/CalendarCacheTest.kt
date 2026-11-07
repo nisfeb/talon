@@ -90,7 +90,7 @@ class CalendarCacheTest {
             assertEquals(listOf("Home"), cold.calendars.value.map { it.name })
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 
@@ -123,7 +123,7 @@ class CalendarCacheTest {
             assertEquals(listOf("Sports day"), cold.rangeRows.value?.map { it.name }, "the screen's own month, from the cache")
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 

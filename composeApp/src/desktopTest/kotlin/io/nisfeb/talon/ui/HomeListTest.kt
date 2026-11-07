@@ -1,5 +1,7 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -8,14 +10,16 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -45,6 +49,7 @@ import io.nisfeb.talon.data.DmInviteEntity
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 
 /**
  * The home list, from what is stored: conversations with their last
@@ -67,6 +72,12 @@ class HomeListTest {
         shown: androidx.compose.runtime.State<Boolean> = androidx.compose.runtime.mutableStateOf(true),
         /** Groups by their latest activity, as a phone set to Recent has them; else the saved order. */
         recent: Boolean = false,
+        /** Groups as cards rather than heads over their channels. */
+        cards: Boolean = false,
+        drafts: InMemoryDraftStore = InMemoryDraftStore(),
+        /** The shells' own lists for these tabs; null hides the tab. */
+        threadsTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
+        partyLinesTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-home-").toFile()
@@ -88,18 +99,21 @@ class HomeListTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
                         if (shown.value) DmListScreen(
-                            db = db, repo = repo, drafts = InMemoryDraftStore(),
+                            db = db, repo = repo, drafts = drafts,
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
-                            onOpenConversation = { opened += it }, onOpenSearch = {}, onNewMessage = {},
+                            onOpenConversation = { opened += it }, onOpenSearch = { did += "Search" }, onNewMessage = {},
                             onSignOut = { did += "Sign out" }, onOpenSelfProfile = { did += "My profile" },
                             onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
                             onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },
                             onOpenContacts = { did += "Contacts" },
-                            onOpenAdministration = { did += "Administration" }, onOpenInvites = { did += "Invites" },
+                            onOpenAdministration = { did += "Group Moderation" }, onOpenInvites = { did += "Invites" },
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
                             folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
+                            groupCards = cards,
+                            threadsTab = threadsTab,
+                            partyLinesTab = partyLinesTab,
                         )
                     }
                 }
@@ -109,7 +123,7 @@ class HomeListTest {
         } finally {
             io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -197,13 +211,40 @@ class HomeListTest {
         assertTrue(onAllNodesWithText("Mentions").fetchSemanticsNodes().isEmpty(), "no Mentions tab for a DM")
     }
 
+    // sneagan, 2026-11-05: the list's search bar "needs to hide when not
+    // in use. maybe scroll down to access it". Tucked away at first; on a
+    // touch screen pulled out of the list (RevealOnPullTest), and with a
+    // pointer, the header's search opens Search. (A wheel past the top
+    // never reaches the list's nested scroll, so it cannot pull the bar.)
+    @Test
+    fun `the search bar is tucked away, and a pointer opens search from the header`() = home(seed = {
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hello?", 1_000))
+    }) {
+        assertFalse(onAllNodes(hasSetTextAction() and hasContentDescription("Search")).fetchSemanticsNodes().isNotEmpty(), "tucked away at first")
+        onNodeWithContentDescription("Search messages").performClick()
+        waitForIdle()
+        assertTrue("Search" in did)
+    }
+
+    // A screen reader cannot pull a list: the header offers search itself.
+    @Test
+    fun `with the bar tucked away, the header offers search to a screen reader`() = home(seed = {}) {
+        fun actionsOf(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.CustomAccessibilityAction> =
+            if (androidx.compose.ui.semantics.SemanticsActions.CustomActions in n.config) n.config[androidx.compose.ui.semantics.SemanticsActions.CustomActions] else emptyList()
+        val header = onNode(androidx.compose.ui.test.SemanticsMatcher("offers Search") { n -> actionsOf(n).any { a -> a.label == "Search" } })
+        val action = actionsOf(header.fetchSemanticsNode()).first { a -> a.label == "Search" }
+        runOnIdle { action.action() }
+        assertTrue("Search" in did)
+    }
+
     @Test
     fun `an unread conversation shows how many`() = home(seed = {
         messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hello?", 1_000))
         unreads().upsert(UnreadEntity("~bus", count = 7, notifyCount = 0, recencyMs = 1_000))
     }) {
         tap("DMs · 7") // the tab carries the count
-        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasText("hello?") and hasText("7")).fetchSemanticsNodes().isNotEmpty() }
+        // The bubble says its count once, as "7 unread", not its text again.
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasText("hello?") and hasContentDescription("7 unread")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -215,7 +256,7 @@ class HomeListTest {
     }) {
         tap("DMs · 2")
         shows("all caught up")
-        onAllNodes(hasText("all caught up") and hasText("2")).assertCountEquals(0)
+        onAllNodes(hasText("all caught up") and hasContentDescription("unread", substring = true)).assertCountEquals(0)
         tap("Unread", substring = true)
         shows("waiting on you")
         onAllNodesWithText("all caught up").assertCountEquals(0)
@@ -234,6 +275,135 @@ class HomeListTest {
         tap("general")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
+    }
+
+    // sneagan, 2026-11-06: the Threads tab lay under the chats' own empty
+    // list ("No direct messages yet"), which took its taps. A dangling
+    // else: the search bar's lines (e9aa110a) went between it and the
+    // list, so the list was drawn on every tab.
+    @Test
+    fun `the Threads and Party lines tabs show their own list, alone, and it takes taps`() {
+        var taps = 0
+        home(
+            seed = {},
+            threadsTab = { androidx.compose.material3.TextButton(onClick = { taps++ }) { androidx.compose.material3.Text("A followed thread") } },
+            partyLinesTab = { androidx.compose.material3.Text("A party line") },
+        ) {
+            tap("Threads", substring = true)
+            tap("A followed thread")
+            waitForIdle()
+            assertEquals(1, taps, "the tab's own list takes the tap")
+            assertTrue(onAllNodesWithText("No direct messages yet", substring = true).fetchSemanticsNodes().isEmpty(), "no chats list over it")
+            tap("Party lines")
+            shows("A party line")
+            assertTrue(onAllNodesWithText("No direct messages yet", substring = true).fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    // ---- Groups as cards (sneagan, 2026-11-06) ----
+
+    /** A group of five channels: one unread, one with our own newest words, two quiet. */
+    private val garden: suspend AppDatabase.() -> Unit = {
+        groups().upsertGroups(listOf(GroupEntity("~bus/garden", "The Garden", null)))
+        groups().upsertChannelGroups(listOf("general", "plans", "photos", "recipes", "books").map {
+            ChannelGroupEntity("chat/~bus/$it", "~bus/garden", title = it)
+        })
+        messages().upsert(msg("chat/~bus/photos", "170141184501", "~bus", "look at the roses", 1_000))
+        messages().upsert(msg("chat/~bus/plans", "170141184502", "~wes", "saturday works", 2_000))
+        messages().upsert(msg("chat/~bus/general", "170141184503", "~nec", "see you at 7", 3_000))
+        messages().upsert(msg("chat/~bus/recipes", "170141184504", "~zod", "I will bring bread", 4_000))
+        unreads().upsert(UnreadEntity("chat/~bus/plans", count = 2, notifyCount = 0, recencyMs = 2_000))
+    }
+
+    @Test
+    fun `as a card, a group shows its newest words with who said them, and a tap opens the channel most worth reading`() = home(seed = garden, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        shows("The Garden")
+        shows("You: I will bring bread", substring = true)
+        assertTrue(onAllNodesWithText("· active", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+        // Only the channel with news is named (sneagan: chips for every
+        // channel were disliked).
+        shows("New in plans 2")
+        assertTrue(onAllNodesWithText("photos", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet channel is not named")
+        tap("The Garden")
+        waitForIdle()
+        assertEquals(listOf("chat/~bus/plans"), opened, "the unread channel, before the newest words")
+    }
+
+    /** Twelve channels with long names: more than one line of chips holds. */
+    private val hall: suspend AppDatabase.() -> Unit = {
+        groups().upsertGroups(listOf(GroupEntity("~bus/hall", "The Hall", null)))
+        groups().upsertChannelGroups((1..12).map {
+            ChannelGroupEntity("chat/~bus/c$it", "~bus/hall", title = "a-long-channel-name-" + "$it".padStart(2, '0'))
+        })
+        messages().upsert(msg("chat/~bus/c1", "170141184501", "~nec", "hello", 1_000))
+    }
+
+    // sneagan, 2026-11-06: the channels as chips were disliked. "N
+    // channels" opens the list's own channel rows, and opening them
+    // opens no chat.
+    @Test
+    fun `N channels opens a card's channel rows without opening anything, and a row opens its channel`() = home(seed = hall, cards = true) {
+        tap("Groups")
+        shows("12 channels")
+        fun rows() = onAllNodesWithText("a-long-channel-name-", substring = true).fetchSemanticsNodes()
+        assertEquals(0, rows().size, "no channel names on the card")
+        assertTrue(onAllNodesWithText("New in", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet group's card has no line of news")
+        tap("12 channels")
+        waitUntil(timeoutMillis = 5_000) { rows().size == 12 }
+        assertEquals(emptyList(), opened, "showing the channels opens no chat")
+        tap("a-long-channel-name-02")
+        waitForIdle()
+        assertEquals(listOf("chat/~bus/c2"), opened, "a row opens its own channel")
+        tap("12 channels")
+        waitUntil(timeoutMillis = 5_000) { rows().isEmpty() }
+    }
+
+    // sneagan, 2026-11-06: edge to edge, touching, a fine rule between.
+    @Test
+    fun `cards run edge to edge and touch, with only a rule between`() = home(seed = { garden(); hall() }, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        shows("The Garden")
+        shows("The Hall")
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        val garden = onNodeWithText("The Garden").fetchSemanticsNode().boundsInRoot
+        val hall = onNodeWithText("The Hall").fetchSemanticsNode().boundsInRoot
+        assertEquals(root.left, garden.left, 0.5f)
+        assertEquals(root.right, garden.right, 0.5f)
+        // Touching but for the rule: 1 dp, no more, no less.
+        assertEquals(1f * density.density, hall.top - garden.bottom, 0.5f)
+    }
+
+    // sneagan, 2026-11-06: the faces of recent speakers came off the cards.
+    @Test
+    fun `a card shows no faces of who has been talking`() = home(seed = garden, cards = true) {
+        tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+        shows("You: I will bring bread", substring = true)
+        val faces = androidx.compose.ui.test.SemanticsMatcher("a face pile") { n ->
+            val cd = androidx.compose.ui.semantics.SemanticsProperties.ContentDescription
+            cd in n.config && n.config[cd].any { it.startsWith("Recently") }
+        }
+        assertTrue(onAllNodes(faces, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `in a folder of the owner's, a group is a card too`() = home(seed = {
+        garden()
+        val id = folders().createFolder(io.nisfeb.talon.data.FolderEntity(name = "Friends"))
+        folders().addMemberRaw(id, "~bus/garden", 0, io.nisfeb.talon.data.FolderMemberEntity.KIND_GROUP)
+    }, cards = true) {
+        tap("Friends", substring = true)
+        shows("You: I will bring bread", substring = true)
+        assertTrue(onAllNodesWithText("· active", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
+    }
+
+    @Test
+    fun `a draft waiting in a channel is on the card`() {
+        val drafts = InMemoryDraftStore().apply { save("chat/~bus/general", "bring the cake") }
+        home(seed = garden, cards = true, drafts = drafts) {
+            tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
+            shows("Draft in general: bring the cake", substring = true)
+        }
     }
 
     // "when you scroll down, open a group, enter a channel, and go back it
@@ -411,9 +581,9 @@ class HomeListTest {
         onAllNodesWithText("nothing about you", substring = true).assertCountEquals(0)
         onAllNodesWithText("dm for ~zod", substring = true).assertCountEquals(0)
         // Nothing cached for the channel: a row made from what is known of it.
-        val placeholder = onAllNodes(hasText("general", substring = true) and hasText("2")).fetchSemanticsNodes()
+        val placeholder = onAllNodes(hasText("general", substring = true) and hasContentDescription("2 unread")).fetchSemanticsNodes()
         assertTrue(placeholder.isNotEmpty(), "the channel's mention is listed with its count")
-        onAllNodes(hasText("general", substring = true) and hasText("2"))[0].performClick()
+        onAllNodes(hasText("general", substring = true) and hasContentDescription("2 unread"))[0].performClick()
         waitForIdle()
         assertEquals(listOf("chat/~nec/general"), opened)
     }
@@ -421,9 +591,9 @@ class HomeListTest {
     // ─── the More menu and folders ─────────────────────────────────
 
     @Test
-    fun `every place in the More menu opens, and signing out is last`() = home(seed = {}) {
-        val places = listOf("Home", "My profile", "Statuses", "Mail", "Bookmarks", "Activity", "Calendar", "Contacts",
-            "Administration", "Invites", "Settings", "Sign out")
+    fun `every place in the More menu opens`() = home(seed = {}) {
+        val places = listOf("Home", "My profile", "Mail", "Bookmarks", "Activity", "Calendar",
+            "Group Moderation", "Invites", "Settings")
         for (place in places) {
             onNodeWithContentDescription("More").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
@@ -431,6 +601,19 @@ class HomeListTest {
             waitUntil(timeoutMillis = 5_000) { did.lastOrNull() == place }
         }
         assertEquals(places, did.toList())
+    }
+
+    @Test
+    fun `statuses, contacts and the sidebar are one entry in the More menu, and sign out is not there`() = home(seed = {}) {
+        for (place in listOf("Statuses", "Contacts")) {
+            onNodeWithContentDescription("More").performClick()
+            assertTrue(onAllNodesWithText("Sign out").fetchSemanticsNodes().isEmpty())
+            assertTrue(onAllNodesWithText(place).fetchSemanticsNodes().isEmpty(), "folded until opened")
+            onNodeWithText("People & sidebar").performClick()
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText(place).fetchSemanticsNodes().isNotEmpty() }
+            onAllNodesWithText(place).let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
+            waitUntil(timeoutMillis = 5_000) { did.lastOrNull() == place }
+        }
     }
 
     @Test
@@ -451,7 +634,8 @@ class HomeListTest {
         onNode(hasSetTextAction() and hasText("Name")).performTextInput("Friends")
         onNodeWithText("Create").performClick()
         tap("Friends")
-        onNodeWithContentDescription("Reorder").performClick()
+        onNodeWithContentDescription("More").performClick()
+        onNodeWithText("Reorder").performClick()
         onNodeWithContentDescription("Rename folder").performClick()
         shows("Edit folder")
         onNodeWithText("Rename").assertIsNotEnabled()

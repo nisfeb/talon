@@ -219,7 +219,7 @@ class SystemNotifier(
  * shown, not read as an option.
  */
 internal fun notifySendArgs(iconPath: String?, title: String, body: String): List<String> = buildList {
-    add("notify-send"); add("-a"); add("Talon")
+    add("notify-send"); add("-a"); add("Groundwire")
     iconPath?.let { add("-i"); add(it) }
     add("-p"); add("-A"); add("default=Open")
     add("-t"); add("10000")
@@ -238,7 +238,7 @@ internal fun gdbusNotifyArgs(iconPath: String, title: String, body: String): Lis
     "--object-path", "/org/freedesktop/Notifications",
     "--method", "org.freedesktop.Notifications.Notify",
     "--",
-    "Talon", "0", iconPath, title, body, "[]", "{}", "-1",
+    "Groundwire", "0", iconPath, title, body, "[]", "{}", "-1",
 )
 
 /** The id in gdbus's answer to Notify, "(uint32 42,)", or null. */

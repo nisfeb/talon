@@ -161,6 +161,8 @@ class SettingsSyncImpl(
         const val ENTRY_SMART_SEARCH = "smart-search-preferred"
         const val ENTRY_POWER_FEATURES = "power-features"
         const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
+        const val ENTRY_CHAT_BUBBLES = "chat-bubbles"
+        const val ENTRY_GROUP_CARDS = "group-cards"
         const val ENTRY_ACCENT = "accent"
         const val ENTRY_THEMES = "themes"
         // Installed fonts and the chosen family; the files themselves
@@ -339,6 +341,8 @@ class SettingsSyncImpl(
         watch(settings.smartSearchPreferred, ENTRY_SMART_SEARCH) { bool(it) }
         watch(settings.powerFeaturesEnabled, ENTRY_POWER_FEATURES) { bool(it) }
         watch(settings.hideComposerButtons, ENTRY_HIDE_COMPOSER_BUTTONS) { bool(it) }
+        watch(settings.chatBubbles, ENTRY_CHAT_BUBBLES) { bool(it) }
+        watch(settings.groupCards, ENTRY_GROUP_CARDS) { bool(it) }
         watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER, ::encodeRailItemOrder)
         watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
         watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
@@ -403,6 +407,10 @@ class SettingsSyncImpl(
                 ?.let { applyLocal(entry, bool(it)) { settings.setPowerFeaturesEnabled(it) } }
             ENTRY_HIDE_COMPOSER_BUTTONS -> obj["enabled"].asBool()
                 ?.let { applyLocal(entry, bool(it)) { settings.setHideComposerButtons(it) } }
+            ENTRY_CHAT_BUBBLES -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setChatBubbles(it) } }
+            ENTRY_GROUP_CARDS -> obj["enabled"].asBool()
+                ?.let { applyLocal(entry, bool(it)) { settings.setGroupCards(it) } }
             ENTRY_RAIL_ITEM_ORDER -> {
                 val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() } ?: return
                 val items = names.mapNotNull { n ->
@@ -818,6 +826,8 @@ class SettingsSyncImpl(
             push(ENTRY_SMART_SEARCH, bool(settings.smartSearchPreferred.value))
             push(ENTRY_POWER_FEATURES, bool(settings.powerFeaturesEnabled.value))
             push(ENTRY_HIDE_COMPOSER_BUTTONS, bool(settings.hideComposerButtons.value))
+            push(ENTRY_CHAT_BUBBLES, bool(settings.chatBubbles.value))
+            push(ENTRY_GROUP_CARDS, bool(settings.groupCards.value))
             push(ENTRY_RAIL_ITEM_ORDER, encodeRailItemOrder(settings.railItemOrder.value))
             push(ENTRY_ACCENT, encodeAccent(settings.accentSettings.value))
             push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))

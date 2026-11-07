@@ -49,6 +49,19 @@ class CloseAfterWorkTest {
         assertFailsWith<Exception>("closed") { db.contacts().get("~bus") }
     }
 
+    // The shared flows ran five seconds past their last collector, and a
+    // ship switch closed after two: a query of theirs ran into the close.
+    @Test
+    fun `the database's shared flows have ended before it closes`() = runBlocking<Unit> {
+        val db = db()
+        val shared = sharingFor(db).coroutineContext.job
+        val reading = launch(Dispatchers.IO) { db.latestPerConversation().collect {} }
+        kotlinx.coroutines.withTimeout(5_000) { while (shared.children.none()) kotlinx.coroutines.delay(5) }
+        reading.cancelAndJoin()
+        assertTrue(closeAfterWork(db) {})
+        assertTrue(shared.isCompleted, "the shared flows still ran as it closed")
+    }
+
     @Test
     fun `work that will not stop leaves the database open`() = runBlocking {
         val db = db()

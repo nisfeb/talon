@@ -51,7 +51,7 @@ class UpdateInstaller(private val context: Context) : UpdateInstallerHook {
 
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val req = DownloadManager.Request(Uri.parse(asset.url))
-            .setTitle("Talon ${manifest.versionName}")
+            .setTitle("Groundwire ${manifest.versionName}")
             .setDescription("Downloading update")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
             .setDestinationUri(Uri.fromFile(target))

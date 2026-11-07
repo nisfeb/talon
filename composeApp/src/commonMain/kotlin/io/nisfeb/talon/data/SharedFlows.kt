@@ -1,20 +1,47 @@
 package io.nisfeb.talon.data
 
+import io.nisfeb.talon.util.ConcurrentMap
 import io.nisfeb.talon.util.OneSlot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 
-/** Where the shared flows run; each stops five seconds after its last collector leaves. */
-internal val sharing = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+/** Each database's shared flows, in a scope of their own, so its teardown can stop them. */
+private val scopes = ConcurrentMap<AppDatabase, CoroutineScope>()
+
+/**
+ * Where [db]'s shared flows run; each stops five seconds after its last
+ * collector leaves. With a handler: a query still in those five seconds
+ * when its database closes failed "Connection pool is closed" with no
+ * one to catch it, which on Android ends the process, and in tests
+ * failed the next test to start.
+ */
+internal fun sharingFor(db: AppDatabase): CoroutineScope = scopes.getOrPut(db) {
+    CoroutineScope(
+        SupervisorJob() + Dispatchers.Default +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e -> io.nisfeb.talon.util.Log.w("SharedFlows", "a shared flow stopped: ${e.message}") },
+    )
+}
+
+/**
+ * Stops [db]'s shared flows and waits for them, before it closes
+ * ([closeAfterWork]). Their five seconds outlived the two a ship switch
+ * waited, and a query of theirs running into the close was a native
+ * crash, not an exception (CI, 2026-11-07).
+ */
+internal suspend fun stopSharing(db: AppDatabase) {
+    scopes.remove(db)?.coroutineContext?.get(Job)?.cancelAndJoin()
+}
 
 private val latest = OneSlot<AppDatabase, Flow<List<MessageEntity>>> { db ->
     db.messages().conversationLatest()
-        .stateIn(sharing, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(sharingFor(db), SharingStarted.WhileSubscribed(5_000), null)
         // Never the placeholder: the notifier seeds on its first list.
         .filterNotNull()
 }

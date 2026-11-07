@@ -14,6 +14,40 @@ interface UiSettings {
     fun setHideComposerButtons(hidden: Boolean)
 
     /**
+     * A conversation's messages as bubbles (ours on the right, theirs on
+     * the left), or as rows: each on the left under its author's name and
+     * time. A taste rather than a screen size, so it syncs.
+     */
+    val chatBubbles: StateFlow<Boolean>
+    fun setChatBubbles(on: Boolean)
+
+    /**
+     * The home list's groups as cards (a bigger picture, the newest words
+     * with who said them, the channels as chips, a tap straight into a
+     * channel) rather than the list of heads that open onto their
+     * channels. A taste, so it syncs. Off by default: nobody's list
+     * changes unasked.
+     */
+    val groupCards: StateFlow<Boolean>
+    fun setGroupCards(on: Boolean)
+
+    /**
+     * The picture behind Home and behind a conversation's bubbles: a
+     * file's path, kept by [ChatBackgroundFiles]; "" is none. This
+     * device's alone: it never syncs. A colour behind them is the theme's.
+     */
+    val chatBackgroundImage: StateFlow<String>
+    fun setChatBackgroundImage(path: String)
+
+    /**
+     * The last searches run on this device, newest first, at most five
+     * (see [io.nisfeb.talon.ui.screens.withRecentSearch]). This device's
+     * alone: they never sync (sneagan, 2026-11-05).
+     */
+    val recentSearches: StateFlow<List<String>>
+    fun setRecentSearches(searches: List<String>)
+
+    /**
      * Theme accent color preferences. The effective tint that drives
      * every primary-colored UI element (send icon, focus rings, ship
      * pip, FilterChip selected state, etc) is derived from this plus
@@ -305,6 +339,30 @@ class InMemoryUiSettings(
         _hideComposerButtons.asStateFlow()
     override fun setHideComposerButtons(hidden: Boolean) {
         _hideComposerButtons.value = hidden
+    }
+
+    private val _chatBubbles = MutableStateFlow(true)
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+    override fun setChatBubbles(on: Boolean) {
+        _chatBubbles.value = on
+    }
+
+    private val _groupCards = MutableStateFlow(false)
+    override val groupCards: StateFlow<Boolean> = _groupCards.asStateFlow()
+    override fun setGroupCards(on: Boolean) {
+        _groupCards.value = on
+    }
+
+    private val _chatBackgroundImage = MutableStateFlow("")
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+    override fun setChatBackgroundImage(path: String) {
+        _chatBackgroundImage.value = path
+    }
+
+    private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+    override fun setRecentSearches(searches: List<String>) {
+        _recentSearches.value = searches
     }
 
     private val _accentSettings = MutableStateFlow(initialAccent)

@@ -17,11 +17,19 @@ class MenuBadgesTest {
             MenuBadges(statusesFresh = true) to RailItem.Statuses,
             MenuBadges(invitesPending = true) to RailItem.Invites,
             MenuBadges(assistantNews = true) to RailItem.Assistant,
-            MenuBadges(threadsUnread = true) to RailItem.Chats,
             MenuBadges(noticesUnread = true) to RailItem.Activity,
         )) {
             assertEquals(setOf(own), RailItem.entries.filter(b::forItem).toSet(), "$b")
         }
+    }
+
+    // The branch that took it away left a phone in Mail with no sign of a
+    // followed thread's reply (review, 2026-11-05).
+    @Test
+    fun `the Chats icon shows a followed thread's reply, in the rail and the drawer`() {
+        assertEquals(true, MenuBadges(threadsUnread = true).forItem(RailItem.Chats))
+        assertEquals(true, MenuBadges(threadsUnread = true).byItem()[RailItem.Chats])
+        assertEquals(false, MenuBadges().forItem(RailItem.Chats))
     }
 
     @Test

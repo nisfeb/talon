@@ -1,4 +1,8 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.data.latestPerConversation
 import io.nisfeb.talon.ui.reorderHandle
@@ -10,12 +14,15 @@ import io.nisfeb.talon.util.nowMs
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -48,7 +56,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -216,6 +223,9 @@ fun DmListScreen(
      *  [groupChannelOrder]. */
     folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
         io.nisfeb.talon.ui.FolderItemOrder.Manual,
+    /** Groups as cards rather than heads over their channels: see
+     *  [io.nisfeb.talon.ui.UiSettings.groupCards]. */
+    groupCards: Boolean = false,
     /** When set to true by a keyboard-shortcut handler upstream, open
      *  the search screen and reset the flag. DmListScreen has no
      *  inline search field — Ctrl+K navigates to the full SearchScreen
@@ -360,6 +370,8 @@ fun DmListScreen(
     // Seeded from HomeListSnapshot so back-navigation from a chat
     // returns the user to whatever tab they were on, not the
     // fresh-launch auto-landed folder.
+    // What the menu's "Invite a friend" did, shown for a moment under the header.
+    var inviteNote by remember { mutableStateOf<String?>(null) }
     var selectedFolderId by remember {
         mutableStateOf(snap.selectedFolderId)
     }
@@ -746,8 +758,12 @@ fun DmListScreen(
         }
     }
 
+    // The search bar stays tucked away until pulled for: past the top of
+    // the list, by a finger or the wheel. See [io.nisfeb.talon.ui.RevealOnPull].
+    val searchBarPx = with(androidx.compose.ui.platform.LocalDensity.current) { SEARCH_BAR_HEIGHT.toPx() }
+    val searchReveal = remember(searchBarPx) { io.nisfeb.talon.ui.RevealOnPull(searchBarPx) }
     Box(modifier = modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().nestedScroll(searchReveal)) {
         // Indeterminate progress strip while the repo is doing its
         // first-run bootstrap (init-posts + activity scries on a
         // freshly-opened ship). Without it, the 10-30s of silent
@@ -785,7 +801,13 @@ fun DmListScreen(
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+                // A screen reader cannot pull the list: search is offered here.
+                .semantics {
+                    customActions = listOf(androidx.compose.ui.semantics.CustomAccessibilityAction("Search") { onOpenSearch(); true })
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // The hamburger takes the left, where the logo used to be.
@@ -812,19 +834,8 @@ fun DmListScreen(
                     // the list mid-compose; getValue would throw there.
                     else -> io.nisfeb.talon.ui.shipHandles(allShips)[activeShip] ?: activeShip
                 }
-                // Colored dot in the user's chosen accent — same
-                // value as `colorScheme.primary` since App.kt's
-                // TalonTheme override drives the theme primary
-                // with the active ship's color (Profile mode), the
-                // user's hex (Custom mode), or brand (off / Brand).
-                val accent = MaterialTheme.colorScheme.primary
-                Box(
-                    modifier = Modifier
-                        .padding(start = 6.dp)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(accent),
-                )
+                // No dot before the name: an accent-coloured dot here
+                // said nothing (removed 2026-11-05).
                 Text(
                     label,
                     style = MaterialTheme.typography.labelMedium,
@@ -840,20 +851,53 @@ fun DmListScreen(
             // Whether this device hears from its ship: a Windows user's sync
             // stopped for three days with nothing to say so (2026-10-29).
             activeShip?.let { io.nisfeb.talon.ui.SyncStatusIcon(repo, it, onSignIn) }
-            io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
-                Icon(Icons.Filled.Search, contentDescription = "Search")
-            }
             // Assistant moved off the top bar — it's now a rail / kebab item
             // ("A"), unifying it with the other panel-based features.
-            io.nisfeb.talon.ui.IconButton(tip = if (editMode) "Finish reordering" else "Reorder", onClick = { editMode = !editMode }) {
-                Icon(
-                    imageVector = if (editMode) Icons.Filled.Done else Icons.Filled.Edit,
-                    contentDescription = if (editMode) "Finish reordering" else "Reorder",
-                    tint = if (editMode) MaterialTheme.colorScheme.primary
-                    else LocalContentColor.current,
-                )
+            // The pencil starts a new chat or group (it was a reorder
+            // toggle nobody could read; the + button it replaces is gone).
+            // While reordering, opened from the menu, it is the way out.
+            if (editMode) {
+                io.nisfeb.talon.ui.IconButton(tip = "Finish reordering", onClick = { editMode = false }) {
+                    Icon(
+                        imageVector = Icons.Filled.Done,
+                        contentDescription = "Finish reordering",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            } else {
+                // The search bar is pulled out of the list on a touch
+                // screen; a wheel past the top never reaches it, so a
+                // pointer gets search here, as before the bar.
+                if (!io.nisfeb.talon.ui.isTouchPrimary) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Search", onClick = onOpenSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search messages")
+                    }
+                }
+                // A phone has no More menu, where reordering moved: its
+                // way in sits beside the pencil, ungated as the pencil was.
+                if (io.nisfeb.talon.ui.isDrawerNavigation) {
+                    io.nisfeb.talon.ui.IconButton(tip = "Reorder", onClick = { editMode = true }) {
+                        Icon(io.nisfeb.talon.ui.icons.TalonIcons.DragHandle, contentDescription = "Reorder")
+                    }
+                }
+                io.nisfeb.talon.ui.IconButton(tip = "New chat or group", onClick = onNewMessage) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .border(1.5.dp, LocalContentColor.current, RoundedCornerShape(8.dp)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Edit,
+                            contentDescription = "New message",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
             var menuOpen by remember { mutableStateOf(false) }
+            var peopleOpen by remember(menuOpen) { mutableStateOf(false) }
+            val inviteFriend = io.nisfeb.talon.ui.rememberInviteFriend(activeShip)
             // Freshness-dot inputs. Per-feature data flows joined with
             // the menuSeen state so a tap-through actually clears the
             // dot. The marker writes happen in the per-item onClick
@@ -918,6 +962,24 @@ fun DmListScreen(
                     expanded = menuOpen,
                     onDismissRequest = { menuOpen = false },
                 ) {
+                    // One click to invite a friend: the share sheet, or the
+                    // invite copied where there is none.
+                    DropdownMenuItem(
+                        text = { Text("Invite a friend") },
+                        onClick = {
+                            menuOpen = false
+                            inviteNote = inviteFriend()
+                        },
+                    )
+                    // Reordering groups and folders, which the header's
+                    // pencil used to toggle.
+                    DropdownMenuItem(
+                        text = { Text("Reorder") },
+                        onClick = {
+                            menuOpen = false
+                            editMode = true
+                        },
+                    )
                     // Assistant — opt-in, so gated on onOpenAssistant being
                     // wired (null when unsupported / off / no key).
                     if (RailItem.Assistant in kebabItems) {
@@ -949,23 +1011,6 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenSelfProfile()
-                            },
-                        )
-                    }
-                    if (RailItem.Statuses in kebabItems) {
-                        DropdownMenuItem(
-                            text = { Text("Statuses") },
-                            trailingIcon = {
-                                if (hasFreshStatuses) MenuBadgeDot()
-                            },
-                            onClick = {
-                                menuOpen = false
-                                val now = nowMs()
-                                menuSeen.markStatusesSeenAt(now)
-                                repo.pushScope.launch {
-                                    runCatching { repo.settingsSync?.pushStatusesSeen(now) }
-                                }
-                                onOpenStatusFeed()
                             },
                         )
                     }
@@ -1005,13 +1050,58 @@ fun DmListScreen(
                             },
                         )
                     }
+                    // People and the list's own layout, as one entry that
+                    // opens in place: statuses, contacts and what the
+                    // sidebar shows. Sign out lives with the ships, in the
+                    // switcher behind the logo.
                     DropdownMenuItem(
-                        text = { Text("Contacts") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenContacts()
+                        text = { Text("People & sidebar") },
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (hasFreshStatuses && RailItem.Statuses in kebabItems) MenuBadgeDot()
+                                Text(if (peopleOpen) " \u25B4" else " \u25B8")
+                            }
                         },
+                        onClick = { peopleOpen = !peopleOpen },
                     )
+                    if (peopleOpen) {
+                        if (RailItem.Statuses in kebabItems) {
+                            DropdownMenuItem(
+                                text = { Text("Statuses") },
+                                trailingIcon = {
+                                    if (hasFreshStatuses) MenuBadgeDot()
+                                },
+                                contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                                onClick = {
+                                    menuOpen = false
+                                    val now = nowMs()
+                                    menuSeen.markStatusesSeenAt(now)
+                                    repo.pushScope.launch {
+                                        runCatching { repo.settingsSync?.pushStatusesSeen(now) }
+                                    }
+                                    onOpenStatusFeed()
+                                },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Contacts") },
+                            contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                            onClick = {
+                                menuOpen = false
+                                onOpenContacts()
+                            },
+                        )
+                        if (onOpenSidebarSettings != null) {
+                            DropdownMenuItem(
+                                text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
+                                contentPadding = PaddingValues(start = 32.dp, end = 12.dp),
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenSidebarSettings()
+                                },
+                            )
+                        }
+                    }
                     if (RailItem.Actions in kebabItems) onOpenActions?.let { open ->
                         DropdownMenuItem(
                             text = { Text(io.nisfeb.talon.ui.railLabel(RailItem.Actions)) },
@@ -1023,7 +1113,7 @@ fun DmListScreen(
                     }
                     if (RailItem.Administration in kebabItems) {
                         DropdownMenuItem(
-                            text = { Text("Administration") },
+                            text = { Text("Group Moderation") },
                             onClick = {
                                 menuOpen = false
                                 onOpenAdministration()
@@ -1052,38 +1142,27 @@ fun DmListScreen(
                             },
                         )
                     }
-                    if (onOpenSidebarSettings != null) {
-                        DropdownMenuItem(
-                            text = { Text(if (io.nisfeb.talon.ui.isDrawerNavigation) "Edit menu" else "Edit sidebar") },
-                            onClick = {
-                                menuOpen = false
-                                onOpenSidebarSettings()
-                            },
-                        )
-                    }
-                    // Sign out is always rendered last, never gated by kebabItems —
-                    // it's not a RailItem and never lives on the rail.
-                    DropdownMenuItem(
-                        text = { Text("Sign out") },
-                        onClick = {
-                            menuOpen = false
-                            onSignOut()
-                        },
-                    )
                 }
             }
             // The brand mark on the right, where the ellipsis was, and
-            // it is what opens the ship picker.
-            io.nisfeb.talon.ui.TalonLogo(
-                contentDescription = "Switch ship",
-                modifier = Modifier
-                    .padding(end = 4.dp)
-                    .size(32.dp)
-                    .clickable { onOpenShipSwitcher() },
+            // it is what opens the ship picker. Where the rail shows, the
+            // rail holds it, at its foot, instead.
+            if (!io.nisfeb.talon.ui.LocalRailShown.current) {
+                val open = Modifier.padding(end = 4.dp).size(32.dp).clickable { onOpenShipSwitcher() }
+                activeShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
+                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
+            }
+        }
+        activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
+        inviteNote?.let { note ->
+            LaunchedEffect(note) { kotlinx.coroutines.delay(5_000); inviteNote = null }
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
-        HorizontalDivider()
-        activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
         batteryBanner?.invoke()
         val totalUnread = remember(unreadRows) { unreadRows.sumOf { it.second } }
         val totalMentions = remember(mentionUnreads) {
@@ -1114,6 +1193,12 @@ fun DmListScreen(
             },
             onSpecialLongPress = { confirmMarkAllRead = true },
             onCreateNew = { creatingFolder = true },
+            creating = creatingFolder,
+            onCreateFolder = { name ->
+                scope.launch { createFolderLogged(repo, name, folders.size, null) }
+                creatingFolder = false
+            },
+            onDismissCreate = { creatingFolder = false },
         )
         if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
             // Groups and DMs always, then Party lines and Threads where a
@@ -1192,11 +1277,27 @@ fun DmListScreen(
         else if (threadsTab != null && selectedHomeTab == HomeTab.Threads &&
             selectedFolderId == null && selectedSpecial == SpecialTab.All
         ) threadsTab()
-        else
+        // Braced: everything down to the list's search bar is the chats'
+        // own list. Unbraced, the else took only the next line, and the
+        // list was drawn over the threads and party tabs, taking their taps.
+        else {
+        // A wheel's scroll ends with no fling: settle the bar when the list rests.
+        LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) searchReveal.settle() }
+        // Message search, as a small rounded bar over the top of the list,
+        // tucked away until pulled for: the first letter typed opens the
+        // results with it, and emptying them comes back here. Over the list,
+        // not above it: only the list's top padding grows as it slides in,
+        // so nothing moves under the finger that pulls it (a layout that
+        // moved fed the drag its own movement, without end).
+        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        val shown = searchReveal.shownPx
+        val shownDp = with(androidx.compose.ui.platform.LocalDensity.current) { shown.toDp() }
+        Box {
         LazyColumn(
             state = listState,
-            // Room under the last row for the new-message button.
-            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
+            // Room under the last row for the new-message button, and over
+            // the first for as much of the search bar as shows.
+            contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // Claims the triage noticed, above everything: each is one tap
@@ -1218,7 +1319,6 @@ fun DmListScreen(
                         onConfirm = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.confirm(db, n.id) } },
                         onDiscard = { repo.pushScope.launch { io.nisfeb.talon.orrery.OrreryRepo.discard(db, n.id) } },
                     )
-                    HorizontalDivider()
                 }
             }
 
@@ -1254,7 +1354,6 @@ fun DmListScreen(
                             }
                         },
                     )
-                    HorizontalDivider()
                 }
             }
             if (selectedFolderId == null && selectedSpecial == SpecialTab.Unread) {
@@ -1279,7 +1378,6 @@ fun DmListScreen(
                             onLongClick = onRowLongPress,
                             open = m.whom == openWhom,
                         )
-                        HorizontalDivider()
                     }
                 }
             } else if (selectedFolderId == null && selectedSpecial == SpecialTab.Mentions) {
@@ -1321,7 +1419,6 @@ fun DmListScreen(
                                 onLongClick = onRowLongPress,
                             )
                         }
-                        HorizontalDivider()
                     }
                 }
             } else if (selectedFolderId != null) {
@@ -1380,7 +1477,29 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    Column {
+                                    if (groupCards) GroupCard(
+                                        row = row,
+                                        children = childrenSnapshot,
+                                        contactMap = contactMap,
+                                        ourShip = activeShip,
+                                        draftOf = { drafts[it] },
+                                        openWhom = openWhom,
+                                        onOpen = onRowOpen,
+                                        // The toggle itself, not the head's lambda:
+                                        // that one opens a chat on expanding, and
+                                        // showing the channels must not.
+                                        onShowAll = onGroupHeadToggle,
+                                        onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        onChannelLongPress = onRowLongPress,
+                                        editMode = editMode,
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
+                                            onDragStarted = {
+                                                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                expandedGroups = expandedGroups - row.flag
+                                            },
+                                            onDragStopped = { onDragStopped() },
+                                        ),
+                                    ) else Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
                                         }.collectAsState(initial = null)
@@ -1415,7 +1534,6 @@ fun DmListScreen(
                                                 onDragStopped = { onDragStopped() },
                                             ),
                                         )
-                                        HorizontalDivider()
                                         // Instant, not animated, and that is the
                                         // fix rather than a simplification.
                                         // AnimatedVisibility animates the *measured
@@ -1450,7 +1568,6 @@ fun DmListScreen(
                                                         onLongClick = onRowLongPress,
                                                         open = child.whom == openWhom,
                                                     )
-                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
                                             }
                                         }
@@ -1497,7 +1614,6 @@ fun DmListScreen(
                                             onDragStopped = { onDragStopped() },
                                         ),
                                     )
-                                    HorizontalDivider()
                                 }
                             }
                             i++
@@ -1578,7 +1694,29 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    Column {
+                                    if (groupCards) GroupCard(
+                                        row = row,
+                                        children = childrenSnapshot,
+                                        contactMap = contactMap,
+                                        ourShip = activeShip,
+                                        draftOf = { drafts[it] },
+                                        openWhom = openWhom,
+                                        onOpen = onRowOpen,
+                                        // The toggle itself, not the head's lambda:
+                                        // that one opens a chat on expanding, and
+                                        // showing the channels must not.
+                                        onShowAll = onGroupHeadToggle,
+                                        onLongClick = if (editMode) null else onGroupHeadLongPress,
+                                        onChannelLongPress = onRowLongPress,
+                                        editMode = editMode,
+                                        dragHandleModifier = if (!canReorder) null else reorderHandle(
+                                            onDragStarted = {
+                                                hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                expandedGroups = expandedGroups - row.flag
+                                            },
+                                            onDragStopped = { onDragStopped() },
+                                        ),
+                                    ) else Column {
                                         val lastActive by remember(row.flag) {
                                             repo.groupLastActive(row.flag)
                                         }.collectAsState(initial = null)
@@ -1617,7 +1755,6 @@ fun DmListScreen(
                                                 onDragStopped = { onDragStopped() },
                                             ),
                                         )
-                                        HorizontalDivider()
                                         // Instant, not animated, and that is the
                                         // fix rather than a simplification.
                                         // AnimatedVisibility animates the *measured
@@ -1652,7 +1789,6 @@ fun DmListScreen(
                                                         onLongClick = onRowLongPress,
                                                         open = child.whom == openWhom,
                                                     )
-                                                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                                                 }
                                             }
                                         }
@@ -1676,7 +1812,6 @@ fun DmListScreen(
                                     onLongClick = onRowLongPress,
                                     open = row.m.whom == openWhom,
                                 )
-                                HorizontalDivider()
                             }
                             i++
                         }
@@ -1684,6 +1819,44 @@ fun DmListScreen(
                 }
             }
         }
+        if (shown > 0f) Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(shownDp)
+                .clipToBounds()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+        OutlinedTextField(
+            value = searchText,
+            onValueChange = { typed ->
+                // An input method's word goes over once it is committed:
+                // handed over while composing, its first keystroke went
+                // raw ("n" for に, a lone jamo) and the rest was lost.
+                if (typed.composition == null && typed.text.isNotBlank()) {
+                    SearchDraft.query = typed.text
+                    SearchDraft.fromBar = true
+                    searchText = androidx.compose.ui.text.input.TextFieldValue()
+                    onOpenSearch()
+                } else searchText = typed
+            },
+            placeholder = { Text("Search", maxLines = 1) },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            singleLine = true,
+            shape = RoundedCornerShape(20.dp),
+            textStyle = MaterialTheme.typography.bodyMedium,
+            // Its own height, sliding down from under the header as it shows.
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .wrapContentHeight(align = Alignment.Bottom, unbounded = true)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .heightIn(min = 40.dp)
+                .semantics { contentDescription = "Search" },
+        )
+        }
+        }
+        } // the chats' own list
         // Only valid for the All tab: the Unread / Mentions tabs render
         // a different flat list, so unreadIndices (built from homeRows)
         // would not line up with listState. Folder views are short
@@ -1699,13 +1872,7 @@ fun DmListScreen(
         }
         }
     }
-        FloatingActionButton(
-            onClick = onNewMessage,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        ) { Icon(Icons.Filled.Add, contentDescription = "New message") }
-
+        // No floating + any more: the header's pencil starts a new chat.
     }
 
     folderSheetWhom?.let { whom ->
@@ -1865,15 +2032,6 @@ fun DmListScreen(
         )
     }
 
-    if (creatingFolder) {
-        FolderCreateDialog(
-            onCreate = { name ->
-                scope.launch { createFolderLogged(repo, name, folders.size, null) }
-                creatingFolder = false
-            },
-            onDismiss = { creatingFolder = false },
-        )
-    }
 }
 
 @Composable
@@ -1919,7 +2077,7 @@ internal fun ShipSwitcherDrawer(
                         .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    io.nisfeb.talon.ui.TalonLogo(contentDescription = null, modifier = Modifier.size(20.dp))
+                    io.nisfeb.talon.ui.ShipMark(ship, size = 22.dp)
                     Spacer(Modifier.size(12.dp))
                     Column {
                         if (!nickname.isNullOrBlank()) {
@@ -1999,6 +2157,24 @@ internal fun ShipSwitcherDrawer(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            // Signing out lives here, with the ships, not in the chat
+            // list's menu: it is about which ship this device is on.
+            if (onSignOut != null && activeShip != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onSignOut(activeShip) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Sign out of ${io.nisfeb.talon.ui.shipHandle(activeShip)}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 
@@ -2046,6 +2222,10 @@ private fun FolderTabs(
      *  reached for. */
     onSpecialLongPress: () -> Unit,
     onCreateNew: () -> Unit,
+    /** The new-folder popover is open, under the + that opened it. */
+    creating: Boolean = false,
+    onCreateFolder: (String) -> Unit = {},
+    onDismissCreate: () -> Unit = {},
 ) {
     val specialActive = selectedFolderId == null
     LazyRow(
@@ -2065,11 +2245,14 @@ private fun FolderTabs(
             )
         }
         item(key = "__new") {
-            TabChip(
-                text = "+",
-                selected = false,
-                onClick = onCreateNew,
-            )
+            Box {
+                TabChip(
+                    text = "+",
+                    selected = false,
+                    onClick = onCreateNew,
+                )
+                FolderCreatePopover(expanded = creating, onCreate = onCreateFolder, onDismiss = onDismissCreate)
+            }
         }
         // Special tabs on the right, in priority order:
         //   Mentions (highest-signal) → Unread → All (scavenge pile).
@@ -2152,15 +2335,7 @@ private fun TabChip(
             // surfaceVariant, so amber primary pops; on a selected
             // chip the chip bg is already primary — use onPrimary
             // there so the count stays readable.
-            val badgeColor = if (selected) MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.primary
-            Text(
-                " " + if (badgeCount < 100) badgeCount.toString() else "99+",
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                ),
-                color = badgeColor,
-            )
+            io.nisfeb.talon.ui.NotificationBadge(badgeCount, Modifier.padding(start = 6.dp))
         }
         // Rename pencil — only surfaced on the active, renameable chip
         // while the user is in edit mode.
@@ -2216,31 +2391,41 @@ private fun FolderRenameDialog(
     )
 }
 
+/**
+ * Naming a new folder: a small popover hanging under the + that opened
+ * it, a field and a Create, rather than a dialog over the whole window.
+ * Enter creates; Escape or a click outside closes it.
+ */
 @Composable
-private fun FolderCreateDialog(onCreate: (String) -> Unit, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New folder") },
-        text = {
+private fun FolderCreatePopover(expanded: Boolean, onCreate: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember(expanded) { mutableStateOf("") }
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Text(
+            "New folder",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 2.dp),
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(expanded) { if (expanded) runCatching { focus.requestFocus() } }
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Name") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (name.isNotBlank()) onCreate(name.trim()) }),
+                modifier = Modifier.width(180.dp).focusRequester(focus),
             )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onCreate(name.trim()) },
-                enabled = name.isNotBlank(),
-            ) { Text("Create") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+            TextButton(onClick = { onCreate(name.trim()) }, enabled = name.isNotBlank()) { Text("Create") }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -2375,10 +2560,14 @@ private fun ConversationRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // The shared messenger row: a round avatar, the name in bold with
+        // the time at the far right, and under it a two-line preview with
+        // the red unread count beside it.
         Avatar(
             label = title,
             url = contactMap.conversationAvatar(m.whom),
             colorHex = contactMap.conversationColor(m.whom),
+            // The density setting's size, as the group rows take it.
             size = density.listAvatarSize,
         )
         Column(
@@ -2389,49 +2578,53 @@ private fun ConversationRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // The name and its badge take all the room the time leaves:
+                // two weights side by side split it, and cut a long name at
+                // half the row while the time floated.
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    ChannelTypeBadge(m.whom)
+                }
                 Text(
-                    title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.SemiBold,
-                    ),
-                    modifier = Modifier.weight(1f, fill = false),
-                    maxLines = 1,
-                )
-                ChannelTypeBadge(m.whom)
-            }
-            Text(
-                "$authorLabel · $timestamp",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (!draftPreview.isNullOrEmpty()) {
-                Text(
-                    "Draft: $draftPreview",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontStyle = FontStyle.Italic,
-                    ),
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                )
-            } else if (preview.isNotEmpty()) {
-                Text(
-                    preview.applyEmojiSpans(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    timestamp,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f)) {
+                    if (!draftPreview.isNullOrEmpty()) {
+                        Text(
+                            "Draft: $draftPreview",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (preview.isNotEmpty()) {
+                        // Who said it, where more than one person talks.
+                        val who = if (m.whom.contains('/') || !m.whom.startsWith("~")) "$authorLabel: " else ""
+                        Text(
+                            (who + preview).applyEmojiSpans(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (unread > 0) io.nisfeb.talon.ui.NotificationBadge(unread, Modifier.padding(top = 2.dp))
+            }
         }
         if (editMode && dragHandleModifier != null) {
             Icon(
@@ -2507,15 +2700,7 @@ private fun MentionPlaceholderRow(
             }
         }
         if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(unread)
         }
     }
 }
@@ -2529,14 +2714,7 @@ private fun MentionPlaceholderRow(
  */
 @Composable
 internal fun MenuBadgeDot(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(8.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            // A dot is color alone: a screen reader said nothing of it.
-            .semantics { contentDescription = "Unread" },
-    )
+    io.nisfeb.talon.ui.NotificationDot(modifier)
 }
 
 /** Per-whom message scan depth for the Mentions tab's true-mention
@@ -2607,6 +2785,178 @@ private fun SectionHeader(label: String) {
     }
 }
 
+/**
+ * A group as a card, the home list's Cards view (sneagan, 2026-11-06,
+ * after the bubbles pleased the people who asked for a friendlier groups
+ * list): its picture larger, the newest words with who said them, and a
+ * line naming only the channels with something new ([newInLine]). A tap
+ * goes straight into the channel that most wants reading ([cardTarget]);
+ * "N channels" opens all of them as the list's own channel rows. Tried
+ * and taken off: the faces of recent speakers, and channels as chips,
+ * which readers disliked (sneagan, 2026-11-06).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GroupCard(
+    row: HomeRow.GroupHead,
+    children: List<HomeRow.GroupChild>,
+    contactMap: ContactMap,
+    ourShip: String?,
+    draftOf: (String) -> String?,
+    openWhom: String?,
+    onOpen: (String) -> Unit,
+    onShowAll: (String) -> Unit,
+    onLongClick: ((String) -> Unit)?,
+    onChannelLongPress: (String) -> Unit,
+    editMode: Boolean,
+    dragHandleModifier: Modifier?,
+) {
+    val glow = focusGlow(!row.expanded && children.any { it.whom == openWhom })
+    val target = remember(children) { cardTarget(children) }
+    val news = remember(children, contactMap) { newInLine(children) { contactMap.channelShortName(it) } }
+    val clicks = if (editMode && dragHandleModifier != null) dragHandleModifier
+    else Modifier.combinedClickableWithSecondary(
+        onClick = { target?.let(onOpen) },
+        onLongClick = onLongClick?.let { { it(row.flag) } },
+    )
+    // Edge to edge, each against the next with a fine rule between
+    // (sneagan, 2026-11-06), rather than rounded cards apart.
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().background(glow).then(clicks).padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val isHexTint = row.image?.startsWith("#") == true
+            Avatar(
+                label = row.title,
+                url = if (isHexTint) null else row.image,
+                colorHex = if (isHexTint) row.image else null,
+                size = 52.dp,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        row.title,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
+                    // A group of one channel has nothing to open: the
+                    // card is the way in.
+                    if (children.size > 1) ChannelsToggle(children.size, row.expanded) { onShowAll(row.flag) }
+                }
+                CardLatest(children, contactMap, ourShip, draftOf)
+                if (news != null) {
+                    Text(
+                        news,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (editMode && dragHandleModifier != null) {
+                Icon(
+                    imageVector = TalonIcons.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterVertically).size(20.dp),
+                )
+            }
+        }
+        // Opened, the list's own channel rows, set in under the text.
+        if (row.expanded && children.size > 1) {
+            children.forEach { child ->
+                GroupChannelRow(
+                    whom = child.whom,
+                    m = child.m,
+                    unread = child.unread,
+                    contactMap = contactMap,
+                    draft = draftOf(child.whom),
+                    onClick = onOpen,
+                    onLongClick = onChannelLongPress,
+                    open = child.whom == openWhom,
+                    startPadding = 80.dp,
+                )
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+    }
+}
+
+/** "N channels", and which way it opens: shows the card's channel rows, or puts them away. */
+@Composable
+private fun ChannelsToggle(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .clickable(onClickLabel = if (expanded) "Hide channels" else "Show channels", onClick = onToggle)
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "$count channels",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            imageVector = TalonIcons.ExpandMore,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = if (expanded) 180f else 0f },
+        )
+    }
+}
+
+/** The card's line of news: a draft waiting, else the newest words and who said them. */
+@Composable
+private fun CardLatest(
+    children: List<HomeRow.GroupChild>,
+    contactMap: ContactMap,
+    ourShip: String?,
+    draftOf: (String) -> String?,
+) {
+    val drafted = children.firstNotNullOfOrNull { c -> draftOf(c.whom)?.trim()?.takeIf { it.isNotEmpty() }?.let { c.whom to it } }
+    val newest = children.mapNotNull { it.m }.maxByOrNull { it.sentMs }
+    when {
+        drafted != null -> Text(
+            "Draft in ${contactMap.channelShortName(drafted.first)}: ${drafted.second.replace('\n', ' ').take(160)}",
+            style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        newest != null -> {
+            val who = if (newest.author == ourShip) "You" else contactMap.displayName(newest.author)
+            val words = remember(newest.id, newest.contentJson, newest.title) {
+                StoryCache.previewFor(newest).take(200).replace('\n', ' ')
+            }
+            Text(
+                listOf(if (words.isBlank()) "$who posted" else "$who: $words", formatRelative(newest.sentMs))
+                    .joinToString(" · ").applyEmojiSpans(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        else -> Text(
+            "Nothing said yet",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupHeaderRow(
@@ -2674,15 +3024,7 @@ private fun GroupHeaderRow(
             )
         }
         if (totalUnread > 0 && !expanded) {
-            Text(
-                if (totalUnread < 100) totalUnread.toString() else "99+",
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(totalUnread)
         }
         Icon(
             // Always the down chevron; rotation alone communicates state
@@ -2733,6 +3075,8 @@ private fun GroupChannelRow(
     onLongClick: (String) -> Unit,
     /** Open beside the list: see [focusGlow]. */
     open: Boolean = false,
+    /** From the row's start to its text: under a group head, or under a card's text. */
+    startPadding: androidx.compose.ui.unit.Dp = 56.dp,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
     val glow = focusGlow(open)
@@ -2756,7 +3100,7 @@ private fun GroupChannelRow(
                 onClick = { onClick(whom) },
                 onLongClick = { onLongClick(whom) },
             )
-            .padding(start = 56.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = startPadding, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -2791,15 +3135,7 @@ private fun GroupChannelRow(
             }
         }
         if (unread > 0) {
-            Text(
-                if (unread < 100) unread.toString() else "99+",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            )
+            io.nisfeb.talon.ui.NotificationBadge(unread)
         }
     }
 }
@@ -3083,3 +3419,6 @@ private suspend fun createFolderLogged(
         io.nisfeb.talon.util.Log.e("Folders", "creating \"$name\" failed", it)
     }
 }
+
+/** The chat list's search bar, all of it: the field and its margin. */
+private val SEARCH_BAR_HEIGHT = 64.dp

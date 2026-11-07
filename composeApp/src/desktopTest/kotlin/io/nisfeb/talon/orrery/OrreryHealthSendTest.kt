@@ -58,7 +58,7 @@ class OrreryHealthSendTest {
         val db = Room.databaseBuilder<AppDatabase>(name = File(dir, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         if (token) db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
-        try { block(db) } finally { db.close(); dir.deleteRecursively() }
+        try { block(db) } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     private val owner = HttpClient(MockEngine { error("health goes under the key, never the owner's cookie") })

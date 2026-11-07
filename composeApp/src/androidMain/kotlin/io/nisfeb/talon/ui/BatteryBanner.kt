@@ -73,7 +73,7 @@ fun BatteryExemptionBanner(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )
             Text(
-                "Android may kill Talon in the background unless you allow it to run unrestricted.",
+                "Android may kill Groundwire in the background unless you allow it to run unrestricted.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
             )

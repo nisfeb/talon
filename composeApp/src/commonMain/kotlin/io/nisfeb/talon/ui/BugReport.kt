@@ -53,7 +53,7 @@ fun bugReport(description: String, about: List<Pair<String, String>>, logs: List
         about.forEach { (k, v) -> append(k).append(": ").append(v).append('\n') }
         append(if (logs != null) "Logs: ${logs.size} lines, in $BUG_REPORT_LOG_FILE" else "Logs: not sent")
     }
-    return BugReport("Talon bug: $first", body, logs?.joinToString("\n", postfix = "\n")?.encodeToByteArray())
+    return BugReport("Groundwire bug: $first", body, logs?.joinToString("\n", postfix = "\n")?.encodeToByteArray())
 }
 
 /**
@@ -91,7 +91,7 @@ fun ReportBugDialog(mail: MailRepo?, about: List<Pair<String, String>>, onDismis
                     Text("It went to $BUG_REPORT_TO as mail from your ship. Thank you.")
                     return@Column
                 }
-                Text("Say what happened and what you expected. It goes to Talon's developer at $BUG_REPORT_TO as Auspex mail from your ship.")
+                Text("Say what happened and what you expected. It goes to Groundwire's developer at $BUG_REPORT_TO as Auspex mail from your ship.")
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it; problem = null; copied = false },

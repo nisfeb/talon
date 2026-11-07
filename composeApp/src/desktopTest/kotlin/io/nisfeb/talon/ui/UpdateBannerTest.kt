@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.ui.theme.TalonTheme
 import io.nisfeb.talon.update.UpdateManifest
 import io.nisfeb.talon.update.UpdateStatus
@@ -38,8 +38,8 @@ class UpdateBannerTest {
 
     @Test
     fun `an update on offer says what is new, taps to update, and can be put off`() = banner(UpdateStatus.Available(manifest)) {
-        assertTrue(shows("Talon 1.9.0 available") && shows("Faster sync."))
-        onNodeWithText("Talon 1.9.0 available").performClick()
+        assertTrue(shows("Groundwire 1.9.0 available") && shows("Faster sync."))
+        onNodeWithText("Groundwire 1.9.0 available").performClick()
         onNodeWithContentDescription("Dismiss").performClick()
         assertEquals(listOf("tap", "dismiss"), did.toList())
     }
@@ -74,6 +74,6 @@ class UpdateBannerTest {
 
     @Test
     fun `with nothing to say there is no banner`() = banner(UpdateStatus.Idle) {
-        assertTrue(!shows("Talon") && !shows("Click"))
+        assertTrue(!shows("Groundwire") && !shows("Click"))
     }
 }

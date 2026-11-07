@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.ui.graphics.compositeOver
 import io.nisfeb.talon.ui.theme.LINK_BLUE
 import io.nisfeb.talon.ui.theme.linkColor
 import io.nisfeb.talon.util.nowMs
@@ -41,12 +42,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import io.nisfeb.talon.ui.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import io.nisfeb.talon.ui.TextButton
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import okio.Path.Companion.toPath
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.horizontalScroll
 import io.nisfeb.talon.ui.theme.hex
@@ -82,6 +84,8 @@ import io.nisfeb.talon.ai.orreryOn
 @Composable
 fun SettingsScreen(
     aiSettings: AiSettingsRepository,
+    /** Sets every group's notification level at once; returns how many. Null hides the control. */
+    onSetAllGroupsNotify: (suspend (level: String) -> Int)? = null,
     themePreference: ThemePreference,
     uiSettings: UiSettings,
     /** The orrery pipe, for its section under AI; null where no ship is known. */
@@ -147,10 +151,12 @@ fun SettingsScreen(
     onOpenLoops: () -> Unit = {},
     /** The comet Talon runs on this computer; Noop where unsupported. */
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
-    /** Open on the Account tab, where the local ship and its dojo live. */
-    startOnAccount: Boolean = false,
+    /** Open on the Experimental tab, where the local ship and its dojo live. */
+    startOnLocalShip: Boolean = false,
     /** Open on the AI tab: the way in from a failure the balance caused. */
     startOnAi: Boolean = false,
+    /** Where the picture behind the bubbles is kept. */
+    chatBackgroundFiles: io.nisfeb.talon.ui.ChatBackgroundFiles = io.nisfeb.talon.ui.ChatBackgroundFiles.default,
     onAlwaysPatpChanged: (Boolean) -> Unit = {},
     /** Fired after the word-names toggle flips; hosts push the new
      *  value to %settings so the choice follows the user. Local apply
@@ -163,6 +169,8 @@ fun SettingsScreen(
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
+    val chatBubbles by uiSettings.chatBubbles.collectAsState()
+    val groupCards by uiSettings.groupCards.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -206,24 +214,30 @@ fun SettingsScreen(
         HorizontalDivider()
 
         val visibleTabs = buildList {
+            // General holds the pages that open from Settings (apps, the
+            // sidebar); Appearance only how things look.
             add(SettingsTab.Appearance)
+            add(SettingsTab.General)
             add(SettingsTab.Home)
             add(SettingsTab.Chats)
-            if (notificationHealth != null || relayConfig != null) {
-                add(SettingsTab.Notifications)
-            }
+            // Always: what notifies the owner is said here on every device.
+            add(SettingsTab.Notifications)
             add(SettingsTab.Ai)
             // Under AI, and its own page: many will want it off, which is
             // how it starts.
             add(SettingsTab.Orrery)
             if (isCallsSupported && callController != null) add(SettingsTab.Calls)
+            // Where there is a keyboard to press them on.
+            if (!io.nisfeb.talon.ui.isTouchPrimary) add(SettingsTab.Shortcuts)
             add(SettingsTab.Account)
+            // Beta and power-user switches, kept apart from everyday ones.
+            add(SettingsTab.Experimental)
             add(SettingsTab.About)
         }
         var tab by remember {
             mutableStateOf(
                 when {
-                    startOnAccount -> SettingsTab.Account
+                    startOnLocalShip -> SettingsTab.Experimental
                     startOnAi -> SettingsTab.Ai
                     else -> SettingsTab.Appearance
                 },
@@ -240,7 +254,7 @@ fun SettingsScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-            if (safeTab == SettingsTab.Appearance) {
+            if (safeTab == SettingsTab.General) {
             // ── Which sections show, and in what order ─────────────
             //
             // Drills into SidebarSettingsScreen. First thing on the
@@ -303,9 +317,10 @@ fun SettingsScreen(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.height(12.dp))
+            }
+            if (safeTab == SettingsTab.Appearance) {
             Text(
-                "Appearance",
+                "Theme",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -413,6 +428,8 @@ fun SettingsScreen(
             FontSection(uiSettings)
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.General) {
             // ── Ship naming ─────────────────────────────────────────
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
             FeatureToggleRow(
@@ -435,7 +452,7 @@ fun SettingsScreen(
                 } else {
                     "Off by default. Comets always show word names -- " +
                         "their Urbit name is their key. A planet's is " +
-                        "not, so turning this on has Talon look each " +
+                        "not, so turning this on has Groundwire look each " +
                         "one up from your own ship, which only works " +
                         "where that ship can answer."
                 },
@@ -446,6 +463,8 @@ fun SettingsScreen(
                 },
                 switchEnabled = !alwaysPatp,
             )
+            }
+            if (safeTab == SettingsTab.Appearance) {
             // ── Accent color ────────────────────────────────────────
             FeatureToggleRow(
                 label = "Custom accent color",
@@ -531,8 +550,10 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
+            }
+            if (safeTab == SettingsTab.Chats) {
             Text(
-                "Home list",
+                "Chat list order",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Text(
@@ -590,6 +611,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.General) {
             // Every time shown, not only the dial's: it sat under Home's
             // clock while the chats, search and calendar went their own way.
             Text(
@@ -611,6 +634,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Shortcuts) {
             // Where there is a keyboard to press them on.
             if (!io.nisfeb.talon.ui.isTouchPrimary) {
                 KeybindsSection(uiSettings)
@@ -653,7 +678,7 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "The hour reads as set under Appearance, Time. The place the dial uses is set on the dial itself.",
+                "The hour reads as set under General, Time. The place the dial uses is set on the dial itself.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -682,6 +707,13 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Account) {
+            Text(
+                "Your Groundwire is an instance of the Urbit operating system: a personal " +
+                    "server you own, which keeps your messages, contacts and apps. Groundwire " +
+                    "is how you reach it.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(8.dp))
             // ── Login QR generator ─────────────────────────────────
             // Lets the user build a `talon://login?...` QR for someone
             // else (assisted onboarding flow). Generation works on
@@ -710,17 +742,20 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(4.dp))
 
-            if (io.nisfeb.talon.ui.isLocalCometSupported && localShip.pierExists()) {
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-                LocalShipSection(localShip)
             }
+            if (safeTab == SettingsTab.Experimental &&
+                io.nisfeb.talon.ui.isLocalCometSupported && localShip.pierExists()
+            ) {
+                LocalShipSection(localShip)
+                Spacer(Modifier.height(8.dp))
             }
             if (safeTab == SettingsTab.Notifications) {
+            NotifyRulesSection(onSetAllGroupsNotify)
+            Spacer(Modifier.height(12.dp))
             // Said plainly, so a missed call is not how the owner learns it (B3-3).
             if (io.nisfeb.talon.ui.needsPushForBackgroundRing && noPush) {
                 Text(
-                    "Without push, calls ring only while Talon is open.",
+                    "Without push, calls ring only while Groundwire is open.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 8.dp),
@@ -750,6 +785,70 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Chats) {
+            Text(
+                "Messages",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "Bubbles put yours on the right and theirs on the left. Rows put every message " +
+                    "on the left under its author's name and time.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = chatBubbles,
+                    onClick = { uiSettings.setChatBubbles(true) },
+                    label = { Text("Bubbles") },
+                )
+                FilterChip(
+                    selected = !chatBubbles,
+                    onClick = { uiSettings.setChatBubbles(false) },
+                    label = { Text("Rows") },
+                )
+            }
+            // A picture of the owner's, behind Home and behind bubbles;
+            // rows draw on the page. Offered either way, since Home has no
+            // bubbles. Colours, the page's and the bubbles', are a theme's.
+            ChatBackgroundImageRow(uiSettings, chatBackgroundFiles)
+            Text(
+                "The picture goes behind Home, and behind chats shown as bubbles.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (chatBubbles) {
+                Text(
+                    "Your bubbles, your contacts' and everyone else's take their colours from your theme, under Appearance.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "Groups",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            )
+            Text(
+                "A list puts each group's channels under it. Cards show each group with its newest " +
+                    "words and its channels, and a tap goes straight in.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !groupCards,
+                    onClick = { uiSettings.setGroupCards(false) },
+                    label = { Text("List") },
+                )
+                FilterChip(
+                    selected = groupCards,
+                    onClick = { uiSettings.setGroupCards(true) },
+                    label = { Text("Cards") },
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+
             Text(
                 "Composer",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -786,6 +885,8 @@ fun SettingsScreen(
             }
             Spacer(Modifier.height(8.dp))
 
+            }
+            if (safeTab == SettingsTab.Experimental) {
             FeatureToggleRow(
                 label = "Power features",
                 description = "Unlocks `/poke <app> <mark> <json>` from any composer — " +
@@ -864,32 +965,26 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 )
                 Text(
-                    "What the app does to your microphone before sending it. " +
-                        "One size does not fit all: a headset in a quiet room wants " +
-                        "less of this than a laptop mic in a café. Per device; takes " +
-                        "effect on the next call or line you join.",
+                    "Cleanup applied to your mic on this device. Changes apply from your next call.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 val mic by uiSettings.micProcessing.collectAsState()
                 FeatureToggleRow(
                     label = "Noise suppression",
-                    description = "Removes fans, keyboards and room hum. Also eats music " +
-                        "and some voices; turn it off if people say you sound underwater.",
+                    description = "Filters out background noise. Turn off if you sound muffled.",
                     enabled = mic.noiseSuppression,
                     onChange = { uiSettings.setMicProcessing(mic.copy(noiseSuppression = it)) },
                 )
                 FeatureToggleRow(
                     label = "Echo cancellation",
-                    description = "Stops the room from hearing itself when you use speakers. " +
-                        "Safe to turn off with a headset.",
+                    description = "Prevents echo when using speakers. Not needed with headphones.",
                     enabled = mic.echoCancellation,
                     onChange = { uiSettings.setMicProcessing(mic.copy(echoCancellation = it)) },
                 )
                 FeatureToggleRow(
                     label = "Auto gain",
-                    description = "Evens out your level so whispers and shouts arrive alike. " +
-                        "Turn it off for a mic you have already set up, or for music.",
+                    description = "Keeps your volume steady. Turn off for a tuned mic or music.",
                     enabled = mic.autoGainControl,
                     onChange = { uiSettings.setMicProcessing(mic.copy(autoGainControl = it)) },
                 )
@@ -898,7 +993,7 @@ fun SettingsScreen(
                 if (!isBackgroundCallRingSupported) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Incoming calls ring only while Talon is open.",
+                        "Incoming calls ring only while Groundwire is open.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -945,10 +1040,10 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
                 Text("Quick dictation", style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "Speak, and Talon hands it to orrery: a note, a todo, a message to send. A question " +
+                    "Speak, and Groundwire hands it to orrery: a note, a todo, a message to send. A question " +
                         "is answered. What orrery's policy holds for you shows on the card: say \"send\" or tap, " +
                         "and on a locked phone, your fingerprint. Start one from the tile, the widget, or the " +
-                        "assist gesture with Talon as your assistant.",
+                        "assist gesture with Groundwire as your assistant.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1003,7 +1098,7 @@ private fun AboutSection(
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
-        "Talon — Compose Multiplatform Urbit chat client.",
+        "Groundwire — Compose Multiplatform Urbit chat client.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1057,7 +1152,7 @@ private fun AboutSection(
                     // so far have come down to a ship running an older
                     // %trunk than the app, and this is what someone
                     // pastes into a support thread.
-                    "Talon ${io.nisfeb.talon.TalonBuild.versionName} " +
+                    "Groundwire ${io.nisfeb.talon.TalonBuild.versionName} " +
                         "(build ${io.nisfeb.talon.TalonBuild.versionCode}) " +
                         "· ${io.nisfeb.talon.ui.platformLabel}" +
                         if (callController != null) {
@@ -1297,13 +1392,10 @@ private fun CallServersSection(controller: io.nisfeb.talon.call.CallController) 
             Button(
                 enabled = valid && servers.none { it.url == candidate },
                 onClick = {
-                    scope.launch {
-                        controller.setIce(
-                            servers + io.nisfeb.talon.call.IceServer(
-                                candidate, user.trim(), cred.trim(),
-                            ),
-                        )
-                    }
+                    // Taken now: the coroutine runs after this handler, which
+                    // clears the fields, and a TURN server went with no login.
+                    val next = servers + io.nisfeb.talon.call.IceServer(candidate, user.trim(), cred.trim())
+                    scope.launch { controller.setIce(next) }
                     url = ""; user = ""; cred = ""
                 },
             ) { Text("Add") }
@@ -1463,12 +1555,12 @@ private fun NotificationHealthPanel(
     val systemState = probe.snapshot()
 
     Text(
-        "Notification health",
+        "Delivery check",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
         "If something below looks wrong, real-time delivery may be " +
-            "degraded — restart Talon, check your network, or look " +
+            "degraded — restart Groundwire, check your network, or look " +
             "at battery / background-app permissions.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1537,7 +1629,7 @@ private fun NotificationHealthPanel(
                 label = "Phone-app call log",
                 value = when {
                     !registered -> "no account — calls aren't logged"
-                    systemState.callLogIsVoip -> "logged as VoIP calls — turn Talon on under Calling accounts › Integrated call logs"
+                    systemState.callLogIsVoip -> "logged as VoIP calls — turn Groundwire on under Calling accounts › Integrated call logs"
                     else -> "account registered"
                 },
                 highlight = !registered,
@@ -1677,17 +1769,17 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     var code by remember { mutableStateOf("") }
 
     Text(
-        "Push relay",
+        "Background delivery",
         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
     )
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
             "With the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears from your ship only " +
-                "through a relay. The default endpoint is the Talon-operated host."
+                "through a relay. The default endpoint is the Groundwire-operated host."
         } else {
             "Optional: register this device with a notification relay so " +
-                "pushes still arrive when Talon is killed by Android or " +
-                "force-stopped. The default endpoint is the Talon-operated " +
+                "pushes still arrive when Groundwire is killed by Android or " +
+                "force-stopped. The default endpoint is the Groundwire-operated " +
                 "host; self-host by pointing at your own."
         },
         style = MaterialTheme.typography.bodySmall,
@@ -1880,7 +1972,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
                             ) {
                                 is io.nisfeb.talon.notify.Enrollment.On ->
                                     "Registered (deviceId=${r.deviceId.take(8)}…)" +
-                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Talon."
+                                        if (r.alerts) "" else ". Messages won't alert until notifications are allowed for Groundwire."
                                 is io.nisfeb.talon.notify.Enrollment.NoToken -> r.why
                                 is io.nisfeb.talon.notify.Enrollment.Refused -> r.why
                             }
@@ -1986,13 +2078,16 @@ private fun SystemPromptEditorDialog(
 /** Settings groups. Order here is the rail / tab-row order. */
 private enum class SettingsTab(val label: String) {
     Appearance("Appearance"),
+    General("General"),
     Home("Home"),
     Chats("Chats"),
     Notifications("Notifications"),
     Ai("AI"),
-    Orrery("Orrery"),
+    Orrery("Assistant"),
     Calls("Calls"),
-    Account("Account"),
+    Shortcuts("Keyboard shortcuts"),
+    Account("Urbit"),
+    Experimental("Experimental"),
     About("About"),
 }
 
@@ -2090,7 +2185,7 @@ internal fun ColorRow(label: String, value: String, onValue: (String) -> Unit) {
 }
 
 /**
- * The six colours a theme may set beyond its five, closed until asked
+ * The ten colours a theme may set beyond its five, closed until asked
  * for: each reads Auto (derived) until set, and goes back to Auto.
  */
 @Composable
@@ -2099,7 +2194,10 @@ private fun MoreColors(
     onDraft: (io.nisfeb.talon.ui.theme.CustomTheme) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    val set = listOf(draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link).count { !it.isNullOrEmpty() }
+    val set = listOf(
+        draft.text, draft.muted, draft.raised, draft.error, draft.selection, draft.link,
+        draft.bubbleMine, draft.bubbleContact, draft.bubbleTheirs, draft.badge,
+    ).count { !it.isNullOrEmpty() }
     TextButton(onClick = { open = !open }) {
         Text(if (open) "Fewer colours" else if (set > 0) "More colours ($set set)" else "More colours")
     }
@@ -2112,6 +2210,11 @@ private fun MoreColors(
     OptionalColorRow("Error", draft.error, now.error) { onDraft(draft.copy(error = it)) }
     OptionalColorRow("Selection", draft.selection, now.primary) { onDraft(draft.copy(selection = it)) }
     OptionalColorRow("Links", draft.link, LINK_BLUE) { onDraft(draft.copy(link = it)) }
+    // Message bubbles: Auto starts from what a bubble draws on this theme's page.
+    OptionalColorRow("My bubbles", draft.bubbleMine, now.primary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleMine = it)) }
+    OptionalColorRow("Contacts' bubbles", draft.bubbleContact, now.tertiary.copy(alpha = 0.22f).compositeOver(now.surface)) { onDraft(draft.copy(bubbleContact = it)) }
+    OptionalColorRow("Others' bubbles", draft.bubbleTheirs, now.surfaceContainerHighest) { onDraft(draft.copy(bubbleTheirs = it)) }
+    OptionalColorRow("Unread badges", draft.badge, now.primary) { onDraft(draft.copy(badge = it)) }
 }
 
 /** A colour that is Auto (derived) until set, with the way back to Auto. */
@@ -2129,6 +2232,55 @@ private fun OptionalColorRow(label: String, value: String?, auto: androidx.compo
             TextButton(onClick = { onValue("") }) { Text("Auto") }
         }
     }
+}
+
+/** The picture behind the bubbles: chosen from this device's, kept on it, and never synced. */
+@Composable
+private fun ChatBackgroundImageRow(uiSettings: UiSettings, files: io.nisfeb.talon.ui.ChatBackgroundFiles) {
+    val image by uiSettings.chatBackgroundImage.collectAsState()
+    val pick = io.nisfeb.talon.util.rememberImagePicker()
+    val scope = rememberCoroutineScope()
+    var picking by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    val choose: () -> Unit = {
+        scope.launch {
+            // Set before the picker suspends: two taps would both get in.
+            if (picking) return@launch
+            picking = true
+            problem = null
+            runCatching {
+                // Kept and set with no wait between, so leaving the
+                // screen can lose the pick but never half of it.
+                pick()?.let { picked ->
+                    val path = files.write(picked.bytes)
+                    uiSettings.setChatBackgroundImage(path)
+                    files.keepOnly(path)
+                }
+            }.onFailure { problem = io.nisfeb.talon.util.problemOf("Couldn't use that picture", it) }
+            picking = false
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Background", Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+        if (image.isEmpty()) {
+            Text("None", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = choose, enabled = !picking) { Text("Choose a picture") }
+        } else {
+            coil3.compose.AsyncImage(
+                model = image.toPath(),
+                contentDescription = "Your background picture",
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = choose, enabled = !picking) { Text("Change") }
+            TextButton(onClick = {
+                uiSettings.setChatBackgroundImage("")
+                files.keepOnly("")
+            }) { Text("Remove") }
+        }
+    }
+    problem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
 }
 
 /** Name, light or dark, five colors, six optional ones, and a live preview of the derived scheme. */
@@ -2458,7 +2610,7 @@ internal fun AppIconBadgeRow(settings: io.nisfeb.talon.notify.RelaySettings) {
             Text("Unread count on the app icon", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "Messages that notified you: direct messages, mentions and replies. " +
-                    "If no number shows, turn on Badges for Talon in the ${io.nisfeb.talon.ui.iosDeviceName}'s Settings, Notifications.",
+                    "If no number shows, turn on Badges for Groundwire in the ${io.nisfeb.talon.ui.iosDeviceName}'s Settings, Notifications.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2489,15 +2641,15 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     val (title, body) = when {
         via -> "Notifications come from $name" to (
             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                "Your ship sends them to $device itself, through its calling app. The Talon relay only hands them to Apple."
+                "Your ship sends them to $device itself, through its calling app. The Groundwire relay only hands them to Apple."
             } else {
-                "Your ship sends them to $device itself, through its calling app. The Talon relay is not used."
+                "Your ship sends them to $device itself, through its calling app. The Groundwire relay is not used."
             }
             )
-        declined -> "Notifications come from the Talon relay" to
+        declined -> "Notifications come from the Groundwire relay" to
             "You chose the relay over $name's own notifications. Register $device with the relay below to get them from it."
         backToShip -> "Moving to $name's notifications" to
-            "Talon moves $device the next time it starts, once a test notification from $name arrives."
+            "Groundwire moves $device the next time it starts, once a test notification from $name arrives."
         else -> return
     }
     val status by produceState<String?>(null, ship, via) {

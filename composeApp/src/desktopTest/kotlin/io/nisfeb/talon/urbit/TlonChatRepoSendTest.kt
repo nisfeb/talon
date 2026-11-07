@@ -50,7 +50,7 @@ class TlonChatRepoSendTest {
     private val flag = "~bus/general"
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = closeAfter(db, repo)
 
     /** Runs [body] with the event stream open, so pokes get their acks. */
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
@@ -191,13 +191,20 @@ class TlonChatRepoSendTest {
     // is not a term, sends nothing: %channels would refuse it.
     @Test
     fun `a channel made with a short name is named by it, and one taken or not a term sends nothing`() = live {
-        ship.scries["groups/v3/groups"] = """{"$flag":{"meta":{"title":"Bus"},"channels":{}}}"""
+        // The group as the ship has it, news among its channels: the new
+        // channel's re-read of the groups rewrites this group's channels
+        // from it, and on a slow runner landed after the row below was
+        // written, which it took away.
+        ship.scries["groups/v3/groups"] = """{"$flag":{"meta":{"title":"Bus"},"channels":{"chat/~zod/news":{"meta":{"title":"news"}}}}}"""
+        // As a slow runner had it: the re-read lands after the row below.
+        ship.holdScry = { if (it == "groups/v3/groups") 300 else 0 }
         assertEquals("chat/~zod/town-hall", repo.createChannel(flag, "chat", "Town hall", shortName = "town-hall"))
         assertEquals(
             """{"create":{"kind":"chat","group":"$flag","name":"town-hall","title":"Town hall","description":"","meta":null,"readers":[],"writers":[]}}""",
             ship.pokesTo("channels").single().json.toString(),
         )
         db.groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~zod/news", flag, title = "news")))
+        kotlinx.coroutines.delay(600)
         assertEquals("chat/~zod/news", repo.shortNameTaken("news", "chat"))
         assertEquals(null, repo.shortNameTaken("news", "heap"), "a gallery of the same name is another channel")
         assertEquals(null, repo.shortNameTaken("", "chat"))

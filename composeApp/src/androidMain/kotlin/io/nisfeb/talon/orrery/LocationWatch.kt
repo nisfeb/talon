@@ -20,6 +20,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import io.nisfeb.talon.TalonApplication
+import io.nisfeb.talon.ai.orreryOn
 import io.nisfeb.talon.ui.hasLocationPermission
 import io.nisfeb.talon.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -176,6 +177,13 @@ class LocationWorker(context: Context, params: WorkerParameters) : CoroutineWork
     override suspend fun doWork(): Result {
         val app = applicationContext as? TalonApplication ?: return Result.success()
         val session = app.sessionStore.active() ?: return Result.success()
+        // Orrery turned off, on another device as well: nothing goes, and
+        // this one stops listening, as the pipe going off here does. The
+        // fix was sent until the app was next opened.
+        if (!app.aiSettings.state.value.orreryOn()) {
+            LocationWatch.set(applicationContext, false)
+            return Result.success()
+        }
         val d = inputData
         val fix = LocationFix(d.getDouble("lat", 0.0), d.getDouble("lon", 0.0), d.getDouble("acc", MAX_MATCH_M), d.getLong("at", System.currentTimeMillis()))
         // Asked again as it sends: the switch may have gone off while this waited for the network.

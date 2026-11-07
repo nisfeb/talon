@@ -1,8 +1,17 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import okio.Path.Companion.toPath
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextReplacement
@@ -13,6 +22,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
@@ -21,7 +32,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.onFirst
 import io.nisfeb.talon.data.ChannelGroupEntity
 import androidx.compose.ui.test.hasScrollAction
@@ -48,7 +59,9 @@ import kotlin.test.Test
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import androidx.compose.ui.graphics.compositeOver
 import io.ktor.client.engine.mock.respond
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -77,8 +90,20 @@ class DmChatScreenTest {
         host: Host = Host(whom),
         drafts: DraftStore = InMemoryDraftStore(),
         ai: io.nisfeb.talon.ai.AiSettingsRepository = FakeAiSettings(),
+        ui: io.nisfeb.talon.ui.UiSettings = InMemoryUiSettings(),
+        /** Ships put in the owner's contact book before the chat opens. */
+        book: List<String> = emptyList(),
+        /** Bubble colours as a theme would set them. */
+        bubbleColors: BubbleColors? = null,
+        /** Handed the theme's colours, for a test that reads pixels. */
+        scheme: (androidx.compose.material3.ColorScheme) -> Unit = {},
+        /** A phone's way into a message's menu: a tap on it, opening at the finger. */
+        touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
+        // One test's rows for ~bus opened the next one's chat until its own
+        // came, and its first page was judged on them (CI, 2026-11-07).
+        io.nisfeb.talon.ui.screens.forgetChatRowsSnapshot()
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -88,6 +113,7 @@ class DmChatScreenTest {
         val stream = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(stream)
         runBlocking { db.seed() }
+        runBlocking { book.forEach { repo.addContact(it) } }
         try {
             runComposeUiTest {
                 setContent {
@@ -98,14 +124,20 @@ class DmChatScreenTest {
                         },
                     ) {
                     TalonTheme(darkTheme = false) {
+                    scheme(androidx.compose.material3.MaterialTheme.colorScheme)
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current),
+                        io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
+                    ) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
-                            aiSettings = ai, uiSettings = InMemoryUiSettings(),
+                            aiSettings = ai, uiSettings = ui,
                             ourPatp = "~zod", whom = host.whom,
                             onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
                         )
+                    }
                     }
                     }
                 }
@@ -115,7 +147,7 @@ class DmChatScreenTest {
         } finally {
             stream.cancel()
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -201,6 +233,262 @@ class DmChatScreenTest {
     }) { _, _ ->
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("No messages yet").fetchSemanticsNodes().isNotEmpty() }
         onAllNodesWithText("Messages could not be loaded").assertCountEquals(0)
+    }
+
+    // sneagan, 2026-11-05: "the chat view should be a setting because I
+    // don't like bubble chats even though many people do". Bubbles: ours
+    // on the right with no byline. Rows: every message on the left under
+    // its author's byline. The choice switches an open conversation.
+    @Test
+    fun `bubbles put ours on the right, and rows put every message on the left under its byline`() {
+        val ui = InMemoryUiSettings()
+        chat(seed = { messages().upsertAll(listOf(msg("~bus/170141184501", "~bus", "from them", 1_000), msg("~zod/170141184502", "~zod", "from me", 2_000))) }, ui = ui) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from me").fetchSemanticsNodes().isNotEmpty() }
+            fun left(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.left
+            fun bylined() = onAllNodesWithText("~zod", substring = true).fetchSemanticsNodes().isNotEmpty()
+            assertTrue(ui.chatBubbles.value, "bubbles unless chosen otherwise")
+            assertTrue(left("from me") > left("from them") + 200f, "ours sits on the right")
+            assertFalse(bylined(), "and carries no byline")
+            ui.setChatBubbles(false)
+            waitForIdle()
+            assertEquals(left("from them"), left("from me"), "rows put both on the left")
+            assertTrue(bylined(), "ours under its byline")
+            ui.setChatBubbles(true)
+            waitForIdle()
+            assertTrue(left("from me") > left("from them") + 200f, "and back")
+        }
+    }
+
+    /** A picture of one colour, kept where a chosen one would be. */
+    private fun picture(rgb: Int): String {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color(rgb); fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        return f.absolutePath
+    }
+
+    private fun assertNear(expected: Color, actual: Color, what: String) {
+        val off = maxOf(kotlin.math.abs(expected.red - actual.red), kotlin.math.abs(expected.green - actual.green), kotlin.math.abs(expected.blue - actual.blue))
+        assertTrue(off < 3f / 255f, "$what: expected $expected, was $actual")
+    }
+
+    private val red = Color(0xFFFF0000)
+
+    private fun ComposeUiTest.aboveEveryMessage(): Color {
+        val list = onNode(hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+        return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.top + 4f).toInt()]
+    }
+
+    // sneagan, 2026-11-05: the owner's bubbles, their contacts' (a VIP
+    // colour) and everyone else's, from the theme; and 2026-11-06, on a
+    // picture of the owner's. Read off the drawn pixels: inside each
+    // bubble's margin, and above every message, where only the picture is.
+    @Test
+    fun `a contact's bubble takes the contacts' colour, others theirs, ours ours, on the chosen picture`() {
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
+        val green = Color(0xFF00FF00)
+        val blue = Color(0xFF0000FF)
+        val yellow = Color(0xFFFFFF00)
+        chat(
+            whom = "0v1.club",
+            ui = ui,
+            book = listOf("~nec"),
+            bubbleColors = BubbleColors(mine = yellow, contact = green, theirs = blue),
+            seed = {
+                messages().upsertAll(listOf(
+                    MessageEntity("0v1.club", "~nec/170141184501", "~nec", 1_000, """[{"inline":["from a contact"]}]""", "/chat"),
+                    MessageEntity("0v1.club", "~wes/170141184502", "~wes", 2_000, """[{"inline":["from a stranger"]}]""", "/chat"),
+                    MessageEntity("0v1.club", "~zod/170141184503", "~zod", 3_000, """[{"inline":["from me"]}]""", "/chat"),
+                ))
+            },
+        ) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from me").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
+            val pixels = onRoot().captureToImage().toPixelMap()
+            val inset = 6.dp.value * density.density
+            fun fillBeside(text: String): Color {
+                val b = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+                return pixels[(b.left - inset).toInt(), b.center.y.toInt()]
+            }
+            assertEquals(green, fillBeside("from a contact"), "a contact's bubble")
+            assertEquals(blue, fillBeside("from a stranger"), "anyone else's")
+            assertEquals(yellow, fillBeside("from me"), "ours")
+        }
+    }
+
+    // Auto's fills are see-through; on a picture they are made solid, and
+    // what is written straight on the chat (the day) sits on a pill.
+    @Test
+    fun `on a picture the bubbles are solid and the day is on a pill`() {
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
+        var colors: androidx.compose.material3.ColorScheme? = null
+        val now = System.currentTimeMillis()
+        chat(
+            whom = "0v1.club",
+            ui = ui,
+            book = listOf("~nec"),
+            scheme = { colors = it },
+            seed = {
+                messages().upsert(MessageEntity("0v1.club", "~nec/170141184501", "~nec", now - 60_000, """[{"inline":["from a contact"]}]""", "/chat"))
+            },
+        ) { _, _ ->
+            // The day comes once the chat knows where its history starts.
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Today").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
+            val c = colors!!
+            val pixels = onRoot().captureToImage().toPixelMap()
+            val inset = 4.dp.value * density.density
+            fun beside(text: String): Color {
+                val b = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+                return pixels[(b.left - inset).toInt(), b.center.y.toInt()]
+            }
+            assertNear(c.tertiary.copy(alpha = 0.22f).compositeOver(c.surface), beside("from a contact"), "the bubble, solid on the page")
+            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), beside("Today"), "the day's pill")
+            // sneagan, 2026-11-06: the picture runs on under the composer,
+            // which has no bar of its own, and Send is on a disc of the
+            // accent once there is something to send.
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            assertEquals(red, pixels[2, (root.bottom - 3).toInt()], "the picture, under the composer")
+            // A bare button sits on a disc of the page, so it shows: 15 dp
+            // from its middle, inside its 36 dp, past its 22 dp icon.
+            val attach = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot.center
+            assertNear(c.surface.copy(alpha = 0.9f).compositeOver(red), pixels[(attach.x - 15 * density.density).toInt(), attach.y.toInt()], "Attach, on its disc")
+            onNode(androidx.compose.ui.test.hasSetTextAction()).performTextInput("hi")
+            waitForIdle()
+            val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot
+            // sneagan, 2026-11-06: Send is 48 dp, as its disc first was,
+            // and the disc stays inside it: 20 dp from the middle is disc,
+            // 27 dp is past it.
+            val now = onRoot().captureToImage().toPixelMap()
+            val mid = send.center
+            fun at(dx: Float) = now[(mid.x + dx * density.density).toInt(), mid.y.toInt()]
+            assertNear(c.primary, at(20f), "inside Send's 48 dp")
+            assertEquals(red, at(27f), "past Send's 48 dp, the picture")
+            val pick = onNodeWithContentDescription("Attach image").fetchSemanticsNode().boundsInRoot.center
+            assertEquals(red, now[(pick.x - 21 * density.density).toInt(), pick.y.toInt()], "past Attach's 36 dp, the picture")
+        }
+    }
+
+    // sneagan, 2026-11-06: the field was too wide on a phone, and the
+    // send button too small. Send has its own 48 dp, 8 dp clear of the field.
+    @Test
+    fun `the send button has its own 48 dp, clear of the text field`() = chat(
+        seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+        val field = onNode(androidx.compose.ui.test.hasSetTextAction()).fetchSemanticsNode().boundsInRoot
+        val send = onNodeWithContentDescription("Send").fetchSemanticsNode().boundsInRoot.center
+        val gap = (send.x - 24 * density.density) - field.right
+        assertEquals(8f * density.density, gap, 1f)
+    }
+
+    @Test
+    fun `who is typing sits on a pill over a picture, and across the page without one`() {
+        val picture = picture(0xFF0000).toPath()
+        var colors: androidx.compose.material3.ColorScheme? = null
+        val onPicture = mutableStateOf(true)
+        runComposeUiTest {
+            setContent {
+                TalonTheme(darkTheme = false) {
+                    colors = androidx.compose.material3.MaterialTheme.colorScheme
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalChatLook provides ChatLook(bubbles = true, image = if (onPicture.value) picture else null),
+                    ) {
+                        androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().background(red)) {
+                            io.nisfeb.talon.ui.screens.TypingLine("~nec is typing…")
+                        }
+                    }
+                }
+            }
+            waitForIdle()
+            fun beside(): Color {
+                val b = onNodeWithText("~nec is typing…").fetchSemanticsNode().boundsInRoot
+                return onRoot().captureToImage().toPixelMap()[(b.left - 4 * density.density).toInt(), b.center.y.toInt()]
+            }
+            assertNear(colors!!.surface.copy(alpha = 0.9f).compositeOver(red), beside(), "on a pill")
+            onPicture.value = false
+            waitForIdle()
+            assertEquals(red, beside(), "no pill on the page")
+        }
+    }
+
+    // The picture is shown first, so its going is rows' doing, not a load
+    // that had not finished yet.
+    @Test
+    fun `rows draw on the page, with no picture behind them`() {
+        val ui = InMemoryUiSettings().apply { setChatBackgroundImage(picture(0xFF0000)) }
+        chat(ui = ui, seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() == red }
+            ui.setChatBubbles(false)
+            waitUntil(timeoutMillis = 5_000) { aboveEveryMessage() != red }
+        }
+    }
+
+    /**
+     * The pixel three quarters across [text]'s row, where it is now: the
+     * list settles after the text first shows (the row rose 40 px), and a
+     * place read before then is no longer the row.
+     */
+    private fun ComposeUiTest.farSide(text: String): Color {
+        waitForIdle()
+        val words = onNodeWithText(text).fetchSemanticsNode().boundsInRoot
+        val root = onRoot().fetchSemanticsNode().boundsInRoot
+        return onRoot().captureToImage().toPixelMap()[(root.right * 0.75f).toInt(), words.center.y.toInt()]
+    }
+
+    // sneagan, 2026-11-05: in bubbles the hover tint ran the window's
+    // width; the "⋯" beside the bubble is what says which message it is.
+    @Test
+    fun `in bubbles, hovering a message tints nothing across the window`() = chat(
+        seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+        // Three quarters across the row: past the bubble, short of the
+        // "⋯" at a row's end, where only the row's own background is.
+        val before = farSide("from them")
+        onNodeWithText("from them").performMouseInput { moveTo(center) }
+        waitForIdle()
+        assertEquals(before, farSide("from them"), "no tint across the row")
+    }
+
+    // Rows keep theirs: the whole row is the message there.
+    @Test
+    fun `in rows, hovering a message still tints its row`() {
+        val ui = InMemoryUiSettings().apply { setChatBubbles(false) }
+        chat(seed = { messages().upsert(msg("~bus/170141184501", "~bus", "from them", 1_000)) }, ui = ui) { _, _ ->
+            waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("from them").fetchSemanticsNodes().isNotEmpty() }
+            val before = farSide("from them")
+            onNodeWithText("from them").performMouseInput { moveTo(center) }
+            waitForIdle()
+            val after = farSide("from them")
+            assertTrue(before != after, "the row tints, so the check above can see one: $before, then $after")
+        }
+    }
+
+    // A club is a DM of three or more: who said each run is the one thing
+    // its bubbles must not drop (review, 2026-11-05: isDirect is true for
+    // clubs too, so the names went).
+    @Test
+    fun `in a club each run's bubble is named, as in a channel`() = chat(
+        whom = "0v1.club",
+        seed = {
+            messages().upsertAll(listOf(
+                MessageEntity("0v1.club", "~nec/170141184501", "~nec", 1_000, """[{"inline":["first from nec"]}]""", "/chat"),
+                MessageEntity("0v1.club", "~wes/170141184502", "~wes", 2_000, """[{"inline":["then wes"]}]""", "/chat"),
+            ))
+        },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("then wes").fetchSemanticsNodes().isNotEmpty() }
+        // Named just above its own words, so a title naming the members
+        // cannot pass for it.
+        fun namedAbove(name: String, words: String): Boolean {
+            val top = onNodeWithText(words).fetchSemanticsNode().boundsInRoot.top
+            return onAllNodesWithText(name, substring = true).fetchSemanticsNodes().any { it.boundsInRoot.bottom <= top && it.boundsInRoot.bottom > top - 60f }
+        }
+        assertTrue(namedAbove("~nec", "first from nec"), "nec's run is named")
+        assertTrue(namedAbove("~wes", "then wes"), "and wes's")
     }
 
     @Test
@@ -369,6 +657,112 @@ class DmChatScreenTest {
         assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty(), "not ours to edit")
         onNodeWithText("Report").performClick()
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Report message?").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // ─── a phone's menu, at the finger ────────────────────────────
+
+    // "the emojis are too far away from the tap point at the top and some
+    // of the menu options should be [nested] a level with each other to
+    // make the popover less populated so we can make the buttons and
+    // emojis bigger" (sneagan, 2026-11-07).
+
+    /** A phone's tap on [text], which opens its menu; where the finger was, in the window. */
+    private fun ComposeUiTest.tapOpen(text: String): androidx.compose.ui.geometry.Offset {
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        val at = onNodeWithText(text).fetchSemanticsNode().boundsInWindow.center
+        onNodeWithText(text).performTouchInput { click(center) }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() }
+        return at
+    }
+
+    private fun ComposeUiTest.shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.boundsOf(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInWindow
+
+    /** Closes the menu by what it is for: a copy. */
+    private fun ComposeUiTest.copyText() {
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Copy text") }
+        onNodeWithText("Copy text").performClick()
+        waitUntil(timeoutMillis = 20_000) { !shown("Copy text") }
+    }
+
+    @Test
+    fun `on a phone the menu opens at the finger, the reactions on the finger's side`() = chat(touch = true, seed = sixty) { _, _ ->
+        val near = with(density) { 32.dp.toPx() }
+        // The newest sits over the composer, low in the window: the menu
+        // opens above the finger, the reactions at its foot.
+        val low = tapOpen("message 60")
+        val thumbs = boundsOf("👍")
+        assertTrue(thumbs.top > boundsOf("Reply in thread").bottom, "the reactions under the actions")
+        assertTrue(thumbs.bottom <= low.y && low.y - thumbs.bottom < near, "just over the finger: ${thumbs.bottom} to ${low.y}")
+        copyText()
+
+        // One high in the window opens below, the reactions at its head.
+        val height = onAllNodes(androidx.compose.ui.test.isRoot())[0].fetchSemanticsNode().size.height
+        val high = (1..60).map { "message $it" }.first { t ->
+            onAllNodesWithText(t).fetchSemanticsNodes().firstOrNull()?.boundsInWindow?.center?.y?.let { it > height * 0.2f && it < height * 0.45f } == true
+        }
+        val top = tapOpen(high)
+        val up = boundsOf("👍")
+        assertTrue(up.bottom < boundsOf("Reply in thread").top, "the reactions over the actions")
+        assertTrue(up.top >= top.y && up.top - top.y < near, "just under the finger: ${top.y} to ${up.top}")
+    }
+
+    @Test
+    fun `on a phone the copies are a level down, and its head goes back up`() = chat(touch = true, seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }) { _, _ ->
+        tapOpen("hello from bus")
+        for (below in listOf("Copy text", "Copy as Markdown", "Copy link")) assertFalse(shown(below), "$below at the top")
+        val backs = onAllNodesWithContentDescription("Back").fetchSemanticsNodes().size
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Copy link") }
+        assertTrue(shown("Copy as Markdown") && !shown("Reply in thread") && !shown("👍"), "only the copies")
+        assertEquals(backs + 1, onAllNodesWithContentDescription("Back").fetchSemanticsNodes().size, "its head is marked as the way back")
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Reply in thread") }
+        copyText()
+        assertEquals(listOf("hello from bus"), copied.toList())
+    }
+
+    @Test
+    fun `on a phone a reaction from the menu goes to the ship, the owner's own first, and the browser opens`() = chat(touch = true, seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+        reactionUsage().upsert("🦊", 3, 1_000)
+    }) { ship, _ ->
+        tapOpen("hello from bus")
+        waitUntil(timeoutMillis = 20_000) { shown("🦊") }
+        assertTrue(boundsOf("🦊").left < boundsOf("👍").left, "the owner's own reaction leads the palette's")
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        val react = ship.pokesTo("chat").single().json.toString()
+        assertTrue("add-react" in react && "~bus/170.141.184.506" in react, react)
+        waitUntil(timeoutMillis = 20_000) { !shown("Copy") }
+
+        tapOpen("hello from bus")
+        onNodeWithContentDescription("Browse emojis").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Search emoji") }
+    }
+
+    @Test
+    fun `on a phone the rare things are under More, an admin's delete with them, and our own are at the top`() = chat(touch = true, whom = ours, seed = ourChannel(
+        post("170141184506", "~bus", "theirs here", 1_000), post("170141184507", "~zod", "mine here", 2_000),
+    )) { _, _ ->
+        tapOpen("mine here")
+        assertTrue(shown("Edit") && shown("Delete") && shown("Quote"), "ours to change, at the top")
+        copyText()
+
+        tapOpen("theirs here")
+        assertTrue(shown("Reply in thread") && shown("Quote"))
+        val rare = listOf("Pin", "Report", "Publish to Lattice", "Delete (admin)")
+        for (r in rare) assertFalse(shown(r), "$r at the top")
+        onNodeWithText("More").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Report") }
+        for (r in rare) assertTrue(shown(r), "$r not under More")
+        onNodeWithText("Report").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Report message?") }
     }
 
     // ─── an emoji alone draws large ────────────────────────────────
@@ -789,12 +1183,37 @@ class DmChatScreenTest {
         editTo("first try", "second try")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("second try", draft())
+        // Cancel would throw the words away while the edit lands all the same.
+        onNodeWithText("Cancel").assertIsNotEnabled()
         // A second Enter while it is on its way does not send it twice.
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Editing message").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Saving…").fetchSemanticsNodes().isEmpty() }
         assertEquals("", draft(), "the box is back to what it held before the edit")
         Thread.sleep(300)
         assertEquals(1, ship.pokesTo("channels").size)
+    }
+
+    // An edit opened over another took the first edit's changed words as
+    // the draft to give back, and the half-typed message was lost.
+    @Test
+    fun `an edit opened over another gives back the half-typed message`() = chat(
+        whom = general,
+        seed = {
+            messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat"))
+            messages().upsert(MessageEntity(general, "170141184508", "~zod", 3_000, """[{"inline":["second one"]}]""", "/chat"))
+        },
+    ) { _, _ ->
+        onNode(hasSetTextAction()).performTextInput("half typed")
+        menuOf("first try")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == "first try" }
+        onNode(hasSetTextAction()).performTextReplacement("first, changed")
+        menuOf("second one")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == "second one" }
+        onNodeWithText("Cancel").performClick()
+        waitForIdle()
+        assertEquals("half typed", draft(), "the message being written before either edit")
     }
 
     // Real time: the edit is held on the ship's side while the chat goes.

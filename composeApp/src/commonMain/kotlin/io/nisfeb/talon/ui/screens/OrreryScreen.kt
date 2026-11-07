@@ -423,7 +423,7 @@ private fun NotOnHere(turnOn: suspend () -> Result<Unit>, onOn: () -> Unit) {
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Orrery isn't set up on this device yet.", style = MaterialTheme.typography.bodyMedium)
         Text(
-            "Talon sets each device up by itself when Orrery is on: the device gets a key of its own, reads Orrery here, and sends Orrery the facts from your calls and contacts' status lines. If that did not happen, try again.",
+            "Groundwire sets each device up by itself when Orrery is on: the device gets a key of its own, reads Orrery here, and sends Orrery the facts from your calls and contacts' status lines. If that did not happen, try again.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

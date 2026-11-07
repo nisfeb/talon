@@ -1,4 +1,6 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.ChatBackdrop
+import androidx.compose.foundation.border
 import io.nisfeb.talon.util.formatMonthDayClock
 
 import androidx.compose.animation.core.Animatable
@@ -456,9 +458,19 @@ fun ThreadList(
                 }
             }) { Text(if (following) "Unfollow" else "Follow") }
         }
+        // Bubbles or rows, as the owner set for chats; the book picks the
+        // contacts' colour.
+        val chatLook = io.nisfeb.talon.ui.LocalChatLook.current
+        val book by repo.bookContacts.collectAsState()
+        val kindOf: (String) -> io.nisfeb.talon.ui.BubbleKind = { io.nisfeb.talon.ui.bubbleKindOf(it, ourPatp, book) }
+        // The owner's picture behind the bubbles and under the composer,
+        // as in the chat.
+        androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
+        ChatBackdrop(chatLook)
+        Column(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(chatDensity.messageSpacing),
         ) {
@@ -493,6 +505,7 @@ fun ThreadList(
                         onPollVote = onPollVoteHandler,
                         showHeader = true,
                         highlighted = true,
+                        bubbleKind = kindOf(p.author),
                         flashAmber = false,
                     )
                 }
@@ -525,10 +538,12 @@ fun ThreadList(
                     showHeader = row.showHeader,
                     highlighted = false,
                     flashAmber = row.m.id == flashReplyId,
+                    bubbleKind = kindOf(replyMsg.author),
                 )
             }
         }
-        HorizontalDivider()
+        // On a picture the composer floats on it, with no rule above.
+        if (chatLook.image == null) HorizontalDivider()
         io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
@@ -550,6 +565,8 @@ fun ThreadList(
             powerFeaturesEnabled = powerFeaturesEnabled,
             strategy = threadStrategy,
         )
+        } // the column over the picture
+        } // the picture's box
     }
 
     pendingDelete?.let { target ->
@@ -750,7 +767,14 @@ private fun ThreadMessage(
     showHeader: Boolean,
     highlighted: Boolean,
     flashAmber: Boolean = false,
+    /** Whose words, for the bubble's colour. */
+    bubbleKind: io.nisfeb.talon.ui.BubbleKind = io.nisfeb.talon.ui.BubbleKind.Theirs,
 ) {
+    // Bubbles or rows, as chats are (the shells provide it).
+    val look = io.nisfeb.talon.ui.LocalChatLook.current
+    val bubbles = look.bubbles
+    val onRight = bubbles && bubbleKind == io.nisfeb.talon.ui.BubbleKind.Mine
+    val clock = remember(m.sentMs) { io.nisfeb.talon.util.formatClock(m.sentMs) }
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
     val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
@@ -767,13 +791,19 @@ private fun ThreadMessage(
             flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
         }
     }
-    val baseColor = if (highlighted) MaterialTheme.colorScheme.surfaceVariant
-        else MaterialTheme.colorScheme.surface
+    // In bubbles the rows let the chat's picture through.
+    val baseColor = when {
+        highlighted -> MaterialTheme.colorScheme.surfaceVariant
+        bubbles -> Color.Transparent
+        else -> MaterialTheme.colorScheme.surface
+    }
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)
     // Desktop only: track row hover so the trailing "⋯" can reveal on
     // hover (matches DmChatScreen.MessageRow).
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
+    val tapOpens = LocalTapOpensMenu.current
+    val tapAt = remember { TapPoint() }
     // Touch: a single tap on the row opens the action menu (and tints the
     // row to show which message). On desktop that clickable is OFF so a
     // left-press-drag reaches the text's SelectionContainer instead of
@@ -784,8 +814,8 @@ private fun ThreadMessage(
             .fillMaxWidth()
             .hoverable(interactionSource)
             .then(
-                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-                    Modifier.clickable { onMenuExpand() }
+                if (tapOpens) {
+                    Modifier.tapPoint(tapAt).clickable { onMenuExpand() }
                 } else Modifier,
             )
             .onSecondaryClick { onMenuExpand() }
@@ -795,18 +825,47 @@ private fun ThreadMessage(
             // hover tint (desktop) so it's clear which message the "⋯" acts on.
             .background(
                 when {
+                    // In bubbles the row is the window's width, and a tint
+                    // across all of it said little: the "⋯" beside the bubble
+                    // says which message the pointer is on (sneagan).
+                    bubbles -> Color.Transparent
                     menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
                     else -> Color.Transparent
                 },
             )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
+        horizontalArrangement = if (onRight) Arrangement.End else Arrangement.Start,
     ) {
+        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
+        // open the menu when tap-to-open is off (selection owns left-drag;
+        // SelectionContainer eats the row's right-click). A plain Icon, NOT
+        // IconButton — its 48dp min touch size inflates short rows.
+        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
+        // DmChatScreen.MessageRow: beside the bubble, on its inner side.
+        @Composable
+        fun androidx.compose.foundation.layout.RowScope.Dots() {
+            if (tapOpens) return
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = "Message actions",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.Top)
+                    .alpha(if (hovered || menuExpanded) 1f else 0f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onMenuExpand)
+                    .padding(2.dp)
+                    .size(20.dp),
+            )
+        }
+        if (onRight) Dots()
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
+            horizontalAlignment = if (onRight) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (showHeader) {
+            if (showHeader && !bubbles) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -832,12 +891,37 @@ private fun ThreadMessage(
                 onPollVote = if (isLocalOnly(m.id)) null else { emoji -> onPollVote(m, reactions, emoji) },
                 // Touch only: null on desktop so a left-press-drag selects
                 // text rather than opening the menu (hover "⋯" opens it).
-                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
+                onMessageTap = if (tapOpens) onMenuExpand else null,
             )
             }
-            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
-                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
-            } else body()
+            val folded: @Composable () -> Unit = {
+                if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                    io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+                } else body()
+            }
+            if (bubbles) {
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind) {
+                    val quiet = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.72f)
+                    // A thread is many people's: each run of theirs is named.
+                    if (showHeader && bubbleKind != io.nisfeb.talon.ui.BubbleKind.Mine) {
+                        Text(
+                            contactMap.byline(m.author, authorLabel, "").removeSuffix(" · "),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = quiet,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                    folded()
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(clock, style = MaterialTheme.typography.labelSmall, color = quiet)
+                        if (m.status == "pending") SendingIcon()
+                    }
+                }
+            } else folded()
             SendStateNote(m.status)
             if (grouped.isNotEmpty()) {
                 FlowRow(
@@ -876,36 +960,25 @@ private fun ThreadMessage(
                     }
                 }
             }
-            // Action menu, anchored to the message. Opened by tapping the
-            // row on touch and by the hover "⋯" below on desktop.
-            androidx.compose.material3.DropdownMenu(
+            // Action menu. Opened by tapping the row on touch, at the
+            // finger, and by the hover "⋯" below on desktop, anchored to
+            // the message.
+            if (tapOpens) {
+                if (menuExpanded) TouchMenuPopup(tapAt, onMenuDismiss) { actionMenu() }
+            } else androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
-                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+                // Narrower, and set off from the chat behind it: its own
+                // raised colour and a hairline edge, as the menu's own (on
+                // its inner column they lost the menu's rounded corners).
+                modifier = Modifier.widthIn(min = 200.dp, max = 260.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }
         }
-        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
-        // open the menu when tap-to-open is off (selection owns left-drag;
-        // SelectionContainer eats the row's right-click). A plain Icon, NOT
-        // IconButton — its 48dp min touch size inflates short rows.
-        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
-        // DmChatScreen.MessageRow.
-        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = "Message actions",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Top)
-                    .alpha(if (hovered || menuExpanded) 1f else 0f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onMenuExpand)
-                    .padding(2.dp)
-                    .size(20.dp),
-            )
-        }
+        if (!onRight) Dots()
     }
 }
 
@@ -947,6 +1020,19 @@ private fun ThreadActionMenu(
     onDelete: () -> Unit,
     onReport: () -> Unit,
 ) {
+    val copyText = MenuAct("Copy text", onCopy)
+    val copyMarkdown = MenuAct("Copy as Markdown", onCopyMarkdown)
+    val edit = MenuAct("Edit", onEdit).takeIf { canEdit }
+    val report = MenuAct("Report", onReport, danger = true).takeIf { canReport }
+    val delete = MenuAct(if (mine) "Delete" else "Delete (admin)", onDelete, danger = true).takeIf { canDelete }
+    LocalTouchMenuSide.current?.let { side ->
+        TouchMenu(
+            side,
+            entries = listOfNotNull(edit) + group("Copy", listOf(copyText, copyMarkdown)) + listOfNotNull(report, delete),
+            reactions = if (canReact) ({ TouchReactions(db, onPickReaction, onBrowseEmoji) }) else null,
+        )
+        return
+    }
     val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
     val itemMinHeight = 36.dp
     Column(
@@ -957,20 +1043,7 @@ private fun ThreadActionMenu(
                 // Suggested row blends the user's most-used reactions with
                 // the default palette — same blend DmChatScreen uses, so
                 // the thread sheet feels consistent with the chat sheet.
-                val topUsage by remember {
-                    db.reactionUsage().streamTop(8)
-                }.collectAsState(initial = emptyList())
-                // De-dupe by canonical reaction (normalize) so a used glyph
-                // and its palette code don't both show — see DmChatScreen.
-                val suggested = remember(topUsage) {
-                    val seen = mutableSetOf<String>()
-                    val out = mutableListOf<String>()
-                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                        .forEach { item ->
-                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                        }
-                    out.take(8)
-                }
+                val suggested = rememberSuggestedReactions(db, 8)
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -1009,14 +1082,11 @@ private fun ThreadActionMenu(
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            @Composable
-            fun ActionRow(
-                onClick: () -> Unit,
-                label: String,
-                color: Color = LocalContentColor.current,
-            ) {
+            // The menu's own ink, not the button's.
+            val ink = LocalContentColor.current
+            listOfNotNull(copyText, copyMarkdown, edit, report, delete).forEach { act ->
                 TextButton(
-                    onClick = onClick,
+                    onClick = act.onClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = itemMinHeight),
@@ -1024,31 +1094,12 @@ private fun ThreadActionMenu(
                     shape = RoundedCornerShape(6.dp),
                 ) {
                     Text(
-                        label,
-                        color = color,
+                        act.label,
+                        color = if (act.danger) MaterialTheme.colorScheme.error else ink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                 }
-            }
-            ActionRow(onClick = onCopy, label = "Copy text")
-            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            if (canEdit) {
-                ActionRow(onClick = onEdit, label = "Edit")
-            }
-            if (canReport) {
-                ActionRow(
-                    onClick = onReport,
-                    label = "Report",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (canDelete) {
-                ActionRow(
-                    onClick = onDelete,
-                    label = if (mine) "Delete" else "Delete (admin)",
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
     }
 }

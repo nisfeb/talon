@@ -23,7 +23,7 @@ class SemanticSearchPagingTest {
         .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
 
     @AfterTest
-    fun close() { db.close(); dir.deleteRecursively() }
+    fun close() { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
 
     @Test
     fun `a search over several pages sees every row once`() = runBlocking {

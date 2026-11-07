@@ -17,7 +17,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 suspend fun closeAfterWork(db: AppDatabase, waitMs: Long = 10_000, stopWork: suspend () -> Unit): Boolean {
     val stopped = try {
-        withTimeoutOrNull(waitMs) { stopWork(); true } == true
+        // The shared flows too: a screen's last one gone, each still ran
+        // for five seconds, and the ship's work stopping says nothing of it.
+        withTimeoutOrNull(waitMs) { stopWork(); stopSharing(db); true } == true
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {

@@ -1,7 +1,13 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -16,7 +22,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -53,6 +59,9 @@ class ThreadListTest {
         parentId: String = parent,
         seed: suspend AppDatabase.() -> Unit = {},
         prepare: FakeShip.() -> Unit = {},
+        look: ChatLook = ChatLook(),
+        /** A phone's way into a reply's menu: a tap on it, opening at the finger. */
+        touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-thread-").toFile()
@@ -71,6 +80,9 @@ class ThreadListTest {
                             override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
                             override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
                         },
+                        // What the shells provide from the bubbles setting.
+                        LocalChatLook provides look,
+                        io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
                     ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
@@ -86,7 +98,7 @@ class ThreadListTest {
             }
         } finally {
             stream.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -108,6 +120,51 @@ class ThreadListTest {
                 .filter { "Text = " in it || "ScrollAxisRange" in it }.joinToString(" | ") { it.trim() }
             error("never showed \"$text\"; the screen showed: $screen")
         }
+    }
+
+    // sneagan, 2026-11-05: "threaded messages are always rows instead of
+    // respecting the bubble setting".
+    private val replies: suspend AppDatabase.() -> Unit = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~nec/170141184507", "~nec", "their answer", 2_000, parentId = parent))
+        messages().upsert(msg("~zod/170141184508", "~zod", "my answer", 3_000, parentId = parent))
+    }
+
+    private fun ComposeUiTest.left(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.left
+
+    @Test
+    fun `in bubbles a thread puts ours on the right, as a chat does`() = thread(seed = replies, look = ChatLook(bubbles = true)) { _, _ ->
+        shows("my answer")
+        assertTrue(left("my answer") > left("their answer") + 200f, "ours on the right")
+        assertTrue(onAllNodesWithText("~nec", substring = true).fetchSemanticsNodes().isNotEmpty(), "theirs named")
+    }
+
+    // sneagan, 2026-11-06: the picture behind the chat's bubbles is behind
+    // a thread's too, below its last reply where nothing else is.
+    @Test
+    fun `in bubbles a thread sits on the owner's picture`() {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        thread(seed = replies, look = ChatLook(bubbles = true, image = okio.Path.Companion.run { f.absolutePath.toPath() })) { _, _ ->
+            shows("my answer")
+            fun belowEveryReply(): androidx.compose.ui.graphics.Color {
+                val list = onNode(androidx.compose.ui.test.hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+                return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.bottom - 4f).toInt()]
+            }
+            waitUntil(timeoutMillis = 5_000) { belowEveryReply() == androidx.compose.ui.graphics.Color.Red }
+            // Under the composer too, which has no bar of its own.
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            assertEquals(androidx.compose.ui.graphics.Color.Red, onRoot().captureToImage().toPixelMap()[2, (root.bottom - 3).toInt()])
+        }
+    }
+
+    @Test
+    fun `in rows a thread puts every message on the left under its byline`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
+        shows("my answer")
+        assertEquals(left("their answer"), left("my answer"))
+        assertTrue(onAllNodesWithText("~zod", substring = true).fetchSemanticsNodes().isNotEmpty(), "ours under its byline")
     }
 
     @Test
@@ -229,6 +286,40 @@ class ThreadListTest {
         onNode(hasSetTextAction() and androidx.compose.ui.test.hasText("Search emoji")).performTextInput("taco")
         onAllNodesWithText("🌮")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").size == 2 }
+    }
+
+    // sneagan, 2026-11-07: the reactions were far from the tap, and the
+    // menu too full for bigger buttons.
+    @Test
+    fun `on a phone a reply's menu opens at the finger, the copies a level down`() = thread(touch = true, whom = nest, parentId = "170141184506", seed = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~zod", "my answer", 2_000, parentId = "170141184506"))
+    }) { ship, _ ->
+        fun open(): androidx.compose.ui.geometry.Offset {
+            shows("my answer")
+            waitForIdle()
+            val at = onNodeWithText("my answer").fetchSemanticsNode().boundsInWindow.center
+            onNodeWithText("my answer").performTouchInput { click(center) }
+            shows("Copy")
+            return at
+        }
+        fun shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+        val at = open()
+        val thumbs = onNodeWithText("👍").fetchSemanticsNode().boundsInWindow
+        val near = with(density) { 32.dp.toPx() }
+        assertTrue(minOf(kotlin.math.abs(thumbs.top - at.y), kotlin.math.abs(thumbs.bottom - at.y)) < near, "the reactions beside the finger: ${thumbs.top}..${thumbs.bottom} at ${at.y}")
+        assertTrue(shown("Edit") && shown("Delete") && !shown("Copy text"), "edit and delete at the top, the copies under Copy")
+        onNodeWithText("Copy").performClick()
+        shows("Copy as Markdown")
+        onNodeWithText("Copy text").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shown("Copy text") }
+        assertEquals(listOf("my answer"), copied.toList())
+
+        open()
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val react = ship.pokesTo("channels").single().json.toString()
+        assertTrue("react" in react && "170.141.184.507" in react, react)
     }
 
     @Test

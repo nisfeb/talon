@@ -11,7 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.CallEngineProvider
 import io.nisfeb.talon.ui.theme.InMemoryThemePreference
@@ -96,7 +96,7 @@ class SettingsCallsTest {
     // while it is open is true on desktop, and shown there.
     @Test
     fun `the calls tab says a call rings only while Talon is open`() = calls {
-        waitUntil(timeoutMillis = 5_000) { shows("Incoming calls ring only while Talon is open.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Incoming calls ring only while Groundwire is open.") }
     }
 
     @Test

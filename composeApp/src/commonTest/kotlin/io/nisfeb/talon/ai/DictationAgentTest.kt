@@ -286,6 +286,7 @@ class DictationAgentTest {
             setOf(
                 "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
                 "memory_index", "memory_recall", "memory_search", "memory_read", "memory_explore", "memory_tidy", "wiki_search", "wiki_read",
+                "skill_read",
             ),
             DictationAgent.PRIVATE_READS,
         )
