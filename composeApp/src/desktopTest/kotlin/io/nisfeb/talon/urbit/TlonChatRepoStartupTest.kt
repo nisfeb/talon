@@ -474,6 +474,33 @@ class TlonChatRepoStartupTest {
         assertEquals(channelsPut().last(), channelsStreamed().last(), "the stream is the one with every watch")
     }
 
+    // The drain a reconnect launched on the side, failing, dropped drainJob
+    // while the sleeping retry lived on: each reconnect on a slow ship added
+    // a retry chain, every one of them asking the ship again.
+    @Test
+    fun `reconnects on a slow ship keep one retry going, not one each`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        until("the progress bar clears") { !repo.bootstrapping.value }
+        until("the stream") { streams() >= 1 }
+        // Nothing reaches the ship, so nothing it takes wakes the drain early.
+        ship.lose = { java.io.IOException("Request timeout has expired") }
+        fun tries() = ship.attempted.count { it.app == "chat" }
+        repo.send("~bus", "are you there")
+        until("the send tried") { tries() >= 1 }
+        repeat(3) {
+            val before = tries()
+            val s = streams()
+            ship.endStreams()
+            until("the stream again") { streams() > s }
+            until("the retry the reconnect woke") { tries() > before }
+        }
+        val after = tries()
+        // One chain's next try is 16 s on, jittered to no sooner than 8.
+        kotlinx.coroutines.delay(7_000)
+        assertEquals(after, tries(), "tries from more than one retry chain")
+    }
+
     // The new channel's subscribe lost on the way: eyre never made it, so
     // its stream is a 404 and the channel is given up. The pass's later
     // watches (a notebook's here) made it on the ship after all, and it

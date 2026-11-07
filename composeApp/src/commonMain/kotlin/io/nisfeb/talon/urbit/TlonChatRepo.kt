@@ -738,7 +738,10 @@ class TlonChatRepo(
             Log.i(TAG, "resuming the channel")
             // What came while it was down is replayed: nothing to read again.
             forcedReconnect = false
-            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+            // Through the one drain job, as every drain goes: launched on
+            // the side, a failed one dropped drainJob while the sleeping
+            // chain lived on, and each reconnect added a chain.
+            scheduleDrain(0, wake = true)
         } else {
             Log.i(TAG, "opening channel (firstRun=$firstRun)")
             // Pagination markers are per-(channel, ship). A new channel
@@ -968,7 +971,7 @@ class TlonChatRepo(
             }
             // The ship is back: what waited for it goes, now that the reading
             // above has reaped any queued channel post that landed after all.
-            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+            scheduleDrain(0, wake = true)
 
             // Stage two: deep history fill-out. Fires on firstRun only —
             // reconnects already pulled the same window via the small
