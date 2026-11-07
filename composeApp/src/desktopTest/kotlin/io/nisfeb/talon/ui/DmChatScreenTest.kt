@@ -567,8 +567,11 @@ class DmChatScreenTest {
         messages().upsert(msg("~bus/170141184506", "~bus", "a question", 1_000))
         messages().upsert(msg("~zod/170141184507", "~zod", "an answer", 2_000, parent = "~bus/170141184506"))
     }) { _, _ ->
-        onNodeWithText("1 reply").performClick()
-        waitForIdle()
+        // Its click action, once it is there: a pointer pressed as the chat
+        // first settled missed it twice in ten CI runs.
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("1 reply").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("1 reply").clickAction()
+        waitUntil(timeoutMillis = 20_000) { threads.isNotEmpty() }
         assertEquals(listOf("~bus/170141184506"), threads)
         onAllNodesWithText("an answer").assertCountEquals(0)
     }
