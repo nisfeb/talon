@@ -134,6 +134,95 @@ class UrbitChannelResumeTest {
         assertEquals(0, gets, "not asked: it is gone")
     }
 
+    // ─── a PUT between streams ─────────────────────────────────────
+
+    // Eyre makes a channel on any PUT to one it does not hold, empty: a PUT
+    // that beat the resume's GET to a reaped channel made it again, the GET
+    // found it, and nothing came down it, with nothing to say so.
+
+    private fun io.ktor.client.engine.mock.MockRequestHandleScope.event(body: String) = respond(ByteReadChannel(body), HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+
+    @Test
+    fun `a PUT between streams waits for the next, and on a channel the ship reaped fails as gone, never making it again`() = runBlocking<Unit> {
+        val puts = CopyOnWriteArrayList<String>()
+        var gets = 0
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") {
+                puts += String(req.body.toByteArray())
+                return@MockEngine respond("", HttpStatusCode.NoContent)
+            }
+            gets++
+            if (gets == 1) event(frames(1)) else respond("", HttpStatusCode.NotFound)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        ch.events().toList()
+        val ack = async { runCatching { ch.ack(1) }.exceptionOrNull() }
+        kotlinx.coroutines.delay(300)
+        assertEquals(emptyList(), puts.toList(), "sent before the next stream was answered")
+        assertFailsWith<ChannelGone> { ch.events().toList() }
+        assertTrue(ack.await() is ChannelGone, "${ack.await()}")
+        assertEquals(emptyList(), puts.toList(), "a PUT to the reaped channel made it again")
+    }
+
+    @Test
+    fun `a PUT between streams goes once the next is answered, and one on an open stream at once`() = runBlocking<Unit> {
+        val order = CopyOnWriteArrayList<String>()
+        val held = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var gets = 0
+        val http = HttpClient(MockEngine { req ->
+            order += req.method.value
+            if (req.method.value == "PUT") return@MockEngine respond("", HttpStatusCode.NoContent)
+            gets++
+            if (gets == 1) return@MockEngine event(frames(1))
+            val body = io.ktor.utils.io.ByteChannel(autoFlush = true)
+            launch { held.await(); body.close() }
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "text/event-stream"))
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        ch.events().toList()
+        val ack = async { ch.ack(1) }
+        kotlinx.coroutines.delay(300)
+        assertEquals(listOf("GET"), order.toList())
+        val stream = launch { ch.events().collect {} }
+        kotlinx.coroutines.withTimeout(5_000) { ack.await() }
+        assertEquals(listOf("GET", "GET", "PUT"), order.toList())
+        val started = System.currentTimeMillis()
+        ch.ack(2)
+        assertTrue(System.currentTimeMillis() - started < 1_000, "an open stream's PUT waited")
+        assertEquals(listOf("GET", "GET", "PUT", "PUT"), order.toList())
+        held.complete(Unit)
+        stream.cancel()
+    }
+
+    @Test
+    fun `with no stream asked for, a PUT between streams goes after the wait, as before`() = runBlocking<Unit> {
+        val puts = CopyOnWriteArrayList<String>()
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") puts += String(req.body.toByteArray())
+            if (req.method.value == "PUT") respond("", HttpStatusCode.NoContent) else event(frames(1))
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod", streamAnswerWaitMs = 300)
+        ch.events().toList()
+        val started = System.currentTimeMillis()
+        ch.ack(1)
+        assertTrue(System.currentTimeMillis() - started >= 300, "it did not wait")
+        assertEquals(1, puts.size)
+    }
+
+    @Test
+    fun `before its first stream a PUT goes at once, since eyre makes the channel on it`() = runBlocking<Unit> {
+        val puts = CopyOnWriteArrayList<String>()
+        val http = HttpClient(MockEngine { req ->
+            if (req.method.value == "PUT") puts += String(req.body.toByteArray())
+            respond("", HttpStatusCode.NoContent)
+        })
+        val ch = UrbitChannel(http, "https://ship.test", "~zod")
+        val started = System.currentTimeMillis()
+        ch.subscribe("chat", "/v4")
+        assertTrue(System.currentTimeMillis() - started < 1_000, "the first PUT waited")
+        assertEquals(1, puts.size)
+    }
+
     // Vere answers /~_~/healthz itself, no login and no event on the ship.
     @Test
     fun `health asks vere at its own path and reads the answer`() = runBlocking<Unit> {

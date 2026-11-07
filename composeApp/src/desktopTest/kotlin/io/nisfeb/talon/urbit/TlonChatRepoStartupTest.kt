@@ -585,6 +585,25 @@ class TlonChatRepoStartupTest {
         assertTrue(sinceMs in (began - 5 * 60_000L - 2_000L)..(began - 5 * 60_000L + 30_000L), "since $asked against $began")
     }
 
+    // Eyre makes a channel on any PUT to one it does not hold, empty. The
+    // last acks, or a message sent while the stream was down, beat the
+    // resume's GET to a channel the ship had reaped and made it again: the
+    // resume found it, and nothing ever came down it (CI, 2026-11-07).
+    @Test
+    fun `a channel the ship reaped is not made again by what was sent before the resume asked`() = started(prepare = {
+        scries[init] = initPosts
+    }) { repo ->
+        connected(repo)
+        val old = channelsPut().single()
+        val from = ship.requests.size
+        ship.reap()
+        repo.send("~bus", "while it was gone")
+        until("a new channel") { channelsPut().size >= 2 }
+        until("the message, on it") { ship.pokesTo("chat").any { "while it was gone" in it.json.toString() } }
+        val after = ship.requests.drop(from)
+        assertTrue(after.none { it == "PUT /~/channel/$old" }, "the reaped channel was made again: $after")
+    }
+
     // An older ship has no /changes: init-posts, as before, and the newer
     // paths are not asked again on every reconnect.
     @Test
