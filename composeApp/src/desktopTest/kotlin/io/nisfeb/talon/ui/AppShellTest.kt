@@ -2400,10 +2400,18 @@ class AppShellTest {
 
     @Test
     fun `a ship without Groups has it installed on the way in, and its chats are read once it is there`() = quickDefaultApps {
+        val up = java.util.concurrent.atomic.AtomicBoolean(false)
         app(defaultApps = true, setup = {
             answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") """[{"name":"lattice","synced":true}]""" else null }
-            // %groups answers once the install has come.
-            answerScry = { p -> if (p == "groups/v2/groups" && pokesTo("hood").isNotEmpty()) "{}" else null }
+            // %groups, and the chats it holds, once it is up.
+            answerScry = { p ->
+                if (!up.get()) null
+                else when {
+                    p == "groups/v2/groups" -> "{}"
+                    "init-posts" in p -> """{"chat":{},"channels":{}}"""
+                    else -> null
+                }
+            }
         }) { ship ->
             waitUntil(timeoutMillis = 20_000) { ship.pokesTo("hood").isNotEmpty() }
             val install = ship.pokesTo("hood").first()
@@ -2412,9 +2420,13 @@ class AppShellTest {
                 listOf("groups", "~nisfeb", "groups"),
                 listOf("local", "ship", "desk").map { install.json.jsonObject[it]!!.jsonPrimitive.content },
             )
-            val streams = ship.streamsOpened.size
-            // The chats it had nothing to read from before: a new channel reads them.
-            waitUntil(timeoutMillis = 20_000) { ship.streamsOpened.size > streams }
+            // The first pass had nothing to read the chats from.
+            waitUntil(timeoutMillis = 20_000) { showing("Couldn't load your chats") }
+            up.set(true)
+            // Groups is up: the chats are read, not only the channel resumed.
+            // Resumed, the list said it could not load them until a restart.
+            waitUntil(timeoutMillis = 20_000) { !showing("Couldn't load your chats") }
+            assertTrue(showing("No direct messages yet") || showing("No groups yet"), "the list, read")
         }
     }
 }

@@ -498,7 +498,7 @@ class TlonChatRepo(
                 h, url,
                 poke = { app, mark, body -> runCatching { pokeRaw(app, mark, body) }.isSuccess },
                 // Chat read nothing without it: read it all again now.
-                onGroups = { forceReconnect() },
+                onGroups = { readAllAgain() },
             )
             if (asked.isNotEmpty()) Log.i(TAG, "added to the ship: ${asked.joinToString()}")
         }
@@ -570,6 +570,10 @@ class TlonChatRepo(
         var firstRun = true
         var gaveUpBefore = false
         while (scope.isActive && started) {
+            if (readAllNext) {
+                readAllNext = false
+                firstRun = true
+            }
             val ended = runCatching { runSessionOnce(session, firstRun) }
                 .onFailure { Log.w(TAG, "session iteration ended", it) }
             // A channel the ship reaped is no trouble: the next pass opens a
@@ -1102,6 +1106,24 @@ class TlonChatRepo(
      * signed out: the loop then waits on this alone, and a sign-in just
      * after a refused try was dropped, leaving chat asleep.
      */
+    /**
+     * %groups is up on a ship that had none: everything read again, on a
+     * new channel. A resumed channel replays only what streamed, and chat
+     * read nothing without %groups, so forceReconnect alone resumed it and
+     * the list said "Couldn't load your chats." until the app restarted.
+     * Not debounced as that is: a reconnect a moment before, the app coming
+     * to the front, had it skipped.
+     */
+    private fun readAllAgain() {
+        readAllNext = true
+        channel?.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
+        lastReconnectMs = 0L
+        forceReconnect()
+    }
+
+    /** The next pass reads as a first one does ([readAllAgain]). */
+    @Volatile private var readAllNext = false
+
     fun forceReconnect() {
         val now = nowMs()
         if (!_signedOut.value && now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
