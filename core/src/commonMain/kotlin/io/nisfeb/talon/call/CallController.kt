@@ -2061,13 +2061,21 @@ class CallController(
         scope.launch {
             delay(connectTimeoutMs)
             if (connectToken != token) return@launch
-            val cur = _state.value
-            if (cur is CallUiState.Active && cur.media != MediaState.Live) {
+            if (_state.value is CallUiState.Active && !mediaLive()) {
                 Log.w(TAG, "media never connected after ${connectTimeoutMs}ms")
                 giveUp("couldn't connect")
             }
         }
     }
+
+    /**
+     * Whether the call's media is up now, as its engine has it. Not
+     * [CallUiState.Active.media]: Failed never reaches that copy (it goes
+     * to [tryIceRestart]), so a path lost mid-call still read Live there,
+     * the give-up never came, and the call held the mic and the device
+     * until somebody hung up.
+     */
+    private fun mediaLive(): Boolean = engine?.state?.value == MediaState.Live
 
     private fun watchMedia(eng: CallEngine, withPeer: String) {
         mediaWatch?.cancel()
@@ -2146,8 +2154,7 @@ class CallController(
                 Log.w(TAG, "waiting for the caller to restart ice: $why")
             }
             delay(restartGiveUpMs)
-            val cur = _state.value
-            if (restartToken == token && cur is CallUiState.Active && cur.media != MediaState.Live) {
+            if (restartToken == token && _state.value is CallUiState.Active && !mediaLive()) {
                 giveUp("connection failed")
             }
         }
