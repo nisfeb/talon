@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -598,10 +599,12 @@ class AppShellTest {
     // it had no Home. Orrery is offered there only while it is on.
     @Test
     fun `with no rail the More menu opens Home`() = app(width = 600.dp) {
-        onNodeWithContentDescription("More").performClick()
+        // Its click action: a pointer pressed as the shell first settles
+        // missed it once in ten CI runs.
+        onNodeWithContentDescription("More").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
         // An entry only the open menu has: "Sign out of" is in the ship
         // switcher, which is composed while closed, so it proved nothing.
-        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
+        waitUntil(timeoutMillis = 20_000) { showing("People & sidebar") }
         assertTrue(!showing("Orrery"), "Orrery is off")
         onNodeWithText("Home").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
@@ -611,10 +614,12 @@ class AppShellTest {
     // With a rail, Home is on it, so the overflow menu leaves it out.
     @Test
     fun `with the rail the More menu has no second Home`() = app {
-        onNodeWithContentDescription("More").performClick()
+        // Its click action: a pointer pressed as the shell first settles
+        // missed it once in ten CI runs.
+        onNodeWithContentDescription("More").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
         // An entry only the open menu has: "Sign out of" is in the ship
         // switcher, which is composed while closed, so it proved nothing.
-        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
+        waitUntil(timeoutMillis = 20_000) { showing("People & sidebar") }
         assertTrue(onAllNodesWithText("Home").fetchSemanticsNodes().isEmpty())
     }
 

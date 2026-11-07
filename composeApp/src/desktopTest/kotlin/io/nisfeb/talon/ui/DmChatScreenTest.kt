@@ -598,9 +598,15 @@ class DmChatScreenTest {
             return buttons.fetchSemanticsNodes().indices.filter { buttons[it].fetchSemanticsNode().boundsInRoot.top <= y }
                 .maxByOrNull { buttons[it].fetchSemanticsNode().boundsInRoot.top }
         }
-        waitUntil(timeoutMillis = 20_000) { nearest() != null }
-        buttons[nearest()!!].clickAction()
-        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
+        // Asked again if nothing opened: the button is found by its place
+        // among the others, and a list still laying out moved them (CI).
+        val opened = { onAllNodesWithText("Copy text").fetchSemanticsNodes().isNotEmpty() }
+        repeat(3) {
+            waitUntil(timeoutMillis = 20_000) { nearest() != null }
+            buttons[nearest()!!].clickAction()
+            if (runCatching { waitUntil(timeoutMillis = 5_000) { opened() } }.isSuccess) return
+        }
+        waitUntil(timeoutMillis = 5_000) { opened() }
     }
 
     @Test
@@ -682,6 +688,18 @@ class DmChatScreenTest {
             if (runCatching { waitUntil(timeoutMillis = 5_000) { opened() } }.isSuccess) return at
         }
         error("tapping \"$text\" opened no menu")
+    }
+
+    /** [count] once it has held still for half a second of real time, frames running meanwhile. */
+    private fun ComposeUiTest.settled(count: () -> Int): Int {
+        var last = count()
+        var since = System.currentTimeMillis()
+        waitUntil(timeoutMillis = 20_000) {
+            val now = count()
+            if (now != last) { last = now; since = System.currentTimeMillis() }
+            System.currentTimeMillis() - since >= 500
+        }
+        return last
     }
 
     private fun ComposeUiTest.shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
@@ -1081,16 +1099,16 @@ class DmChatScreenTest {
     }) { ship, db ->
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("two").fetchSemanticsNodes().isNotEmpty() }
         waitUntil(timeoutMillis = 20_000) { ship.scried.any { "/writs/older/" in it } }
-        Thread.sleep(500)
-        val first = ship.scried.count { "/writs/older/" in it }
+        // The page's probes go one after another on the screen's frames: a
+        // sleep held them, and the count was taken three probes in (CI).
+        val asks = { ship.scried.count { "/writs/older/" in it } }
+        val first = settled(asks)
         // New messages change the layout with the top still in view.
         listOf("three", "four", "five").forEachIndexed { i, text ->
             runBlocking { db.messages().upsert(msg("~bus/17014118450${8 + i}", "~bus", text, 3_000L + i)) }
             waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
         }
-        Thread.sleep(500)
-        waitForIdle()
-        assertEquals(first, ship.scried.count { "/writs/older/" in it }, "not asked again on every layout change")
+        assertEquals(first, settled(asks), "not asked again on every layout change")
     }
 
     // "Copy link" gave a talon:// address that neither Tlon nor a chat in
