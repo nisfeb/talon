@@ -821,6 +821,19 @@ fun TalonApp(
         viewerImageUrl = null
         viewerImageList = null
     }
+    // The ship the open chat and sections were opened on. Only the drawer
+    // put them down before a switch: a ring's, call back's or sign-in's
+    // notification goes straight to app.switchShip, and adding a ship logs
+    // in, so the old ship's chat stayed open on the new one, sent as it,
+    // and was saved as its last chat. Put down here for every switch,
+    // ahead of the deep link below, which then opens what it came for.
+    var navShip by remember { mutableStateOf(loggedInShip) }
+    LaunchedEffect(loggedInShip) {
+        if (loggedInShip != navShip) {
+            if (navShip != null) closeSections()
+            navShip = loggedInShip
+        }
+    }
     inviteShipFromCode?.let { ship ->
         io.nisfeb.talon.ui.InviteToGroupDialog(
             db = app.db, repo = app.repo, ship = ship, shipName = io.nisfeb.talon.ui.shipHandle(ship),

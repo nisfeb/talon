@@ -118,6 +118,18 @@ class AndroidLifecycleGuardTest {
         }
     }
 
+    // A ring's notification for another ship switched without the
+    // drawer's reset: the old ship's chat stayed open on the new one.
+    @Test
+    fun `every ship switch puts the old ship's chat down before the deep link opens its own`() {
+        val reset = talonApp.indexOf("LaunchedEffect(loggedInShip) {\n        if (loggedInShip != navShip) {\n            if (navShip != null) closeSections()")
+        val deepLink = talonApp.indexOf("LaunchedEffect(\n        initialForShip,")
+        assertTrue(reset >= 0, "no reset on a ship switch")
+        assertTrue(reset < deepLink, "the reset runs after the deep link, and wipes what it opened")
+        val close = talonApp.substringAfter("fun closeSections() {").substringBefore("\n    }\n")
+        assertTrue("openWhom = null" in close && "openThread = null" in close && "sections.closeAll()" in close, close)
+    }
+
     // The Assistant is drawn over Settings on Android: Top up opened it out of sight.
     @Test
     fun `Top up from the Assistant puts it down so Settings shows`() {
