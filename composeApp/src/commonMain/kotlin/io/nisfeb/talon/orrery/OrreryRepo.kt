@@ -423,8 +423,14 @@ class OrreryRepo(
         // ship switch started a loop and a beacon for the ship just left.
         attaching = scope.launch {
             probe()
-            _enabled.value = db.orreryAccounts().get(ship) != null
-            if (_enabled.value) startLoop()
+            // Raised only: detach() above lowered it, and an enable() since
+            // is newer than this read. Assigned, a read from before
+            // enable's row landed put the switch back off with the pipe
+            // feeding, and the next enable minted a second key.
+            if (db.orreryAccounts().get(ship) != null && !_enabled.value) {
+                _enabled.value = true
+                startLoop()
+            }
             // A ship with no pipe has nowhere to send a move, and its
             // screen has no switch to stop them: the phone kept waking
             // for every one after a switch from a ship that had a pipe.

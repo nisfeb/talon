@@ -300,7 +300,9 @@ class OrrerySwitchTest {
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret"))
             repo.attach("https://ship.test", "~zod")
-            kotlinx.coroutines.withTimeout(5_000) { while (repo.availability.value == OrreryAvailability.UNKNOWN) kotlinx.coroutines.delay(20) }
+            // Attached: probed, and the kept row read. The probe answers
+            // before the row is read, so availability alone came a tick early.
+            kotlinx.coroutines.withTimeout(5_000) { while (repo.availability.value == OrreryAvailability.UNKNOWN || !repo.enabled.value) kotlinx.coroutines.delay(20) }
             block(repo, db)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
