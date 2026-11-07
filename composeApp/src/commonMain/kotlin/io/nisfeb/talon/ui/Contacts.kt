@@ -309,7 +309,7 @@ private val sharedContactMaps = io.nisfeb.talon.util.OneSlot<AppDatabase, StateF
         db.clubs().stream(),
         db.groups().streamGroups(),
         db.groups().streamChannelGroups(),
-    ).stateIn(io.nisfeb.talon.data.sharing, SharingStarted.WhileSubscribed(5_000), LastContactMap.value)
+    ).stateIn(io.nisfeb.talon.data.sharingFor(db), SharingStarted.WhileSubscribed(5_000), LastContactMap.value)
 }
 
 /**
