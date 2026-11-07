@@ -791,10 +791,12 @@ private fun ThreadMessage(
             flashAlpha.animateTo(0f, tween(5_000, easing = LinearEasing))
         }
     }
-    // In bubbles the rows let the chat's picture through.
+    // In bubbles the rows let the chat's picture through, the parent's
+    // too: its tint drew a square behind its bubble (sneagan, 2026-11-07).
+    // The rule below it sets it apart there; in rows the tint does.
     val baseColor = when {
-        highlighted -> MaterialTheme.colorScheme.surfaceVariant
         bubbles -> Color.Transparent
+        highlighted -> MaterialTheme.colorScheme.surfaceVariant
         else -> MaterialTheme.colorScheme.surface
     }
     val flashOverlay = Color(0xFFFFC107).copy(alpha = 0.30f * flashAlpha.value)

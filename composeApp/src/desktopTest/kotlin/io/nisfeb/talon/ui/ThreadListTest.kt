@@ -160,6 +160,36 @@ class ThreadListTest {
         }
     }
 
+    /** The pixel three quarters across [text]'s row, past a bubble on the left and clear of the scrollbar. */
+    private fun ComposeUiTest.besideRow(text: String): androidx.compose.ui.graphics.Color {
+        waitForIdle()
+        val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y.toInt()
+        val right = onRoot().fetchSemanticsNode().boundsInRoot.right
+        return onRoot().captureToImage().toPixelMap()[(right * 0.75f).toInt(), y]
+    }
+
+    // sneagan, 2026-11-07: "in the thread view the parent message that
+    // starts the thread has a square background peeking out from behind
+    // the chat bubble".
+    @Test
+    fun `in bubbles the thread's first message sits on the picture, with no square behind its bubble`() {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        thread(seed = replies, look = ChatLook(bubbles = true, image = okio.Path.Companion.run { f.absolutePath.toPath() })) { _, _ ->
+            shows("their answer")
+            waitUntil(timeoutMillis = 5_000) { besideRow("their answer") == androidx.compose.ui.graphics.Color.Red }
+            assertEquals(androidx.compose.ui.graphics.Color.Red, besideRow("the question"))
+        }
+    }
+
+    @Test
+    fun `in rows the thread's first message still stands out from its replies`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
+        shows("their answer")
+        assertTrue(besideRow("the question") != besideRow("their answer"), "the first message is tinted")
+    }
+
     @Test
     fun `in rows a thread puts every message on the left under its byline`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
         shows("my answer")
