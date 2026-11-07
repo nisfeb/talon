@@ -377,6 +377,9 @@ class MailRepo(
         // nothing on screen yet. A read behind mail already shown (the
         // timer, coming back, after an action) is quiet; it spun on every
         // thread opened, since opening one marks it read and re-reads.
+        // The folder this read is for, as read() takes it: the open one can
+        // change while the read is out.
+        val key = pageKey()
         val p = read(a, maxOf(_page.value?.threads?.size ?: 0, AuspexApi.DEFAULT_PAGE), spin = asked || _page.value == null)
             ?: return@withLock
         _availability.value = MailAvailability.PRESENT
@@ -394,7 +397,7 @@ class MailRepo(
                 null
             }
         }
-        announce(p)
+        announce(p, key)
     }
 
     /**
@@ -440,8 +443,12 @@ class MailRepo(
      * because they switched tabs would be noise. The first read of a
      * session only seeds the baseline.
      */
-    private fun announce(p: InboxPage) {
-        if (pageKey() == INBOX) announceInbox(p)
+    private fun announce(p: InboxPage, key: PageKey) {
+        // The folder the page is of, not the one open now: tapping Inbox
+        // while a Sent or search read was out made that page the inbox's
+        // baseline, and the next inbox read announced every unread thread
+        // already seen.
+        if (key == INBOX) announceInbox(p)
     }
 
     /** [announce] of a page known to be the inbox's. */
