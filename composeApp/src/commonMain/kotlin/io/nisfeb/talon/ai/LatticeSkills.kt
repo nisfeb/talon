@@ -160,7 +160,7 @@ object LatticeSkills {
                 } catch (e: LatticeError.Refused) {
                     when (e.status) {
                         401 -> LatticeMemory.REVOKED_TOOL
-                        403 -> "Lattice refused it: Talon's key has no access to skills. The owner grants it in lattice Settings, Agent keys."
+                        403 -> "Lattice refused it: this app's key has no access to skills. The owner grants it in lattice Settings, Agent keys."
                         404 -> "No such skill, or no such file in it."
                         else -> "Lattice refused it: ${e.reason}"
                     }
