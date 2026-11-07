@@ -22,6 +22,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
@@ -95,6 +97,8 @@ class DmChatScreenTest {
         bubbleColors: BubbleColors? = null,
         /** Handed the theme's colours, for a test that reads pixels. */
         scheme: (androidx.compose.material3.ColorScheme) -> Unit = {},
+        /** A phone's way into a message's menu: a tap on it, opening at the finger. */
+        touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-dmchat-").toFile()
@@ -118,7 +122,10 @@ class DmChatScreenTest {
                     ) {
                     TalonTheme(darkTheme = false) {
                     scheme(androidx.compose.material3.MaterialTheme.colorScheme)
-                    androidx.compose.runtime.CompositionLocalProvider(LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current)) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current),
+                        io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
+                    ) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
                             aiSettings = ai, uiSettings = ui,
@@ -647,6 +654,103 @@ class DmChatScreenTest {
         assertTrue(onAllNodesWithText("Edit").fetchSemanticsNodes().isEmpty(), "not ours to edit")
         onNodeWithText("Report").performClick()
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Report message?").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    // ─── a phone's menu, at the finger ────────────────────────────
+
+    // "the emojis are too far away from the tap point at the top and some
+    // of the menu options should be [nested] a level with each other to
+    // make the popover less populated so we can make the buttons and
+    // emojis bigger" (sneagan, 2026-11-07).
+
+    /** A phone's tap on [text], which opens its menu; where the finger was, in the window. */
+    private fun ComposeUiTest.tapOpen(text: String): androidx.compose.ui.geometry.Offset {
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        val at = onNodeWithText(text).fetchSemanticsNode().boundsInWindow.center
+        onNodeWithText(text).performTouchInput { click(center) }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() }
+        return at
+    }
+
+    private fun ComposeUiTest.shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.boundsOf(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInWindow
+
+    /** Closes the menu by what it is for: a copy. */
+    private fun ComposeUiTest.copyText() {
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Copy text") }
+        onNodeWithText("Copy text").performClick()
+        waitUntil(timeoutMillis = 20_000) { !shown("Copy text") }
+    }
+
+    @Test
+    fun `on a phone the menu opens at the finger, the reactions on the finger's side`() = chat(touch = true, seed = sixty) { _, _ ->
+        val near = with(density) { 32.dp.toPx() }
+        // The newest sits over the composer, low in the window: the menu
+        // opens above the finger, the reactions at its foot.
+        val low = tapOpen("message 60")
+        val thumbs = boundsOf("👍")
+        assertTrue(thumbs.top > boundsOf("Reply in thread").bottom, "the reactions under the actions")
+        assertTrue(thumbs.bottom <= low.y && low.y - thumbs.bottom < near, "just over the finger: ${thumbs.bottom} to ${low.y}")
+        copyText()
+
+        // One high in the window opens below, the reactions at its head.
+        val height = onAllNodes(androidx.compose.ui.test.isRoot())[0].fetchSemanticsNode().size.height
+        val high = (1..60).map { "message $it" }.first { t ->
+            onAllNodesWithText(t).fetchSemanticsNodes().firstOrNull()?.boundsInWindow?.center?.y?.let { it > height * 0.2f && it < height * 0.45f } == true
+        }
+        val top = tapOpen(high)
+        val up = boundsOf("👍")
+        assertTrue(up.bottom < boundsOf("Reply in thread").top, "the reactions over the actions")
+        assertTrue(up.top >= top.y && up.top - top.y < near, "just under the finger: ${top.y} to ${up.top}")
+    }
+
+    @Test
+    fun `on a phone the copies are a level down, and its head goes back up`() = chat(touch = true, seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }) { _, _ ->
+        tapOpen("hello from bus")
+        for (below in listOf("Copy text", "Copy as Markdown", "Copy link")) assertFalse(shown(below), "$below at the top")
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Copy link") }
+        assertTrue(shown("Copy as Markdown") && !shown("Reply in thread") && !shown("👍"), "only the copies")
+        onNodeWithText("Copy").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Reply in thread") }
+        copyText()
+        assertEquals(listOf("hello from bus"), copied.toList())
+    }
+
+    @Test
+    fun `on a phone a reaction from the menu goes to the ship`() = chat(touch = true, seed = {
+        messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+    }) { ship, _ ->
+        tapOpen("hello from bus")
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        val react = ship.pokesTo("chat").single().json.toString()
+        assertTrue("add-react" in react && "~bus/170.141.184.506" in react, react)
+        waitUntil(timeoutMillis = 20_000) { !shown("Copy") }
+    }
+
+    @Test
+    fun `on a phone the rare things are under More, an admin's delete with them, and our own are at the top`() = chat(touch = true, whom = ours, seed = ourChannel(
+        post("170141184506", "~bus", "theirs here", 1_000), post("170141184507", "~zod", "mine here", 2_000),
+    )) { _, _ ->
+        tapOpen("mine here")
+        assertTrue(shown("Edit") && shown("Delete") && shown("Quote"), "ours to change, at the top")
+        copyText()
+
+        tapOpen("theirs here")
+        assertTrue(shown("Reply in thread") && shown("Quote"))
+        val rare = listOf("Pin", "Report", "Publish to Lattice", "Delete (admin)")
+        for (r in rare) assertFalse(shown(r), "$r at the top")
+        onNodeWithText("More").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Report") }
+        for (r in rare) assertTrue(shown(r), "$r not under More")
+        onNodeWithText("Report").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Report message?") }
     }
 
     // ─── an emoji alone draws large ────────────────────────────────

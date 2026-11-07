@@ -802,6 +802,8 @@ private fun ThreadMessage(
     // hover (matches DmChatScreen.MessageRow).
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
+    val tapOpens = LocalTapOpensMenu.current
+    val tapAt = remember { TapPoint() }
     // Touch: a single tap on the row opens the action menu (and tints the
     // row to show which message). On desktop that clickable is OFF so a
     // left-press-drag reaches the text's SelectionContainer instead of
@@ -812,8 +814,8 @@ private fun ThreadMessage(
             .fillMaxWidth()
             .hoverable(interactionSource)
             .then(
-                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-                    Modifier.clickable { onMenuExpand() }
+                if (tapOpens) {
+                    Modifier.tapPoint(tapAt).clickable { onMenuExpand() }
                 } else Modifier,
             )
             .onSecondaryClick { onMenuExpand() }
@@ -843,7 +845,7 @@ private fun ThreadMessage(
         // DmChatScreen.MessageRow: beside the bubble, on its inner side.
         @Composable
         fun androidx.compose.foundation.layout.RowScope.Dots() {
-            if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) return
+            if (tapOpens) return
             Icon(
                 Icons.Filled.MoreVert,
                 contentDescription = "Message actions",
@@ -889,7 +891,7 @@ private fun ThreadMessage(
                 onPollVote = if (isLocalOnly(m.id)) null else { emoji -> onPollVote(m, reactions, emoji) },
                 // Touch only: null on desktop so a left-press-drag selects
                 // text rather than opening the menu (hover "⋯" opens it).
-                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
+                onMessageTap = if (tapOpens) onMenuExpand else null,
             )
             }
             val folded: @Composable () -> Unit = {
@@ -958,9 +960,12 @@ private fun ThreadMessage(
                     }
                 }
             }
-            // Action menu, anchored to the message. Opened by tapping the
-            // row on touch and by the hover "⋯" below on desktop.
-            androidx.compose.material3.DropdownMenu(
+            // Action menu. Opened by tapping the row on touch, at the
+            // finger, and by the hover "⋯" below on desktop, anchored to
+            // the message.
+            if (tapOpens) {
+                if (menuExpanded) TouchMenuPopup(tapAt, onMenuDismiss) { actionMenu() }
+            } else androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 // Narrower, and set off from the chat behind it: its own
@@ -1015,6 +1020,19 @@ private fun ThreadActionMenu(
     onDelete: () -> Unit,
     onReport: () -> Unit,
 ) {
+    val copyText = MenuAct("Copy text", onCopy)
+    val copyMarkdown = MenuAct("Copy as Markdown", onCopyMarkdown)
+    val edit = MenuAct("Edit", onEdit).takeIf { canEdit }
+    val report = MenuAct("Report", onReport, danger = true).takeIf { canReport }
+    val delete = MenuAct(if (mine) "Delete" else "Delete (admin)", onDelete, danger = true).takeIf { canDelete }
+    LocalTouchMenuSide.current?.let { side ->
+        TouchMenu(
+            side,
+            entries = listOfNotNull(edit) + group("Copy", listOf(copyText, copyMarkdown)) + listOfNotNull(report, delete),
+            reactions = if (canReact) ({ TouchReactions(db, onPickReaction, onBrowseEmoji) }) else null,
+        )
+        return
+    }
     val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
     val itemMinHeight = 36.dp
     Column(
@@ -1025,20 +1043,7 @@ private fun ThreadActionMenu(
                 // Suggested row blends the user's most-used reactions with
                 // the default palette — same blend DmChatScreen uses, so
                 // the thread sheet feels consistent with the chat sheet.
-                val topUsage by remember {
-                    db.reactionUsage().streamTop(8)
-                }.collectAsState(initial = emptyList())
-                // De-dupe by canonical reaction (normalize) so a used glyph
-                // and its palette code don't both show — see DmChatScreen.
-                val suggested = remember(topUsage) {
-                    val seen = mutableSetOf<String>()
-                    val out = mutableListOf<String>()
-                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                        .forEach { item ->
-                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                        }
-                    out.take(8)
-                }
+                val suggested = rememberSuggestedReactions(db, 8)
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -1077,14 +1082,11 @@ private fun ThreadActionMenu(
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
             }
-            @Composable
-            fun ActionRow(
-                onClick: () -> Unit,
-                label: String,
-                color: Color = LocalContentColor.current,
-            ) {
+            // The menu's own ink, not the button's.
+            val ink = LocalContentColor.current
+            listOfNotNull(copyText, copyMarkdown, edit, report, delete).forEach { act ->
                 TextButton(
-                    onClick = onClick,
+                    onClick = act.onClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = itemMinHeight),
@@ -1092,31 +1094,12 @@ private fun ThreadActionMenu(
                     shape = RoundedCornerShape(6.dp),
                 ) {
                     Text(
-                        label,
-                        color = color,
+                        act.label,
+                        color = if (act.danger) MaterialTheme.colorScheme.error else ink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                 }
-            }
-            ActionRow(onClick = onCopy, label = "Copy text")
-            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            if (canEdit) {
-                ActionRow(onClick = onEdit, label = "Edit")
-            }
-            if (canReport) {
-                ActionRow(
-                    onClick = onReport,
-                    label = "Report",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (canDelete) {
-                ActionRow(
-                    onClick = onDelete,
-                    label = if (mine) "Delete" else "Delete (admin)",
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
     }
 }

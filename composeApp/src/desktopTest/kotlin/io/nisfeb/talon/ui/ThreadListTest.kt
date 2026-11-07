@@ -5,6 +5,9 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -57,6 +60,8 @@ class ThreadListTest {
         seed: suspend AppDatabase.() -> Unit = {},
         prepare: FakeShip.() -> Unit = {},
         look: ChatLook = ChatLook(),
+        /** A phone's way into a reply's menu: a tap on it, opening at the finger. */
+        touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-thread-").toFile()
@@ -77,6 +82,7 @@ class ThreadListTest {
                         },
                         // What the shells provide from the bubbles setting.
                         LocalChatLook provides look,
+                        io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
                     ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
@@ -280,6 +286,40 @@ class ThreadListTest {
         onNode(hasSetTextAction() and androidx.compose.ui.test.hasText("Search emoji")).performTextInput("taco")
         onAllNodesWithText("🌮")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").size == 2 }
+    }
+
+    // sneagan, 2026-11-07: the reactions were far from the tap, and the
+    // menu too full for bigger buttons.
+    @Test
+    fun `on a phone a reply's menu opens at the finger, the copies a level down`() = thread(touch = true, whom = nest, parentId = "170141184506", seed = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~zod", "my answer", 2_000, parentId = "170141184506"))
+    }) { ship, _ ->
+        fun open(): androidx.compose.ui.geometry.Offset {
+            shows("my answer")
+            waitForIdle()
+            val at = onNodeWithText("my answer").fetchSemanticsNode().boundsInWindow.center
+            onNodeWithText("my answer").performTouchInput { click(center) }
+            shows("Copy")
+            return at
+        }
+        fun shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+        val at = open()
+        val thumbs = onNodeWithText("👍").fetchSemanticsNode().boundsInWindow
+        val near = with(density) { 32.dp.toPx() }
+        assertTrue(minOf(kotlin.math.abs(thumbs.top - at.y), kotlin.math.abs(thumbs.bottom - at.y)) < near, "the reactions beside the finger: ${thumbs.top}..${thumbs.bottom} at ${at.y}")
+        assertTrue(shown("Edit") && shown("Delete") && !shown("Copy text"), "edit and delete at the top, the copies under Copy")
+        onNodeWithText("Copy").performClick()
+        shows("Copy as Markdown")
+        onNodeWithText("Copy text").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shown("Copy text") }
+        assertEquals(listOf("my answer"), copied.toList())
+
+        open()
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val react = ship.pokesTo("channels").single().json.toString()
+        assertTrue("react" in react && "170.141.184.507" in react, react)
     }
 
     @Test

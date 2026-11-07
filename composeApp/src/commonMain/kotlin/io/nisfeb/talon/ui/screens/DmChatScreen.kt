@@ -1718,6 +1718,8 @@ private fun MessageRow(
     // hover (the touch path opens the menu by tapping the row instead).
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
+    val tapOpens = LocalTapOpensMenu.current
+    val tapAt = remember { TapPoint() }
 
     Row(
         modifier = Modifier
@@ -1744,10 +1746,11 @@ private fun MessageRow(
             // clickable is OFF so a left-press-drag reaches the message
             // text's SelectionContainer instead of being swallowed and
             // popping the menu on mouse-up; desktop opens the menu via
-            // right-click below. (isTapToOpenMenuSupported)
+            // right-click below. (isTapToOpenMenuSupported) The press is
+            // noted first, so the menu opens at the finger.
             .then(
-                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-                    Modifier.clickable { onMenuExpand() }
+                if (tapOpens) {
+                    Modifier.tapPoint(tapAt).clickable { onMenuExpand() }
                 } else Modifier,
             )
             .onSecondaryClick { onMenuExpand() }
@@ -1832,7 +1835,7 @@ private fun MessageRow(
                     // the action menu — same as tapping the row background. Null
                     // on desktop so a left-press-drag in text selects rather than
                     // opening the menu (right-click opens it instead).
-                    onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
+                    onMessageTap = if (tapOpens) onMenuExpand else null,
                 )
             }
             // Only a post that could run long is measured for a fold.
@@ -1958,12 +1961,15 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            // Action menu, anchored to the message. On touch, opened by a
-            // single tap on the row (see the gated row clickable + the
-            // StoryRenderer onMessageTap above); on desktop, by the trailing
-            // hover "⋯" below (left-click/drag is reserved for text selection,
-            // and right-click is eaten by the text's SelectionContainer).
-            androidx.compose.material3.DropdownMenu(
+            // Action menu. On touch, opened by a single tap on the row (see
+            // the gated row clickable + the StoryRenderer onMessageTap above),
+            // at the finger. On desktop, anchored to the message and opened
+            // by the trailing hover "⋯" below (left-click/drag is reserved for
+            // text selection, and right-click is eaten by the text's
+            // SelectionContainer).
+            if (tapOpens) {
+                if (menuExpanded) TouchMenuPopup(tapAt, onMenuDismiss) { actionMenu() }
+            } else androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
                 // Narrower, and set off from the chat behind it: its own
@@ -1989,7 +1995,7 @@ private fun MessageRow(
  */
 @Composable
 private fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit, modifier: Modifier = Modifier) {
-    if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) return
+    if (LocalTapOpensMenu.current) return
     Icon(
         Icons.Filled.MoreVert,
         contentDescription = "Message actions",
@@ -2504,6 +2510,51 @@ private fun MessageActionMenu(
     val onShip = !isLocalOnly(message.id)
     val sending = !onShip && message.status == "pending"
     val canReply = message.parentId == null && onShip
+    val copyText = MenuAct("Copy text", onCopy)
+    val copyMarkdown = MenuAct("Copy as Markdown", onCopyMarkdown)
+    val copyLink = MenuAct("Copy link", onCopyLink).takeIf { onShip }
+    val bookmark = MenuAct(if (isBookmarked) "Remove bookmark" else "Bookmark", onToggleBookmark).takeIf { canBookmark && onShip }
+    val reply = MenuAct("Reply in thread", onReply).takeIf { canReply }
+    val event = onMakeEvent?.let { MenuAct("New event", it) }
+    val task = onMakeTask?.let { MenuAct("New task", it) }
+    val quote = MenuAct("Quote", onQuote).takeIf { canQuote && onShip }
+    // Edit on channel chats only — %chat (DMs + clubs) silently
+    // ignores edit pokes. Thread replies have their own Edit
+    // affordance in ThreadActionSheet; top-level posts get it here.
+    val edit = MenuAct("Edit", onEdit).takeIf { isMine && isChannel && message.parentId == null && onShip }
+    val follow = followLabel?.takeIf { onShip }?.let { MenuAct(it, onToggleFollow) }
+    // Pin / Unpin — chat channels only, top-level posts only.
+    val pin = MenuAct(if (isPinned) "Unpin" else "Pin", onTogglePin).takeIf { canPin && onShip }
+    // Report — other people's messages in group channels only:
+    // flag-content routes through the group host, so DMs have
+    // nowhere to send it, and reporting yourself is noise.
+    val report = MenuAct("Report", onReport, danger = true).takeIf { !isMine && isChannel }
+    // Publish this message (and its thread replies) as a
+    // Lattice note on your own ship. Channel content only.
+    val publish = MenuAct("Publish to Lattice", onPublish).takeIf { isChannel }
+    // Your own always; other people's only where you can
+    // actually moderate. Offering it to everyone and letting
+    // the ship refuse was the old behaviour: the row stayed
+    // put, nothing said why, and the app had advertised a
+    // power the reader did not have.
+    val delete = MenuAct(if (isMine) "Delete" else "Delete (admin)", onDelete, danger = true)
+        .takeIf { (isMine || (isChannel && canModerate)) && !sending }
+
+    LocalTouchMenuSide.current?.let { side ->
+        // A phone: what is done most at the top level, the rest a level
+        // down, and an admin's delete with the rare things.
+        TouchMenu(
+            side,
+            entries = listOfNotNull(reply, quote, edit) +
+                group("Copy", listOfNotNull(copyText, copyMarkdown, copyLink)) +
+                listOfNotNull(bookmark) +
+                group("More", listOfNotNull(follow, pin, event, task, publish, report, delete?.takeIf { !isMine })) +
+                listOfNotNull(delete?.takeIf { isMine }),
+            reactions = if (onShip) ({ TouchReactions(db, onPickReaction, onBrowseEmoji) }) else null,
+        )
+        return
+    }
+
     // Compact density tokens. The previous menu used Material's
     // default 8.dp spacedBy + full TextButton heights (~48.dp each)
     // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
@@ -2516,25 +2567,10 @@ private fun MessageActionMenu(
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
             if (onShip) {
-                val topUsage by remember {
-                    db.reactionUsage().streamTop(8)
-                }.collectAsState(initial = emptyList())
-
-                // Merge usage-ranked reactions with the default palette so
-                // the row is always 8 wide even before the user has reacted
-                // much. De-dupe by canonical reaction (normalize) so a glyph
-                // already in history (❤️) and its palette code (:heart:) don't
-                // both show as separate-looking options. Usage rows rank
-                // first, then the palette fills the rest.
-                val suggested = remember(topUsage) {
-                    val seen = mutableSetOf<String>()
-                    val out = mutableListOf<String>()
-                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                        .forEach { item ->
-                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                        }
-                    out.take(8)
-                }
+                // Usage-ranked reactions first, then the palette, so the
+                // row is always 8 wide even before the user has reacted
+                // much.
+                val suggested = rememberSuggestedReactions(db, 8)
 
                 // One line of reactions, the emoji browser at its end: the
                 // "React" heading over them took a row of its own.
@@ -2571,15 +2607,14 @@ private fun MessageActionMenu(
             // tap target spans the popover and reads like a menu
             // item instead of a centered button. minHeight 36 (vs
             // Material default 48) is the main driver of total
-            // popover height.
-            @Composable
-            fun ActionRow(
-                onClick: () -> Unit,
-                label: String,
-                color: androidx.compose.ui.graphics.Color = androidx.compose.material3.LocalContentColor.current,
-            ) {
+            // popover height. The menu's own ink, not the button's.
+            val ink = androidx.compose.material3.LocalContentColor.current
+            listOfNotNull(
+                copyText, copyMarkdown, copyLink, bookmark, reply, event, task,
+                quote, edit, follow, pin, report, publish, delete,
+            ).forEach { act ->
                 TextButton(
-                    onClick = onClick,
+                    onClick = act.onClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = itemMinHeight),
@@ -2587,70 +2622,12 @@ private fun MessageActionMenu(
                     shape = RoundedCornerShape(6.dp),
                 ) {
                     Text(
-                        label,
-                        color = color,
+                        act.label,
+                        color = if (act.danger) MaterialTheme.colorScheme.error else ink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                 }
-            }
-            ActionRow(onClick = onCopy, label = "Copy text")
-            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            if (onShip) ActionRow(onClick = onCopyLink, label = "Copy link")
-            if (canBookmark && onShip) {
-                ActionRow(
-                    onClick = onToggleBookmark,
-                    label = if (isBookmarked) "Remove bookmark" else "Bookmark",
-                )
-            }
-            if (canReply) {
-                ActionRow(onClick = onReply, label = "Reply in thread")
-            }
-            onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
-            onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
-            if (canQuote && onShip) {
-                ActionRow(onClick = onQuote, label = "Quote")
-            }
-            // Edit on channel chats only — %chat (DMs + clubs) silently
-            // ignores edit pokes. Thread replies have their own Edit
-            // affordance in ThreadActionSheet; top-level posts get it here.
-            if (isMine && isChannel && message.parentId == null && onShip) {
-                ActionRow(onClick = onEdit, label = "Edit")
-            }
-            followLabel?.takeIf { onShip }?.let { ActionRow(onClick = onToggleFollow, label = it) }
-            // Pin / Unpin — chat channels only, top-level posts only.
-            if (canPin && onShip) {
-                ActionRow(
-                    onClick = onTogglePin,
-                    label = if (isPinned) "Unpin" else "Pin",
-                )
-            }
-            // Your own always; other people's only where you can
-            // actually moderate. Offering it to everyone and letting
-            // the ship refuse was the old behaviour: the row stayed
-            // put, nothing said why, and the app had advertised a
-            // power the reader did not have.
-            // Report — other people's messages in group channels only:
-            // flag-content routes through the group host, so DMs have
-            // nowhere to send it, and reporting yourself is noise.
-            if (!isMine && isChannel) {
-                ActionRow(
-                    onClick = onReport,
-                    label = "Report",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            // Publish this message (and its thread replies) as a
-            // Lattice note on your own ship. Channel content only.
-            if (isChannel) {
-                ActionRow(onClick = onPublish, label = "Publish to Lattice")
-            }
-            if ((isMine || (isChannel && canModerate)) && !sending) {
-                ActionRow(
-                    onClick = onDelete,
-                    label = if (isMine) "Delete" else "Delete (admin)",
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
     }
 }
