@@ -195,6 +195,20 @@ class ComposerState(initialDraftText: String) {
      * editor.
      */
     var editing by mutableStateOf<EditTarget?>(null)
+
+    /**
+     * Edit a post in the composer: its [text] in the box, the caret at the
+     * end where one usually picks up, and the words it displaces kept to
+     * come back after. An edit opened over another keeps the words the
+     * first displaced: it took the first edit's changed text as the
+     * draft, and the half-typed message was lost. Not while one is saving.
+     */
+    fun beginEdit(postId: String, sentMs: Long, contentJson: String?, text: String) {
+        if (saving) return
+        val prior = editing?.priorDraftText ?: draft.text
+        draft = TextFieldValue(text, TextRange(text.length))
+        editing = EditTarget(postId, sentMs, contentJson, prior)
+    }
 }
 
 /** A message being edited in place. */
@@ -1064,7 +1078,9 @@ fun ChatComposer(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = {
+                // Not while saving: the edit lands all the same, and Cancel
+                // threw away the words a failed save is tried again with.
+                TextButton(enabled = !state.saving, onClick = {
                     val prior = state.editing?.priorDraftText.orEmpty()
                     state.editing = null
                     state.draft = TextFieldValue(prior, TextRange(prior.length))

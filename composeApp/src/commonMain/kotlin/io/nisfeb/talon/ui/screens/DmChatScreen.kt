@@ -1170,20 +1170,9 @@ fun DmChatScreen(
                     // Into the composer, not a dialog: same keyboard,
                     // same autocomplete, and the conversation stays
                     // visible behind what you are changing.
-                    val prior = composerState.draft.text
-                    val editText = io.nisfeb.talon.urbit.editableText(target.contentJson)
-                    composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
-                        editText,
-                        // Caret at the end of the text being edited, not
-                        // its start — you almost always append or fix a
-                        // typo near where you stopped typing.
-                        selection = androidx.compose.ui.text.TextRange(editText.length),
-                    )
-                    composerState.editing = io.nisfeb.talon.ui.EditTarget(
-                        postId = target.id,
-                        originalSentMs = target.sentMs,
-                        originalContentJson = target.contentJson,
-                        priorDraftText = prior,
+                    composerState.beginEdit(
+                        target.id, target.sentMs, target.contentJson,
+                        io.nisfeb.talon.urbit.editableText(target.contentJson),
                     )
                 },
                 onDelete = {
@@ -1370,21 +1359,9 @@ fun DmChatScreen(
                         .filter { it.author == ourPatp && it.parentId == null && !isLocalOnly(it.id) }
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
-                            val prior = composerState.draft.text
-                            val editText =
-                                io.nisfeb.talon.urbit.editableText(target.contentJson)
-                            composerState.draft =
-                                androidx.compose.ui.text.input.TextFieldValue(
-                                    editText,
-                                    selection = androidx.compose.ui.text.TextRange(
-                                        editText.length,
-                                    ),
-                                )
-                            composerState.editing = io.nisfeb.talon.ui.EditTarget(
-                                postId = target.id,
-                                originalSentMs = target.sentMs,
-                                originalContentJson = target.contentJson,
-                                priorDraftText = prior,
+                            composerState.beginEdit(
+                                target.id, target.sentMs, target.contentJson,
+                                io.nisfeb.talon.urbit.editableText(target.contentJson),
                             )
                         }
                 }

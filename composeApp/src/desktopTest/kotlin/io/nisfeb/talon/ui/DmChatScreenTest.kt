@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.performTextReplacement
@@ -1066,12 +1067,37 @@ class DmChatScreenTest {
         editTo("first try", "second try")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Saving…").fetchSemanticsNodes().isNotEmpty() }
         assertEquals("second try", draft())
+        // Cancel would throw the words away while the edit lands all the same.
+        onNodeWithText("Cancel").assertIsNotEnabled()
         // A second Enter while it is on its way does not send it twice.
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Editing message").fetchSemanticsNodes().isEmpty() && onAllNodesWithText("Saving…").fetchSemanticsNodes().isEmpty() }
         assertEquals("", draft(), "the box is back to what it held before the edit")
         Thread.sleep(300)
         assertEquals(1, ship.pokesTo("channels").size)
+    }
+
+    // An edit opened over another took the first edit's changed words as
+    // the draft to give back, and the half-typed message was lost.
+    @Test
+    fun `an edit opened over another gives back the half-typed message`() = chat(
+        whom = general,
+        seed = {
+            messages().upsert(MessageEntity(general, "170141184507", "~zod", 2_000, """[{"inline":["first try"]}]""", "/chat"))
+            messages().upsert(MessageEntity(general, "170141184508", "~zod", 3_000, """[{"inline":["second one"]}]""", "/chat"))
+        },
+    ) { _, _ ->
+        onNode(hasSetTextAction()).performTextInput("half typed")
+        menuOf("first try")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == "first try" }
+        onNode(hasSetTextAction()).performTextReplacement("first, changed")
+        menuOf("second one")
+        onNodeWithText("Edit").performClick()
+        waitUntil(timeoutMillis = 20_000) { draft() == "second one" }
+        onNodeWithText("Cancel").performClick()
+        waitForIdle()
+        assertEquals("half typed", draft(), "the message being written before either edit")
     }
 
     // Real time: the edit is held on the ship's side while the chat goes.
