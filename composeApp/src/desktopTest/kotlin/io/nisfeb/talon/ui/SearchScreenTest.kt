@@ -143,7 +143,8 @@ class SearchScreenTest {
         type("lunch", "lunch at noon")
         // The group and the person land on their own: clicked before they
         // were there, the test failed on a slow machine.
-        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") }
+        // The person's own row: "Lunch Club" is in a message's byline too.
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("to start a DM") }
         // Each one opened keeps the search it came from.
         onNodeWithText("Lunch Crew").performClick()
         assertEquals(listOf("lunch"), ui.recentSearches.value, "a group")

@@ -142,39 +142,38 @@ fun SearchScreen(
         else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
 
-    // Read once a query: as a live flow the LIKE scan ran again on every
-    // write to messages while the results showed.
-    val substringResults by remember(filter, escapedNeedle) {
-        if (filter.isTrivial) flowOf(emptyList())
-        else db.messages().searchFiltered(
-            needle = escapedNeedle,
-            fromShip = filter.fromShip,
-            inWhom = filter.inWhom,
-            sinceMs = filter.sinceMs,
-            hasImage = if (filter.hasImage) 1 else 0,
-            hasLink = if (filter.hasLink) 1 else 0,
-        ).take(1)
-    }.collectAsState(initial = emptyList<MessageEntity>())
-
-    // People search runs against the keyword text only — operators
-    // like since: / from: / has: have no analog for contacts.
+    // People and group search run against the keyword text only:
+    // operators like since: / from: / has: have no analog for them.
     val peopleEscapedNeedle = remember(filter) {
         if (filter.needle.length < 2) ""
         else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
-    val people by remember(peopleEscapedNeedle) {
-        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
-        else db.contacts().search(peopleEscapedNeedle)
-    }.collectAsState(initial = emptyList<ContactEntity>())
 
-    // Group-name search — same free-text needle as people (operators
-    // like since:/has: have no analog for groups). Surfaced above
-    // message hits because a name match is a stronger signal of intent
-    // than a substring buried in some message body.
-    val groups by remember(peopleEscapedNeedle) {
-        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
-        else db.groups().searchGroups(peopleEscapedNeedle)
-    }.collectAsState(initial = emptyList<io.nisfeb.talon.data.GroupEntity>())
+    // Groups, people and messages, as one: shown as each query landed, a
+    // kind a frame late went in above the row the list held its place by,
+    // out of sight for good (a search for a group's name found it and showed
+    // only its messages), or moved the rows under a click as it landed.
+    // Groups come first, a name match being a stronger sign of intent than
+    // a word in some message. Messages are read once a query: as a live flow
+    // the LIKE scan ran again on every write to messages while they showed.
+    val found by remember(filter) {
+        kotlinx.coroutines.flow.combine(
+            if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+            else db.groups().searchGroups(peopleEscapedNeedle),
+            if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+            else db.contacts().search(peopleEscapedNeedle),
+            if (filter.isTrivial) flowOf(emptyList())
+            else db.messages().searchFiltered(
+                needle = escapedNeedle,
+                fromShip = filter.fromShip,
+                inWhom = filter.inWhom,
+                sinceMs = filter.sinceMs,
+                hasImage = if (filter.hasImage) 1 else 0,
+                hasLink = if (filter.hasLink) 1 else 0,
+            ).take(1),
+        ) { g: List<io.nisfeb.talon.data.GroupEntity>, p: List<ContactEntity>, m: List<MessageEntity> -> Triple(g, p, m) }
+    }.collectAsState(initial = Triple(emptyList(), emptyList(), emptyList()))
+    val (groups, people, substringResults) = found
 
     // Set of whoms the user has any activity with — used to flag a
     // search result as "you've never DMed this person, tap to start"
