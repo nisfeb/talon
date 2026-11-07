@@ -495,10 +495,10 @@ class TlonChatRepoStartupTest {
             until("the stream again") { streams() > s }
             until("the retry the reconnect woke") { tries() > before }
         }
-        val after = tries()
-        // One chain's next try is 16 s on, jittered to no sooner than 8.
-        kotlinx.coroutines.delay(7_000)
-        assertEquals(after, tries(), "tries from more than one retry chain")
+        // The one that tried hands over to its next and ends; an orphan
+        // sleeps a backoff of a second or more.
+        kotlinx.coroutines.delay(300)
+        assertEquals(1, repo.drainsAliveForTest, "retry chains")
     }
 
     // A watch lost on every channel (a ship timing every PUT out) gave

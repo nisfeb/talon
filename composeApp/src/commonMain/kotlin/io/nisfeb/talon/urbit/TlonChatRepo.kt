@@ -1619,15 +1619,24 @@ class TlonChatRepo(
             job.cancel()
         }
         drainJob = pushScope.launch {
-            drainSleeping = true
+            drainsAlive.update { it + 1 }
             try {
-                delay(if (afterMs == 0L) 0L else jittered(afterMs))
+                drainSleeping = true
+                try {
+                    delay(if (afterMs == 0L) 0L else jittered(afterMs))
+                } finally {
+                    drainSleeping = false
+                }
+                drainQueue()
             } finally {
-                drainSleeping = false
+                drainsAlive.update { it - 1 }
             }
-            drainQueue()
         }
     }
+
+    /** Drain jobs alive: one at most, besides one finishing as it hands over. */
+    private val drainsAlive = MutableStateFlow(0)
+    internal val drainsAliveForTest: Int get() = drainsAlive.value
 
     /**
      * Messages queued behind another of their conversation, never sent:
