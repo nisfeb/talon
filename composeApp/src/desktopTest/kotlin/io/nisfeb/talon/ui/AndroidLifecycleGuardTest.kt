@@ -95,6 +95,21 @@ class AndroidLifecycleGuardTest {
         assertTrue("LeaveAlarm.schedule(app)" in gate && "LeaveAlarm.stop(app)" in gate, gate)
     }
 
+    // Orrery turned off on another device: the workers sent on until the app was opened.
+    @Test
+    fun `Orrery off stops location and health sends from the background`() {
+        for ((file, send, stop) in listOf(
+            Triple("orrery/LocationWatch.kt", "sendLocation(", "LocationWatch.set(applicationContext, false)"),
+            Triple("orrery/HealthWatch.kt", "sendHealth(", "HealthWatch.set(app, false)"),
+        )) {
+            val work = read("$android/$file").substringAfter("override suspend fun doWork(): Result {")
+            val gate = work.indexOf("if (!app.aiSettings.state.value.orreryOn()) {")
+            val sent = work.indexOf(send)
+            assertTrue(gate in 0 until sent, "$file sends before it asks whether Orrery is on")
+            assertTrue(stop in work.substring(gate, sent), "$file does not stop itself when Orrery is off")
+        }
+    }
+
     // B3-8
     @Test
     fun `an update starts the stream as a reboot does`() {
