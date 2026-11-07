@@ -12,7 +12,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.rightClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -159,6 +159,7 @@ class BookmarksScreenTest {
         onNodeWithText("Delete").performClick()
         settled { runBlocking { db.bookmarkFolders().streamFolders().first() }.isEmpty() }
         assertEquals(2, runBlocking { db.bookmarks().all() }.size)
-        assertTrue(sent(ship).any { "del-entry" in it && "bookmark-folders" in it })
+        // The ship is told after the rows go: a beat later, not at once.
+        settled { sent(ship).any { "del-entry" in it && "bookmark-folders" in it } }
     }
 }
