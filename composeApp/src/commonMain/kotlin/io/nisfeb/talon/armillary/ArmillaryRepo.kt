@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -70,6 +71,9 @@ class ArmillaryRepo(
     private var catalog: List<CatalogRow>? = null
     private val _inference = MutableStateFlow<Inference?>(null)
     val inference: StateFlow<Inference?> = _inference.asStateFlow()
+
+    /** Inference configs taken so far: a "no key" read that began before the last one is older news. */
+    private val keysTaken = MutableStateFlow(0)
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
     private val _payment = MutableStateFlow<Payment?>(null)
@@ -229,8 +233,9 @@ class ArmillaryRepo(
                 return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
             }
             var got: Inference? = null
+            val taken = keysTaken.value
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey() }
+                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey(taken) }
                 .onFailure {
                     Log.i(TAG, "inference skipped: ${it.message}")
                     if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
@@ -256,8 +261,9 @@ class ArmillaryRepo(
     /** The vendor's picks, the key and the models read off the ship and put on the row; a failed read keeps what the row had. */
     private suspend fun readPicks() = lock.withLock {
         val a = api ?: return@withLock
+        val taken = keysTaken.value
         runSuspendCatching { a.inference() }
-            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey() }
+            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey(taken) }
             .onFailure { Log.i(TAG, "picks skipped: ${it.message}") }
     }
 
@@ -285,9 +291,13 @@ class ArmillaryRepo(
      * the key revoked. The row kept the old key and the card said
      * Connected; now the key goes from the row, and the card offers to
      * set this device up. A read that failed says nothing of the kind,
-     * and keeps what the row had.
+     * and keeps what the row had. So does one that began before a key
+     * was [taken][keysTaken] since: a refresh's read, answered after this
+     * device minted its key, took the new key off the row, and nothing
+     * asked again (CI, 2026-11-07).
      */
-    private fun dropKey() {
+    private fun dropKey(takenWhenAsked: Int) {
+        if (keysTaken.value != takenWhenAsked) return
         _inference.value = null
         val ai = aiSettings ?: return
         val profile = ai.state.value.savedProfile ?: return
@@ -615,6 +625,7 @@ class ArmillaryRepo(
 
     /** An inference config just read: kept, and written onto the provider row. */
     private fun took(inf: Inference): Inference {
+        keysTaken.update { it + 1 }
         // The row first: whatever waits for the inference reads the key
         // off the row, and found it blank when it woke in between.
         publish(inf)
