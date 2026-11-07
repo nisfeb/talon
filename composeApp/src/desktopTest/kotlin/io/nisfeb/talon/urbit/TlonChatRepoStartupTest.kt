@@ -45,7 +45,9 @@ class TlonChatRepoStartupTest {
 
     private suspend fun until(what: String, check: suspend () -> Boolean) {
         runCatching { withTimeout(30_000) { while (!check()) delay(50) } }
-            .onFailure { error("never saw: $what") }
+            // What the ship was asked, last first: a CI run that gave up here
+            // (the second stream, once in five) left nothing else to go on.
+            .onFailure { error("never saw: $what. Last requests: ${ship.requests.takeLast(40).reversed()}") }
     }
 
     private fun essay(author: String, text: String, sent: Long) =
