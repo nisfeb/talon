@@ -716,9 +716,11 @@ class DmChatScreenTest {
     }) { _, _ ->
         tapOpen("hello from bus")
         for (below in listOf("Copy text", "Copy as Markdown", "Copy link")) assertFalse(shown(below), "$below at the top")
+        val backs = onAllNodesWithContentDescription("Back").fetchSemanticsNodes().size
         onNodeWithText("Copy").performClick()
         waitUntil(timeoutMillis = 20_000) { shown("Copy link") }
         assertTrue(shown("Copy as Markdown") && !shown("Reply in thread") && !shown("👍"), "only the copies")
+        assertEquals(backs + 1, onAllNodesWithContentDescription("Back").fetchSemanticsNodes().size, "its head is marked as the way back")
         onNodeWithText("Copy").performClick()
         waitUntil(timeoutMillis = 20_000) { shown("Reply in thread") }
         copyText()
@@ -726,15 +728,22 @@ class DmChatScreenTest {
     }
 
     @Test
-    fun `on a phone a reaction from the menu goes to the ship`() = chat(touch = true, seed = {
+    fun `on a phone a reaction from the menu goes to the ship, the owner's own first, and the browser opens`() = chat(touch = true, seed = {
         messages().upsert(msg("~bus/170141184506", "~bus", "hello from bus", 1_000))
+        reactionUsage().upsert("🦊", 3, 1_000)
     }) { ship, _ ->
         tapOpen("hello from bus")
+        waitUntil(timeoutMillis = 20_000) { shown("🦊") }
+        assertTrue(boundsOf("🦊").left < boundsOf("👍").left, "the owner's own reaction leads the palette's")
         onAllNodesWithText("👍")[0].performClick()
         waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
         val react = ship.pokesTo("chat").single().json.toString()
         assertTrue("add-react" in react && "~bus/170.141.184.506" in react, react)
         waitUntil(timeoutMillis = 20_000) { !shown("Copy") }
+
+        tapOpen("hello from bus")
+        onNodeWithContentDescription("Browse emojis").performClick()
+        waitUntil(timeoutMillis = 20_000) { shown("Search emoji") }
     }
 
     @Test
