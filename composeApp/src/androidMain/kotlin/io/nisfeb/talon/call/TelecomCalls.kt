@@ -44,10 +44,9 @@ class TelecomCalls(
      *  Android version: see [ModernTelecom]. */
     val route: CallRoute = if (ModernTelecom.active) ModernTelecomRoute() else TelecomRoute()
 
-    // Hold has no wire in %trunk, so being put on hold mutes us and
-    // being taken off it unmutes — only if the hold is what muted.
-    private var callHeldMute = false
-    private var partyHeldMute = false
+    // Hold has no wire in %trunk: see HoldMute. Each ends with its call or line.
+    private val callHold = HoldMute()
+    private val partyHold = HoldMute()
 
     private val callControls = object : TalonTelecom.Controls {
         override fun onAnswer() = controller.accept()
@@ -57,11 +56,9 @@ class TelecomCalls(
         }
         override fun onHold() {
             val s = controller.state.value
-            if (s is CallUiState.Active && !s.muted) { controller.setMuted(true); callHeldMute = true }
+            callHold.hold(s is CallUiState.Active && !s.muted) { controller.setMuted(true) }
         }
-        override fun onUnhold() {
-            if (callHeldMute) { controller.setMuted(false); callHeldMute = false }
-        }
+        override fun onUnhold() = callHold.unhold { controller.setMuted(false) }
     }
 
     private val partyControls = object : TalonTelecom.Controls {
@@ -70,11 +67,9 @@ class TelecomCalls(
         override fun onDisconnect() = party.leave()
         override fun onHold() {
             val s = party.state.value
-            if (s is PartyState.Live && !s.muted) { party.setMuted(true); partyHeldMute = true }
+            partyHold.hold(s is PartyState.Live && !s.muted) { party.setMuted(true) }
         }
-        override fun onUnhold() {
-            if (partyHeldMute) { party.setMuted(false); partyHeldMute = false }
-        }
+        override fun onUnhold() = partyHold.unhold { party.setMuted(false) }
     }
 
     fun start() {
@@ -130,6 +125,7 @@ class TelecomCalls(
             .collect { s ->
                 if (s is CallUiState.Active && !answered) { answered = true; conn.setActive() }
             }
+        callHold.ended()
         conn.setDisconnected(DisconnectCause(endCause(incoming, answered)))
         conn.destroy()
     }
@@ -161,6 +157,7 @@ class TelecomCalls(
                     if (incoming) call.answer() else call.setActive()
                 }
             }
+        callHold.ended()
         call.disconnect(endCause(incoming, answered))
     }
 
@@ -185,6 +182,7 @@ class TelecomCalls(
             party.state
                 .takeWhile { it !is PartyState.Idle && it !is PartyState.Failed }
                 .collect { s -> if (s is PartyState.Live && !live) { live = true; call.setActive() } }
+            partyHold.ended()
             call.disconnect(DisconnectCause.LOCAL)
             return
         }
@@ -199,6 +197,7 @@ class TelecomCalls(
             .collect { s ->
                 if (s is PartyState.Live && !live) { live = true; conn.setActive() }
             }
+        partyHold.ended()
         conn.setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
         conn.destroy()
     }
