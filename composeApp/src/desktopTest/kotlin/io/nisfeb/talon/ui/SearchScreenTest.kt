@@ -297,6 +297,42 @@ class SearchScreenTest {
         }
     }
 
+    /** An embedder whose search for [slow] blocks a thread until [go], as the desktop one's model does. */
+    private class SlowEmbedder(private val slow: String, private val quick: List<MessageEntity>) : SearchEmbedderClient {
+        val go = java.util.concurrent.CountDownLatch(1)
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        override val progress = MutableStateFlow(IndexProgress(indexed = 3, total = 3))
+        override suspend fun start() {}
+        override suspend fun semanticSearch(query: String): List<MessageEntity> {
+            asked += query
+            if (query != slow) return quick
+            // Not cancellable while it runs: withContext only says so on the way out.
+            return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { go.await(); emptyList() }
+        }
+        override suspend fun keywordSearch(terms: List<String>) = emptyList<MessageEntity>()
+        override suspend fun embed(text: String): FloatArray? = null
+        override suspend fun computeHighlights() = emptyList<MessageEntity>()
+    }
+
+    // A search the next keystroke cut off was caught as a failure when its
+    // model came back, and wrote no results over the newer search's.
+    @Test
+    fun `a smart search cut off by typing does not wipe the newer one's results`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = SlowEmbedder(slow = "evening", quick = listOf(dinner))
+        search(embedder) {
+            onNode(hasSetTextAction()).performTextInput("evening")
+            waitUntil(timeoutMillis = 5_000) { "evening" in embedder.asked }
+            onNode(hasSetTextAction()).performTextInput(" meal")
+            waitUntil(timeoutMillis = 5_000) { shows("dinner later") }
+            embedder.go.countDown()
+            Thread.sleep(500)
+            waitForIdle()
+            assertTrue(shows("dinner later"), "the cut-off search wiped the results")
+            assertTrue(!shows("Searching"), "and left the spinner up")
+        }
+    }
+
     // B6-8: every smart Search open ran a whole indexer pass.
     @Test
     fun `smart search opened again soon runs no second pass`() {

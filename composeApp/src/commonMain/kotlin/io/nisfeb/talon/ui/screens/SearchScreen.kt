@@ -214,14 +214,22 @@ fun SearchScreen(
     // Again when a pass ends, so a search typed while it ran sees what it
     // added. Not when one starts: that asked the same query again.
     androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder, indexProgress.running) {
+        // Each way out says it is not searching: a search this one cut off
+        // left "Searching…" up for good.
         if (!smartMode || debouncedTrimmed.length < 2 || embedder == null) {
             semanticResults.value = emptyList()
             searchedFor = null
+            semanticBusy = false
             return@LaunchedEffect
         }
-        if (indexProgress.running && searchedFor == debouncedTrimmed) return@LaunchedEffect
+        if (indexProgress.running && searchedFor == debouncedTrimmed) {
+            semanticBusy = false
+            return@LaunchedEffect
+        }
         semanticBusy = true
-        semanticResults.value = runCatching { embedder.semanticSearch(debouncedTrimmed) }
+        // A search the next keystroke cut off goes quietly. Caught as a
+        // failure, it wrote no results over the newer search's, a beat later.
+        semanticResults.value = io.nisfeb.talon.util.runSuspendCatching { embedder.semanticSearch(debouncedTrimmed) }
             .getOrElse { emptyList() }
         searchedFor = debouncedTrimmed
         semanticBusy = false

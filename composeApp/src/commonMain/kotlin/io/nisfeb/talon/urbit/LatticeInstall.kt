@@ -11,6 +11,7 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -162,7 +163,7 @@ object LatticeInstall {
         publisher: String = PUBLISHER,
         /** For a client without the session's cookie store, as the link host's is. */
         cookie: String? = null,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runSuspendCatching {
         val body = buildJsonObject {
             put("name", name)
             put("code", "$publisher/apps/shell.shell/desks/$name.desk/desk/code")
@@ -209,7 +210,7 @@ object LatticeInstall {
         if (url == null) {
             Result.failure(IllegalStateException("Not signed in to a ship."))
         } else {
-            runCatching {
+            runSuspendCatching {
                 // The shell has to be there before it can be asked for
                 // anything. Where it already is, this costs one probe.
                 if (installedOrUnknown(http, url) == false) {
@@ -219,7 +220,7 @@ object LatticeInstall {
                 val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
                 while (io.nisfeb.talon.util.nowMs() < deadline) {
                     kotlinx.coroutines.delay(POLL_MS)
-                    if (answers(url)) return@runCatching
+                    if (answers(url)) return@runSuspendCatching
                 }
                 error(
                     "$name was asked for and has not answered yet. The shell syncs it over the network, " +
@@ -238,7 +239,7 @@ object LatticeInstall {
      * lattice is one of the shell's stock desks, and a ship can have the
      * shell and not yet the desk.
      */
-    suspend fun hasShell(http: HttpClient, shipUrl: String, cookie: String? = null): Boolean = runCatching {
+    suspend fun hasShell(http: HttpClient, shipUrl: String, cookie: String? = null): Boolean = runSuspendCatching {
         val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
@@ -247,7 +248,7 @@ object LatticeInstall {
     }.getOrDefault(false)
 
     /** Ask the shell to fetch its stock desks (lattice, mail, the calendar) from their repositories. Idempotent. */
-    suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runCatching {
+    suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runSuspendCatching {
         val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/sync-defaults") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
@@ -261,7 +262,7 @@ object LatticeInstall {
     }
 
     /** Whether the shell says every stock desk has been fetched; null where it did not say. */
-    suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runCatching {
+    suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runSuspendCatching {
         val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
@@ -295,8 +296,8 @@ object LatticeInstall {
         if (url == null) {
             Result.failure(IllegalStateException("Not signed in to a ship."))
         } else {
-            runCatching {
-                if (answers(url)) return@runCatching
+            runSuspendCatching {
+                if (answers(url)) return@runSuspendCatching
                 if (!hasShell(http, url, cookie())) {
                     installAndWait(http, url, poke, timeoutMs, installed = { hasShell(http, url, cookie()) }).getOrThrow()
                 }
@@ -304,7 +305,7 @@ object LatticeInstall {
                 val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
                 while (io.nisfeb.talon.util.nowMs() < deadline) {
                     kotlinx.coroutines.delay(POLL_MS)
-                    if (answers(url)) return@runCatching
+                    if (answers(url)) return@runSuspendCatching
                     if (stockSynced(http, url, cookie()) == true &&
                         io.nisfeb.talon.ui.fetchPendingPermits(http, url, cookie()).orEmpty().isNotEmpty()
                     ) {
