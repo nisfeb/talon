@@ -568,6 +568,7 @@ class TlonChatRepo(
     private suspend fun runSessionLoop(session: UrbitSession) {
         var backoffMs = 2_000L
         var firstRun = true
+        var gaveUpBefore = false
         while (scope.isActive && started) {
             val ended = runCatching { runSessionOnce(session, firstRun) }
                 .onFailure { Log.w(TAG, "session iteration ended", it) }
@@ -584,7 +585,18 @@ class TlonChatRepo(
             firstRun = false
             // Back off exponentially after failures; reset on a normal
             // "stream completed" exit (rare, but polite).
-            backoffMs = if (ok) 2_000L else (backoffMs * 2).coerceAtMost(60_000L)
+            // A channel given up for a watch it lost ended its pass without
+            // an error, so the next began 2 s later with a new channel and
+            // the whole pass again: on a ship timing every watch out, that
+            // every few seconds for as long as it lasted. The first goes
+            // again as soon as ever; a run of them backs off as failures do.
+            val gaveUp = gaveUpWatch.also { gaveUpWatch = false }
+            backoffMs = when {
+                gaveUp && gaveUpBefore -> (backoffMs * 2).coerceAtMost(60_000L)
+                ok || gaveUp -> 2_000L
+                else -> (backoffMs * 2).coerceAtMost(60_000L)
+            }
+            gaveUpBefore = gaveUp
             // Jitter. A ship restart drops every client at the same
             // instant, so a fixed delay brings them all back on the same
             // tick and the ship meets the whole fleet at once.
@@ -602,6 +614,9 @@ class TlonChatRepo(
             if (woken) backoffMs = 2_000L
         }
     }
+
+    /** The pass just ended gave its channel up for a watch it lost ([runSessionLoop]'s backoff). */
+    private var gaveUpWatch = false
 
     private val _loadFailed = MutableStateFlow(false)
 
@@ -1024,6 +1039,7 @@ class TlonChatRepo(
             // next pass makes a new one with every watch. Returned, not
             // streamed, so the deep read launched above still finishes.
             if (ch.gone) {
+                gaveUpWatch = true
                 lastBootstrapMs = 0L
                 // Ended on the ship too: a stream refused as unknown (its
                 // first PUT lost) leaves a channel the pass's later watches

@@ -501,6 +501,22 @@ class TlonChatRepoStartupTest {
         assertEquals(after, tries(), "tries from more than one retry chain")
     }
 
+    // A watch lost on every channel (a ship timing every PUT out) gave
+    // each up, and the next pass began 2 s later with a new channel and the
+    // whole pass again, for as long as it lasted.
+    @Test
+    fun `a watch lost on every channel backs off`() = started(prepare = {
+        scries[init] = initPosts
+        scries["notes/v0/notebooks"] = NOTEBOOKS
+        loseWatch = { w -> if (w == RECIPES) java.io.IOException("lost") else null }
+    }) { _ ->
+        until("the first channel given up") { channelsPut().size >= 2 }
+        kotlinx.coroutines.delay(12_000)
+        // 2 s, then 4, then 8, each jittered: two more at most in twelve
+        // seconds, not one every one to three.
+        assertTrue(channelsPut().size <= 4, "a new channel every few seconds: ${channelsPut().size}")
+    }
+
     // The new channel's subscribe lost on the way: eyre never made it, so
     // its stream is a 404 and the channel is given up. The pass's later
     // watches (a notebook's here) made it on the ship after all, and it
