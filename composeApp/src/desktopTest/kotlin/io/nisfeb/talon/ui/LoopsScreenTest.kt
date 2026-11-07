@@ -39,7 +39,11 @@ class LoopsScreenTest {
         override fun reschedule() { rescheduled++ }
     }
 
-    private fun loops(seed: suspend AppDatabase.() -> Unit = {}, block: ComposeUiTest.(AppDatabase) -> Unit) {
+    private fun loops(
+        seed: suspend AppDatabase.() -> Unit = {},
+        settingsSync: io.nisfeb.talon.urbit.SettingsSync? = null,
+        block: ComposeUiTest.(AppDatabase) -> Unit,
+    ) {
         val tmp = createTempDirectory(prefix = "talon-loops-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
@@ -48,7 +52,7 @@ class LoopsScreenTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
-                        LoopsScreen(db = db, scheduler = scheduler, onRunNow = { ran += it }, onBack = {}, onAllowHeld = { allowed += it })
+                        LoopsScreen(db = db, scheduler = scheduler, onRunNow = { ran += it }, onBack = {}, onAllowHeld = { allowed += it }, settingsSync = settingsSync)
                     }
                 }
                 waitForIdle()
@@ -86,6 +90,40 @@ class LoopsScreenTest {
         assertEquals("Evening check" to "any mentions today?", loop.name to loop.prompt)
         assertTrue(!loop.writesAuthorized, "a new loop only reads until trusted")
         waitUntil(timeoutMillis = 5_000) { rescheduled > 0 }
+    }
+
+    /** A ship slow to take a loop's push, until [takes] completes. */
+    private class SlowSync(val takes: kotlinx.coroutines.CompletableDeferred<Unit>) : io.nisfeb.talon.urbit.SettingsSync {
+        val pushed = java.util.concurrent.CopyOnWriteArrayList<String>()
+        override fun attach(channel: io.nisfeb.talon.urbit.UrbitChannel) = Unit
+        override suspend fun bootstrap() = Unit
+        override suspend fun applySettingsEvent(payload: kotlinx.serialization.json.JsonObject) = Unit
+        override suspend fun pushLoop(loop: LoopEntity) { pushed += loop.gid; takes.await() }
+    }
+
+    // The loop had its id only once the ship took the push: Save tapped
+    // again on a slow ship made a second loop, synced to every device.
+    @Test
+    fun `a loop saved twice on a slow ship is made once`() {
+        val sync = SlowSync(kotlinx.coroutines.CompletableDeferred())
+        loops(settingsSync = sync) { db ->
+            tap("Add a loop")
+            shows("New loop")
+            onNode(hasSetTextAction() and hasText("Name")).performTextInput("Evening check")
+            onNode(hasSetTextAction() and hasText("Prompt", substring = true)).performTextInput("any mentions today?")
+            tap("Save")
+            waitUntil(timeoutMillis = 5_000) { sync.pushed.isNotEmpty() }
+            // Still on its way: a second tap.
+            onAllNodesWithText("Save")[0].performClick()
+            waitForIdle()
+            sync.takes.complete(Unit)
+            // The save, and any second one, done.
+            waitUntil(timeoutMillis = 5_000) { rescheduled > 0 }
+            Thread.sleep(500)
+            waitForIdle()
+            assertEquals(1, runBlocking { db.loops().enabled() }.size, "two loops for one Save")
+            assertEquals(1, sync.pushed.size)
+        }
     }
 
     @Test
