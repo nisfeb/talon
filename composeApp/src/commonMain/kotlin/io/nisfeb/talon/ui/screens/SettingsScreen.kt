@@ -1392,13 +1392,10 @@ private fun CallServersSection(controller: io.nisfeb.talon.call.CallController) 
             Button(
                 enabled = valid && servers.none { it.url == candidate },
                 onClick = {
-                    scope.launch {
-                        controller.setIce(
-                            servers + io.nisfeb.talon.call.IceServer(
-                                candidate, user.trim(), cred.trim(),
-                            ),
-                        )
-                    }
+                    // Taken now: the coroutine runs after this handler, which
+                    // clears the fields, and a TURN server went with no login.
+                    val next = servers + io.nisfeb.talon.call.IceServer(candidate, user.trim(), cred.trim())
+                    scope.launch { controller.setIce(next) }
                     url = ""; user = ""; cred = ""
                 },
             ) { Text("Add") }
