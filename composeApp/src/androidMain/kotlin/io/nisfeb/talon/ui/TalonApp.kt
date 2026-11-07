@@ -2438,7 +2438,10 @@ fun TalonApp(
                 // No Orrery tools while Orrery is off.
                 orrery = orreryRepo.takeIf { orreryGate == true },
                 listenOnOpen = assistantListen,
-                onTopUp = openTopUp,
+                // Put down first, as the chat and calendar ways out are:
+                // the Assistant is drawn over Settings here, so Top up
+                // opened it out of sight and the next back shut it.
+                onTopUp = { assistantOpen = false; openTopUp() },
                 session = assistantSession,
                 scheduler = app.loops,
                 onRunLoop = { app.loops.runOneNow(it) },

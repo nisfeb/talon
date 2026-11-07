@@ -118,6 +118,12 @@ class AndroidLifecycleGuardTest {
         }
     }
 
+    // The Assistant is drawn over Settings on Android: Top up opened it out of sight.
+    @Test
+    fun `Top up from the Assistant puts it down so Settings shows`() {
+        assertTrue("onTopUp = { assistantOpen = false; openTopUp() }" in talonApp)
+    }
+
     // B3-8
     @Test
     fun `an update starts the stream as a reboot does`() {
