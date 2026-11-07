@@ -48,7 +48,19 @@ class CalendarRepo(
     /** The first pause between the reads back after a write; each doubles it. */
     private val readBackPauseMs: Long = 500L,
 ) {
-    private var api: CalendarApi? = null
+    @kotlin.concurrent.Volatile private var api: CalendarApi? = null
+
+    /** Held across swapping the ship (attach, detach) and each write a read for one makes ([still]). */
+    private val shipLock = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    /**
+     * [write] only while [a] is still the ship read from, as one step
+     * against attach's swap and clear: false once another, or none, is
+     * attached. A read for the last ship that landed after the clear
+     * filled the next ship's screen with the last one's calendars.
+     */
+    private inline fun still(a: CalendarApi, write: () -> Unit): Boolean =
+        kotlinx.atomicfu.locks.synchronized(shipLock) { (api === a).also { if (it) write() } }
     private var poller: Job? = null
     private var foreground = true
     private val gate = Mutex()
@@ -1147,14 +1159,16 @@ class CalendarRepo(
      */
     fun attach(baseUrl: String, poll: Boolean = true) {
         if (api != null && shipUrl == baseUrl) return
+        poller?.cancel()
+        poller = null
         shipUrl = baseUrl
         zoneAdopted = false
         zoneNames = null
         details.clear()
-        api = CalendarApi(http, baseUrl)
-        clearShipState()
-        poller?.cancel()
-        poller = null
+        kotlinx.atomicfu.locks.synchronized(shipLock) {
+            api = CalendarApi(http, baseUrl)
+            clearShipState()
+        }
         pollStopped = false
         if (poll) startPoller(readFirst = true)
     }
@@ -1208,12 +1222,14 @@ class CalendarRepo(
         poller?.cancel()
         poller = null
         pollStopped = false
-        api = null
         shipUrl = null
         zoneAdopted = false
         zoneNames = null
         details.clear()
-        clearShipState()
+        kotlinx.atomicfu.locks.synchronized(shipLock) {
+            api = null
+            clearShipState()
+        }
     }
 
     private var lastShareSyncMs = 0L
@@ -1291,51 +1307,74 @@ class CalendarRepo(
         try {
             val now = nowMs()
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
-            _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
-            // The ship has just said what is current, so nothing read of
-            // one event before now is: the assistant reads through here too.
-            details.clear()
-            if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
-            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull()?.let(::shipTasks) ?: _tasks.value
-            if (full && rarely) readRarely(a)
+            // Each write after a read, only while this is still the ship read from ([still]).
+            if (!still(a) {
+                    _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+                    // The ship has just said what is current, so nothing read of
+                    // one event before now is: the assistant reads through here too.
+                    details.clear()
+                }
+            ) return@withLock
+            if (full) {
+                val cals = runSuspendCatching { a.calendars() }.getOrNull()
+                if (!still(a) { if (cals != null) _calendars.value = cals }) return@withLock
+            }
+            val tasks = runSuspendCatching { a.tasks() }.getOrNull()
+            if (!still(a) { if (tasks != null) _tasks.value = shipTasks(tasks) }) return@withLock
+            if (full && rarely && !readRarely(a)) return@withLock
+            // keep() suspends, so not under the lock: it skips a state a detach emptied.
+            if (api !== a) return@withLock
             keep()
             val config = if (full) runSuspendCatching { a.config() }.getOrNull() else null
-            config?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
-            noteReminders(w.rows)
-            _availability.value = CalendarAvailability.PRESENT
-            _error.value = null
-            lastReadMs = now
-            if (full) {
-                lastFullMs = now
-                if (config != null && config.zone == null) adoptZoneIfNone()
-            }
+            if (!still(a) {
+                    config?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
+                    noteReminders(w.rows)
+                    _availability.value = CalendarAvailability.PRESENT
+                    _error.value = null
+                    lastReadMs = now
+                    if (full) lastFullMs = now
+                }
+            ) return@withLock
+            if (full && config != null && config.zone == null) adoptZoneIfNone()
             // A 403 stopped the poll; signed in again, this read is the first
             // to go through, and nothing else would start it again.
             if (pollStopped) { pollStopped = false; startPoller(readFirst = false) }
         } catch (e: AuspexError) {
-            readFailed(e)
+            still(a) { readFailed(e) }
         }
     }
 
-    /** What a full read adds between the tasks and the config: shares, sync state and tags. */
-    private suspend fun readRarely(a: CalendarApi) {
+    /**
+     * What a full read adds between the tasks and the config: shares, sync
+     * state and tags. False when another ship was attached meanwhile, and
+     * nothing of this one's was kept.
+     */
+    private suspend fun readRarely(a: CalendarApi): Boolean {
         // Null only when the calendar has no sharing (404); a hiccup
         // keeps the last answer, and with it the read-only guard.
-        _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
-            if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
-        }
+        val shares = runSuspendCatching { a.shares() }
+        if (!still(a) {
+                _shares.value = shares.getOrElse { e ->
+                    if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
+                }
+            }
+        ) return false
         // Sync state and conflicts only where a calendar syncs: three
         // reads of the ship's one queue that say nothing of local ones.
         val syncing = _calendars.value.any { it.kind != "local" }
-        _conflicts.value = if (syncing) runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value } else emptyList()
-        _sync.value = buildMap {
-            if (syncing) {
-                runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
-                runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
-            }
-            _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
-        }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
-        _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
+        val conflicts = if (syncing) runSuspendCatching { a.conflicts() } else null
+        val google = if (syncing) runSuspendCatching { a.google() }.getOrNull() else null
+        val caldav = if (syncing) runSuspendCatching { a.caldavSubscriptions() }.getOrNull() else null
+        val tags = runSuspendCatching { a.tags() }.getOrNull()
+        return still(a) {
+            _conflicts.value = conflicts?.getOrElse { _conflicts.value } ?: emptyList()
+            _sync.value = buildMap {
+                google?.linked?.forEach { (id, row) -> put(id, row) }
+                caldav?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
+            }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
+            if (tags != null) _tags.value = tags.map { it.tag }
+        }
     }
 
     private fun readFailed(e: AuspexError) {
