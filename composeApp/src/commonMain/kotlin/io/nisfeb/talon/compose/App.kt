@@ -1555,7 +1555,11 @@ fun App(
                         mailRepo.setForeground(front)
                         calendarRepo.setForeground(front)
                         orreryRepo.setForeground(front)
-                        if (front && !was) repo.forceReconnect()
+                        if (front && !was) {
+                            repo.forceReconnect()
+                            // The next assistant reads the owner's skills again.
+                            io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
+                        }
                         was = front
                     }
                 } else {
@@ -1567,6 +1571,7 @@ fun App(
                             mailRepo.setForeground(focused)
                             calendarRepo.setForeground(focused)
                             orreryRepo.setForeground(focused)
+                            if (focused) io.nisfeb.talon.ai.LatticeKeys.refreshSkills()
                         }
                 }
             }
@@ -2645,6 +2650,13 @@ fun App(
                                 io.nisfeb.talon.ai.LatticeKeys(
                                     db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(session.http, http, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
                                 ).renew()
+                            }
+                        },
+                        latticeSkillsReadable = sessionStore.active()?.let { s ->
+                            {
+                                io.nisfeb.talon.ai.LatticeKeys(
+                                    db.latticeKeys(), s.ship, io.nisfeb.talon.ai.LatticeApi(session.http, http, s.shipUrl), io.nisfeb.talon.ui.platformLabel,
+                                ).skillsReadable()
                             }
                         },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
