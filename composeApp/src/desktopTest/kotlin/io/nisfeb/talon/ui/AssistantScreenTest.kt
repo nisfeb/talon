@@ -305,7 +305,7 @@ class AssistantScreenTest {
             stall.countDown()
             runBlocking { sessionScope.coroutineContext.job.cancelAndJoin() }
             server.stop(0)
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

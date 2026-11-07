@@ -70,7 +70,7 @@ class JarsUploadLiveTest {
         try {
             runBlocking { block(repo, session.http, channel) }
         } finally {
-            db.close()
+            closeAfter(db, repo)
             dir.deleteRecursively()
         }
     }

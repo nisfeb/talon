@@ -39,7 +39,7 @@ class TlonChatRepoStartupTest {
         try {
             withTimeout(60_000) { block(repo) }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 
@@ -637,7 +637,7 @@ class TlonChatRepoStartupTest {
                 assertEquals(refused, ship.streamsOpened.count { it.first == channelsStreamed().first() }, "not asked again")
             }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 
@@ -705,14 +705,14 @@ class TlonChatRepoStartupTest {
         val first = TlonChatRepo(db).apply { start(session()) }
         try {
             until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
-        } finally { first.stop() }
+        } finally { first.stopAndJoinForTest() }
         db.messages().forgetLinkSearchText()
         val next = TlonChatRepo(db).apply { start(session()) }
         try {
             until("the second stream") { streams() >= 2 }
             delay(500)
             assertNull(text(), "a later launch scanned for rows to fill")
-        } finally { next.stop() }
+        } finally { next.stopAndJoinForTest() }
     }
 
     private fun foreigns(vararg flags: String) = flags.joinToString(",", "{", "}") { f ->
@@ -868,7 +868,7 @@ class TlonChatRepoStartupTest {
                 until("the outbox empty") { db.settingsOutbox().all().isEmpty() }
             }
         } finally {
-            repo.stop()
+            repo.stopAndJoinForTest()
         }
     }
 

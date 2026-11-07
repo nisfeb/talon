@@ -100,7 +100,7 @@ class GroupInfoPaneTest {
             }
         } finally {
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

@@ -106,7 +106,7 @@ class GroupAdminScreenTest {
         } finally {
             calls?.stop()
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -297,7 +297,7 @@ class GroupAdminScreenTest {
             )
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

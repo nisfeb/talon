@@ -55,7 +55,7 @@ class SlashCommandsTest {
 
     @After
     fun tearDown() {
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db, repo) }
         tmpDir.deleteRecursively()
     }
 

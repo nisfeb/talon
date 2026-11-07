@@ -50,7 +50,7 @@ class TlonChatRepoSendTest {
     private val flag = "~bus/general"
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = closeAfter(db, repo)
 
     /** Runs [body] with the event stream open, so pokes get their acks. */
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {

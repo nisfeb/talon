@@ -45,7 +45,7 @@ class SidebarSettingsScreenTest {
                 block(db)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

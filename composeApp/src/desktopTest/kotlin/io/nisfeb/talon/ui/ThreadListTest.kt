@@ -98,7 +98,7 @@ class ThreadListTest {
             }
         } finally {
             stream.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

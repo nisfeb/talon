@@ -75,7 +75,7 @@ class OptimisticReactTest {
         }
         assertFalse(sending.isCompleted, "shown while the poke still waits for its ack")
         sending.cancelAndJoin()
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db, repo)
     }
 
     @Test
@@ -88,6 +88,6 @@ class OptimisticReactTest {
         assertFailsWith<PokeNacked> { withTimeout(10_000) { repo.react("~bus", "170.141.184.506", "👍") } }
         assertNull(db.reactions().get("~bus", "170141184506", "~zod"))
         events.cancel()
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db, repo)
     }
 }

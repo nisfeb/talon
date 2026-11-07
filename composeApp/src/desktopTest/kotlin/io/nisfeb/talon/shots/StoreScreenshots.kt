@@ -343,7 +343,7 @@ class StoreScreenshots {
             )
         }
 
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db, repo) }
         tmp.deleteRecursively()
     }
 }

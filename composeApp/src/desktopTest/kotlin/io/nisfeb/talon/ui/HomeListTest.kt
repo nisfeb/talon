@@ -123,7 +123,7 @@ class HomeListTest {
         } finally {
             io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
