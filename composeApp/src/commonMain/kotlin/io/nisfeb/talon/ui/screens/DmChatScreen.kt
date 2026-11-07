@@ -2239,7 +2239,15 @@ private object ChatRowsSnapshot {
     // the other ship's rows showed for the first frames.
     fun get(ship: String, whom: String): List<ChatListItem> = recent["$ship $whom"].orEmpty()
     fun put(ship: String, whom: String, rows: List<ChatListItem>) = recent.put("$ship $whom", rows)
+    fun clear() = recent.clear()
 }
+
+/**
+ * Forget the chats' rows kept for the life of the process. Tests sign in
+ * as the same ship, and one's rows opened another's chat (shown until its
+ * own came), as [forgetHomeListSnapshot] is for the list.
+ */
+internal fun forgetChatRowsSnapshot() = ChatRowsSnapshot.clear()
 
 /** The last [keep] values put, by key; past that, the one put longest ago goes. */
 internal class RecentByKey<V>(private val keep: Int) {
@@ -2247,6 +2255,9 @@ internal class RecentByKey<V>(private val keep: Int) {
     operator fun get(key: String): V? = byKey.value[key]
     fun put(key: String, value: V) {
         byKey.update { m -> (m - key + (key to value)).let { if (it.size > keep) it - it.keys.first() else it } }
+    }
+    fun clear() {
+        byKey.value = emptyMap()
     }
 }
 

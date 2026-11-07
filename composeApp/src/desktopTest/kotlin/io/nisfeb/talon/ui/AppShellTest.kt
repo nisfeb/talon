@@ -93,6 +93,9 @@ class AppShellTest {
         // test's opening frame ("pending composition has not been
         // applied"), only in the full suite. HomeListTest does the same.
         io.nisfeb.talon.ui.screens.forgetHomeListSnapshot("~zod")
+        // And each chat's rows, kept the same way: another test's "hello
+        // there" under this one's id opened this test's chat.
+        io.nisfeb.talon.ui.screens.forgetChatRowsSnapshot()
         // Hosts' answers for references outside this ship's groups are kept a session: another test's are not this one's.
         io.nisfeb.talon.ui.OutsideCites.clear()
         // A ship with nothing yet: an empty feed and no invites, which is
@@ -560,8 +563,10 @@ class AppShellTest {
     @Test
     fun `Home, Mail and Calendar take the whole area, and each says what the ship lacks`() = app {
         onNodeWithContentDescription("Home").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Set a location") }
-        assertTrue(showing("Install the calendar") && !present("New message"), "the home page, not the list")
+        // "Set a location" is this device's and shows at once; the calendar's
+        // offer waits for the ship's 404, a moment later on a slow runner.
+        waitUntil(timeoutMillis = 5_000) { showing("Set a location") && showing("Install the calendar") }
+        assertTrue(!present("New message"), "the home page, not the list")
         onNodeWithContentDescription("Mail").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
         onNodeWithContentDescription("Calendar").performClick()
