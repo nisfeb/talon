@@ -95,6 +95,14 @@ class AndroidLifecycleGuardTest {
         assertTrue("LeaveAlarm.schedule(app)" in gate && "LeaveAlarm.stop(app)" in gate, gate)
     }
 
+    // Implicit state machines, 2026-11-07: the observer kept the first
+    // ship's repos, so after a switch the new ones polled in the background.
+    @Test
+    fun `the foreground observer follows each ship's repos`() {
+        assertTrue("DisposableEffect(mailRepo, calendarRepo, orreryRepo) {\n        val lifecycle = ProcessLifecycleOwner.get().lifecycle" in talonApp)
+        assertFalse("DisposableEffect(Unit) {\n        val lifecycle = ProcessLifecycleOwner.get().lifecycle" in talonApp)
+    }
+
     // Orrery turned off on another device: the workers sent on until the app was opened.
     @Test
     fun `Orrery off stops location and health sends from the background`() {

@@ -1371,7 +1371,11 @@ fun TalonApp(
     // host — and reliably lost to the 30s RPC timeout, polluting
     // logcat with `catchUp bootstrap failed: IOException: Canceled`
     // on every foreground entry. forceReconnect alone covers the gap.
-    DisposableEffect(Unit) {
+    // Keyed on the repos: they are the session's, made again on every ship
+    // switch and login. Under Unit the observer kept the first ship's, so
+    // the new ones were never told the app went behind (their polls ran on
+    // in the background) or came back.
+    DisposableEffect(mailRepo, calendarRepo, orreryRepo) {
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
