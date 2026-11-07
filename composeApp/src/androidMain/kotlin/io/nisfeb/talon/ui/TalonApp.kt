@@ -1718,10 +1718,6 @@ fun TalonApp(
         // the chat. Search and New message are drawn under the chat they
         // open, so the chat's back still comes before theirs.
         val sectionOnTop = sections.anyOpenExcept(searchSection, newDmSection)
-        PlatformBackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
-            notebookComposeOpen = false
-            notebookEditPostId = null
-        }
         // See App.kt: post / compose state is per channel, and a deep
         // link's anchor names the post to open in a gallery or notebook.
         LaunchedEffect(openWhom) {
@@ -1744,11 +1740,19 @@ fun TalonApp(
                 }
             }
         }
-        PlatformBackHandler(enabled = openNotebookPostId != null && !sectionOnTop) { openNotebookPostId = null }
-        PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
-        PlatformBackHandler(enabled = openGalleryPostId != null && !sectionOnTop) { openGalleryPostId = null }
         PlatformBackHandler(enabled = openThread != null && !sectionOnTop) { openThread = null }
         PlatformBackHandler(enabled = openThread == null && openWhom != null && !sectionOnTop) { openWhom = null }
+        // After the chat handler, as in App.kt: a notebook or gallery post
+        // is drawn over its channel, and its compose over the post, and
+        // the later registration wins. Before the chat's, back from a post
+        // closed the whole channel.
+        PlatformBackHandler(enabled = openNotebookPostId != null && !notebookComposeOpen && !sectionOnTop) { openNotebookPostId = null }
+        PlatformBackHandler(enabled = notebookComposeOpen && !sectionOnTop) {
+            notebookComposeOpen = false
+            notebookEditPostId = null
+        }
+        PlatformBackHandler(enabled = openGalleryPostId != null && !galleryComposeOpen && !sectionOnTop) { openGalleryPostId = null }
+        PlatformBackHandler(enabled = galleryComposeOpen && !sectionOnTop) { galleryComposeOpen = false }
         // After the chat handler: an open note is *inside* a notes/
         // channel, so both are enabled and the later registration has to
         // be this one or back would close the whole notebook.
