@@ -3066,10 +3066,12 @@ fun App(
                                         notebookEditPostId = null
                                     },
                                     editPostId = notebookEditPostId,
-                                    initialTitle = notebookEditTitle,
-                                    initialImage = notebookEditImage,
-                                    initialBody = notebookEditBody,
-                                    originalSentMs = notebookEditSentMs,
+                                    // An edit's words only for an edit: kept after it, a New
+                                    // post opened as a copy of the last post edited.
+                                    initialTitle = if (notebookEditPostId != null) notebookEditTitle else "",
+                                    initialImage = if (notebookEditPostId != null) notebookEditImage else "",
+                                    initialBody = if (notebookEditPostId != null) notebookEditBody else "",
+                                    originalSentMs = if (notebookEditPostId != null) notebookEditSentMs else 0L,
                                 )
                             })
                             openChat?.startsWith("diary/") == true && openNotebookPostId != null -> ({
