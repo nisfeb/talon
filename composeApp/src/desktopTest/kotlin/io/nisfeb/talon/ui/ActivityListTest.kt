@@ -68,7 +68,7 @@ class ActivityListTest {
             }
         } finally {
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

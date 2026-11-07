@@ -48,7 +48,7 @@ class GroupDaoPinTest {
 
     @AfterTest
     fun tearDown() {
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db) }
         tmpDir.deleteRecursively()
     }
 

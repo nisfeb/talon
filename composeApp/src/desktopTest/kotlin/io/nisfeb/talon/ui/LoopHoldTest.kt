@@ -123,7 +123,7 @@ class LoopHoldTest {
             }
         } finally {
             host.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

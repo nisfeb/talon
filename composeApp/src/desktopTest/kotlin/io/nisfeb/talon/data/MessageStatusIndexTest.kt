@@ -41,7 +41,7 @@ class MessageStatusIndexTest {
                 assertEquals("~bus/1", db.messages().getOne("~bus", "~bus/1")?.id, "kept")
                 assertEquals(1, db.messages().queuedCount().first())
             } finally {
-                db.close()
+                io.nisfeb.talon.urbit.closeAfter(db)
             }
             BundledSQLiteDriver().open(path).also { c ->
                 val has = c.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_messages_status'").use { it.step() }

@@ -839,7 +839,7 @@ class CalendarScreenTest {
             runBlocking { chat.stopAndJoinForTest() }
             scope.cancel()
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

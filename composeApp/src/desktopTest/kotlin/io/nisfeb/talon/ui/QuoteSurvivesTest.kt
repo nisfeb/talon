@@ -73,7 +73,7 @@ class QuoteSurvivesTest {
                 assertEquals(quoted.id, state.pendingQuote?.id)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -122,7 +122,7 @@ class QuoteSurvivesTest {
                 assertNull(PendingQuotes.get(threadKey))
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

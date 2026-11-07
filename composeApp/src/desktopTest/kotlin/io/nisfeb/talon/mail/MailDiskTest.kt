@@ -67,7 +67,7 @@ class MailDiskTest {
             assertEquals(emptyList(), db.mailRows().listing("inbox"))
             assertEquals(false, db.railItemPrefs().streamAll().first().single { it.itemName == "Mail" }.visible)
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 
@@ -116,7 +116,7 @@ class MailDiskTest {
             assertEquals("pay me", cold.storedThread("0v1")?.messages?.single()?.body)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 

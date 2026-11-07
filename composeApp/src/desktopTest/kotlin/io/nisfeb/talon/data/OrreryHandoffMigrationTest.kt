@@ -55,7 +55,7 @@ class OrreryHandoffMigrationTest {
                     db.orrerySent().under("~zod", "").map { it.key }.sorted(),
                 )
             } finally {
-                db.close()
+                io.nisfeb.talon.urbit.closeAfter(db)
             }
             BundledSQLiteDriver().open(path).also { c ->
                 val left = c.prepare("SELECT name FROM sqlite_master WHERE name = 'orrery_channels'").use { it.step() }

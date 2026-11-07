@@ -36,7 +36,7 @@ class CometDomesCheckTest {
     @AfterTest
     fun close() {
         Mnemonym.onComet = null
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         dir.deleteRecursively()
     }
 

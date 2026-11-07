@@ -85,7 +85,7 @@ class OrreryRecoveryTest {
             block(repo, db)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

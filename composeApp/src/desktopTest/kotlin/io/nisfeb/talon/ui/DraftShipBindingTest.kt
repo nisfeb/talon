@@ -83,7 +83,7 @@ class DraftShipBindingTest {
             // must never hold is the outgoing ship's text.
             assertTrue(kept("~b", "~group").isNullOrEmpty(), "the incoming ship must not inherit the outgoing draft")
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

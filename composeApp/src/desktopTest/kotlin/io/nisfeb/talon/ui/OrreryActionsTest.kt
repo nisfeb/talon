@@ -167,7 +167,7 @@ class OrreryActionsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -336,7 +336,7 @@ class OrreryActionsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

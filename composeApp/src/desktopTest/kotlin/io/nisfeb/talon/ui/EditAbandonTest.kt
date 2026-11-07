@@ -59,7 +59,7 @@ class EditAbandonTest {
                 waitForIdle()
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

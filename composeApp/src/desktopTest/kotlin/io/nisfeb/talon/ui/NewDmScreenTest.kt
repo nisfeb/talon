@@ -45,7 +45,7 @@ class NewDmScreenTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun newDm(book: Set<String> = setOf("~mitlyn-ditrel"), block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         setContent {

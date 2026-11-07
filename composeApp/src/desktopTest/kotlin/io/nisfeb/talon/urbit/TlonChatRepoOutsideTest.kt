@@ -38,7 +38,7 @@ class TlonChatRepoOutsideTest {
     @AfterTest
     fun close() {
         runBlocking { repo.stopAndJoinForTest() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     /** The channel's events applied by the repo, as its session does. */

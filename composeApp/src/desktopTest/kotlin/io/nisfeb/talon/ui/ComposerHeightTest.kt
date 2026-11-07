@@ -79,7 +79,7 @@ class ComposerHeightTest {
             }
             return result
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

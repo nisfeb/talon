@@ -26,7 +26,7 @@ class VoiceHistoryTest {
 
     @AfterTest
     fun close() {
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         tmp.deleteRecursively()
     }
 

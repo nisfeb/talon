@@ -22,7 +22,7 @@ class ConversationLatestTest {
         .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
 
     @AfterTest
-    fun tearDown() { db.close(); tmpDir.deleteRecursively() }
+    fun tearDown() { io.nisfeb.talon.urbit.closeAfter(db); tmpDir.deleteRecursively() }
 
     private fun m(whom: String, id: String, sent: Long, parent: String? = null, deleted: Boolean = false) =
         MessageEntity(whom, id, "~zod", sent, "[]", "/chat", isDeleted = deleted, parentId = parent)

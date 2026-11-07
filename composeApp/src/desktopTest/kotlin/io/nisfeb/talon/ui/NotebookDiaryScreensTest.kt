@@ -70,7 +70,7 @@ class NotebookDiaryScreensTest {
         } finally {
             scope.cancel()
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

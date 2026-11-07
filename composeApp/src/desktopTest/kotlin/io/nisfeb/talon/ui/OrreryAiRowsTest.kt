@@ -151,7 +151,7 @@ class OrreryAiRowsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

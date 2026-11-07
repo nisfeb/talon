@@ -22,7 +22,7 @@ class PageWriteTest {
         .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
 
     @AfterTest
-    fun close() { db.close(); dir.deleteRecursively() }
+    fun close() { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
 
     private fun image(n: Int) = """[{"inline":[{"link":{"href":"https://x.com/$n.jpg","content":"img"}}]}]"""
     private fun page(a: String = image(1)) = listOf(

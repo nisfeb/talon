@@ -47,7 +47,7 @@ class SettingsSyncUiPrefsTest {
     @AfterTest
     fun close() {
         runBlocking { watchers.coroutineContext.job.cancelAndJoin() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {

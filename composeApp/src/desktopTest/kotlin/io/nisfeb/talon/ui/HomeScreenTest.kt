@@ -94,7 +94,7 @@ class HomeScreenTest {
                 block(db)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -393,7 +393,7 @@ class HomeScreenTest {
                 assertTrue(!shows("Buy milk"), "the task goes once the ship has it done")
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

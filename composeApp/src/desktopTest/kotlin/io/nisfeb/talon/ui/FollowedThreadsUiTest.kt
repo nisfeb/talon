@@ -87,7 +87,7 @@ class FollowedThreadsUiTest {
         } finally {
             stream.cancel()
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -248,7 +248,7 @@ class FollowedThreadsUiTest {
             val lunch = rows.last()
             assertEquals(listOf("~bus", "1", "~nec", "170141184507"), listOf(lunch.parentAuthor, "${lunch.replyCount}", lunch.lastReplier, lunch.lastReplyId))
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

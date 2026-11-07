@@ -173,7 +173,7 @@ class OrrerySwitchTest {
             }
         } finally {
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -306,7 +306,7 @@ class OrrerySwitchTest {
             block(repo, db)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -402,7 +402,7 @@ class OrrerySwitchTest {
             assertTrue(writes.isEmpty(), "a switch off by default stops nothing on the ship")
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -427,7 +427,7 @@ class OrrerySwitchTest {
             assertEquals(listOf("c9"), mints.toList())
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -446,7 +446,7 @@ class OrrerySwitchTest {
             assertEquals(listOf("c9"), mints.toList())
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -464,7 +464,7 @@ class OrrerySwitchTest {
             assertFalse(repo.enabled.value)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

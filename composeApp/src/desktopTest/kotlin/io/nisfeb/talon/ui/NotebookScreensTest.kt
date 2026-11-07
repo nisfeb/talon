@@ -87,7 +87,7 @@ class NotebookScreensTest {
             // read sent as the screen left wrote to a closed database, and
             // SQLite's native code took the test JVM down with it.
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

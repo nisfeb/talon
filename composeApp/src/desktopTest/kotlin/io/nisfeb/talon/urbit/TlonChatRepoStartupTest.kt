@@ -30,7 +30,7 @@ class TlonChatRepoStartupTest {
     private val ship = FakeShip("~zod")
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun started(prepare: FakeShip.() -> Unit, block: suspend (TlonChatRepo) -> Unit) = runBlocking<Unit> {
         ship.prepare()

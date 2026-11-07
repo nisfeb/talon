@@ -67,7 +67,7 @@ class InviteComposerTest {
                 assertEquals("/invite ~nec/tlon-studio ", state.draft.text)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

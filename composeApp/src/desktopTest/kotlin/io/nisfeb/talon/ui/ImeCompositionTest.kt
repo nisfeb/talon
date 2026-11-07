@@ -84,7 +84,7 @@ class ImeCompositionTest {
                 body(state)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

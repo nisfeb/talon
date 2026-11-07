@@ -42,7 +42,7 @@ class DesktopUiSettingsTest {
         // query at construction, and closing the db under it is a native
         // SQLite crash that takes the whole test JVM down.
         runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db) }
         tmpDir.deleteRecursively()
     }
 

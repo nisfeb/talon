@@ -56,7 +56,7 @@ class ContactsAndStatusTest {
     }
 
     @AfterTest
-    fun close() { db.close(); tmp.deleteRecursively() }
+    fun close() { io.nisfeb.talon.urbit.closeAfter(db); tmp.deleteRecursively() }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 

@@ -70,7 +70,7 @@ class OrreryVersion60RepoTest {
             block(repo, db, raised)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

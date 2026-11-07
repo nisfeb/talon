@@ -55,7 +55,7 @@ class NotesRepoTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
         val events = ship.channel.events().launchIn(this)

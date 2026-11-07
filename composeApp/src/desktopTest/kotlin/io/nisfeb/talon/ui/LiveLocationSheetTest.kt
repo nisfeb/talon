@@ -144,7 +144,7 @@ class LiveLocationSheetTest {
             // closes: closed under one, SQLite's native side crashed the
             // test JVM later, in a finalizer (CI, 2026-11-01).
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

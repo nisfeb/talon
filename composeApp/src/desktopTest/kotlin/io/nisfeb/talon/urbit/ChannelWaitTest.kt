@@ -35,7 +35,7 @@ class ChannelWaitTest {
     @AfterTest
     fun close() {
         runBlocking { repo.stopAndJoinForTest() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {

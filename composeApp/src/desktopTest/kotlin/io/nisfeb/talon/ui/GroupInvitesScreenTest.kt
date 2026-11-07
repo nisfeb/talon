@@ -73,7 +73,7 @@ class GroupInvitesScreenTest {
         } finally {
             runBlocking { repo.stopAndJoinForTest() }
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

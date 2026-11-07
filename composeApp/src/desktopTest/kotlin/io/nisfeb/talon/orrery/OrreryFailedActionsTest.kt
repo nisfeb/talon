@@ -93,7 +93,7 @@ class OrreryFailedActionsTest {
             withTimeout(10_000) { while (asked.count { it == "failed" } == failedAsks) delay(20) }
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

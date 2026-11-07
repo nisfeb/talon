@@ -69,7 +69,7 @@ class SearchScreenTest {
     }
 
     @AfterTest
-    fun close() { SearchDraft.query = ""; SearchDraft.fromBar = false; db.close() }
+    fun close() { SearchDraft.query = ""; SearchDraft.fromBar = false; io.nisfeb.talon.urbit.closeAfter(db) }
 
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
