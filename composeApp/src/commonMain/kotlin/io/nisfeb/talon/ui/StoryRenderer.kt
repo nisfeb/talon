@@ -920,10 +920,15 @@ private fun CalWidgetBlock(
             val shipCalendars = shipCalendar?.calendars?.collectAsState()?.value.orEmpty()
             val addScope = androidx.compose.runtime.rememberCoroutineScope()
             var menuOpen by remember { mutableStateOf(false) }
-            var added by remember { mutableStateOf<String?>(null) }
+            // Saveable: a chat row scrolled away and back is composed anew,
+            // and plain remember turned Add back on after a success.
+            var added by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
             // A successful add disarms the button — left armed, every
             // further tap wrote another copy of the event.
-            var addedDone by remember { mutableStateOf(false) }
+            var addedDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+            // So does one on its way: armed during "Adding…", a second pick
+            // wrote a second copy.
+            var adding by remember { mutableStateOf(false) }
             fun toAnotherApp() = runCatching {
                 // Android: Intent.ACTION_INSERT pops the system
                 // create-event sheet pre-filled. Desktop / unset:
@@ -942,24 +947,30 @@ private fun CalWidgetBlock(
                     onClick = {
                         if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
                     },
-                    enabled = !addedDone,
+                    enabled = !addedDone && !adding,
                 ) { Text(added ?: "Add") }
                 androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     shipCalendar?.writable().orEmpty().forEach { c ->
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(c.name.ifBlank { c.id }) },
-                            onClick = {
+                            onClick = add@{
                                 menuOpen = false
+                                if (adding) return@add
+                                adding = true
                                 added = "Adding…"
                                 why = null
                                 addScope.launch {
-                                    val cal = shipCalendar!!
-                                    // This add's own reason, never another write's.
-                                    val whyNot = cal.addSharedWhyNot(c.id, title, startEpochMs, endEpochMs)
-                                    addedDone = whyNot == null
-                                    added = if (whyNot == null) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
-                                    // Said here, and so not again on the calendar.
-                                    if (whyNot != null) { why = whyNot; cal.heard(whyNot) }
+                                    try {
+                                        val cal = shipCalendar!!
+                                        // This add's own reason, never another write's.
+                                        val whyNot = cal.addSharedWhyNot(c.id, title, startEpochMs, endEpochMs)
+                                        addedDone = whyNot == null
+                                        added = if (whyNot == null) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
+                                        // Said here, and so not again on the calendar.
+                                        if (whyNot != null) { why = whyNot; cal.heard(whyNot) }
+                                    } finally {
+                                        adding = false
+                                    }
                                 }
                             },
                         )
