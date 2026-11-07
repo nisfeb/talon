@@ -295,13 +295,17 @@ class ThreadListTest {
         messages().upsert(post("170141184506", "~bus", "the question", 1_000))
         messages().upsert(post("170141184507", "~zod", "my answer", 2_000, parentId = "170141184506"))
     }) { ship, _ ->
+        // A real pointer, tried again where the words are now if it opened
+        // nothing: a list still settling moves them (DmChatScreenTest.tapOpen).
         fun open(): androidx.compose.ui.geometry.Offset {
             shows("my answer")
-            waitForIdle()
-            val at = onNodeWithText("my answer").fetchSemanticsNode().boundsInWindow.center
-            onNodeWithText("my answer").performTouchInput { click(center) }
-            shows("Copy")
-            return at
+            repeat(3) {
+                waitForIdle()
+                val at = onNodeWithText("my answer").fetchSemanticsNode().boundsInWindow.center
+                onNodeWithText("my answer").performTouchInput { click(center) }
+                if (runCatching { waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() } }.isSuccess) return at
+            }
+            error("tapping the reply opened no menu")
         }
         fun shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
         val at = open()

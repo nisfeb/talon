@@ -707,9 +707,13 @@ class TlonChatRepoStartupTest {
             until("filled and marked") { text() != null && db.marks().get(io.nisfeb.talon.data.SEARCH_TEXT_FILLED_MARK) != null }
         } finally { first.stopAndJoinForTest() }
         db.messages().forgetLinkSearchText()
+        // Counted from here: the first launch can fill, mark and be stopped
+        // before it ever streams, and "two streams" then never came (CI's
+        // request dump, 2026-11-07).
+        val streamed = streams()
         val next = TlonChatRepo(db).apply { start(session()) }
         try {
-            until("the second stream") { streams() >= 2 }
+            until("the next launch's stream") { streams() > streamed }
             delay(500)
             assertNull(text(), "a later launch scanned for rows to fill")
         } finally { next.stopAndJoinForTest() }

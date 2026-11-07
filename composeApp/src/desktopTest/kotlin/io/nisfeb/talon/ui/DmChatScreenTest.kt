@@ -666,14 +666,22 @@ class DmChatScreenTest {
     // make the popover less populated so we can make the buttons and
     // emojis bigger" (sneagan, 2026-11-07).
 
-    /** A phone's tap on [text], which opens its menu; where the finger was, in the window. */
+    /**
+     * A phone's tap on [text], which opens its menu; where the finger was,
+     * in the window. A real pointer, for where the menu opens: a chat still
+     * settling on a loaded runner moved the words from under it once in
+     * ten runs, so a tap that opened nothing is made again where they are.
+     */
     private fun ComposeUiTest.tapOpen(text: String): androidx.compose.ui.geometry.Offset {
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
-        waitForIdle()
-        val at = onNodeWithText(text).fetchSemanticsNode().boundsInWindow.center
-        onNodeWithText(text).performTouchInput { click(center) }
-        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() }
-        return at
+        val opened = { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() }
+        repeat(3) {
+            waitForIdle()
+            val at = onNodeWithText(text).fetchSemanticsNode().boundsInWindow.center
+            onNodeWithText(text).performTouchInput { click(center) }
+            if (runCatching { waitUntil(timeoutMillis = 5_000) { opened() } }.isSuccess) return at
+        }
+        error("tapping \"$text\" opened no menu")
     }
 
     private fun ComposeUiTest.shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
@@ -792,7 +800,9 @@ class DmChatScreenTest {
             messages().upsert(msg("$comet/170141184506", comet, "hello", 1_000))
         }) { _, _ ->
             waitUntil(timeoutMillis = 30_000) { onAllNodesWithText("RI").fetchSemanticsNodes().isNotEmpty() }
-            onAllNodesWithText("RI").onFirst().performClick()
+            // Its click, not a pointer: the chat still settling moved the
+            // tile from under one (CI, 2026-11-07).
+            onAllNodesWithText("RI").onFirst().clickAction()
             // The profile is open once its "Show @p" is there.
             waitUntil(timeoutMillis = 30_000) { onAllNodesWithText("Show @p").fetchSemanticsNodes().isNotEmpty() }
             onAllNodesWithText("LM").assertCountEquals(0)
