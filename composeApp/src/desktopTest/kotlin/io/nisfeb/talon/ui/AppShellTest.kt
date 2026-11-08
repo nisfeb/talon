@@ -101,6 +101,10 @@ class AppShellTest {
         io.nisfeb.talon.ui.screens.forgetChatRowsSnapshot()
         // Hosts' answers for references outside this ship's groups are kept a session: another test's are not this one's.
         io.nisfeb.talon.ui.OutsideCites.clear()
+        // App sets Coil's one image loader, which refuses once anything has
+        // used Coil: a chat test's pictures run first in the same JVM failed
+        // every test here (2026-11-08). AnimatedGifTest does the same.
+        coil3.SingletonImageLoader.reset()
         // A ship with nothing yet: an empty feed and no invites, which is
         // not the same as one that does not answer.
         val ship = FakeShip("~zod").apply {
