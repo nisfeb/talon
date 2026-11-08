@@ -1320,6 +1320,27 @@ class DmChatScreenTest {
     // A user report: clicking an avatar no longer showed the profile. It
     // did in the first chat; the desktop pane keeps this screen, and after
     // a switch the tap wrote the first chat's state.
+    // sneagan, 2026-11-08: "I prefer the posters icon to be at the top of a
+    // series of messages instead of the bottom in the bubble view".
+    @Test
+    fun `in bubbles the poster's tile sits at the top of their run`() = chat(
+        ui = InMemoryUiSettings().apply { setChatBubbles(true) },
+        seed = {
+            contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam Bell", null, null)))
+            messages().upsert(msg("~sampel-palnet/170141184506", "~sampel-palnet", "a long first message " + "that runs on and on ".repeat(14), 1_000))
+            messages().upsert(msg("~sampel-palnet/170141184507", "~sampel-palnet", "and a second", 2_000))
+        },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("SB").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText("and a second").fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        val tile = onAllNodesWithText("SB").onFirst().fetchSemanticsNode().boundsInRoot
+        val first = onNodeWithText("a long first message", substring = true).fetchSemanticsNode().boundsInRoot
+        val second = onNodeWithText("and a second").fetchSemanticsNode().boundsInRoot
+        assertTrue(first.height > tile.height * 2, "the first message wraps: ${first.height}")
+        assertTrue(tile.center.y < first.top + 30f, "the tile at the run's top: tile ${tile.center.y}, first ${first.top}..${first.bottom}")
+        assertTrue(tile.bottom < second.top, "not down by the second: tile ${tile.bottom}, second ${second.top}")
+    }
+
     @Test
     fun `an avatar opens the profile after the pane switches chats`() {
         // msg() files every message under ~bus: open on an empty chat first.

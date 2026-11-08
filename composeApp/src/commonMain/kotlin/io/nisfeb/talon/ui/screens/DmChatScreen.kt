@@ -1793,13 +1793,15 @@ private fun MessageRow(
         // Bubbles blend the big messengers' shared shape: ours on the right
         // in a soft accent bubble, theirs on the left in grey with the
         // avatar beside the first of a run, the time inside the bubble.
+        // The avatar at the run's top: at the foot of its first message it
+        // sat down by the second (sneagan, 2026-11-08).
         // Rows put every message on the left under its author and time.
         horizontalArrangement = when {
             !bubbles -> Arrangement.spacedBy(10.dp)
             mine -> Arrangement.End
             else -> Arrangement.spacedBy(8.dp)
         },
-        verticalAlignment = if (bubbles) Alignment.Bottom else Alignment.Top,
+        verticalAlignment = Alignment.Top,
     ) {
         val onRight = bubbles && mine
         if (!onRight) {
