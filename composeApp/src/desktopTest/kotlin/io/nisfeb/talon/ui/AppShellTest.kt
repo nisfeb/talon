@@ -85,6 +85,8 @@ class AppShellTest {
         videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
         /** Grubbery's stock apps added on the way in; off, so other tests' ships hear nothing of it. */
         defaultApps: Boolean = false,
+        /** Whether the app is in front, as a phone's lifecycle says; null for always, as before. */
+        foreground: kotlinx.coroutines.flow.Flow<Boolean>? = null,
         block: ComposeUiTest.(FakeShip) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-app-").toFile()
@@ -132,6 +134,7 @@ class AppShellTest {
                             notifier = notifier,
                             audioDevices = audioDevices,
                             videoDevices = videoDevices,
+                            appForeground = foreground,
                         )
                         }
                     }
@@ -2012,6 +2015,34 @@ class AppShellTest {
             assertTrue(showing("New messages wait until you sign in again.") && !showing("Connect"))
             onNodeWithText("Sign in").performClick()
             waitUntil(timeoutMillis = 10_000) { showing("You were signed out of ~zod. Sign in again") }
+        }
+    }
+
+    // sneagan's users, 2026-11-08: "excessive 'cannot reach ship' red
+    // alerts when the ship is accessible", and of coming back to the app,
+    // "it shouldn't already be present". Behind, the OS cut the stream;
+    // its last heard was from before, and the app opened on it in red.
+    @Test
+    fun `coming back to the app reconnects without first saying Can't reach`() {
+        val front = kotlinx.coroutines.flow.MutableStateFlow(true)
+        app(sync = quickSync, setup = { heartbeat(500) }, foreground = front) { ship ->
+            home()
+            waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
+            // Behind: the stream is cut, and nothing comes back while it is.
+            // Frames run meanwhile (a sleep held them): out of reach, as
+            // nobody sees while the app is behind.
+            front.value = false
+            ship.refuseStream = true
+            kotlinx.coroutines.runBlocking { ship.endStreams() }
+            waitUntil(timeoutMillis = 15_000) { showing("Can't reach ~zod since") }
+            // Back in front, as the phone says on its return, on a network
+            // that takes its moment: the reconnect is not in yet.
+            front.value = true
+            waitUntil(timeoutMillis = 1_500) { !showing("Can't reach") }
+            assertTrue(onAllNodesWithContentDescription("Connecting to ~zod", substring = true).fetchSemanticsNodes().isNotEmpty(), "it says it is connecting")
+            ship.refuseStream = false
+            waitUntil(timeoutMillis = 10_000) { !syncMarkShown() }
+            assertTrue(!showing("Can't reach"))
         }
     }
 

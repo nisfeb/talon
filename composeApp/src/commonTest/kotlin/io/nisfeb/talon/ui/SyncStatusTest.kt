@@ -29,6 +29,18 @@ class SyncStatusTest {
         assertEquals(SyncStatus.Unreachable(now - 20_001, pending = 0), status(null, triedAgo = 20_001))
     }
 
+    // sneagan, 2026-11-08: "it shouldn't already be present when returning
+    // to the app". Behind, the OS cut the stream; the last heard is from
+    // before the app came back, and that is a reconnect, not a lost ship.
+    @Test
+    fun `back at the app, a stream last heard before it is connecting for a while, then out of reach since it was heard`() {
+        val hourAgo = 3_600_000L
+        assertEquals(SyncStatus.Connecting, status(hourAgo, triedAgo = 1_000))
+        assertEquals(SyncStatus.Connecting, status(hourAgo, triedAgo = 20_000))
+        assertEquals(SyncStatus.Unreachable(now - hourAgo, pending = 0), status(hourAgo, triedAgo = 20_001), "since it was last heard, not since it came back")
+        assertEquals(SyncStatus.Unreachable(now - 80_000, pending = 0), status(80_000, triedAgo = 100_000), "heard since it came back, then nothing: no grace again")
+    }
+
     @Test
     fun `a lapsed login outranks everything`() {
         assertEquals(SyncStatus.SignedOut, status(1_000, signedOut = true))

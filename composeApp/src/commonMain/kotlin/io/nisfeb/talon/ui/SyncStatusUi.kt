@@ -43,6 +43,8 @@ fun rememberSyncStatus(repo: TlonChatRepo): SyncStatus {
     val signedOut by repo.signedOut.collectAsState()
     val syncing by repo.bootstrapping.collectAsState()
     val pending by remember(repo) { repo.queuedWrites }.collectAsState(initial = 0)
+    // A state, so coming back to the app is seen at once, not at the next tick.
+    val trySince by repo.tryingSinceMs.collectAsState()
     val thresholds = LocalSyncThresholds.current
     val now by produceState(nowMs(), thresholds) {
         while (true) {
@@ -50,7 +52,7 @@ fun rememberSyncStatus(repo: TlonChatRepo): SyncStatus {
             delay(minOf(SYNC_TICK_MS, thresholds.heardRecentlyMs / 2))
         }
     }
-    return syncStatus(signedOut, repo.lastHeardMs(), repo.startedMs, now, syncing, pending, thresholds)
+    return syncStatus(signedOut, repo.lastHeardMs(), trySince, now, syncing, pending, thresholds)
 }
 
 private const val SYNC_TICK_MS = 3_000L

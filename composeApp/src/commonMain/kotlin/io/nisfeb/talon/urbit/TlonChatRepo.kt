@@ -323,6 +323,7 @@ class TlonChatRepo(
         val was = appForegrounded
         appForegrounded = foreground
         if (foreground && !was) {
+            _tryingSinceMs.value = nowMs()
             openWhom?.let { whom -> scope.launch { runCatching { markRead(whom) } } }
         }
     }
@@ -414,9 +415,16 @@ class TlonChatRepo(
     /** The ship's follows, read as a connect reads them. */
     internal suspend fun bootstrapFollowedThreadsForTest() = bootstrapFollowedThreads(channel!!)
 
-    /** When this run began talking to the ship, for "since" while it has never heard from it. */
-    @Volatile var startedMs: Long = nowMs()
-        private set
+    private val _tryingSinceMs = MutableStateFlow(nowMs())
+
+    /**
+     * When this run began talking to the ship, or the app last came back
+     * to the front: the sync status gives a reconnect its grace from here
+     * ([io.nisfeb.talon.ui.syncStatus]). Behind, the OS cuts the stream,
+     * and the app came back already saying "Can't reach" in red of a ship
+     * that was there all along (sneagan's users, 2026-11-08).
+     */
+    val tryingSinceMs: StateFlow<Long> = _tryingSinceMs.asStateFlow()
 
     @Volatile private var heardMs = 0L
 
@@ -444,7 +452,7 @@ class TlonChatRepo(
     fun start(session: UrbitSession) {
         if (started) return
         started = true
-        startedMs = nowMs()
+        _tryingSinceMs.value = nowMs()
         ourPatp = session.ourPatp
         // What a ship serves is learnt once a login, not again on every
         // reconnect: a new login may be another ship, or this one upgraded.

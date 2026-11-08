@@ -31,14 +31,17 @@ sealed interface SyncStatus {
 data class SyncThresholds(
     /** Heard within this, it is connected: three of eyre's heartbeats, so a reconnect's few seconds never show. */
     val heardRecentlyMs: Long = 75_000L,
-    /** Never heard yet this run, connecting for this long before it is unreachable. */
+    /** Nothing heard since it began trying (this run, or back at the app), connecting for this long before it is unreachable. */
     val connectGraceMs: Long = 20_000L,
 )
 
 /**
  * [lastHeardMs]: when anything last came from the ship on its event
  * stream, heartbeats included, or null for not yet this run;
- * [trySinceMs]: when this run began trying.
+ * [trySinceMs]: when this run began trying, or the app last came back to
+ * the front. Nothing heard since then is a reconnect under way, not a
+ * ship out of reach, until [SyncThresholds.connectGraceMs] has passed:
+ * behind, the OS cuts the stream, and the last heard is from before.
  */
 fun syncStatus(
     signedOut: Boolean,
@@ -52,7 +55,7 @@ fun syncStatus(
     signedOut -> SyncStatus.SignedOut
     lastHeardMs != null && nowMs - lastHeardMs <= thresholds.heardRecentlyMs ->
         SyncStatus.Connected(nowMs - lastHeardMs, syncing, pending)
-    lastHeardMs == null && nowMs - trySinceMs <= thresholds.connectGraceMs -> SyncStatus.Connecting
+    (lastHeardMs == null || lastHeardMs < trySinceMs) && nowMs - trySinceMs <= thresholds.connectGraceMs -> SyncStatus.Connecting
     else -> SyncStatus.Unreachable(lastHeardMs ?: trySinceMs, pending)
 }
 
