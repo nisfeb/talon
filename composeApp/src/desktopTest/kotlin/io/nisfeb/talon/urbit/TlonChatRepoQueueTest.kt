@@ -87,8 +87,11 @@ class TlonChatRepoQueueTest {
         ship.refuse = { null }
         ship.lose = { lost }
         assertFalse(repo.sendConfirmed("~bus", "Recording this call."), "out of reach, so queued")
-        ship.lose = { null }
-        assertFalse(repo.sendConfirmed("~bus", "Recording this call."), "behind one still queued, it waits too")
+        // Still out of reach, so the queue's own retry cannot empty it first:
+        // with the ship back here, a slow CI runner's drain sent the queued
+        // one before this, and this one went straight out (2026-11-08).
+        assertFalse(repo.sendConfirmed("~bus", "Recording, again."), "behind one still queued, it waits too")
+        assertTrue(ship.attempted.none { "Recording, again." in it.json.toString() }, "it was tried, not queued behind")
     }
 
     // "Slow" covered a ship mid-event, one down behind its proxy and one
