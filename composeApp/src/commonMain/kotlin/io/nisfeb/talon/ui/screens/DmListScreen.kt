@@ -207,10 +207,11 @@ fun DmListScreen(
     groupChannelOrder: io.nisfeb.talon.ui.GroupChannelOrder =
         io.nisfeb.talon.ui.GroupChannelOrder.Recent,
     /** When a detail pane sits beside this list (the wide split
-     *  layout), expanding a group also opens its most recently
-     *  active channel there — the tap's obvious next act. Off by
-     *  default because on compact layouts "open" navigates away
-     *  from the list the user was in the middle of browsing. */
+     *  layout), a jump to a group from elsewhere also opens its most
+     *  recently active channel there. A tap on a card only unfolds
+     *  it. Off by default because on compact layouts "open"
+     *  navigates away from the list the user was in the middle of
+     *  browsing. */
     autoOpenOnExpand: Boolean = false,
     /** The conversation open beside the list, whose row keeps a soft
      *  accent for as long as it has the focus. Null where the chat
