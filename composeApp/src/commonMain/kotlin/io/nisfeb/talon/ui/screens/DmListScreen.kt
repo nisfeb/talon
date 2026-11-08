@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.animation.core.tween
@@ -101,7 +100,6 @@ import io.nisfeb.talon.ui.applyEmojiSpans
 import io.nisfeb.talon.ui.FolderAssignmentSheet
 import io.nisfeb.talon.ui.RailItem
 import io.nisfeb.talon.ui.UpdateBanner
-import io.nisfeb.talon.ui.shortRelativeTime
 import io.nisfeb.talon.update.UpdateStatus
 import io.nisfeb.talon.ui.MentionMatcher
 import io.nisfeb.talon.urbit.StoryCache
@@ -223,9 +221,6 @@ fun DmListScreen(
      *  [groupChannelOrder]. */
     folderItemOrder: io.nisfeb.talon.ui.FolderItemOrder =
         io.nisfeb.talon.ui.FolderItemOrder.Manual,
-    /** Groups as cards rather than heads over their channels: see
-     *  [io.nisfeb.talon.ui.UiSettings.groupCards]. */
-    groupCards: Boolean = false,
     /** When set to true by a keyboard-shortcut handler upstream, open
      *  the search screen and reset the flag. DmListScreen has no
      *  inline search field — Ctrl+K navigates to the full SearchScreen
@@ -1477,7 +1472,7 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    if (groupCards) GroupCard(
+                                    GroupCard(
                                         row = row,
                                         children = childrenSnapshot,
                                         contactMap = contactMap,
@@ -1499,79 +1494,7 @@ fun DmListScreen(
                                             },
                                             onDragStopped = { onDragStopped() },
                                         ),
-                                    ) else Column {
-                                        val lastActive by remember(row.flag) {
-                                            repo.groupLastActive(row.flag)
-                                        }.collectAsState(initial = null)
-                                        GroupHeaderRow(
-                                            flag = row.flag,
-                                            title = row.title,
-                                            avatarUrl = row.image,
-                                            childCount = row.childCount,
-                                            totalUnread = row.totalUnread,
-                                            expanded = row.expanded,
-                                            lastActiveMs = lastActive,
-                                            onToggle = { flag ->
-                                                // Read BEFORE the toggle flips it.
-                                                val expanding = !row.expanded
-                                                onGroupHeadToggle(flag)
-                                                // Only on expand, never collapse; and
-                                                // not in edit mode, where expansion is
-                                                // part of reordering, not reading.
-                                                if (autoOpenOnExpand && expanding && !editMode) {
-                                                    childrenSnapshot
-                                                        .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let { onRowOpen(it.whom) }
-                                                }
-                                            },
-                                            onLongClick = if (editMode) null else onGroupHeadLongPress,
-                                            editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
-                                                onDragStarted = {
-                                                    hapticRoot.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    expandedGroups = expandedGroups - row.flag
-                                                },
-                                                onDragStopped = { onDragStopped() },
-                                            ),
-                                        )
-                                        // Instant, not animated, and that is the
-                                        // fix rather than a simplification.
-                                        // AnimatedVisibility animates the *measured
-                                        // height* of the container, so while that
-                                        // animation is in flight the item reports a
-                                        // height its content does not have.
-                                        // Backgrounding the app pauses Compose's
-                                        // frame clock, and a resume could leave the
-                                        // transition parked partway: the item then
-                                        // measured collapsed while its children
-                                        // still drew, every row below rode up over
-                                        // them, and nothing short of killing the
-                                        // app put it back. A plain `if` cannot
-                                        // desynchronise — height and content are
-                                        // the same decision.
-                                        //
-                                        // The children still live in the group's own
-                                        // lazy item, which is what stopped the
-                                        // reorder placement animation fighting the
-                                        // expansion earlier. Only the animated
-                                        // height is gone.
-                                        if (row.expanded) {
-                                            Column {
-                                                childrenSnapshot.forEach { child ->
-                                                    GroupChannelRow(
-                                                        whom = child.whom,
-                                                        m = child.m,
-                                                        unread = child.unread,
-                                                        contactMap = contactMap,
-                                                        draft = drafts[child.whom],
-                                                        onClick = onRowOpen,
-                                                        onLongClick = onRowLongPress,
-                                                        open = child.whom == openWhom,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                                    )
                                 }
                             }
                             i = j
@@ -1694,7 +1617,7 @@ fun DmListScreen(
                                     // mode wants the animation.
                                     animateItemModifier = if (editMode) Modifier.animateItem() else Modifier,
                                 ) { _ ->
-                                    if (groupCards) GroupCard(
+                                    GroupCard(
                                         row = row,
                                         children = childrenSnapshot,
                                         contactMap = contactMap,
@@ -1716,83 +1639,7 @@ fun DmListScreen(
                                             },
                                             onDragStopped = { onDragStopped() },
                                         ),
-                                    ) else Column {
-                                        val lastActive by remember(row.flag) {
-                                            repo.groupLastActive(row.flag)
-                                        }.collectAsState(initial = null)
-                                        GroupHeaderRow(
-                                            flag = row.flag,
-                                            title = row.title,
-                                            avatarUrl = row.image,
-                                            childCount = row.childCount,
-                                            totalUnread = row.totalUnread,
-                                            expanded = row.expanded,
-                                            lastActiveMs = lastActive,
-                                            onToggle = { flag ->
-                                                // Read BEFORE the toggle flips it.
-                                                val expanding = !row.expanded
-                                                onGroupHeadToggle(flag)
-                                                // Only on expand, never collapse; and
-                                                // not in edit mode, where expansion is
-                                                // part of reordering, not reading.
-                                                if (autoOpenOnExpand && expanding && !editMode) {
-                                                    childrenSnapshot
-                                                        .maxByOrNull { it.m?.sentMs ?: 0L }
-                                                        ?.let { onRowOpen(it.whom) }
-                                                }
-                                            },
-                                            onLongClick = if (editMode) null else onGroupHeadLongPress,
-                                            editMode = editMode,
-                                            dragHandleModifier = if (!canReorder) null else reorderHandle(
-                                                onDragStarted = {
-                                                    hapticRoot.performHapticFeedback(
-                                                        HapticFeedbackType.LongPress,
-                                                    )
-                                                    // Collapse while dragging so children
-                                                    // don't get in the way of swap targets.
-                                                    expandedGroups = expandedGroups - row.flag
-                                                },
-                                                onDragStopped = { onDragStopped() },
-                                            ),
-                                        )
-                                        // Instant, not animated, and that is the
-                                        // fix rather than a simplification.
-                                        // AnimatedVisibility animates the *measured
-                                        // height* of the container, so while that
-                                        // animation is in flight the item reports a
-                                        // height its content does not have.
-                                        // Backgrounding the app pauses Compose's
-                                        // frame clock, and a resume could leave the
-                                        // transition parked partway: the item then
-                                        // measured collapsed while its children
-                                        // still drew, every row below rode up over
-                                        // them, and nothing short of killing the
-                                        // app put it back. A plain `if` cannot
-                                        // desynchronise — height and content are
-                                        // the same decision.
-                                        //
-                                        // The children still live in the group's own
-                                        // lazy item, which is what stopped the
-                                        // reorder placement animation fighting the
-                                        // expansion earlier. Only the animated
-                                        // height is gone.
-                                        if (row.expanded) {
-                                            Column {
-                                                childrenSnapshot.forEach { child ->
-                                                    GroupChannelRow(
-                                                        whom = child.whom,
-                                                        m = child.m,
-                                                        unread = child.unread,
-                                                        contactMap = contactMap,
-                                                        draft = drafts[child.whom],
-                                                        onClick = onRowOpen,
-                                                        onLongClick = onRowLongPress,
-                                                        open = child.whom == openWhom,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                                    )
                                 }
                             }
                             i = j
@@ -2790,8 +2637,9 @@ private fun SectionHeader(label: String) {
  * after the bubbles pleased the people who asked for a friendlier groups
  * list): its picture larger, the newest words with who said them, and a
  * line naming only the channels with something new ([newInLine]). A tap
- * goes straight into the channel that most wants reading ([cardTarget]);
- * "N channels" opens all of them as the list's own channel rows. Tried
+ * anywhere on it unfolds its channels as the list's own channel rows, and
+ * a group of one channel opens it (sneagan, 2026-11-08, when the cards
+ * became the only groups view). Tried
  * and taken off: the faces of recent speakers, and channels as chips,
  * which readers disliked (sneagan, 2026-11-06).
  */
@@ -2812,12 +2660,14 @@ private fun GroupCard(
     dragHandleModifier: Modifier?,
 ) {
     val glow = focusGlow(!row.expanded && children.any { it.whom == openWhom })
-    val target = remember(children) { cardTarget(children) }
     val news = remember(children, contactMap) { newInLine(children) { contactMap.channelShortName(it) } }
     val clicks = if (editMode && dragHandleModifier != null) dragHandleModifier
     else Modifier.combinedClickableWithSecondary(
-        onClick = { target?.let(onOpen) },
+        // A group of one channel has nothing to unfold: the card is the
+        // way in. Any other unfolds or folds its channels.
+        onClick = { if (children.size > 1) onShowAll(row.flag) else children.firstOrNull()?.let { onOpen(it.whom) } },
         onLongClick = onLongClick?.let { { it(row.flag) } },
+        onClickLabel = if (children.size > 1) (if (row.expanded) "Hide channels" else "Show channels") else null,
     )
     // Edge to edge, each against the next with a fine rule between
     // (sneagan, 2026-11-06), rather than rounded cards apart.
@@ -2847,9 +2697,7 @@ private fun GroupCard(
                         modifier = Modifier.weight(1f),
                     )
                     if (row.totalUnread > 0) io.nisfeb.talon.ui.NotificationBadge(row.totalUnread)
-                    // A group of one channel has nothing to open: the
-                    // card is the way in.
-                    if (children.size > 1) ChannelsToggle(children.size, row.expanded) { onShowAll(row.flag) }
+                    if (children.size > 1) ChannelsToggle(children.size, row.expanded)
                 }
                 CardLatest(children, contactMap, ourShip, draftOf)
                 if (news != null) {
@@ -2883,7 +2731,6 @@ private fun GroupCard(
                     onClick = onOpen,
                     onLongClick = onChannelLongPress,
                     open = child.whom == openWhom,
-                    startPadding = 80.dp,
                 )
             }
         }
@@ -2892,14 +2739,11 @@ private fun GroupCard(
     }
 }
 
-/** "N channels", and which way it opens: shows the card's channel rows, or puts them away. */
+/** "N channels", and which way a tap on the card turns: shows its channel rows, or puts them away. */
 @Composable
-private fun ChannelsToggle(count: Int, expanded: Boolean, onToggle: () -> Unit) {
+private fun ChannelsToggle(count: Int, expanded: Boolean) {
     Row(
-        modifier = Modifier
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-            .clickable(onClickLabel = if (expanded) "Hide channels" else "Show channels", onClick = onToggle)
-            .padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -2957,98 +2801,6 @@ private fun CardLatest(
 }
 
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun GroupHeaderRow(
-    flag: String,
-    title: String,
-    avatarUrl: String?,
-    childCount: Int,
-    totalUnread: Int,
-    expanded: Boolean,
-    lastActiveMs: Long?,
-    onToggle: (String) -> Unit,
-    editMode: Boolean = false,
-    /** Null when this list can't be reordered — see `canReorder` in
-     *  DmListScreen. A grip the user can't drag is a lie. */
-    dragHandleModifier: Modifier? = null,
-    onLongClick: ((String) -> Unit)? = null,
-) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 0f else -90f,
-        animationSpec = tween(durationMillis = 160),
-        label = "groupChevronRotation",
-    )
-    val rowClickModifier = if (editMode && dragHandleModifier != null) {
-        Modifier.clickable { onToggle(flag) }.then(dragHandleModifier)
-    } else {
-        Modifier.combinedClickableWithSecondary(
-            onClick = { onToggle(flag) },
-            onLongClick = onLongClick?.let { { it(flag) } },
-        )
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(rowClickModifier)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        val isHexTint = avatarUrl?.startsWith("#") == true
-        Avatar(
-            label = title,
-            url = if (isHexTint) null else avatarUrl,
-            colorHex = if (isHexTint) avatarUrl else null,
-            size = 32.dp,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 1,
-            )
-            val channelsLabel = "$childCount channel${if (childCount == 1) "" else "s"}"
-            // "· active Nm ago" rides the channel-count line, from the
-            // newest message across the group's channels. Durable
-            // history, not transient presence — the only place a member
-            // sees group liveness, since tapping toggles the accordion
-            // rather than opening a group screen.
-            val activeLabel = lastActiveMs?.let {
-                "$channelsLabel · active ${shortRelativeTime(it, nowMs())}"
-            } ?: channelsLabel
-            Text(
-                activeLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (totalUnread > 0 && !expanded) {
-            io.nisfeb.talon.ui.NotificationBadge(totalUnread)
-        }
-        Icon(
-            // Always the down chevron; rotation alone communicates state
-            // (0° expanded = points down, -90° collapsed = points right).
-            // Swapping the icon AND rotating produced an up-pointing arrow
-            // when expanded.
-            imageVector = TalonIcons.ExpandMore,
-            contentDescription = if (expanded) "Collapse" else "Expand",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .size(24.dp)
-                .graphicsLayer { rotationZ = rotation },
-        )
-        if (editMode && dragHandleModifier != null) {
-            Icon(
-                imageVector = TalonIcons.DragHandle,
-                contentDescription = "Drag to reorder",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp).size(20.dp),
-            )
-        }
-    }
-}
-
 /**
  * The soft accent behind the row of the conversation open beside the
  * list. It was a flash that faded when a group expand landed on a
@@ -3075,8 +2827,6 @@ private fun GroupChannelRow(
     onLongClick: (String) -> Unit,
     /** Open beside the list: see [focusGlow]. */
     open: Boolean = false,
-    /** From the row's start to its text: under a group head, or under a card's text. */
-    startPadding: androidx.compose.ui.unit.Dp = 56.dp,
 ) {
     val shortName = remember(whom) { contactMap.channelShortName(whom) }
     val glow = focusGlow(open)
@@ -3100,7 +2850,8 @@ private fun GroupChannelRow(
                 onClick = { onClick(whom) },
                 onLongClick = { onLongClick(whom) },
             )
-            .padding(start = startPadding, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            // Set in under the card's text.
+            .padding(start = 80.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

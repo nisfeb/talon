@@ -37,14 +37,6 @@ sealed interface HomeRow {
 }
 
 /**
- * Where a group's card opens: the channel with the most unread, else the
- * one with the newest words. Null for a group with no channels yet.
- */
-fun cardTarget(children: List<HomeRow.GroupChild>): String? =
-    children.filter { it.unread > 0 }.maxByOrNull { it.unread }?.whom
-        ?: children.maxByOrNull { it.m?.sentMs ?: Long.MIN_VALUE }?.whom
-
-/**
  * A card's line of news: its channels with something unread, in the
  * order the card lists them, with how many, as "New in plans 2 ·
  * general 5". Null when nothing is new, and the card is two lines.

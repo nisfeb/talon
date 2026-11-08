@@ -253,11 +253,8 @@ class SettingsScreenTest {
         tap("Bubbles")
         assertTrue(ui.chatBubbles.value)
 
-        assertFalse(ui.groupCards.value, "groups are a list until asked")
-        tap("Cards")
-        assertTrue(ui.groupCards.value)
-        tap("List")
-        assertFalse(ui.groupCards.value)
+        // sneagan, 2026-11-08: groups are cards only, with no choice.
+        assertTrue(onAllNodesWithText("Cards").fetchSemanticsNodes().isEmpty(), "no List or Cards choice")
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()

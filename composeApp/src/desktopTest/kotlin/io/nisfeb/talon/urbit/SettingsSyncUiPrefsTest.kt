@@ -121,22 +121,14 @@ class SettingsSyncUiPrefsTest {
         )
     }
 
-    // Cards or a list for groups is a taste, like bubbles, so it travels.
+    // Groups had a List or Cards choice that travelled, until 2026-11-08.
+    // An older device still sends it: it is let be, and never sent.
     @Test
-    fun `group cards chosen here go up as the ship's own body, and from another device are taken, not sent back`() = live {
+    fun `an older device's List or Cards choice for groups changes nothing and is not sent back`() = live {
         watching()
-        ui.setGroupCards(true)
-        settled { pushed("group-cards").isNotEmpty() }
-        assertEquals(
-            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"group-cards","value":"{\"enabled\":true}"}}""",
-            pushed("group-cards").single(),
-        )
         arrives("group-cards", """{"enabled":false}""")
-        settled { !ui.groupCards.value }
-        arrives("group-cards", """{"enabled":"yes"}""")
         delay(300)
-        assertFalse(ui.groupCards.value, "nonsense changes nothing")
-        assertEquals(1, pushed("group-cards").size, "applying is not an edit")
+        assertTrue(pushed("group-cards").isEmpty(), "${ship.pokesTo("settings")}")
     }
 
     @Test

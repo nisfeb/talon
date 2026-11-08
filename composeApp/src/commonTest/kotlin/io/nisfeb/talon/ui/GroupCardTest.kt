@@ -2,13 +2,12 @@ package io.nisfeb.talon.ui
 
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.ui.screens.HomeRow
-import io.nisfeb.talon.ui.screens.cardTarget
 import io.nisfeb.talon.ui.screens.newInLine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-/** A group's card: where its tap goes, and its line of news. */
+/** A group's card: its line of news. */
 class GroupCardTest {
     private fun child(whom: String, unread: Int = 0, author: String? = null, sent: Long = 0) = HomeRow.GroupChild(
         whom = whom,
@@ -16,19 +15,6 @@ class GroupCardTest {
         unread = unread,
         groupFlag = "~bus/garden",
     )
-
-    @Test
-    fun `the channel with the most unread is opened, before the newest words`() {
-        val children = listOf(child("a", unread = 2, author = "~nec", sent = 1), child("b", unread = 5, author = "~nec", sent = 2), child("c", author = "~wes", sent = 9))
-        assertEquals("b", cardTarget(children))
-    }
-
-    @Test
-    fun `with nothing unread the newest words are opened, and no channel opens nothing`() {
-        assertEquals("c", cardTarget(listOf(child("a", author = "~nec", sent = 1), child("c", author = "~wes", sent = 9), child("d"))))
-        assertEquals("d", cardTarget(listOf(child("d"))), "a channel with no messages yet still opens")
-        assertNull(cardTarget(emptyList()))
-    }
 
     @Test
     fun `the news names only the channels with something unread, in the card's order, with how many`() {

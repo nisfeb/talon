@@ -170,7 +170,6 @@ fun SettingsScreen(
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
     val chatBubbles by uiSettings.chatBubbles.collectAsState()
-    val groupCards by uiSettings.groupCards.collectAsState()
     val density by uiSettings.density.collectAsState()
     val homeFahrenheit by uiSettings.homeFahrenheit.collectAsState()
     val homeTwentyFourHour by uiSettings.homeTwentyFourHour.collectAsState()
@@ -821,30 +820,6 @@ fun SettingsScreen(
                     "Your bubbles, your contacts' and everyone else's take their colours from your theme, under Appearance.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                "Groups",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-            )
-            Text(
-                "A list puts each group's channels under it. Cards show each group with its newest " +
-                    "words and its channels, and a tap goes straight in.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = !groupCards,
-                    onClick = { uiSettings.setGroupCards(false) },
-                    label = { Text("List") },
-                )
-                FilterChip(
-                    selected = groupCards,
-                    onClick = { uiSettings.setGroupCards(true) },
-                    label = { Text("Cards") },
                 )
             }
             Spacer(Modifier.height(8.dp))

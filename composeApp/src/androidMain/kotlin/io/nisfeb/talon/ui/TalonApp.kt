@@ -3203,7 +3203,6 @@ fun TalonApp(
                     .collectAsState().value,
                 folderItemOrder = app.uiSettings.folderItemOrder
                     .collectAsState().value,
-                groupCards = app.uiSettings.groupCards.collectAsState().value,
                 kebabItems = RailItem.entries.toSet(),
                 revealGroupFlag = revealGroupRequest,
                 onRevealGroupHandled = { revealGroupRequest = null },

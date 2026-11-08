@@ -72,8 +72,6 @@ class HomeListTest {
         shown: androidx.compose.runtime.State<Boolean> = androidx.compose.runtime.mutableStateOf(true),
         /** Groups by their latest activity, as a phone set to Recent has them; else the saved order. */
         recent: Boolean = false,
-        /** Groups as cards rather than heads over their channels. */
-        cards: Boolean = false,
         drafts: InMemoryDraftStore = InMemoryDraftStore(),
         /** The shells' own lists for these tabs; null hides the tab. */
         threadsTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
@@ -111,7 +109,6 @@ class HomeListTest {
                             onOpenHome = { did += "Home" },
                             activeShip = "~zod", allShips = listOf("~zod"),
                             folderItemOrder = if (recent) io.nisfeb.talon.ui.FolderItemOrder.Recent else io.nisfeb.talon.ui.FolderItemOrder.Manual,
-                            groupCards = cards,
                             threadsTab = threadsTab,
                             partyLinesTab = partyLinesTab,
                         )
@@ -263,16 +260,15 @@ class HomeListTest {
     }
 
     @Test
-    fun `a group shows under Groups with its channels, and a channel opens`() = home(seed = {
+    fun `a group of one channel shows under Groups, and a tap on its card opens the channel`() = home(seed = {
         groups().upsertGroups(listOf(GroupEntity("~bus/garden", "The Garden", null)))
         groups().upsertChannelGroups(listOf(ChannelGroupEntity("chat/~bus/general", "~bus/garden", title = "general")))
         messages().upsert(msg("chat/~bus/general", "170141184506", "~bus", "in the garden", 1_000))
     }) {
         tap("Groups")
-        shows("The Garden")
-        shows("1 channel", substring = true)
-        tap("The Garden") // a tap opens the group on its channel list
-        tap("general")
+        shows("~bus: in the garden", substring = true)
+        assertTrue(onAllNodesWithText("channel", substring = true).fetchSemanticsNodes().isEmpty(), "one channel has nothing to unfold")
+        tap("The Garden")
         waitForIdle()
         assertEquals(listOf("chat/~bus/general"), opened)
     }
@@ -300,7 +296,8 @@ class HomeListTest {
         }
     }
 
-    // ---- Groups as cards (sneagan, 2026-11-06) ----
+    // ---- Groups as cards (sneagan, 2026-11-06), the only groups view
+    // since 2026-11-08 ----
 
     /** A group of five channels: one unread, one with our own newest words, two quiet. */
     private val garden: suspend AppDatabase.() -> Unit = {
@@ -316,7 +313,7 @@ class HomeListTest {
     }
 
     @Test
-    fun `as a card, a group shows its newest words with who said them, and a tap opens the channel most worth reading`() = home(seed = garden, cards = true) {
+    fun `as a card, a group shows its newest words with who said them, and a tap on them unfolds its channels`() = home(seed = garden) {
         tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
         shows("The Garden")
         shows("You: I will bring bread", substring = true)
@@ -325,9 +322,12 @@ class HomeListTest {
         // channel were disliked).
         shows("New in plans 2")
         assertTrue(onAllNodesWithText("photos", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet channel is not named")
-        tap("The Garden")
+        // sneagan, 2026-11-08: a tap anywhere on the card, not only on
+        // "N channels", unfolds them.
+        tap("You: I will bring bread", substring = true)
+        listOf("general", "plans", "photos", "recipes", "books").forEach { shows(it) }
         waitForIdle()
-        assertEquals(listOf("chat/~bus/plans"), opened, "the unread channel, before the newest words")
+        assertEquals(emptyList(), opened, "unfolding opens no chat")
     }
 
     /** Twelve channels with long names: more than one line of chips holds. */
@@ -339,29 +339,35 @@ class HomeListTest {
         messages().upsert(msg("chat/~bus/c1", "170141184501", "~nec", "hello", 1_000))
     }
 
-    // sneagan, 2026-11-06: the channels as chips were disliked. "N
-    // channels" opens the list's own channel rows, and opening them
-    // opens no chat.
+    // sneagan, 2026-11-06: the channels as chips were disliked. A tap on
+    // the card opens the list's own channel rows, and opening them opens
+    // no chat. Anywhere on it (2026-11-08): the name, or "N channels".
     @Test
-    fun `N channels opens a card's channel rows without opening anything, and a row opens its channel`() = home(seed = hall, cards = true) {
+    fun `a tap on a card unfolds its channel rows without opening anything, and a row opens its channel`() = home(seed = hall) {
         tap("Groups")
         shows("12 channels")
         fun rows() = onAllNodesWithText("a-long-channel-name-", substring = true).fetchSemanticsNodes()
         assertEquals(0, rows().size, "no channel names on the card")
         assertTrue(onAllNodesWithText("New in", substring = true).fetchSemanticsNodes().isEmpty(), "a quiet group's card has no line of news")
-        tap("12 channels")
+        fun said(label: String) = onAllNodes(androidx.compose.ui.test.SemanticsMatcher(label) {
+            val click = androidx.compose.ui.semantics.SemanticsActions.OnClick
+            click in it.config && it.config[click].label == label
+        }).fetchSemanticsNodes().size
+        assertEquals(1, said("Show channels"), "a screen reader hears what the tap does")
+        tap("The Hall")
         waitUntil(timeoutMillis = 5_000) { rows().size == 12 }
         assertEquals(emptyList(), opened, "showing the channels opens no chat")
         tap("a-long-channel-name-02")
         waitForIdle()
         assertEquals(listOf("chat/~bus/c2"), opened, "a row opens its own channel")
+        assertEquals(1, said("Hide channels"))
         tap("12 channels")
         waitUntil(timeoutMillis = 5_000) { rows().isEmpty() }
     }
 
     // sneagan, 2026-11-06: edge to edge, touching, a fine rule between.
     @Test
-    fun `cards run edge to edge and touch, with only a rule between`() = home(seed = { garden(); hall() }, cards = true) {
+    fun `cards run edge to edge and touch, with only a rule between`() = home(seed = { garden(); hall() }) {
         tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
         shows("The Garden")
         shows("The Hall")
@@ -376,7 +382,7 @@ class HomeListTest {
 
     // sneagan, 2026-11-06: the faces of recent speakers came off the cards.
     @Test
-    fun `a card shows no faces of who has been talking`() = home(seed = garden, cards = true) {
+    fun `a card shows no faces of who has been talking`() = home(seed = garden) {
         tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
         shows("You: I will bring bread", substring = true)
         val faces = androidx.compose.ui.test.SemanticsMatcher("a face pile") { n ->
@@ -391,7 +397,7 @@ class HomeListTest {
         garden()
         val id = folders().createFolder(io.nisfeb.talon.data.FolderEntity(name = "Friends"))
         folders().addMemberRaw(id, "~bus/garden", 0, io.nisfeb.talon.data.FolderMemberEntity.KIND_GROUP)
-    }, cards = true) {
+    }) {
         tap("Friends", substring = true)
         shows("You: I will bring bread", substring = true)
         assertTrue(onAllNodesWithText("· active", substring = true).fetchSemanticsNodes().isEmpty(), "a card, not the head over its channels")
@@ -400,7 +406,7 @@ class HomeListTest {
     @Test
     fun `a draft waiting in a channel is on the card`() {
         val drafts = InMemoryDraftStore().apply { save("chat/~bus/general", "bring the cake") }
-        home(seed = garden, cards = true, drafts = drafts) {
+        home(seed = garden, drafts = drafts) {
             tap("Groups", substring = true) // "Groups · 2": its unread ride the tab
             shows("Draft in general: bring the cake", substring = true)
         }

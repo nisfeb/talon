@@ -74,10 +74,9 @@ class DesktopUiSettingsTest {
     }
 
     @Test
-    fun `group cards persist and survive reload, and the list is the default`() {
-        assertFalse(newStore().groupCards.value)
-        newStore().setGroupCards(true)
-        assertTrue(newStore().groupCards.value)
+    fun `a file saved while groups had a List or Cards choice still loads`() {
+        file.writeText("""{"chatBubbles":false,"groupCards":true}""")
+        assertFalse(newStore().chatBubbles.value)
     }
 
     @Test
