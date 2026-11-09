@@ -553,6 +553,36 @@ class HomeListTest {
         shows("hey stranger", substring = true)
     }
 
+    // sneagan, 2026-11-09: the people starred, a tap from their chat.
+    @Test
+    fun `favourites sit atop the list as faces, by name, and a tap opens the chat`() = home(
+        ui = io.nisfeb.talon.ui.InMemoryUiSettings().apply {
+            setReach(io.nisfeb.talon.ui.ReachSettings(favourites = setOf("~wes", "~nec")))
+        },
+        seed = { messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "not a favourite", 1_000)) },
+    ) {
+        tap("DMs")
+        shows("~wes")
+        val nec = onNodeWithText("~nec").fetchSemanticsNode().boundsInRoot
+        val wes = onNodeWithText("~wes").fetchSemanticsNode().boundsInRoot
+        assertTrue(nec.left < wes.left && nec.top == wes.top, "one row, in name order: $nec $wes")
+        assertTrue(wes.bottom < onNodeWithText("not a favourite", substring = true).fetchSemanticsNode().boundsInRoot.top, "above the chats")
+        tap("~wes")
+        assertEquals(listOf("~wes"), opened)
+    }
+
+    @Test
+    fun `with nobody starred there is no favourites row`() = home(seed = {
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hello", 1_000))
+    }) {
+        tap("DMs")
+        shows("hello", substring = true)
+        assertTrue(onAllNodes(androidx.compose.ui.test.SemanticsMatcher("opens a chat from the row") {
+            val click = androidx.compose.ui.semantics.SemanticsActions.OnClick
+            click in it.config && it.config[click].label?.startsWith("Open chat with") == true
+        }).fetchSemanticsNodes().isEmpty())
+    }
+
     // With only people added, a stranger's request folds under one line,
     // closed; a favourite's stays in view (2026-11-08).
     @Test

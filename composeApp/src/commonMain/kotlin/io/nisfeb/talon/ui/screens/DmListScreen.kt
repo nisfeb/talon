@@ -1303,6 +1303,13 @@ fun DmListScreen(
             contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // The people starred as favourites, a tap from their chat
+            // (sneagan, 2026-11-09). Shown on every tab, as the requests are.
+            if (reach.favourites.isNotEmpty()) {
+                item(key = "__favourites", contentType = "favourites") {
+                    FavouritesRow(reach.favourites, contactMap, onOpenConversation)
+                }
+            }
             // Claims the triage noticed, above everything: each is one tap
             // to confirm or discard, and a kind confirmed enough times
             // stops asking.
@@ -2325,6 +2332,42 @@ private fun FolderCreatePopover(expanded: Boolean, onCreate: (String) -> Unit, o
  * first, guarded ([io.nisfeb.talon.ui.LocalGuardedContent]). The
  * stranger's picture is not fetched: a monogram.
  */
+/**
+ * The owner's favourites ([io.nisfeb.talon.ui.ReachSettings.favourites]),
+ * as faces in a row that scrolls sideways: a tap opens the chat. In
+ * name order, so the row does not shuffle as messages come.
+ */
+@Composable
+private fun FavouritesRow(favourites: Set<String>, contactMap: io.nisfeb.talon.ui.ContactMap, onOpen: (String) -> Unit) {
+    val people = remember(favourites, contactMap) {
+        favourites.map { it to contactMap.conversationLabel(it) }.sortedBy { it.second.lowercase() }
+    }
+    androidx.compose.foundation.lazy.LazyRow(
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items(items = people, key = { it.first }) { (ship, name) ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .width(72.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClickLabel = "Open chat with $name") { onOpen(ship) }
+                    .padding(vertical = 6.dp),
+            ) {
+                Avatar(label = name, url = contactMap.conversationAvatar(ship), size = 52.dp)
+                Text(
+                    name,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun DmRequestRow(
     ship: String,
