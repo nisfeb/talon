@@ -465,6 +465,9 @@ fun StoryRenderer(
                     startEpochMs = part.startEpochMs,
                     endEpochMs = part.endEpochMs,
                     title = part.title,
+                    reactions = reactions,
+                    ourPatp = ourPatp,
+                    onReply = onPollVote,
                 )
 
                 is StoryPart.PollWidget -> PollWidgetBlock(
@@ -910,6 +913,10 @@ private fun CalWidgetBlock(
     startEpochMs: Long,
     endEpochMs: Long,
     title: String,
+    reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
+    ourPatp: String? = null,
+    /** A reply tapped, as its reaction: the host toggles or replaces it, as a poll's vote. Null where nobody can react. */
+    onReply: ((emoji: String) -> Unit)? = null,
 ) {
     val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(startEpochMs, endEpochMs) }
     val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
@@ -923,6 +930,7 @@ private fun CalWidgetBlock(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     ) {
+        Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -993,6 +1001,33 @@ private fun CalWidgetBlock(
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Another calendar app…") }, onClick = { menuOpen = false; toAnotherApp() })
                 }
             }
+        }
+        if (onReply != null || reactions.any { eventReplyOf(it.emoji) != null }) EventReplies(reactions, ourPatp, onReply)
+        }
+    }
+}
+
+/**
+ * Going, Maybe or Can't go on an event card: each a reaction on the
+ * card's message, as a poll's votes are, so they sync with no new state
+ * and show to someone on Tlon's client as the reactions they are.
+ */
+@Composable
+private fun EventReplies(reactions: List<io.nisfeb.talon.data.ReactionEntity>, ourPatp: String?, onReply: ((emoji: String) -> Unit)?) {
+    val counts = remember(reactions) { eventReplyCounts(reactions.map { it.emoji }) }
+    val mine = remember(reactions, ourPatp) { ourPatp?.let { us -> eventReplyOf(reactions.firstOrNull { it.author == us }?.emoji) } }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        for (reply in EventReply.entries) {
+            val n = counts[reply] ?: 0
+            androidx.compose.material3.FilterChip(
+                selected = reply == mine,
+                enabled = onReply != null,
+                onClick = { onReply?.invoke(reply.emoji) },
+                label = { Text(if (n > 0) "${reply.emoji} ${reply.label} · $n" else "${reply.emoji} ${reply.label}") },
+            )
         }
     }
 }

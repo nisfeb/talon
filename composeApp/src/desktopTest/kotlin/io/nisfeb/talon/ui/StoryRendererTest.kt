@@ -4,6 +4,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -133,6 +135,21 @@ class StoryRendererTest {
             assertTrue(shows("📅 Standup"))
             onNodeWithText("Add").performClick()
             assertEquals(listOf("calendar $start $end Standup"), did)
+        }
+    }
+
+    // sneagan, 2026-11-09: replies on an event card, as reactions on its message.
+    @Test
+    fun `an event card takes Going, Maybe and Can't go, counts them, and marks our own`() {
+        val start = 1_790_000_000_000L
+        val end = start + 30 * 60_000
+        val said = listOf(ReactionEntity("~bus", "1", "~nec", "✅"), ReactionEntity("~bus", "1", "~wes", "✅"), ReactionEntity("~bus", "1", "~zod", "🤔"), ReactionEntity("~bus", "1", "~bus", "👍"))
+        render(parts("📅 Standup\n${formatCalSummary(start, end)}\n${encodeCalTag(start, end, "Standup")}"), reactions = said) {
+            assertTrue(shows("✅ Going · 2") && shows("🤔 Maybe · 1") && shows("❌ Can't go"), "a thumbs up is no reply")
+            onNodeWithText("🤔 Maybe · 1").assertIsSelected()
+            onNodeWithText("✅ Going · 2").assertIsNotSelected()
+            onNodeWithText("✅ Going · 2").performClick()
+            assertEquals(listOf("vote ✅"), did)
         }
     }
 

@@ -20,6 +20,21 @@ class PollVotesTest {
         assertEquals("1⃣", stored(0), "stored without its variation selector")
     }
 
+    // Going, Maybe and Can't go on an event card are reactions too.
+    @Test
+    fun `an event reply is read from its reaction as stored, and counted`() {
+        for (r in EventReply.entries) {
+            assertEquals(r, eventReplyOf(r.emoji))
+            assertEquals(r, eventReplyOf(ReactionPalette.normalize(r.emoji)))
+        }
+        assertEquals(null, eventReplyOf("👍"))
+        assertEquals(null, eventReplyOf(null))
+        assertEquals(
+            mapOf(EventReply.Going to 2, EventReply.No to 1),
+            eventReplyCounts(listOf("✅", "👍", ReactionPalette.normalize("✅"), "❌")),
+        )
+    }
+
     @Test
     fun `anything else is no vote`() {
         assertEquals(-1, voteIndex(null))
