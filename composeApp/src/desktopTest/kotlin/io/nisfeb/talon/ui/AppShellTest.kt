@@ -1447,6 +1447,41 @@ class AppShellTest {
         }
     }
 
+    // A reply is held in quiet hours as a message is, but a favourite's.
+    @Test
+    fun `in quiet hours a reply notifies only from a favourite`() {
+        val notified = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val notifier = object : io.nisfeb.talon.notify.Notifier {
+            override fun notify(title: String, body: String, key: String?) { notified += key ?: title }
+            override fun clear(key: String) {}
+        }
+        val now = io.nisfeb.talon.ui.localMinuteOfDay()
+        val ui = InMemoryUiSettings().apply {
+            setReach(io.nisfeb.talon.ui.ReachSettings(
+                favourites = setOf("~nec"),
+                quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = (now + 1380) % 1440, toMin = (now + 60) % 1440),
+            ))
+        }
+        app(ui = ui, notifier = notifier) { ship ->
+            home()
+            waitForIdle()
+            val t = System.currentTimeMillis()
+            fun essay(author: String, text: String, sent: Long) =
+                """{"content":[{"inline":["$text"]}],"author":"$author","sent":$sent,"kind":"/chat","blob":null,"meta":null}"""
+            fun fact(whom: String, id: String, response: String) = runBlocking {
+                ship.emit("""{"id":1,"response":"diff","json":{"whom":"$whom","id":"$id","response":$response}}""")
+            }
+            // Ours in each DM, then a reply to each: replies to us count.
+            fact("~bus", "~zod/170141184506", """{"add":{"essay":${essay("~zod", "question", t - 1_000)},"time":null}}""")
+            fact("~nec", "~zod/170141184507", """{"add":{"essay":${essay("~zod", "question", t - 1_000)},"time":null}}""")
+            fact("~bus", "~zod/170141184506", """{"reply":{"id":"~bus/170.141.184.510","meta":null,"delta":{"add":{"reply-essay":${essay("~bus", "a stranger's answer", t)},"time":null}}}}""")
+            fact("~nec", "~zod/170141184507", """{"reply":{"id":"~nec/170.141.184.511","meta":null,"delta":{"add":{"reply-essay":${essay("~nec", "a favourite's answer", t)},"time":null}}}}""")
+            waitUntil(timeoutMillis = 20_000) { "~nec" in notified }
+            // Decided in order: ~bus's reply came first.
+            assertTrue("~bus" !in notified, notified.toString())
+        }
+    }
+
     // A chat opened from a tab that shows one beside it stays on that tab.
     @Test
     fun `a chat asked for from Bookmarks opens beside the bookmarks`() {

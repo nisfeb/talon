@@ -506,6 +506,8 @@ class TalonApplication : Application() {
                     "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
                     title, "invited you to a group$from", "invite:${invite.flag}",
                 )
+                // Quiet hours hold an invite too, but a favourite's; it still waits under Invites.
+                if (!io.nisfeb.talon.ui.messageReaches(reach(), invite.inviter.orEmpty(), io.nisfeb.talon.ui.localMinuteOfDay())) return@launch
                 Notifications.showMessage(
                     context = this@TalonApplication, whom = "invite:${invite.flag}", forShip = ship, postId = null, parentId = null,
                     title = title, body = "invited you to a group$from", sentMs = System.currentTimeMillis(),

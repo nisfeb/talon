@@ -1596,7 +1596,10 @@ fun App(
                 repo.groupInviteListener = { invite ->
                     val name = invite.title ?: invite.flag
                     val from = invite.inviter?.let { " from " + callContacts.displayName(it) } ?: ""
-                    runCatching { notifier.notify(name, "invited you to a group$from", "invite:${invite.flag}") }
+                    // Quiet hours hold an invite too, but a favourite's; it still waits under Invites.
+                    if (io.nisfeb.talon.ui.messageReaches(uiSettings.reach.value, invite.inviter.orEmpty(), io.nisfeb.talon.ui.localMinuteOfDay())) {
+                        runCatching { notifier.notify(name, "invited you to a group$from", "invite:${invite.flag}") }
+                    }
                     noticeRepo.record(
                         "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
                         name, "invited you to a group$from", "invite:${invite.flag}",
@@ -1692,7 +1695,11 @@ fun App(
             val replyScope = rememberCoroutineScope()
             DisposableEffect(repo, notifier, loggedInShip) {
                 repo.messageListener = { m, _, heard ->
-                    if (m.parentId != null && !heard) replyScope.launch {
+                    // Quiet hours hold a reply as they do a message; a request's waits for Accept.
+                    if (m.parentId != null && !heard &&
+                        io.nisfeb.talon.ui.messageReaches(uiSettings.reach.value, m.author, io.nisfeb.talon.ui.localMinuteOfDay())
+                    ) replyScope.launch {
+                        if (db.dmInvites().has(m.whom)) return@launch
                         val level = db.notifyLevelOf(m.whom)
                         io.nisfeb.talon.notify.replyNotification(
                             reply = m,
