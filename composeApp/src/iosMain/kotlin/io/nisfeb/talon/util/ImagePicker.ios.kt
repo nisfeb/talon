@@ -96,10 +96,11 @@ private fun topViewController(): UIViewController? {
  * a busy screen is tried again a little later ([presentStep]) rather
  * than given up on at once: the gallery "didn't consistently open".
  * And a presentation is counted as dropped only once it has had time
- * to show ([PRESENT_CONFIRM_MS]); counted after one turn of the main
- * queue, a picker that opened a moment later took the photo picked in
- * it nowhere: "selecting an image doesn't attach it". A caller that
- * stopped waiting ([wanted] false) is neither retried for nor shown one.
+ * to show ([watch]); counted too soon, a picker that opened a moment
+ * later took the photo picked in it nowhere: "selecting an image doesn't
+ * attach it". One that opens after all the same is closed at once
+ * ([closeOnArrival]). A caller that stopped waiting ([wanted] false) is
+ * neither retried for nor shown one.
  */
 private fun present(picker: UIViewController, wanted: () -> Boolean, attempt: Int = 0, onDropped: () -> Unit) {
     if (attempt == 0) activeWindow()?.endEditing(true)
@@ -115,13 +116,34 @@ private fun present(picker: UIViewController, wanted: () -> Boolean, attempt: In
             PresentStep.GIVE_UP -> onDropped()
             PresentStep.PRESENT -> {
                 var shown = false
+                var droppedAlready = false
                 // In the app's light or dark, not the phone's (IosAppearance).
                 picker.followAppTheme()
-                root!!.presentViewController(picker, animated = true, completion = { shown = true })
-                after(PRESENT_CONFIRM_MS) {
-                    if (!shown && picker.presentingViewController == null) onDropped()
-                }
+                root!!.presentViewController(picker, animated = true, completion = {
+                    shown = true
+                    if (closeOnArrival(droppedAlready, wanted())) picker.dismissViewControllerAnimated(false, completion = null)
+                })
+                watch(picker, { shown }, wanted, 0L) { droppedAlready = true; onDropped() }
             }
+        }
+    }
+}
+
+/**
+ * Looks every [PRESENT_WATCH_MS] until [picker] is up, or [PRESENT_CONFIRM_MS]
+ * have passed ([presentWatch]). One look at 1.5 s called a slow photo
+ * library dropped (about four seconds to come up on iOS 26.6): the user
+ * was told it did not open, and then it did, with nothing waiting for
+ * the photo picked in it.
+ */
+private fun watch(picker: UIViewController, shown: () -> Boolean, wanted: () -> Boolean, waitedMs: Long, onDropped: () -> Unit) {
+    after(PRESENT_WATCH_MS) {
+        if (!wanted()) return@after
+        val waited = waitedMs + PRESENT_WATCH_MS
+        when (presentWatch(up = shown() || picker.presentingViewController != null, waitedMs = waited)) {
+            PresentWatch.UP -> Unit
+            PresentWatch.WAIT -> watch(picker, shown, wanted, waited, onDropped)
+            PresentWatch.DROPPED -> onDropped()
         }
     }
 }
