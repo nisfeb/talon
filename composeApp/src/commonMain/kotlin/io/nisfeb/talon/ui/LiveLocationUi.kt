@@ -69,6 +69,7 @@ fun LiveLocationProfileRows(ship: String, who: String) {
     val out = shares?.outTo(ship)
     if (out != null) OutboundRow(out)
     else if (live.canShare) TextButton(onClick = { asking = true }) { Text("Share my location") }
+    ShareProblem(live.shareProblems.collectAsState().value[ship])
     if (asking) ShareLocationDialog(listOf(ship), "Share where you are with $who", exactFirst = true, onDone = { asking = false })
 }
 
@@ -92,13 +93,15 @@ fun GroupLiveLocationRows(members: List<String>, us: String) {
             Text("You're sharing where you are with ${sharedWith.size} of its members", style = MaterialTheme.typography.bodyMedium)
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
-        TextButton(onClick = {
+        TextButton(enabled = shares?.out.orEmpty().none { it.sending && it.ship in others }, onClick = {
             problem = null
             scope.launch { live.stop(sharedWith).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
     } else if (live.canShare && others.isNotEmpty() && others.size <= GROUP_SHARE_MAX) {
         TextButton(onClick = { asking = true }) { Text("Share my location with the group") }
     }
+    val problems by live.shareProblems.collectAsState()
+    ShareProblem(others.firstNotNullOfOrNull { problems[it] })
     if (asking) ShareLocationDialog(others, "Share where you are with the group's ${others.size} members", exactFirst = false, onDone = { asking = false })
 }
 
@@ -114,6 +117,12 @@ fun SharingWithList() {
     if (out.isEmpty()) return
     Text("Sharing where you are with", style = MaterialTheme.typography.labelLarge)
     out.forEach { s -> OutboundRow(s, label = shipHandle(s.ship)) }
+}
+
+/** Why a share the dialog handed over did not start: it closed on the tap, so the reason shows where Share is. */
+@Composable
+private fun ShareProblem(e: Throwable?) {
+    if (e != null) Text(shareProblem("share", e), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
 }
 
 /** A ship this orrery does not know wants to share where they are: nothing of theirs shows until accepted. */
@@ -212,7 +221,8 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
             Text(outboundDetail(s), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
-        TextButton(onClick = {
+        // Not while the ship has yet to take it: a stop could land first, and the share after.
+        TextButton(enabled = !s.sending, onClick = {
             problem = null
             scope.launch { live.stop(listOf(s.ship)).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
@@ -256,6 +266,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     "Your ship sends where you are each minute while this runs. Stop it any time.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (busy) Text("Waiting for location access…", style = MaterialTheme.typography.bodySmall)
                 problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -270,9 +281,9 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         busy = false
                         return@launch
                     }
+                    // The ship's answer lands where the share shows: no waiting on it here.
                     live.share(ships, length, exact)
-                        .onSuccess { onDone() }
-                        .onFailure { problem = shareProblem("share", it); busy = false }
+                    onDone()
                 }
             }) { Text("Share") }
         },
@@ -288,6 +299,7 @@ internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
 ).joinToString(" · ")
 
 internal fun outboundDetail(s: OutShare): String = listOfNotNull(
+    if (s.sending) "Sending to your ship" else null,
     s.untilMs?.let { "until ${formatClock(it)}" } ?: "until you're home",
     if (s.exact) "exact" else "area only",
 ).joinToString(" · ")

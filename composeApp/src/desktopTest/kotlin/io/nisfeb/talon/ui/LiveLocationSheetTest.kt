@@ -8,6 +8,8 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -226,8 +228,8 @@ class LiveLocationSheetTest {
 
     @Test
     fun `a refusal says the ship's reason, and nothing is shown as shared`() = card(ship().apply {
-        answerApiStatus = { method, path, _ ->
-            if (method == "POST" && path.endsWith("/location/share")) {
+        answerApiStatus = { method, path, body ->
+            if (method == "POST" && path.endsWith("/location/share") && "\"home\":true" in body) {
                 HttpStatusCode.BadRequest to """{"error": "home: this ship does not know where home is; give hours too"}"""
             } else null
         }
@@ -237,9 +239,37 @@ class LiveLocationSheetTest {
         onNodeWithText("Until I'm home").performClick()
         onNodeWithText("Share").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't share: home: this ship does not know where home is; give hours too") }
-        assertTrue(shows("Share where you are with ~bus"), "the choices stay, to pick hours instead")
+        // The dialog closed on the tap: the reason is on the card, by Share, to pick hours instead.
+        assertTrue(!shows("Share where you are with ~bus"))
+        assertTrue(shows("Share my location"), "offered again")
         assertTrue(!shows("You're sharing where you are"))
         assertTrue(live.isEmpty() || live.last() == null, "no fast sending for a share the ship refused")
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("For 8 hours") }
+        onNodeWithText("For 8 hours").performClick()
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are") && !shows("Sending to your ship") }
+        assertTrue(!shows("Couldn't share"), "asked again, the old reason goes")
+    }
+
+    // sneagan, 2026-11-08: "tapping share doesn't dismiss the modal". It
+    // waited for the ship's answer, and then the shares read back.
+    @Test
+    fun `Share closes the choices on the tap, and the card says it is being sent until the ship takes it`() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        card(ship(onShare = { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) })) { ship, _, _ ->
+            tap("Share my location")
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 2_000) { !shows("Share where you are with ~bus") }
+            waitUntil(timeoutMillis = 2_000) { shows("Sending to your ship") }
+            assertTrue(shows("You're sharing where you are"), "shown at once")
+            onNodeWithText("Stop").assertIsNotEnabled()
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /apps/orrery/api/location/share") } }
+            gate.countDown()
+            waitUntil(timeoutMillis = 5_000) { !shows("Sending to your ship") }
+            assertTrue(shows("You're sharing where you are"))
+            onNodeWithText("Stop").assertIsEnabled()
+        }
     }
 
     @Test

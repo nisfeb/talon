@@ -34,7 +34,14 @@ data class LocationShares(
     fun asking(ship: String): Boolean = ship in asks
 }
 
-data class OutShare(val ship: String, val untilMs: Long?, val home: Boolean, val exact: Boolean)
+data class OutShare(
+    val ship: String,
+    val untilMs: Long?,
+    val home: Boolean,
+    val exact: Boolean,
+    /** Asked for here and not yet answered by the ship: shown at once, taken back if refused. */
+    val sending: Boolean = false,
+)
 
 data class InShare(
     val ship: String,
@@ -143,10 +150,15 @@ interface LiveLocation {
 
     /**
      * Start sharing with each of [ships], one grant each (a group's members),
-     * or replace the share there. Runs to the end on the repo's scope; the
-     * first refusal stops it, and the shares made before it stand.
+     * or replace the share there. Shown in [shares] at once, as sending, so
+     * the asking screen can close on the tap; runs to the end on the repo's
+     * scope. The first refusal stops it, lands in [shareProblems], and the
+     * shares made before it stand.
      */
-    suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit>
+    fun share(ships: List<String>, length: ShareLength, exact: Boolean): kotlinx.coroutines.Job
+
+    /** Why the last share with a ship failed, by ship; cleared when it is asked for again. */
+    val shareProblems: StateFlow<Map<String, Throwable>>
 
     /** Stop sharing with each of [ships]. Runs to the end on the repo's scope. */
     suspend fun stop(ships: List<String>): Result<Unit>

@@ -540,6 +540,7 @@ class OrreryRepo(
     // ─── live location (orrery 88) ───
 
     private val _shares = MutableStateFlow<LocationShares?>(null)
+    private val _shareProblems = MutableStateFlow<Map<String, Throwable>>(emptyMap())
 
     /** Live location with other ships, as every screen reads it ([LocalLiveLocation]). */
     val live: LiveLocation = object : LiveLocation {
@@ -550,25 +551,38 @@ class OrreryRepo(
             runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }
         }
 
-        // Said here at once, so every screen shows it; then read back from the
-        // ship, which a failed read leaves as said.
-        override suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit> = scope.async {
-            runCatching {
-                try {
-                    for (ship in ships) {
-                        attached().shareLocation(ship, length, exact)
-                        val until = length.hours?.let { now() + it * 3_600_000L }
-                        _shares.update { s ->
-                            val was = s ?: LocationShares(emptyList(), emptyList())
-                            was.copy(out = was.out.filter { it.ship != ship } + OutShare(ship, until, length.hours == null, exact))
-                        }
-                    }
-                } finally {
-                    location.live(_shares.value?.let { sendFastUntil(it, now()) })
-                    refresh()
-                }
+        override val shareProblems: StateFlow<Map<String, Throwable>> = _shareProblems.asStateFlow()
+
+        // Shown at once as sending, so every screen has it and the dialog
+        // closes on the tap (sneagan, 2026-11-08: it stayed open while the
+        // ship answered); each confirmed as the ship takes it, then read
+        // back, which a failed read leaves as said.
+        override fun share(ships: List<String>, length: ShareLength, exact: Boolean): Job = scope.launch {
+            val until = length.hours?.let { now() + it * 3_600_000L }
+            _shareProblems.update { it - ships.toSet() }
+            _shares.update { s ->
+                val was = s ?: LocationShares(emptyList(), emptyList())
+                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true) })
             }
-        }.await()
+            try {
+                for ((i, ship) in ships.withIndex()) {
+                    try {
+                        attached().shareLocation(ship, length, exact)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        val unsent = ships.drop(i).toSet()
+                        _shares.update { s -> s?.copy(out = s.out.filterNot { it.sending && it.ship in unsent }) }
+                        _shareProblems.update { it + (ship to e) }
+                        break
+                    }
+                    _shares.update { s -> s?.copy(out = s.out.map { if (it.ship == ship) it.copy(sending = false) else it }) }
+                }
+            } finally {
+                location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                refresh()
+            }
+        }
 
         override suspend fun stop(ships: List<String>): Result<Unit> = scope.async {
             runCatching {
@@ -599,7 +613,8 @@ class OrreryRepo(
 
     private suspend fun readShares() {
         val s = locationShares(attached().locationDoc(), now())
-        _shares.value = s
+        // A share still being sent is kept: the ship has not got it yet.
+        _shares.update { was -> s.copy(out = s.out + was?.out.orEmpty().filter { it.sending && s.outTo(it.ship) == null }) }
         location.live(sendFastUntil(s, now()))
     }
 

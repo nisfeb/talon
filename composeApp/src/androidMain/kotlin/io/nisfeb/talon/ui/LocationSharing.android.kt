@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import io.nisfeb.talon.orrery.LocationWatch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
 
 /** The pipe's side of [LocationWatch]: stopping and holding it from outside the screen. */
@@ -57,8 +58,12 @@ actual fun rememberLocationSharing(): LocationSharing? {
                     !ask(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                 ) return false
                 LocationWatch.set(ctx, true)
-                // Orrery hears where the owner is now, not only after the first move.
-                fetchLastKnownLocation(ctx)?.let { LocationWatch.send(ctx, it) }
+                // Orrery hears where the owner is now, not only after the first
+                // move. Off the tap: a phone with no recent fix waits up to 20 s
+                // for one, and the share dialog waited with it.
+                (ctx as? io.nisfeb.talon.TalonApplication)?.appScope?.launch {
+                    fetchLastKnownLocation(ctx)?.let { LocationWatch.send(ctx, it) }
+                }
                 return true
             }
 
