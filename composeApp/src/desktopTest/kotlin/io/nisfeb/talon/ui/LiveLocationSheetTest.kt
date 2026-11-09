@@ -81,7 +81,8 @@ class LiveLocationSheetTest {
                     val hours = asked["hours"]?.jsonPrimitive?.content?.toLong()
                     val until = hours?.let { "\"${iso(now + it * 3_600_000)}\"" } ?: "null"
                     val exact = asked["precision"]?.jsonPrimitive?.content == "exact"
-                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}"}"""
+                    val by = asked["by"]?.jsonPrimitive?.content?.let { "\"$it\"" } ?: "null"
+                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}", "by": $by}"""
                     """{"ship": "$to"}"""
                 }
                 // Orrery 137: accept moves the ask's fix in, decline drops it.
@@ -250,6 +251,33 @@ class LiveLocationSheetTest {
         onNodeWithText("Share").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are") && !shows("Sending to your ship") }
         assertTrue(!shows("Couldn't share"), "asked again, the old reason goes")
+    }
+
+    // A check-in (orrery 142): until home, by a time, or the ship tells them.
+    @Test
+    fun `Check in sends a time to be home by, and the card says it`() = card { ship, _, _ ->
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        assertTrue(!shows("Check in"), "only for until home")
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("even if your phone is off") && shows("Home by") }
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+        val body = ship.api.single { "/location/share" in it }
+        val by = Regex(""""by":"([^"]+)"""").find(body)?.groupValues?.get(1)
+        assertTrue(body.startsWith("""POST /apps/orrery/api/location/share {"ship":"~bus","home":true,"precision":"exact","by":"""), body)
+        val byMs = kotlin.time.Instant.parse(by!!).toEpochMilliseconds()
+        assertTrue(byMs > now && byMs < now + 26 * 3_600_000, "the next one: $by")
+        waitUntil(timeoutMillis = 5_000) { shows("check in by") }
+    }
+
+    @Test
+    fun `theirs, not home by their time, says so`() {
+        inbound = """{"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true, "late": "${iso(now - 60_000)}"}}"""
+        card { _, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Not home yet, meant to be by") }
+        }
     }
 
     // sneagan, 2026-11-08: "tapping share doesn't dismiss the modal". It

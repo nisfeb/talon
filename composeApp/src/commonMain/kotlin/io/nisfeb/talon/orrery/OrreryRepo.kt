@@ -557,17 +557,17 @@ class OrreryRepo(
         // closes on the tap (sneagan, 2026-11-08: it stayed open while the
         // ship answered); each confirmed as the ship takes it, then read
         // back, which a failed read leaves as said.
-        override fun share(ships: List<String>, length: ShareLength, exact: Boolean): Job = scope.launch {
+        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?): Job = scope.launch {
             val until = length.hours?.let { now() + it * 3_600_000L }
             _shareProblems.update { it - ships.toSet() }
             _shares.update { s ->
                 val was = s ?: LocationShares(emptyList(), emptyList())
-                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true) })
+                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true, byMs = byMs.takeIf { length.hours == null }) })
             }
             try {
                 for ((i, ship) in ships.withIndex()) {
                     try {
-                        attached().shareLocation(ship, length, exact)
+                        attached().shareLocation(ship, length, exact, byMs)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Throwable) {

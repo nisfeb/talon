@@ -170,7 +170,7 @@ private fun InboundRow(s: InShare, who: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("$who is sharing where they are", style = MaterialTheme.typography.bodyMedium)
-            Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (s.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         // A map in Talon follows each fix; elsewhere the point goes to the maps app.
         if (isLiveMapSupported) TextButton(onClick = { mapOpen = true }) { Text("Map") }
@@ -202,7 +202,7 @@ private fun LiveMapDialog(ship: String, who: String, onDone: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LiveMapView(s.lat, s.lon, s.accuracyM, Modifier.fillMaxWidth().height(360.dp))
-                Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (s.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
@@ -236,6 +236,9 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
     val scope = rememberCoroutineScope()
     var length by remember { mutableStateOf(ShareLength.Hour) }
     var exact by remember { mutableStateOf(exactFirst) }
+    // A check-in (orrery 142): home by a time, or they are told, by the ship.
+    var checkIn by remember { mutableStateOf(false) }
+    var byMin by remember { mutableStateOf(((localMinuteOfDay() / 15 + 1) * 15 + 60) % (24 * 60)) }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     AlertDialog(
@@ -251,6 +254,20 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         RadioButton(selected = length == l, onClick = null)
                         Text(l.label, Modifier.padding(start = 8.dp))
                     }
+                }
+                if (length == ShareLength.Home) {
+                    Row(Modifier.fillMaxWidth().clickable { checkIn = !checkIn }, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Check in")
+                            Text(
+                                if (checkIn) "If you're not home by then, ${if (ships.size == 1) "they're" else "each is"} told, even if your phone is off."
+                                else "Tell them if you're not home by a time.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = checkIn, onCheckedChange = { checkIn = it })
+                    }
+                    if (checkIn) ClockTimeButton(byMin, { byMin = it }, label = "Home by")
                 }
                 Row(Modifier.fillMaxWidth().clickable { exact = !exact }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -282,7 +299,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         return@launch
                     }
                     // The ship's answer lands where the share shows: no waiting on it here.
-                    live.share(ships, length, exact)
+                    live.share(ships, length, exact, byMs = if (checkIn && length == ShareLength.Home) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null)
                     onDone()
                 }
             }) { Text("Share") }
@@ -293,6 +310,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
 
 /** "Updated 3m ago · until 2:30 PM", and "area only" for a share cut to a kilometre. */
 internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
+    s.lateByMs?.let { "Not home yet, meant to be by ${formatClock(it)}" },
     s.atMs?.let { "Updated ${shortRelativeTime(it, nowMs)}" },
     s.untilMs?.let { "until ${formatClock(it)}" } ?: if (s.home) "until they're home" else null,
     if ((s.accuracyM ?: 0.0) >= 1000.0) "area only" else null,
@@ -301,6 +319,7 @@ internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
 internal fun outboundDetail(s: OutShare): String = listOfNotNull(
     if (s.sending) "Sending to your ship" else null,
     s.untilMs?.let { "until ${formatClock(it)}" } ?: "until you're home",
+    s.byMs?.let { "check in by ${formatClock(it)}" },
     if (s.exact) "exact" else "area only",
 ).joinToString(" · ")
 

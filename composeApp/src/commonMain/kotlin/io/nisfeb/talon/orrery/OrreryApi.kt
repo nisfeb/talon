@@ -617,8 +617,8 @@ class OrreryApi(
     }
 
     /** Share where the owner is with [ship]: the owner's only. See [shareBody] for the wire. */
-    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean) {
-        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact))
+    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null) {
+        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact, byMs))
     }
 
     /** Take a share from a ship orrery did not know (orrery 137): it makes them a person here. */
