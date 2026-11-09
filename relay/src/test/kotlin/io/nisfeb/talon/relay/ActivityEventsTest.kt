@@ -118,22 +118,6 @@ class ActivityEventsTest {
         assertEquals(true, reachAllows(null, "~bus", night), "no setting, no hold")
     }
 
-    // With "Only people you've added", a stranger's message while their
-    // request waited still pushed as an ordinary message (review of #99).
-    @Test
-    fun `only added people - a stranger's waiting request pushes nothing, a favourite's does`() {
-        fun reach(who: String) = reachOf(obj("""{"desk":{"ui-prefs":{"reach":"{\"whoCanMessage\":\"$who\",\"favourites\":[\"~nec\"],\"quiet\":{\"on\":false}}"}}}"""))
-        val added = reach("Added")
-        assertEquals(true, added?.added)
-        assertEquals(false, reach("Anyone")?.added)
-        val strangers = setOf("~bus", "~nec")
-        assertEquals(true, strangerHeld(added, "~bus", strangers))
-        assertEquals(false, strangerHeld(added, "~nec", strangers), "a favourite")
-        assertEquals(false, strangerHeld(added, "~zod", strangers), "no request waiting, or in the book")
-        assertEquals(false, strangerHeld(reach("Anyone"), "~bus", strangers), "anyone may: the message is the request's alert")
-        assertEquals(false, strangerHeld(null, "~bus", strangers), "no setting, no hold")
-    }
-
     // The group a channel post or reply is in, for a group's level: the
     // event carries it, and so does its source.
     @Test

@@ -50,9 +50,6 @@ import java.util.concurrent.TimeUnit
  */
 private const val NOTIFY_PREFS_TTL_MS = 5 * 60_000L
 
-// Short: a request accepted on the phone should push its next message.
-private const val STRANGERS_TTL_MS = 30_000L
-
 class ShipConnection(
     private val shipRowId: Long,
     private val shipUrl: String,
@@ -337,13 +334,6 @@ class ShipConnection(
             db.setLastEventId(shipRowId, deviceId, postId)
             return
         }
-        // "Only people you've added": a stranger's message while their
-        // request waits pushes nothing, as it alerts nothing on the device.
-        if (reach?.added == true && whom.startsWith("~") && strangerHeld(reach, whom, strangers())) {
-            log.info("a stranger's request whom=$whom post=$postId")
-            db.setLastEventId(shipRowId, deviceId, postId)
-            return
-        }
 
         val dev = db.deviceFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
@@ -427,36 +417,6 @@ class ShipConnection(
 
     /** Who can reach the owner, from the same scry as [notifyPrefs]; read as levels are. */
     @Volatile private var reach: RelayReach? = null
-
-    /** Ships with a DM request waiting that are not in the contact book; read as levels are. */
-    @Volatile private var pendingStrangers: Set<String> = emptySet()
-    @Volatile private var strangersAtMs = 0L
-
-    /**
-     * Read only for an owner who lets only added people message them,
-     * and only when a DM comes. A read that fails holds nothing: better
-     * a push than a contact's message lost.
-     */
-    private fun strangers(): Set<String> {
-        val now = System.currentTimeMillis()
-        if (now - strangersAtMs > STRANGERS_TTL_MS) {
-            strangersAtMs = now
-            pendingStrangers = runCatching {
-                val pending = scryJson("chat/dm/invited") as? kotlinx.serialization.json.JsonArray ?: return@runCatching emptySet()
-                val ships = pending.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
-                if (ships.isEmpty()) ships else ships - (scryJson("contacts/v1/book") as? JsonObject)?.keys.orEmpty()
-            }.onFailure { log.warn("dm request scry failed: ${it.message}") }.getOrDefault(emptySet())
-        }
-        return pendingStrangers
-    }
-
-    private fun scryJson(path: String): JsonElement {
-        val req = Request.Builder().url("${shipUrl.trimEnd('/')}/~/scry/$path.json").header("Cookie", cookie).get().build()
-        http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) error("HTTP ${resp.code}")
-            return Json.parseToJsonElement(resp.body.string())
-        }
-    }
 
     private fun notifyLevels(): Map<String, String> {
         val now = System.currentTimeMillis()
@@ -629,27 +589,9 @@ internal fun notifyLevels(settings: JsonObject): Map<String, String> {
 /**
  * Who can reach the owner: Talon's ReachSettings, the "reach" entry of
  * %settings' talon ui-prefs, a string of JSON as %settings keeps it
- * (2026-11-08). Only what a push needs: the favourites, quiet hours and
- * whether only added people may message.
+ * (2026-11-08). Only what a push needs: the favourites and quiet hours.
  */
-internal data class RelayReach(
-    val favourites: Set<String>,
-    val quietOn: Boolean,
-    val fromMin: Int,
-    val toMin: Int,
-    val zone: String,
-    /** "Only people you've added" may message: Talon's WhoCanMessage.Added. */
-    val added: Boolean = false,
-)
-
-/**
- * Whether a DM in [whom] is held: the owner lets only added people
- * message them, and [whom] is one of [strangers], whose request waits
- * and who is not in the contact book. A favourite is never held. As
- * Talon's requestReaches decides on the device.
- */
-internal fun strangerHeld(r: RelayReach?, whom: String, strangers: Set<String>): Boolean =
-    r != null && r.added && whom in strangers && whom !in r.favourites
+internal data class RelayReach(val favourites: Set<String>, val quietOn: Boolean, val fromMin: Int, val toMin: Int, val zone: String)
 
 internal fun reachOf(settings: JsonObject): RelayReach? {
     val desk = settings["desk"] as? JsonObject ?: settings
@@ -665,7 +607,6 @@ internal fun reachOf(settings: JsonObject): RelayReach? {
         fromMin = int("fromMin", 22 * 60),
         toMin = int("toMin", 7 * 60),
         zone = (quiet?.get("zone") as? JsonPrimitive)?.contentOrNull.orEmpty(),
-        added = (obj["whoCanMessage"] as? JsonPrimitive)?.contentOrNull == "Added",
     )
 }
 

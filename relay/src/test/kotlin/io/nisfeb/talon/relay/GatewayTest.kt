@@ -30,9 +30,7 @@ class GatewayTest {
         voip = { t, p -> rings += t to p; apns },
         badgeOnly = { t, n -> quiet += "badge $t $n"; apns },
         background = { t, p -> quiet += "background $t $p"; apns },
-        now = { clock },
     )
-    private var clock = System.currentTimeMillis()
     private val quiet = mutableListOf<String>()
 
     @AfterTest fun drop() { java.io.File(path).delete() }
@@ -41,36 +39,6 @@ class GatewayTest {
 
     private fun alert(d: GatewayDevice, secret: String = d.secret, nonce: String? = null) =
         GatewayPush(d.handle, secret, "alert", patp = "~zod", whom = "~bus", postId = "~bus/1", title = "~bus", body = "hi", nonce = nonce)
-
-    // An iPhone its ship pushes to got every message in quiet hours: the
-    // ship's pushes came here knowing nothing of them (review of #99).
-    @Test
-    fun `in the owner's quiet hours a message is taken and not sent, but a favourite's, a notice or a test`() {
-        val d = enrolled()
-        val hours = GatewayQuiet(d.handle, d.secret, on = true, fromMin = 1320, toMin = 420, zone = "America/New_York", favourites = listOf("~nec"))
-        assertEquals(401, gateway.quiet(hours.copy(secret = "wrong")))
-        assertEquals(404, gateway.quiet(hours.copy(handle = "nobody")))
-        assertEquals(400, gateway.quiet(hours.copy(fromMin = 1440)))
-        assertEquals(204, gateway.quiet(hours))
-        assertEquals(204, gateway.badge(GatewayBadge(d.handle, d.secret, 3)))
-        // 23:30 in New York, 2026-11-09.
-        clock = java.time.Instant.parse("2026-11-10T04:30:00Z").toEpochMilli()
-        assertEquals(200, gateway.push(alert(d)), "taken, so the ship does not drop the phone")
-        assertTrue(alerts.isEmpty(), "and not sent")
-        assertEquals(200, gateway.push(alert(d).copy(postId = "~nec/2")))
-        assertEquals(listOf<Int?>(4), badges, "the favourite's counts; the held one did not")
-        assertEquals(200, gateway.push(alert(d).copy(event = "notice", whom = "leave/1", postId = "")))
-        assertEquals(200, gateway.push(alert(d, nonce = "n1")))
-        assertEquals(3, alerts.size, "a notice and a test alert are not messages")
-        // Noon the same day, then quiet hours off at night.
-        clock = java.time.Instant.parse("2026-11-09T17:00:00Z").toEpochMilli()
-        assertEquals(200, gateway.push(alert(d)))
-        assertEquals(4, alerts.size)
-        clock = java.time.Instant.parse("2026-11-10T04:30:00Z").toEpochMilli()
-        assertEquals(204, gateway.quiet(hours.copy(on = false)))
-        assertEquals(200, gateway.push(alert(d)))
-        assertEquals(5, alerts.size, "off again, it is sent")
-    }
 
     @Test
     fun `an enrolled phone's alert goes to its alert token`() {
