@@ -137,7 +137,7 @@ class SettingsRelayTest {
     @Test
     fun `the relay's address is saved as typed`() = panel {
         onNode(hasSetTextAction() and hasText("Endpoint")).performScrollTo().performTextReplacement("https://relay.example/v2")
-        onNodeWithText("Save endpoint").performClick()
+        onNodeWithText("Save endpoint").performScrollTo().performClick()
         assertEquals("https://relay.example/v2", relaySettings.endpoint.value)
     }
 
@@ -151,10 +151,12 @@ class SettingsRelayTest {
         relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
         panel(shipPoke = { pokes += it.toString() }) {
             assertTrue(shows("Notifications come from ~zod"))
-            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
-            val relay = onNodeWithText("Background delivery").fetchSemanticsNode().boundsInRoot.top
+            // Unclipped: below the fold, both clip to the window's edge
+            // and read as one height.
+            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().positionInRoot.y
+            val relay = onNodeWithText("Background delivery").fetchSemanticsNode().positionInRoot.y
             assertTrue(row < relay, "above the relay panel, not inside it")
-            onNodeWithText("Use the relay").performClick()
+            onNodeWithText("Use the relay").performScrollTo().performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }
             assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
             assertTrue(shows("Use my ship"))

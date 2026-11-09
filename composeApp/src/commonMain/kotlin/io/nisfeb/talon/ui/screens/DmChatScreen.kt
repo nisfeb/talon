@@ -2148,8 +2148,8 @@ private fun DmRequestBar(who: String, onAccept: () -> Unit, onDecline: () -> Uni
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmBlock = true }) { Text("Block") }
             Spacer(Modifier.weight(1f))
-            androidx.compose.material3.OutlinedButton(onClick = onDecline) { Text("Decline") }
-            androidx.compose.material3.Button(onClick = onAccept) { Text("Accept") }
+            io.nisfeb.talon.ui.OutlinedButton(onClick = onDecline) { Text("Decline") }
+            io.nisfeb.talon.ui.Button(onClick = onAccept) { Text("Accept") }
         }
     }
     if (confirmBlock) io.nisfeb.talon.ui.ConfirmDestructive(
