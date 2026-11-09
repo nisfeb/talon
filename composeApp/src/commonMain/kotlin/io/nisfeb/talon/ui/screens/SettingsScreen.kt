@@ -1,4 +1,5 @@
 package io.nisfeb.talon.ui.screens
+import io.nisfeb.talon.ui.onThisClock
 import androidx.compose.ui.graphics.compositeOver
 import io.nisfeb.talon.ui.theme.LINK_BLUE
 import io.nisfeb.talon.ui.theme.linkColor
@@ -1229,8 +1230,8 @@ private fun ReachSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
         )
     }
     Spacer(Modifier.height(8.dp))
-    // Set here, the zone goes with it, for the relay, which has no clock of yours.
-    fun quiet(q: io.nisfeb.talon.ui.QuietHours) = set(reach.copy(quiet = q.copy(zone = kotlinx.datetime.TimeZone.currentSystemDefault().id)))
+    // Set here, the zone and its offset go with it, for the relay and the ship, which have no clock of yours.
+    fun quiet(q: io.nisfeb.talon.ui.QuietHours) = set(reach.copy(quiet = q.onThisClock()))
     FeatureToggleRow(
         label = "Quiet hours",
         description = if (reach.quiet.on) "Messages don't notify you between these times, except your favourites'. They're still there when you look."

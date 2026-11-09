@@ -56,31 +56,6 @@ class AppIconBadgeTest {
         assertEquals(listOf("""/gateway/badge {"handle":"h1","secret":"s1","count":2}"""), sent)
     }
 
-    // Body pinned against the relay's GatewayQuiet.
-    @Test
-    fun a_phone_on_its_ship_tells_the_gateway_its_quiet_hours_and_no_other_does() = runTest {
-        val reach = io.nisfeb.talon.ui.ReachSettings(
-            favourites = setOf("~nec", "~bus"),
-            quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = 1320, toMin = 420, zone = "America/New_York"),
-        )
-        settings.setDeviceIdFor("~zod", "dev-1")
-        assertTrue(reportQuiet("~zod", reach, settings, relay))
-        assertTrue(sent.isEmpty(), "the relay's own pushes read them from the ship")
-        settings.setViaShipPush("~zod", true)
-        settings.setGatewayFor("~zod", GatewayDevice("h1", "s1"))
-        assertTrue(reportQuiet("~zod", reach, settings, relay))
-        reportQuiet("~zod", reach.copy(quiet = reach.quiet.copy(on = false)), settings, relay)
-        assertEquals(
-            listOf(
-                """/gateway/quiet {"handle":"h1","secret":"s1","on":true,"fromMin":1320,"toMin":420,"zone":"America/New_York","favourites":["~bus","~nec"]}""",
-                """/gateway/quiet {"handle":"h1","secret":"s1","on":false,"fromMin":1320,"toMin":420,"zone":"America/New_York","favourites":[]}""",
-            ),
-            sent,
-        )
-        status = HttpStatusCode.NotFound
-        assertEquals(false, reportQuiet("~zod", reach, settings, relay), "a relay from before")
-    }
-
     @Test
     fun no_push_registration_means_nothing_to_tell() = runTest {
         assertTrue(reportBadge("~zod", 2, settings, relay))

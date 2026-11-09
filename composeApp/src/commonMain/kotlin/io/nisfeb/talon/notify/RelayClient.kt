@@ -174,30 +174,6 @@ class RelayClient(
         }.getOrDefault(false)
     }
 
-    /**
-     * The owner's quiet hours and favourites, for an iPhone its ship
-     * pushes to: the gateway holds a message's alert in them, since the
-     * ship's push knows nothing of them and an iPhone cannot hold one.
-     * A relay from before answers 404, and holds nothing.
-     */
-    suspend fun gatewayQuiet(device: GatewayDevice, reach: io.nisfeb.talon.ui.ReachSettings): Boolean = withContext(ioDispatcher) {
-        runCatching {
-            http.post("${endpoint().trimEnd('/')}/gateway/quiet") {
-                contentType(ContentType.Application.Json)
-                setBody(JSON.encodeToString(GatewayQuietRequest(
-                    device.handle, device.secret, reach.quiet.on, reach.quiet.fromMin, reach.quiet.toMin, reach.quiet.zone,
-                    // Only while they matter: the relay is told who is a favourite for nothing else.
-                    if (reach.quiet.on) reach.favourites.sorted() else emptyList(),
-                )))
-            }.status.isSuccess()
-        }.getOrDefault(false)
-    }
-
-    @Serializable
-    private data class GatewayQuietRequest(
-        val handle: String, val secret: String, val on: Boolean, val fromMin: Int, val toMin: Int, val zone: String, val favourites: List<String>,
-    )
-
     @Serializable
     private data class BadgeRequest(val count: Int?)
 

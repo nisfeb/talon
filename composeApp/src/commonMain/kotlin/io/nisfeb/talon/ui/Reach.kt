@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.offsetAt
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 
@@ -35,6 +36,9 @@ enum class WhoCanMessage {
  * and [toMin] are minutes after midnight in [zone]; one that ends before
  * it starts runs over midnight. [zone] is the device's where it was set,
  * so the relay, which has no clock of the owner's, can tell the time.
+ * [offsetMin] is that zone's minutes from UTC, for the ship's own pushes
+ * (%trunk): a ship has no zone table. Null from a build before it, and
+ * the ship then holds nothing.
  */
 @Serializable
 data class QuietHours(
@@ -42,7 +46,36 @@ data class QuietHours(
     val fromMin: Int = 22 * 60,
     val toMin: Int = 7 * 60,
     val zone: String = "",
+    val offsetMin: Int? = null,
 )
+
+/** This device's zone and its minutes from UTC now, as quiet hours carry them. */
+fun deviceClock(atMs: Long = io.nisfeb.talon.util.nowMs()): Pair<String, Int> {
+    val zone = TimeZone.currentSystemDefault()
+    return zone.id to zone.offsetAt(kotlin.time.Instant.fromEpochMilliseconds(atMs)).totalSeconds / 60
+}
+
+/** [this] as set on this device: its zone and offset go with it. */
+fun QuietHours.onThisClock(clock: Pair<String, Int> = deviceClock()): QuietHours = copy(zone = clock.first, offsetMin = clock.second)
+
+/**
+ * [r] with its quiet hours' offset put right for [clock], or null when
+ * nothing needs writing. Only hours that are on and of this device's own
+ * zone (or of none): summer time moved the offset, or a build before it
+ * wrote none. Another zone's are left to the device in it, or two devices
+ * in two zones would write over each other at every start.
+ */
+fun quietClockDue(r: ReachSettings, clock: Pair<String, Int>): ReachSettings? {
+    val q = r.quiet
+    if (!q.on || (q.zone.isNotEmpty() && q.zone != clock.first)) return null
+    val right = q.onThisClock(clock)
+    return if (right == q) null else r.copy(quiet = right)
+}
+
+/** Keeps the quiet hours' offset right while the app runs ([quietClockDue]): at start, and as a setting arrives from another device. */
+suspend fun keepQuietClock(ui: UiSettings) {
+    ui.reach.collect { r -> quietClockDue(r, deviceClock())?.let(ui::setReach) }
+}
 
 private val reachJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
 

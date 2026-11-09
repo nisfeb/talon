@@ -891,17 +891,8 @@ fun App(
                 }
             }
         }
-        // Quiet hours for an iPhone its ship pushes to: the gateway holds
-        // the alerts, so it is told them, again when they change or the
-        // phone moves to its ship's pushes.
-        LaunchedEffect(loggedInShip) {
-            val ship = loggedInShip ?: return@LaunchedEffect
-            kotlinx.coroutines.flow.merge(uiSettings.reach.map { }, relaySettings.changes)
-                .collectLatest {
-                    kotlinx.coroutines.delay(1_500)
-                    io.nisfeb.talon.notify.reportQuiet(ship, uiSettings.reach.value, relaySettings, relayClient)
-                }
-        }
+        // Quiet hours carry this clock's minutes from UTC, for the ship.
+        LaunchedEffect(Unit) { io.nisfeb.talon.ui.keepQuietClock(uiSettings) }
         // The unread count on the app icon, by the owner's choice (iOS):
         // set while open, and told to whoever pushes, so each alert while
         // closed adds one to the true count. Off clears it everywhere.

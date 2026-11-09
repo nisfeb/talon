@@ -129,11 +129,11 @@ class SettingsSyncUiPrefsTest {
         ui.setReach(io.nisfeb.talon.ui.ReachSettings(
             whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Added,
             favourites = setOf("~nec"),
-            quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = 1320, toMin = 420, zone = "America/New_York"),
+            quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = 1320, toMin = 420, zone = "America/New_York", offsetMin = -300),
         ))
         settled { pushed("reach").isNotEmpty() }
         assertEquals(
-            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"reach","value":"{\"whoCanMessage\":\"Added\",\"favourites\":[\"~nec\"],\"quiet\":{\"on\":true,\"fromMin\":1320,\"toMin\":420,\"zone\":\"America/New_York\"}}"}}""",
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"reach","value":"{\"whoCanMessage\":\"Added\",\"favourites\":[\"~nec\"],\"quiet\":{\"on\":true,\"fromMin\":1320,\"toMin\":420,\"zone\":\"America/New_York\",\"offsetMin\":-300}}"}}""",
             pushed("reach").single(),
         )
         arrives("reach", """{"whoCanMessage":"Anyone","favourites":["~wes"],"quiet":{"on":false,"fromMin":1320,"toMin":420,"zone":""}}""")

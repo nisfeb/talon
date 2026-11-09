@@ -57,6 +57,35 @@ class ReachTest {
         assertTrue(hintReaches(r, "~bus", 12 * 60))
     }
 
+    // The ship's own pushes (%trunk) read quiet hours by the offset: a
+    // ship has no zone table. Body shape checked against trunk's
+    // lib/trunk-push.hoon +reach-of.
+    @Test
+    fun `quiet hours set here carry this clock's zone and its minutes from UTC`() {
+        val q = night.onThisClock("America/New_York" to -300)
+        assertEquals("America/New_York" to -300, q.zone to q.offsetMin)
+        assertEquals(
+            """{"whoCanMessage":"Anyone","favourites":[],"quiet":{"on":true,"fromMin":1320,"toMin":420,"zone":"America/New_York","offsetMin":-300}}""",
+            ReachSettings(quiet = q).toJson(),
+        )
+        assertEquals(null, reachFromJson("""{"quiet":{"on":true,"fromMin":1320,"toMin":420,"zone":"UTC"}}""")?.quiet?.offsetMin, "from a build before it")
+    }
+
+    @Test
+    fun `the offset is put right for this device's own zone, and another zone's is left alone`() {
+        val ny = "America/New_York" to -300
+        val set = ReachSettings(quiet = night.onThisClock(ny))
+        assertEquals(null, quietClockDue(set, ny), "already right: nothing written")
+        // Summer time: the same zone, an hour on.
+        assertEquals(-240, quietClockDue(set, "America/New_York" to -240)?.quiet?.offsetMin)
+        // Written by a build before the offset, in this zone or in none.
+        assertEquals(-300, quietClockDue(ReachSettings(quiet = night.copy(zone = "America/New_York")), ny)?.quiet?.offsetMin)
+        assertEquals(ny, quietClockDue(ReachSettings(quiet = night), ny)?.quiet?.let { it.zone to it.offsetMin })
+        // Another device's zone: its to keep, or the two would write over each other at every start.
+        assertEquals(null, quietClockDue(set, "America/Los_Angeles" to -480))
+        assertEquals(null, quietClockDue(ReachSettings(quiet = night.copy(on = false)), ny), "off: nothing to keep")
+    }
+
     @Test
     fun `a minute reads as a clock time`() {
         assertEquals("10:00 PM", minuteLabel(22 * 60))

@@ -1297,6 +1297,8 @@ fun TalonApp(
     // No push reaches this phone for the ship, mail aside: calls ring only
     // while Talon is open, and Settings says so.
     var noPush by remember { mutableStateOf(false) }
+    // Quiet hours carry this clock's minutes from UTC, for the ship.
+    LaunchedEffect(Unit) { io.nisfeb.talon.ui.keepQuietClock(app.uiSettings) }
     val keepAliveLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(loggedInShip) {
         // No ship left signed in: nothing to keep the stream for.
