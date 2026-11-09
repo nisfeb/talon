@@ -147,6 +147,14 @@ fun Application.installRoutes(
             call.respond(HttpStatusCode.fromValue(g.push(req)))
         }
 
+        // The owner's quiet hours for an iPhone its ship pushes to.
+        post("/gateway/quiet") {
+            val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
+            val req = runCatching { call.receive<GatewayQuiet>() }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(HttpStatusCode.fromValue(g.quiet(req)))
+        }
+
         post("/gateway/badge") {
             val g = gateway ?: return@post call.respond(HttpStatusCode.ServiceUnavailable)
             val req = runCatching { call.receive<GatewayBadge>() }.getOrNull()

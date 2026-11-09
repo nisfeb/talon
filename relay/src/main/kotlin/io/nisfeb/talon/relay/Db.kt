@@ -73,6 +73,8 @@ class Db(private val path: String) {
                 // badges off ([nextBadge]).
                 if (!has("devices", "badge")) s.executeUpdate("ALTER TABLE devices ADD COLUMN badge INTEGER")
                 if (!has("gateway_devices", "badge")) s.executeUpdate("ALTER TABLE gateway_devices ADD COLUMN badge INTEGER")
+                // The owner's quiet hours, as the app gave them ([Gateway.quiet]).
+                if (!has("gateway_devices", "quiet")) s.executeUpdate("ALTER TABLE gateway_devices ADD COLUMN quiet TEXT")
             }
         }
     }
@@ -161,6 +163,21 @@ class Db(private val path: String) {
         c.prepareStatement("SELECT secret_sha256, endpoint FROM gateway_devices WHERE handle = ?").use { ps ->
             ps.setString(1, handle)
             ps.executeQuery().use { rs -> if (rs.next()) GatewayRow(rs.getString(1), rs.getString(2)) else null }
+        }
+    }
+
+    fun gatewayQuiet(handle: String): String? = connect().use { c ->
+        c.prepareStatement("SELECT quiet FROM gateway_devices WHERE handle = ?").use { ps ->
+            ps.setString(1, handle)
+            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+        }
+    }
+
+    fun setGatewayQuiet(handle: String, quiet: String?) = connect().use { c ->
+        c.prepareStatement("UPDATE gateway_devices SET quiet = ? WHERE handle = ?").use { ps ->
+            ps.setString(1, quiet)
+            ps.setString(2, handle)
+            ps.executeUpdate()
         }
     }
 

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.relay
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import org.slf4j.LoggerFactory
 import java.security.MessageDigest
@@ -15,6 +16,22 @@ data class GatewayDevice(val handle: String, val secret: String)
 
 @Serializable
 data class GatewayBadge(val handle: String, val secret: String, val count: Int? = null)
+
+/**
+ * The owner's quiet hours and favourites, from the app: the phone's ship
+ * pushes here knowing neither, and an iPhone cannot hold an alert itself.
+ * [on] false clears them.
+ */
+@Serializable
+data class GatewayQuiet(
+    val handle: String,
+    val secret: String,
+    val on: Boolean = false,
+    val fromMin: Int = 0,
+    val toMin: Int = 0,
+    val zone: String = "",
+    val favourites: List<String> = emptyList(),
+)
 
 @Serializable
 data class GatewayPush(
@@ -62,6 +79,7 @@ class Gateway(
     private val badgeOnly: (token: String, badge: Int) -> ApnsResult = { _, _ -> ApnsResult(0, "unsupported") },
     /** A background push the app wakes for (wire 12 "clear"). */
     private val background: (token: String, payload: String) -> ApnsResult = { _, _ -> ApnsResult(0, "unsupported") },
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val log = LoggerFactory.getLogger("Gateway")
     private val rings = GatewayRings()
@@ -92,6 +110,13 @@ class Gateway(
                 if (req.badge != null && req.badge !in 0..MAX_BADGE) return 400
                 val token = Push.iosAlertToken(row.endpoint)
                     ?: return 409.also { log.warn("gateway ${req.handle.take(6)}…: an alert, and the phone gave no alert token") }
+                // A message in the owner's quiet hours, but a favourite's:
+                // taken and not sent, as the relay's own pushes are held.
+                // Never a notice (a reminder, a check-in) or a test alert.
+                if (req.event == null && req.nonce == null) {
+                    val author = req.postId.substringBefore('/').takeIf { it.startsWith("~") }
+                    if (!reachAllows(db.gatewayQuiet(req.handle)?.let(::quietOf), author, now())) return 200
+                }
                 // The ship's own count when it sends one (wire 12); else this
                 // gateway's (a wire 11 ship). A test alert is nothing to count.
                 val badge = req.badge ?: if (req.nonce == null) db.nextBadge(Db.GATEWAY, req.handle) else null
@@ -137,10 +162,28 @@ class Gateway(
         return 204
     }
 
+    /** The owner's quiet hours for this phone, kept until set again. 204 when set. */
+    fun quiet(req: GatewayQuiet): Int {
+        val row = db.gatewayDevice(req.handle) ?: return 404
+        if (!matches(row, req.secret)) return 401
+        val bad = req.fromMin !in 0 until 1440 || req.toMin !in 0 until 1440 || req.zone.length > MAX_ZONE ||
+            req.favourites.size > MAX_FAVOURITES || req.favourites.any { it.length > MAX_ZONE }
+        if (bad) return 400
+        db.setGatewayQuiet(req.handle, if (req.on) Json.encodeToString(GatewayQuiet.serializer(), req.copy(handle = "", secret = "")) else null)
+        return 204
+    }
+
+    private fun quietOf(stored: String): RelayReach? = runCatching {
+        val q = Json.decodeFromString(GatewayQuiet.serializer(), stored)
+        RelayReach(q.favourites.toSet(), q.on, q.fromMin, q.toMin, q.zone)
+    }.getOrNull()
+
     private fun matches(row: Db.GatewayRow, secret: String) =
         MessageDigest.isEqual(sha256(secret).toByteArray(), row.secretSha256.toByteArray())
 
     private companion object {
+        const val MAX_ZONE = 64
+        const val MAX_FAVOURITES = 500
         /** "<voip>|<alert>", either half empty, as the iOS app gives it. */
         val TOKENS = Regex("[0-9a-fA-F]{0,200}\\|[0-9a-fA-F]{0,200}")
         /** APNs refusals that mean the token will never work. */
