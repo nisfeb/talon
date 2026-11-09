@@ -532,6 +532,33 @@ class HomeListTest {
         assertEquals(listOf("~bus"), opened)
     }
 
+    // 2026-11-08: the ship sends a stranger's messages whether or not the
+    // DM is accepted, and they showed as an ordinary chat beside the
+    // request. They wait under Requests; accepted, the chat is there.
+    @Test
+    fun `a stranger's message waits under Requests, not as a chat, until it is accepted`() = home(seed = {
+        dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1)))
+        messages().upsert(msg("~bus", "~bus/170141184506", "~bus", "hey stranger", 1_000))
+        messages().upsert(msg("~nec", "~nec/170141184507", "~nec", "a friend says hi", 2_000))
+    }) {
+        tap("DMs")
+        shows("a friend says hi", substring = true)
+        shows("wants to message you", substring = true)
+        assertTrue(onAllNodesWithText("hey stranger", substring = true).fetchSemanticsNodes().isEmpty(), "not a chat yet")
+        tap("Accept")
+        shows("hey stranger", substring = true)
+    }
+
+    @Test
+    fun `a request is read with a tap before it is answered`() = home(seed = {
+        dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1)))
+    }) { ship ->
+        tap("wants to message you", substring = true)
+        waitForIdle()
+        assertEquals(listOf("~bus"), opened)
+        assertTrue(ship.pokesTo("chat").isEmpty(), "reading answers nothing")
+    }
+
     @Test
     fun `a DM request declined is refused on the ship and opens nothing`() = home(seed = {
         dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1)))

@@ -1,6 +1,7 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.test.ComposeUiTest
@@ -27,6 +28,12 @@ class ContactProfileSheetTest {
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val fetched: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
+    /** Who the sheet blocked: as the repo's list, so Unblock follows. */
+    private val blockedNow = kotlinx.coroutines.flow.MutableStateFlow<Set<String>?>(emptySet())
+    private val blocking = ShipBlocking(blockedNow) { who, on ->
+        did += if (on) "block $who" else "unblock $who"
+        blockedNow.value = if (on) blockedNow.value.orEmpty() + who else blockedNow.value.orEmpty() - who
+    }
     private fun card(self: Boolean = false, inBook: Boolean = true, bio: String = "bakes on weekends", trunk: Boolean = true, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         val person = ContactEntity(ship, "Mittens", bio, null, status = "at the market")
         setContent {
@@ -38,6 +45,7 @@ class ContactProfileSheetTest {
                 io.nisfeb.talon.mail.LocalMailTo provides { to: String -> did += "mail $to" },
                 LocalCallTo provides if (trunk) { to: String -> did += "call $to" } else null,
                 LocalFetchProfile provides { who: String -> fetched += who },
+                LocalShipBlocking provides blocking,
             ) {
                 TalonTheme(darkTheme = false) {
                     ContactProfileSheet(
@@ -53,6 +61,28 @@ class ContactProfileSheetTest {
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
+
+    // 2026-11-08: a person could not be blocked from their profile, only
+    // their calls from Settings.
+    @Test
+    fun `Block asks first, says their ship is told, and then offers Unblock`() = card {
+        onNodeWithText("Block").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Block Mittens?") }
+        assertTrue(shows("Their ship is told that you blocked them."))
+        assertTrue(did.none { it.startsWith("block") }, "nothing before the confirm")
+        onAllNodesWithText("Block").onLast().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Unblock") }
+        assertEquals(listOf("block $ship"), did.filter { "block" in it })
+        onNodeWithText("Unblock").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("Unblock") }
+        assertEquals(listOf("block $ship", "unblock $ship"), did.filter { "block" in it })
+    }
+
+    @Test
+    fun `our own profile offers no Block`() = card(self = true) {
+        waitForIdle()
+        assertTrue(onAllNodesWithText("Block").fetchSemanticsNodes().isEmpty())
+    }
 
     // "users need to be able to select text in the user's bio ... to copy
     // and paste". The copy itself goes to the system clipboard: the sheet

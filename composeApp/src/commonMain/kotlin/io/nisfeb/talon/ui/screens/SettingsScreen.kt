@@ -551,6 +551,7 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Chats) {
+            BlockedPeopleSection()
             Text(
                 "Chat list order",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -1202,6 +1203,26 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.assistantOn()
     }
+
+/** Who is blocked from reaching you, chats and calls both ([io.nisfeb.talon.ui.ShipBlocking]). */
+@Composable
+private fun BlockedPeopleSection() {
+    val blocking = io.nisfeb.talon.ui.LocalShipBlocking.current ?: return
+    val blocked by blocking.blocked.collectAsState()
+    ShipListEditor(
+        title = "Blocked people",
+        empty = "Nobody blocked. Block someone from their profile or their request.",
+        ships = blocked.orEmpty(),
+        onAdd = { blocking.set(it, true) },
+        onRemove = { blocking.set(it, false) },
+    )
+    Text(
+        "They can't message or call you. Their ship is told that you blocked them.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(16.dp))
+}
 
 @Composable
 private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {

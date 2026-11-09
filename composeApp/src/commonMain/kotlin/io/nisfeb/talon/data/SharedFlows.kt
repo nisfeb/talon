@@ -9,6 +9,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 
@@ -40,7 +41,14 @@ internal suspend fun stopSharing(db: AppDatabase) {
 }
 
 private val latest = OneSlot<AppDatabase, Flow<List<MessageEntity>>> { db ->
-    db.messages().conversationLatest()
+    // A DM request is not a conversation until it is accepted. The ship
+    // sends a stranger's messages anyway, and they showed as an ordinary
+    // chat beside the request, in shortcuts and the briefing too
+    // (2026-11-08); they wait under Requests instead.
+    combine(db.messages().conversationLatest(), db.dmInvites().stream()) { rows, invites ->
+        if (invites.isEmpty()) rows
+        else invites.mapTo(HashSet()) { it.ship }.let { pending -> rows.filter { it.whom !in pending } }
+    }
         .stateIn(sharingFor(db), SharingStarted.WhileSubscribed(5_000), null)
         // Never the placeholder: the notifier seeds on its first list.
         .filterNotNull()

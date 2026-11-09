@@ -1338,6 +1338,7 @@ fun DmListScreen(
                     DmRequestRow(
                         ship = invite.ship,
                         contactMap = contactMap,
+                        onOpen = { currentOnOpenConversation(invite.ship) },
                         onAccept = {
                             repo.pushScope.launch {
                                 runCatching { repo.acceptDmInvite(invite.ship) }
@@ -2277,11 +2278,16 @@ private fun FolderCreatePopover(expanded: Boolean, onCreate: (String) -> Unit, o
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-/** A pending DM request row: avatar + name, with Decline / Accept. */
+/**
+ * A pending DM request row: name, with Decline / Accept; a tap reads it
+ * first, guarded ([io.nisfeb.talon.ui.LocalGuardedContent]). The
+ * stranger's picture is not fetched: a monogram.
+ */
 @Composable
 private fun DmRequestRow(
     ship: String,
     contactMap: ContactMap,
+    onOpen: () -> Unit,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
 ) {
@@ -2289,14 +2295,12 @@ private fun DmRequestRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClickLabel = "Read the request", onClick = onOpen)
             .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Avatar(
-            label = label,
-            url = contactMap.conversationAvatar(ship),
-        )
+        Avatar(label = label, url = null)
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

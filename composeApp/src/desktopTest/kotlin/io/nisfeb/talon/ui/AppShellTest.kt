@@ -1394,6 +1394,25 @@ class AppShellTest {
         }
     }
 
+    // 2026-11-08: chats could not be blocked at all; Settings' only Blocked
+    // list was the calls'. The ship's list, read at sign-in, and Remove
+    // lets them reach you again, chats and calls both.
+    @Test
+    fun `Settings lists who the ship blocks, and Remove unblocks chats and calls`() = app(setup = {
+        scries["chat/blocked"] = """["~bus"]"""
+    }) { ship ->
+        home()
+        onNodeWithContentDescription("Settings").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
+        onAllNodesWithText("Chats").onLast().performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Blocked people") && showing("~bus") }
+        onNodeWithText("Remove").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.pokesTo("trunk").any { "unblock" in it.json.toString() } }
+        assertEquals(listOf("""chat-unblock-ship {"ship":"~bus"}"""), ship.pokesTo("chat").map { "${it.mark} ${it.json}" })
+        assertTrue(ship.pokesTo("trunk").any { it.json.toString() == """{"unblock":"~bus"}""" })
+        waitUntil(timeoutMillis = 5_000) { showing("Nobody blocked.") }
+    }
+
     // A chat opened from a tab that shows one beside it stays on that tab.
     @Test
     fun `a chat asked for from Bookmarks opens beside the bookmarks`() {

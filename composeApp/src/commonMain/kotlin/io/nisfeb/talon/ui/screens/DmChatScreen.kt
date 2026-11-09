@@ -872,6 +872,18 @@ fun DmChatScreen(
             }
         }
 
+    // A stranger's DM not yet accepted: read, but nothing of theirs is
+    // fetched (pictures, previews, media), and nothing here answers them,
+    // since on the ship a reply or a reaction accepts it (2026-11-08). Null
+    // until the database says: guarded until then, so nothing loads early,
+    // but the composer is there at once, as it was; the request's bar takes
+    // its place within the first read.
+    val request by remember(whom) {
+        if (!whom.startsWith("~")) kotlinx.coroutines.flow.flowOf(false)
+        else db.dmInvites().stream().map { l -> l.any { it.ship == whom } }
+    }.collectAsState(initial = if (whom.startsWith("~")) null else false)
+    val guarded = request != false
+
     Column(
         // The foot's inset is padded inside the picture's box below, so
         // the picture runs to the bottom of the screen.
@@ -1048,7 +1060,10 @@ fun DmChatScreen(
         // look this screen read for everything drawn over it.
         Box(Modifier.weight(1f).fillMaxWidth()) {
         ChatBackdrop(chatLook)
-        androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalChatLook provides chatLook) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            io.nisfeb.talon.ui.LocalChatLook provides chatLook,
+            io.nisfeb.talon.ui.LocalGuardedContent provides guarded,
+        ) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
         Box(
             modifier = Modifier.weight(1f).fillMaxSize()
@@ -1247,7 +1262,7 @@ fun DmChatScreen(
                             contactMap = contactMap,
                             http = http,
                             menuExpanded = actionTarget?.id == rowMsg.id,
-                            onMenuExpand = { actionTarget = rowMsg },
+                            onMenuExpand = { if (!guarded) actionTarget = rowMsg },
                             onMenuDismiss = { actionTarget = null },
                             actionMenu = {
                                 // Per-row menu body. State lookups
@@ -1259,15 +1274,16 @@ fun DmChatScreen(
                                 messageActionMenuFor(rowMsg)
                             },
                             onOpenThread = onOpenThreadForMessage,
-                            onSwipe = onSwipeMessage,
-                            onReactionTap = onReactionForMessage,
+                            // A request answers nothing and opens nothing of theirs.
+                            onSwipe = if (guarded) { _ -> } else onSwipeMessage,
+                            onReactionTap = if (guarded) { _, _, _ -> } else onReactionForMessage,
                             onReactionLongPress = { reactions ->
                                 reactionDetailsTarget = reactions
                             },
-                            onMentionTap = onMentionTap,
-                            onLinkTap = onLinkTap,
-                            onImageTap = currentOnOpenImage,
-                            onAvatarTap = onAvatarTap,
+                            onMentionTap = if (guarded) { _ -> } else onMentionTap,
+                            onLinkTap = if (guarded) { _ -> } else onLinkTap,
+                            onImageTap = if (guarded) { _ -> } else currentOnOpenImage,
+                            onAvatarTap = if (guarded) { _ -> } else onAvatarTap,
                             flashAmber = item.row.m.id == flashMessageId,
                             bubbles = chatBubbles,
                             bubbleKind = io.nisfeb.talon.ui.bubbleKindOf(item.row.m.author, ourPatp, book),
@@ -1311,7 +1327,12 @@ fun DmChatScreen(
         }
         } // close empty-state Box
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
-        io.nisfeb.talon.ui.ChatComposer(
+        if (request == true) DmRequestBar(
+            who = contactMap.conversationLabel(whom),
+            onAccept = { repo.pushScope.launch { runCatching { repo.acceptDmInvite(whom) }.onFailure { composerState.failed("accept", it) } } },
+            onDecline = { repo.pushScope.launch { runCatching { repo.declineDmInvite(whom) } }; onBack() },
+            onBlock = { repo.pushScope.launch { runCatching { repo.blockShip(whom) } }; onBack() },
+        ) else io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
             repo = repo,
@@ -1900,7 +1921,9 @@ private fun MessageRow(
                 folded()
             }
             SendStateNote(m.status)
-            val firstLink = remember(parts) { firstLinkUrl(parts) }
+            // A request's links are not fetched for a card ([LocalGuardedContent]).
+            val guarded = io.nisfeb.talon.ui.LocalGuardedContent.current
+            val firstLink = remember(parts) { firstLinkUrl(parts) }.takeUnless { guarded }
             if (firstLink != null) {
                 LinkPreviewCard(
                     url = firstLink,
@@ -1909,7 +1932,7 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }
+            val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }.takeUnless { guarded }
             if (firstUrb != null) {
                 io.nisfeb.talon.ui.UrbUnfurlCard(
                     urbUrl = firstUrb,
@@ -1917,7 +1940,7 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }
+            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }.takeUnless { guarded }
             if (firstFurum != null) {
                 io.nisfeb.talon.ui.FurumCard(
                     link = firstFurum,
@@ -2102,6 +2125,40 @@ private fun PinnedPostBanner(
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+/**
+ * A stranger's DM, not yet accepted, in place of the composer: on the ship
+ * a reply or a reaction would accept it. Accept makes it a chat; Decline
+ * and Block leave it. Block says what Tlon tells their ship.
+ */
+@Composable
+private fun DmRequestBar(who: String, onAccept: () -> Unit, onDecline: () -> Unit, onBlock: () -> Unit) {
+    var confirmBlock by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("$who wants to message you", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+        Text(
+            "Their pictures and links stay hidden until you accept.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmBlock = true }) { Text("Block") }
+            Spacer(Modifier.weight(1f))
+            androidx.compose.material3.OutlinedButton(onClick = onDecline) { Text("Decline") }
+            androidx.compose.material3.Button(onClick = onAccept) { Text("Accept") }
+        }
+    }
+    if (confirmBlock) io.nisfeb.talon.ui.ConfirmDestructive(
+        title = "Block $who?",
+        text = "They won't be able to message or call you, and this request is declined. Their ship is told that you blocked them.",
+        confirm = "Block",
+        onConfirm = onBlock,
+        onDismiss = { confirmBlock = false },
+    )
 }
 
 @Composable

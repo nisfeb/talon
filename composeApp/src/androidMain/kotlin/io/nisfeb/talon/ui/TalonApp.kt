@@ -1612,6 +1612,7 @@ fun TalonApp(
         io.nisfeb.talon.orrery.LocalLiveLocation provides orreryRepo.live.takeIf { orreryRepo.availability.collectAsState().value == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT },
         LocalCallTo provides callTarget,
         LocalFetchProfile provides remember(app.repo) { { ship: String -> app.repo.meetIfUnknown(ship); Unit } },
+        LocalShipBlocking provides remember(app.repo) { shipBlocking(app.repo) },
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

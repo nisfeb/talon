@@ -213,6 +213,8 @@ fun readPast(count: Int?, recencyMs: Long?, sentMs: Long): Boolean =
 
 /** [liveMessageAlerts] for [m], with its chat's level and read state from [this] database. */
 suspend fun AppDatabase.messageAlerts(m: MessageEntity, replyToUs: Boolean, heard: Boolean, ourShip: String, onScreen: Boolean): Boolean {
+    // A request's own alert says who wants to message; what they wrote waits for Accept.
+    if (dmInvites().has(m.whom)) return false
     val read = if (m.parentId == null) unreads().getOne(m.whom).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
     else threadUnreads().getOne(m.whom, m.parentId).let { readPast(it?.count, it?.recencyMs, m.sentMs) }
     return liveMessageAlerts(m.whom, notifyLevelOf(m.whom), isMentioned(m.contentJson, ourShip), replyToUs, heard, read, onScreen)

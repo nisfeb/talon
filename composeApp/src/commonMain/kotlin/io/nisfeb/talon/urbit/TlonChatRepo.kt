@@ -953,6 +953,7 @@ class TlonChatRepo(
                         runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
                             .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
                     }
+                    launch { readBlocked(ch) }
                     // Group invites had no bootstrap at all — refreshInvites ran
                     // only when the Invites screen was opened, so an invite that
                     // arrived while you weren't looking never lit the badge.
@@ -4948,6 +4949,46 @@ class TlonChatRepo(
 
     /** Decline a pending DM request: poke `chat-dm-rsvp` with `ok=false`. */
     suspend fun declineDmInvite(ship: String) = rsvpDmInvite(ship, accept = false)
+
+    private val _blockedShips = MutableStateFlow<Set<String>?>(null)
+
+    /** Ships blocked for chats ([blockShip]), as %chat last said; null until read. */
+    val blockedShips: StateFlow<Set<String>?> = _blockedShips.asStateFlow()
+
+    /** Read %chat's blocked list again: a scry, so no event on the ship. */
+    suspend fun refreshBlocked() = readBlocked(liveChannel())
+
+    private suspend fun readBlocked(ch: UrbitChannel) {
+        val body = runCatching { ch.scry("chat", "/blocked") }
+            .onFailure { Log.w(TAG, "chat/blocked scry failed", it) }
+            .getOrNull() as? JsonArray ?: return
+        _blockedShips.value = body.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.toSet()
+    }
+
+    /**
+     * Block [ship] from reaching us: %chat refuses their DMs from now on
+     * (and tells their ship so, as Tlon does), %trunk ignores their calls,
+     * and a request of theirs is declined. On the repo's scope: leaving
+     * the screen does not stop it halfway. A ship without %trunk still
+     * blocks chats.
+     */
+    suspend fun blockShip(ship: String) = carry {
+        if (db.dmInvites().has(ship)) rsvpDmInvite(ship, accept = false)
+        val ch = liveChannel()
+        ch.poke(app = "chat", mark = "chat-block-ship", payload = buildJsonObject { put("ship", ship) })
+        _blockedShips.update { (it ?: emptySet()) + ship }
+        runCatching { ch.poke(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.call.TrunkWire.ACTION_MARK, io.nisfeb.talon.call.TrunkWire.blockAction(ship, true)) }
+            .onFailure { Log.i(TAG, "calls not blocked (no trunk?): ${it.message}") }
+    }
+
+    /** Undo [blockShip]: chats and calls both. */
+    suspend fun unblockShip(ship: String) = carry {
+        val ch = liveChannel()
+        ch.poke(app = "chat", mark = "chat-unblock-ship", payload = buildJsonObject { put("ship", ship) })
+        _blockedShips.update { it?.minus(ship) }
+        runCatching { ch.poke(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.call.TrunkWire.ACTION_MARK, io.nisfeb.talon.call.TrunkWire.blockAction(ship, false)) }
+            .onFailure { Log.i(TAG, "calls not unblocked (no trunk?): ${it.message}") }
+    }
 
     private suspend fun rsvpDmInvite(ship: String, accept: Boolean) {
         val ch = liveChannel()

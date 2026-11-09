@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
@@ -96,6 +97,14 @@ val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
  * wherever it is rendered — chat, thread, notebook post, gallery. The
  * default no-op keeps previews and tests renderable without a shell.
  */
+/**
+ * Inside a DM request: a stranger's pictures, link previews and media are
+ * not fetched, so nothing of theirs loads on this device, and tells their
+ * server it was seen, before the owner accepts (2026-11-08). Provided by
+ * the chat screen for a request.
+ */
+val LocalGuardedContent = staticCompositionLocalOf { false }
+
 val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
 
 /** Names a channel nest the way the lists do ("Group · Channel"). Null
@@ -360,7 +369,9 @@ fun StoryRenderer(
 
                 // An image block whose src is a video or a sound is not
                 // an image: it plays below with the rest of the media.
-                is StoryPart.Image -> if (classifyMediaUrl(part.src) == null) {
+                is StoryPart.Image -> if (LocalGuardedContent.current) {
+                    GuardedPicture()
+                } else if (classifyMediaUrl(part.src) == null) {
                     // Both dims must be positive: width comes off the
                     // wire unclamped, and aspectRatio() throws on <= 0
                     // — a remote message with width: 0 would crash the
@@ -439,7 +450,7 @@ fun StoryRenderer(
                     }
                 }
 
-                is StoryPart.LinkPreview -> InlineLinkPreview(preview = part) {
+                is StoryPart.LinkPreview -> if (!LocalGuardedContent.current) InlineLinkPreview(preview = part) {
                     onLinkTap(part.url)
                 }
 
@@ -484,7 +495,7 @@ fun StoryRenderer(
         // upstream state change a row reads) re-does the walk for
         // every visible row.
         val media = remember(parts) { mediaInStory(parts) }
-        media.forEach { (url, kind) ->
+        if (!LocalGuardedContent.current) media.forEach { (url, kind) ->
             if (inlinePlayer != null) {
                 inlinePlayer(url, kind)
             } else {
@@ -584,6 +595,20 @@ internal fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
+}
+
+/** Where a request's picture would be: said, not fetched ([LocalGuardedContent]). */
+@Composable
+private fun GuardedPicture() {
+    Text(
+        "Picture hidden until you accept",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    )
 }
 
 @Composable

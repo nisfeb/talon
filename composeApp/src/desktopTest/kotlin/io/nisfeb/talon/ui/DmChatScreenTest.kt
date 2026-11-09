@@ -23,6 +23,8 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.graphics.toPixelMap
@@ -133,7 +135,7 @@ class DmChatScreenTest {
                             db = db, repo = repo, drafts = drafts, http = offline,
                             aiSettings = ai, uiSettings = ui,
                             ourPatp = "~zod", whom = host.whom,
-                            onBack = {}, onOpenThread = { threads += it }, onOpenConversation = {},
+                            onBack = { backs++ }, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
                         )
@@ -152,10 +154,17 @@ class DmChatScreenTest {
         }
     }
 
+    /** What the screen asked of the web: a link's preview, a card. */
+    private val webAsked = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     /** The web, as far as these tests go: nothing there. A link's preview is not fetched from the real one. */
     private val offline = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine {
+        webAsked += it.url.toString()
         respond("", io.ktor.http.HttpStatusCode.NotFound)
     })
+
+    /** How many times the screen asked to be left. */
+    @Volatile private var backs = 0
 
     /** What the screen put on the clipboard. */
     private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -1467,5 +1476,56 @@ class DmChatScreenTest {
         val sendTall = sendIcon()
         assertTrue(tall.height > one.height + 20, "the field grew: $one to $tall")
         assertEquals(one.bottom - sendOne.bottom, tall.bottom - sendTall.bottom, 1.5f, "Send stayed as far above the field's bottom")
+    }
+
+    // ─── a stranger's request (2026-11-08) ─────────────────────────
+
+    /** ~bus, not yet accepted, wrote words, a link and a picture. */
+    private val strangerSaid: suspend AppDatabase.() -> Unit = {
+        dmInvites().upsertAll(listOf(io.nisfeb.talon.data.DmInviteEntity("~bus", 1)))
+        messages().upsert(MessageEntity("~bus", "~bus/170141184506", "~bus", 1_000,
+            """[{"inline":["hi there, see ",{"link":{"href":"https://example.com/page","content":"https://example.com/page"}}]},""" +
+                """{"block":{"image":{"src":"https://x.test/cat.png","alt":"a cat","height":300,"width":400}}}]""", "/chat"))
+    }
+
+    private fun ComposeUiTest.described(what: String) =
+        onAllNodesWithContentDescription(what, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+
+    // Nothing of a stranger's is fetched before Accept: a picture or a
+    // link's preview tells their server it was seen. And nothing answers
+    // them: on the ship a reply or a reaction accepts.
+    @Test
+    fun `a request shows the words, fetches nothing of theirs, and answers nothing until Accept`() = chat(seed = strangerSaid) { ship, _ ->
+        waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
+        waitForIdle()
+        assertTrue(onAllNodesWithText("hi there", substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(shown("Picture hidden until you accept"))
+        assertTrue(!described("a cat"), "the picture is not loaded")
+        assertTrue(webAsked.none { "example.com" in it }, "no preview fetched: $webAsked")
+        assertTrue(onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty(), "no composer: a reply would accept")
+        onNodeWithText("hi there", substring = true).performTouchInput { longClick() }
+        waitForIdle()
+        assertTrue(!shown("Copy text"), "no menu: a reaction would accept")
+        onNodeWithText("Accept").performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        assertEquals(listOf("""chat-dm-rsvp {"ship":"~bus","ok":true}"""), ship.pokesTo("chat").map { "${it.mark} ${it.json}" })
+        waitUntil(timeoutMillis = 20_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(described("a cat"), "accepted, the picture is shown")
+    }
+
+    @Test
+    fun `Block on a request declines it, blocks chats and calls, and leaves the chat`() = chat(seed = strangerSaid) { ship, _ ->
+        waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
+        onNodeWithText("Block").performClick()
+        waitUntil(timeoutMillis = 5_000) { shown("Block ~bus?") }
+        assertTrue(onAllNodesWithText("Their ship is told that you blocked them.", substring = true).fetchSemanticsNodes().isNotEmpty(), "said before it is done")
+        onAllNodesWithText("Block").onLast().performClick()
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("trunk").isNotEmpty() }
+        assertEquals(
+            listOf("""chat chat-dm-rsvp {"ship":"~bus","ok":false}""", """chat chat-block-ship {"ship":"~bus"}""", """trunk trunk-action {"block":"~bus"}"""),
+            // Opening it marked it read on our own %activity, as any chat.
+            ship.pokes.filter { it.app != "activity" }.map { "${it.app} ${it.mark} ${it.json}" },
+        )
+        assertEquals(1, backs)
     }
 }

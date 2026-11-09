@@ -102,6 +102,26 @@ class MessageAlertsTest {
         assertEquals(listOf("~bus/170141184508", "~bus/170141184509"), alerted)
     }
 
+    // A stranger's DM is a request: the request alerts ("wants to message
+    // you"), what they wrote does not, until it is accepted (2026-11-08).
+    @Test
+    fun `a request's messages alert nothing until it is accepted`() = started(prepare = {
+        scries["groups-ui/v6/init-posts/10/10"] = """{"chat":{},"channels":{}}"""
+    }) { repo ->
+        until("the first read") { !repo.bootstrapping.value }
+        until("the stream") { streams >= 1 }
+        // As %chat sends them: the request list, then the message.
+        ship.emit("""{"id":1,"response":"diff","json":["~bus"]}""")
+        ship.emit(dmFact("~bus/170141184508", "hey stranger", System.currentTimeMillis()))
+        until("decided") { "~bus/170141184508" in decided }
+        assertEquals(emptyList(), alerted.toList(), "a request's words wait for Accept")
+        ship.emit("""{"id":1,"response":"diff","json":[]}""")
+        until("accepted") { db.dmInvites().allShips().isEmpty() }
+        ship.emit(dmFact("~bus/170141184509", "thanks", System.currentTimeMillis()))
+        until("decided again") { "~bus/170141184509" in decided }
+        assertEquals(listOf("~bus/170141184509"), alerted.toList())
+    }
+
     // A reply's read state is its thread's; the chat's level and a mention
     // still decide the rest. The pieces messageAlerts reads, one by one.
     @Test

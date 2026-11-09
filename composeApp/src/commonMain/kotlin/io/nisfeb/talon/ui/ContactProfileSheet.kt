@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -226,6 +227,7 @@ fun ContactProfileSheet(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Add to contacts") }
                 }
+                BlockRow(ship, label)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -294,5 +296,39 @@ val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((Strin
  */
 val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
 
+/**
+ * Who is blocked from reaching us, chats and calls, and the switch for a
+ * ship ([io.nisfeb.talon.urbit.TlonChatRepo.blockShip]); the write runs on
+ * the repo's scope. Null in a tree with no ship.
+ */
+class ShipBlocking(val blocked: kotlinx.coroutines.flow.StateFlow<Set<String>?>, val set: (ship: String, blocked: Boolean) -> Unit)
+
+val LocalShipBlocking = androidx.compose.runtime.staticCompositionLocalOf<ShipBlocking?> { null }
+
+/** [ShipBlocking] for [repo], as both shells provide it. */
+fun shipBlocking(repo: io.nisfeb.talon.urbit.TlonChatRepo) = ShipBlocking(repo.blockedShips) { ship, block ->
+    repo.pushScope.launch {
+        runCatching { if (block) repo.blockShip(ship) else repo.unblockShip(ship) }
+            .onFailure { io.nisfeb.talon.util.Log.w("Blocking", "block $ship=$block failed: ${it.message}") }
+    }
+}
+
 /** Asks our ship for a ship's profile when it holds none ([io.nisfeb.talon.urbit.TlonChatRepo.meetIfUnknown]). */
 val LocalFetchProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/** Block or unblock [ship] from the profile: chats and calls, with what Tlon tells their ship. */
+@Composable
+private fun BlockRow(ship: String, who: String) {
+    val blocking = LocalShipBlocking.current ?: return
+    val blocked = blocking.blocked.collectAsState().value?.contains(ship) == true
+    var confirm by remember(ship) { mutableStateOf(false) }
+    if (blocked) TextButton(onClick = { blocking.set(ship, false) }) { Text("Unblock") }
+    else DestructiveTextButton(onClick = { confirm = true }) { Text("Block") }
+    if (confirm) ConfirmDestructive(
+        title = "Block $who?",
+        text = "They won't be able to message or call you. Their ship is told that you blocked them.",
+        confirm = "Block",
+        onConfirm = { blocking.set(ship, true) },
+        onDismiss = { confirm = false },
+    )
+}

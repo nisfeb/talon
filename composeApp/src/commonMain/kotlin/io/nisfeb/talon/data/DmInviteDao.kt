@@ -19,6 +19,10 @@ interface DmInviteDao {
     @Query("SELECT * FROM dm_invites ORDER BY receivedMs DESC")
     fun stream(): Flow<List<DmInviteEntity>>
 
+    /** Whether [ship]'s DM is still a request: its messages alert nothing until it is accepted. */
+    @Query("SELECT EXISTS(SELECT 1 FROM dm_invites WHERE ship = :ship)")
+    suspend fun has(ship: String): Boolean
+
     /** Ships currently pending — used to diff a fresh invite snapshot. */
     @Query("SELECT ship FROM dm_invites")
     suspend fun allShips(): List<String>
