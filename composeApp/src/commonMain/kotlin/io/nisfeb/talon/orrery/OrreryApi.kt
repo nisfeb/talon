@@ -586,6 +586,12 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 
+    /** Whether the ship holds a Mapbox token (GET /api/travel's token_set, never the token): what works out a check-in's time (orrery 143). */
+    suspend fun mapboxSet(): Boolean {
+        val text = request(owner, HttpMethod.Get, "/api/travel")
+        return reading { Json.parseToJsonElement(text).jsonObject["token_set"]?.jsonPrimitive?.booleanOrNull == true }
+    }
+
     /** What the leave pass did last, with its plan for the next appointment: the owner's only. */
     suspend fun travelLast(): JsonObject {
         val text = request(owner, HttpMethod.Get, "/api/travel/last")
@@ -617,8 +623,8 @@ class OrreryApi(
     }
 
     /** Share where the owner is with [ship]: the owner's only. See [shareBody] for the wire. */
-    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null) {
-        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact, byMs))
+    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false) {
+        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact, byMs, autoBy))
     }
 
     /** Take a share from a ship orrery did not know (orrery 137): it makes them a person here. */

@@ -239,6 +239,8 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
     // A check-in (orrery 142): home by a time, or they are told, by the ship.
     var checkIn by remember { mutableStateOf(false) }
     var byMin by remember { mutableStateOf(((localMinuteOfDay() / 15 + 1) * 15 + 60) % (24 * 60)) }
+    // With a Mapbox token the ship works the time out from the drive home (orrery 143): the default there.
+    var autoBy by remember { mutableStateOf(live.canAutoCheckIn) }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     AlertDialog(
@@ -268,7 +270,15 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         }
                         Switch(checked = checkIn, onCheckedChange = { checkIn = it })
                     }
-                    if (checkIn) ClockTimeButton(byMin, { byMin = it }, label = "Home by")
+                    if (checkIn && live.canAutoCheckIn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilterChip(selected = autoBy, onClick = { autoBy = true }, label = { Text("Automatic") })
+                        androidx.compose.material3.FilterChip(selected = !autoBy, onClick = { autoBy = false }, label = { Text("Set a time") })
+                    }
+                    if (checkIn && live.canAutoCheckIn && autoBy) Text(
+                        "Your ship works it out from the drive home, with traffic, plus your travel buffer.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else if (checkIn) ClockTimeButton(byMin, { byMin = it }, label = "Home by")
                 }
                 Row(Modifier.fillMaxWidth().clickable { exact = !exact }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -300,7 +310,9 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         return@launch
                     }
                     // The ship's answer lands where the share shows: no waiting on it here.
-                    live.share(ships, length, exact, byMs = if (checkIn && length == ShareLength.Home && live.canCheckIn) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null)
+                    val checking = checkIn && length == ShareLength.Home && live.canCheckIn
+                    val auto = checking && live.canAutoCheckIn && autoBy
+                    live.share(ships, length, exact, byMs = if (checking && !auto) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null, autoBy = auto)
                     onDone()
                 }
             }) { Text("Share") }

@@ -547,6 +547,7 @@ class OrreryRepo(
         override val shares: StateFlow<LocationShares?> = _shares.asStateFlow()
         override val canShare: Boolean get() = canShareLocation
         override val canCheckIn: Boolean get() = (_version.value ?: 0) >= CHECK_IN_VERSION
+        override val canAutoCheckIn: Boolean get() = (_version.value ?: 0) >= AUTO_CHECK_IN_VERSION && _mapbox.value
 
         override suspend fun refresh() {
             runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }
@@ -558,7 +559,7 @@ class OrreryRepo(
         // closes on the tap (sneagan, 2026-11-08: it stayed open while the
         // ship answered); each confirmed as the ship takes it, then read
         // back, which a failed read leaves as said.
-        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?): Job = scope.launch {
+        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?, autoBy: Boolean): Job = scope.launch {
             val until = length.hours?.let { now() + it * 3_600_000L }
             _shareProblems.update { it - ships.toSet() }
             _shares.update { s ->
@@ -568,7 +569,7 @@ class OrreryRepo(
             try {
                 for ((i, ship) in ships.withIndex()) {
                     try {
-                        attached().shareLocation(ship, length, exact, byMs)
+                        attached().shareLocation(ship, length, exact, byMs, autoBy)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Throwable) {
@@ -798,6 +799,9 @@ class OrreryRepo(
     }
 
     private val _version = MutableStateFlow<Int?>(null)
+
+    /** Whether the ship holds a Mapbox token, read with the version where it can work out a check-in. */
+    private val _mapbox = MutableStateFlow(false)
     /** Orrery's version on the ship, once read; null before, or while it did not answer. */
     val version: StateFlow<Int?> = _version.asStateFlow()
 
@@ -808,6 +812,11 @@ class OrreryRepo(
         io.nisfeb.talon.util.runSuspendCatching { a.version() }
             .onSuccess { if (api === a) _version.value = it }
             .onFailure { Log.i(TAG, "version skipped: ${it.message}") }
+        if ((_version.value ?: 0) >= AUTO_CHECK_IN_VERSION) {
+            io.nisfeb.talon.util.runSuspendCatching { a.mapboxSet() }
+                .onSuccess { if (api === a) _mapbox.value = it }
+                .onFailure { Log.i(TAG, "travel settings skipped: ${it.message}") }
+        }
     }
 
     fun detach() {
@@ -844,6 +853,7 @@ class OrreryRepo(
         answering.value = emptyMap()
         marking.value = emptyMap()
         _version.value = null
+        _mapbox.value = false
         _actions.value = emptyList()
         if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
     }

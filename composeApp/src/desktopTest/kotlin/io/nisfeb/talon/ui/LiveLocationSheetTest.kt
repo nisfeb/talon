@@ -72,11 +72,15 @@ class LiveLocationSheetTest {
     /** The ship's orrery, as GET /api/version answers. */
     @Volatile private var orreryVersion = 141
 
+    /** Whether the ship holds a Mapbox token, as GET /api/travel's token_set says. */
+    @Volatile private var mapbox = false
+
     private fun ship(onShare: (String) -> Unit = {}) = FakeShip("~zod").apply {
         answerApi = { method, path, body ->
             when {
                 path == "/apps/orrery/api/state" -> "{}"
                 path == "/apps/orrery/api/version" -> """{"version":$orreryVersion}"""
+                method == "GET" && path == "/apps/orrery/api/travel" -> """{"enabled":false,"token_set":$mapbox}"""
                 method == "GET" && path == "/apps/orrery/api/location" -> doc
                 method == "POST" && path == "/apps/orrery/api/location/share" -> {
                     onShare(body)
@@ -85,7 +89,8 @@ class LiveLocationSheetTest {
                     val hours = asked["hours"]?.jsonPrimitive?.content?.toLong()
                     val until = hours?.let { "\"${iso(now + it * 3_600_000)}\"" } ?: "null"
                     val exact = asked["precision"]?.jsonPrimitive?.content == "exact"
-                    val by = asked["by"]?.jsonPrimitive?.content?.let { "\"$it\"" } ?: "null"
+                    // "auto": the ship works it out, here half an hour and five minutes off.
+                    val by = asked["by"]?.jsonPrimitive?.content?.let { if (it == "auto") iso(now + 35 * 60_000) else it }?.let { "\"$it\"" } ?: "null"
                     outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}", "by": $by}"""
                     """{"ship": "$to"}"""
                 }
@@ -285,6 +290,44 @@ class LiveLocationSheetTest {
         val byMs = kotlin.time.Instant.parse(by!!).toEpochMilliseconds()
         assertTrue(byMs > now && byMs < now + 26 * 3_600_000, "the next one: $by")
         waitUntil(timeoutMillis = 5_000) { shows("check in by") }
+    }
+
+    // orrery 143 with a Mapbox token: the ship works the time out from the drive home.
+    @Test
+    fun `with Mapbox on the ship, Check in works its time out from the drive home`() = card(ship().also { orreryVersion = 143; mapbox = true }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("works it out from the drive home") }
+        assertTrue(!shows("Home by"), "no clock while Automatic")
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+        assertEquals("""POST /apps/orrery/api/location/share {"ship":"~bus","home":true,"precision":"exact","by":"auto"}""", ship.api.single { "/location/share" in it })
+        waitUntil(timeoutMillis = 5_000) { shows("check in by") }
+    }
+
+    @Test
+    fun `Set a time is there beside Automatic, and without Mapbox only a time`() {
+        card(ship().also { orreryVersion = 143; mapbox = true }) { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+            tap("Share my location")
+            waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+            onNodeWithText("Until I'm home").performClick()
+            tap("Check in")
+            tap("Set a time")
+            waitUntil(timeoutMillis = 5_000) { shows("Home by") }
+        }
+        card(ship().also { orreryVersion = 143; mapbox = false }) { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+            tap("Share my location")
+            waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+            onNodeWithText("Until I'm home").performClick()
+            tap("Check in")
+            waitUntil(timeoutMillis = 5_000) { shows("Home by") }
+            assertTrue(!shows("Automatic"), "no token, nothing to work it out with")
+        }
     }
 
     @Test

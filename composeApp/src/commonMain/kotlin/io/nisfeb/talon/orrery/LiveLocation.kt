@@ -65,6 +65,9 @@ data class InShare(
 /** The orrery that keeps a check-in's time and tells the peer when it passes. */
 const val CHECK_IN_VERSION = 142
 
+/** The orrery that works a check-in's time out from the drive home, where it holds a Mapbox token. */
+const val AUTO_CHECK_IN_VERSION = 143
+
 /** How long a share runs, as orrery's share route takes it. */
 enum class ShareLength(val label: String, val hours: Int?) {
     Hour("For 1 hour", 1),
@@ -122,12 +125,14 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
 fun askBody(ship: String): String = buildJsonObject { put("ship", ship) }.toString()
 
 /** The body of POST /api/location/share, as orrery's +serve-location-share reads it. */
-fun shareBody(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null): String = buildJsonObject {
+fun shareBody(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false): String = buildJsonObject {
     put("ship", ship)
     if (length.hours != null) put("hours", length.hours) else put("home", true)
     put("precision", if (exact) "exact" else "area")
-    // A check-in, only with until home (orrery 142), to the second as the ship reads it.
-    if (length.hours == null && byMs != null) put("by", kotlin.time.Instant.fromEpochMilliseconds(byMs / 1000 * 1000).toString())
+    // A check-in, only with until home (orrery 142), to the second as the ship reads it;
+    // "auto" has the ship work it out from the drive home (orrery 143).
+    if (length.hours == null && autoBy) put("by", "auto")
+    else if (length.hours == null && byMs != null) put("by", kotlin.time.Instant.fromEpochMilliseconds(byMs / 1000 * 1000).toString())
 }.toString()
 
 /** The next [minuteOfDay] here after [nowMs]: today's, or tomorrow's once today's has gone. A check-in's time. */
@@ -169,6 +174,9 @@ interface LiveLocation {
     /** Whether the ship's orrery keeps a check-in ([CHECK_IN_VERSION]): an older one ignores the time, so it is not offered. */
     val canCheckIn: Boolean
 
+    /** Whether the ship can work a check-in's time out from the drive home: [AUTO_CHECK_IN_VERSION] and a Mapbox token. */
+    val canAutoCheckIn: Boolean
+
     /** Read the shares again: cheap, a scry where the ship allows one. */
     suspend fun refresh()
 
@@ -179,7 +187,7 @@ interface LiveLocation {
      * scope. The first refusal stops it, lands in [shareProblems], and the
      * shares made before it stand.
      */
-    fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long? = null): kotlinx.coroutines.Job
+    fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false): kotlinx.coroutines.Job
 
     /** Why the last share with a ship failed, by ship; cleared when it is asked for again. */
     val shareProblems: StateFlow<Map<String, Throwable>>

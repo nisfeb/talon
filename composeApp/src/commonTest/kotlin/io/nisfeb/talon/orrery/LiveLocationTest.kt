@@ -71,6 +71,9 @@ class LiveLocationTest {
         // A check-in (orrery 142): with until home only, to the second, as de-iso reads it.
         assertEquals("""{"ship":"~bus","home":true,"precision":"area","by":"${iso(now)}"}""", shareBody("~bus", ShareLength.Home, exact = false, byMs = now + 345))
         assertEquals("""{"ship":"~bus","hours":1,"precision":"area"}""", shareBody("~bus", ShareLength.Hour, exact = false, byMs = now), "no check-in on a share for hours")
+        // Worked out by the ship from the drive home (orrery 143), and only until home.
+        assertEquals("""{"ship":"~bus","home":true,"precision":"exact","by":"auto"}""", shareBody("~bus", ShareLength.Home, exact = true, byMs = now, autoBy = true))
+        assertEquals("""{"ship":"~bus","hours":8,"precision":"area"}""", shareBody("~bus", ShareLength.EightHours, exact = false, autoBy = true))
     }
 
     // The phone's fast listening (Android's LiveShares) follows this.
