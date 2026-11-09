@@ -99,6 +99,25 @@ class ActivityEventsTest {
         assertEquals(emptyMap(), notifyLevels(obj("""{"desk":{}}""")))
     }
 
+    // The owner's quiet hours hold an iPhone's pushes, but a favourite's
+    // (2026-11-08): read from ui-prefs' "reach", a string as %settings keeps it.
+    @Test
+    fun `quiet hours in the owner's zone hold a push, but a favourite's`() {
+        val settings = obj("""{"desk":{"ui-prefs":{"reach":"{\"whoCanMessage\":\"Anyone\",\"favourites\":[\"~nec\"],\"quiet\":{\"on\":true,\"fromMin\":1320,\"toMin\":420,\"zone\":\"America/New_York\"}}"}}}""")
+        val r = reachOf(settings)
+        assertEquals(RelayReach(setOf("~nec"), true, 1320, 420, "America/New_York"), r)
+        // 23:30 and 12:00 in New York, 2026-11-09 (UTC-5).
+        val night = java.time.Instant.parse("2026-11-10T04:30:00Z").toEpochMilli()
+        val noon = java.time.Instant.parse("2026-11-09T17:00:00Z").toEpochMilli()
+        assertEquals(false, reachAllows(r, "~bus", night))
+        assertEquals(true, reachAllows(r, "~nec", night), "a favourite")
+        assertEquals(true, reachAllows(r, "~bus", noon))
+        assertEquals(true, reachAllows(r!!.copy(zone = "Not/AZone"), "~bus", night), "a zone it cannot read holds nothing")
+        assertEquals(true, reachAllows(r.copy(quietOn = false), "~bus", night))
+        assertNull(reachOf(obj("""{"desk":{}}""")))
+        assertEquals(true, reachAllows(null, "~bus", night), "no setting, no hold")
+    }
+
     // The group a channel post or reply is in, for a group's level: the
     // event carries it, and so does its source.
     @Test
