@@ -177,6 +177,9 @@ interface LiveLocation {
     /** Whether the ship can work a check-in's time out from the drive home: [AUTO_CHECK_IN_VERSION] and a Mapbox token. */
     val canAutoCheckIn: Boolean
 
+    /** Ask the ship again what check-in it can do, as the share dialog opens: a version not yet read, a token added since. */
+    suspend fun refreshCheckIn() {}
+
     /** Read the shares again: cheap, a scry where the ship allows one. */
     suspend fun refresh()
 

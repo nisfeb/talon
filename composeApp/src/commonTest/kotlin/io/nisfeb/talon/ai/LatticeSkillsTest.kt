@@ -125,6 +125,18 @@ class LatticeSkillsTest {
         assertTrue((req.body as TextContent).text.startsWith("---\nname: trip-pack"))
     }
 
+    // The write probe went with every read of the skills: a second
+    // request each time the assistant started (review of #99).
+    @Test fun `whether a key may save is asked once, though the skills are read again`() = runTest {
+        val ship = Ship(write = true)
+        keys(ship).mind()
+        LatticeKeys.refreshSkills()
+        val again = keys(ship).mind()
+        assertEquals(2, ship.count("skills"), "the skills themselves are read afresh")
+        assertEquals(1, ship.count("skill-save"), "the key's answer is kept")
+        assertTrue(again.tools.any { it.spec.name == "skill_save" })
+    }
+
     @Test fun `a key without the skills scope runs without them, quietly, and Settings is told`() = runTest {
         val ship = Ship(skills = HttpStatusCode.Forbidden to """{"error":"forbidden"}""")
         val m = keys(ship).mind()

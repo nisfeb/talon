@@ -240,7 +240,19 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
     var checkIn by remember { mutableStateOf(false) }
     var byMin by remember { mutableStateOf(((localMinuteOfDay() / 15 + 1) * 15 + 60) % (24 * 60)) }
     // With a Mapbox token the ship works the time out from the drive home (orrery 143): the default there.
-    var autoBy by remember { mutableStateOf(live.canAutoCheckIn) }
+    // Read again as the dialog opens: asked for before the ship's version
+    // was read, or with a token added since sign-in, it offered no check-in
+    // and never learned better.
+    var canCheckIn by remember { mutableStateOf(live.canCheckIn) }
+    var canAutoCheckIn by remember { mutableStateOf(live.canAutoCheckIn) }
+    var autoBy by remember { mutableStateOf(canAutoCheckIn) }
+    var autoChosen by remember { mutableStateOf(false) }
+    LaunchedEffect(live) {
+        live.refreshCheckIn()
+        canCheckIn = live.canCheckIn
+        canAutoCheckIn = live.canAutoCheckIn
+        if (!autoChosen) autoBy = canAutoCheckIn
+    }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     AlertDialog(
@@ -258,7 +270,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     }
                 }
                 // Gated, not faked: an older orrery would take the time and tell no one.
-                if (length == ShareLength.Home && live.canCheckIn) {
+                if (length == ShareLength.Home && canCheckIn) {
                     Row(Modifier.fillMaxWidth().clickable { checkIn = !checkIn }, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Check in")
@@ -270,11 +282,11 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         }
                         Switch(checked = checkIn, onCheckedChange = { checkIn = it })
                     }
-                    if (checkIn && live.canAutoCheckIn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.FilterChip(selected = autoBy, onClick = { autoBy = true }, label = { Text("Automatic") })
-                        androidx.compose.material3.FilterChip(selected = !autoBy, onClick = { autoBy = false }, label = { Text("Set a time") })
+                    if (checkIn && canAutoCheckIn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilterChip(selected = autoBy, onClick = { autoBy = true; autoChosen = true }, label = { Text("Automatic") })
+                        androidx.compose.material3.FilterChip(selected = !autoBy, onClick = { autoBy = false; autoChosen = true }, label = { Text("Set a time") })
                     }
-                    if (checkIn && live.canAutoCheckIn && autoBy) Text(
+                    if (checkIn && canAutoCheckIn && autoBy) Text(
                         "Your ship works it out from the drive home, with traffic, plus your travel buffer.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -310,8 +322,8 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         return@launch
                     }
                     // The ship's answer lands where the share shows: no waiting on it here.
-                    val checking = checkIn && length == ShareLength.Home && live.canCheckIn
-                    val auto = checking && live.canAutoCheckIn && autoBy
+                    val checking = checkIn && length == ShareLength.Home && canCheckIn
+                    val auto = checking && canAutoCheckIn && autoBy
                     live.share(ships, length, exact, byMs = if (checking && !auto) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null, autoBy = auto)
                     onDone()
                 }

@@ -912,8 +912,12 @@ private fun CalWidgetBlock(
     title: String,
 ) {
     val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(startEpochMs, endEpochMs) }
-    // Why an add did not go, from the calendar: "Not added" alone left the owner guessing.
-    var why by remember { mutableStateOf<String?>(null) }
+    val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
+    // How this card's add to the ship's calendar stands, kept by the repo.
+    val cardAdd = shipCalendar?.let { cal ->
+        val key = remember(title, startEpochMs, endEpochMs) { cal.cardKey(title, startEpochMs, endEpochMs) }
+        cal.cardAdds.collectAsState().value[key]
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
@@ -937,23 +941,24 @@ private fun CalWidgetBlock(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                // Why an add did not go, from the calendar: "Not added" alone left the owner guessing.
+                (cardAdd as? io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded)?.let {
+                    Text(it.why, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             val calendarLauncher = LocalCalendarLauncher.current
-            val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
             val shipCalendars = shipCalendar?.calendars?.collectAsState()?.value.orEmpty()
-            val addScope = androidx.compose.runtime.rememberCoroutineScope()
             var menuOpen by remember { mutableStateOf(false) }
-            // Saveable: a chat row scrolled away and back is composed anew,
-            // and plain remember turned Add back on after a success.
-            var added by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-            // A successful add disarms the button — left armed, every
+            // An add on its way or done disarms the button: armed, every
             // further tap wrote another copy of the event.
-            var addedDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-            // So does one on its way: armed during "Adding…", a second pick
-            // wrote a second copy.
-            var adding by remember { mutableStateOf(false) }
+            val added = when (cardAdd) {
+                null -> null
+                io.nisfeb.talon.calendar.CalendarRepo.CardAdd.Adding -> "Adding…"
+                is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.Added -> "Added to ${cardAdd.calendar}"
+                is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded -> "Not added"
+            }
+            val armed = cardAdd == null || cardAdd is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded
             fun toAnotherApp() = runCatching {
                 // Android: Intent.ACTION_INSERT pops the system
                 // create-event sheet pre-filled. Desktop / unset:
@@ -972,31 +977,16 @@ private fun CalWidgetBlock(
                     onClick = {
                         if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
                     },
-                    enabled = !addedDone && !adding,
+                    enabled = armed,
                 ) { Text(added ?: "Add") }
                 androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     shipCalendar?.writable().orEmpty().forEach { c ->
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(c.name.ifBlank { c.id }) },
-                            onClick = add@{
+                            onClick = {
                                 menuOpen = false
-                                if (adding) return@add
-                                adding = true
-                                added = "Adding…"
-                                why = null
-                                addScope.launch {
-                                    try {
-                                        val cal = shipCalendar!!
-                                        // This add's own reason, never another write's.
-                                        val whyNot = cal.addSharedWhyNot(c.id, title, startEpochMs, endEpochMs)
-                                        addedDone = whyNot == null
-                                        added = if (whyNot == null) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
-                                        // Said here, and so not again on the calendar.
-                                        if (whyNot != null) { why = whyNot; cal.heard(whyNot) }
-                                    } finally {
-                                        adding = false
-                                    }
-                                }
+                                // The repo's, so it finishes and is remembered with this card scrolled away.
+                                shipCalendar?.addFromCard(c.id, c.name.ifBlank { c.id }, title, startEpochMs, endEpochMs)
                             },
                         )
                     }

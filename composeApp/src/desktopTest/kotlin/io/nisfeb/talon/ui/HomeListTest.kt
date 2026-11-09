@@ -103,7 +103,7 @@ class HomeListTest {
                             db = db, repo = repo, drafts = drafts,
                             updateState = UpdateState(scope, StaticUpdateRuntime(), NoopUpdateInstallerHook()),
                             onOpenConversation = { opened += it }, onOpenSearch = { did += "Search" }, onNewMessage = {},
-                            onSignOut = { did += "Sign out" }, onOpenSelfProfile = { did += "My profile" },
+                            onOpenSelfProfile = { did += "My profile" },
                             onOpenStatusFeed = { did += "Statuses" }, onOpenBookmarks = { did += "Bookmarks" },
                             onOpenActivity = { did += "Activity" }, onOpenSettings = { did += "Settings" },
                             onOpenMail = { did += "Mail" }, onOpenCalendar = { did += "Calendar" },

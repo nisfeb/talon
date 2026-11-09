@@ -548,6 +548,10 @@ class OrreryRepo(
         override val canShare: Boolean get() = canShareLocation
         override val canCheckIn: Boolean get() = (_version.value ?: 0) >= CHECK_IN_VERSION
         override val canAutoCheckIn: Boolean get() = (_version.value ?: 0) >= AUTO_CHECK_IN_VERSION && _mapbox.value
+        override suspend fun refreshCheckIn() {
+            val a = api ?: return
+            if (_version.value == null) readVersion() else readMapbox(a)
+        }
 
         override suspend fun refresh() {
             runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }
@@ -812,11 +816,15 @@ class OrreryRepo(
         io.nisfeb.talon.util.runSuspendCatching { a.version() }
             .onSuccess { if (api === a) _version.value = it }
             .onFailure { Log.i(TAG, "version skipped: ${it.message}") }
-        if ((_version.value ?: 0) >= AUTO_CHECK_IN_VERSION) {
-            io.nisfeb.talon.util.runSuspendCatching { a.mapboxSet() }
-                .onSuccess { if (api === a) _mapbox.value = it }
-                .onFailure { Log.i(TAG, "travel settings skipped: ${it.message}") }
-        }
+        readMapbox(a)
+    }
+
+    /** Whether the ship has a Mapbox token: read with the version, and again as the share dialog opens. */
+    private suspend fun readMapbox(a: OrreryApi) {
+        if ((_version.value ?: 0) < AUTO_CHECK_IN_VERSION) return
+        io.nisfeb.talon.util.runSuspendCatching { a.mapboxSet() }
+            .onSuccess { if (api === a) _mapbox.value = it }
+            .onFailure { Log.i(TAG, "travel settings skipped: ${it.message}") }
     }
 
     fun detach() {

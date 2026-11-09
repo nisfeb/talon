@@ -131,7 +131,6 @@ fun DmListScreen(
      *  is configured, so it stays invisible during rc rollout. */
     onOpenAssistant: (() -> Unit)? = null,
     onNewMessage: () -> Unit,
-    onSignOut: () -> Unit,
     onOpenSelfProfile: () -> Unit,
     onOpenStatusFeed: () -> Unit,
     onOpenMail: () -> Unit = {},
@@ -1300,9 +1299,8 @@ fun DmListScreen(
         Box {
         LazyColumn(
             state = listState,
-            // Room under the last row for the new-message button, and over
-            // the first for as much of the search bar as shows.
-            contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 88.dp),
+            // Room over the first row for as much of the search bar as shows.
+            contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             // Claims the triage noticed, above everything: each is one tap

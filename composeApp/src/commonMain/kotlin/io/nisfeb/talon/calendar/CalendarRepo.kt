@@ -519,6 +519,45 @@ class CalendarRepo(
     suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean =
         addSharedWhyNot(calId, title, startMs, endMs) == null
 
+    /** How a chat card's add of a shared event stands ([addFromCard]). */
+    sealed interface CardAdd {
+        data object Adding : CardAdd
+        data class Added(val calendar: String) : CardAdd
+        data class NotAdded(val why: String) : CardAdd
+    }
+
+    private val _cardAdds = MutableStateFlow<Map<String, CardAdd>>(emptyMap())
+
+    /**
+     * Each card's add, by [cardKey]. Here and not in the card: a chat row
+     * scrolled away mid-add is composed anew, and with the state its own
+     * it came back armed while the first add was still finishing, so a
+     * second tap wrote the event twice.
+     */
+    val cardAdds: StateFlow<Map<String, CardAdd>> = _cardAdds.asStateFlow()
+
+    fun cardKey(title: String, startMs: Long, endMs: Long): String = "$startMs|$endMs|$title"
+
+    /**
+     * Add a chat card's event to [calId], unless that card's add is under
+     * way or done. On the repo's scope, so it finishes with the card gone.
+     */
+    fun addFromCard(calId: String, calName: String, title: String, startMs: Long, endMs: Long) {
+        val key = cardKey(title, startMs, endMs)
+        while (true) {
+            val now = _cardAdds.value
+            if (now[key] is CardAdd.Adding || now[key] is CardAdd.Added) return
+            if (_cardAdds.compareAndSet(now, now + (key to CardAdd.Adding))) break
+        }
+        scope.launch {
+            val why = runSuspendCatching { addSharedWhyNot(calId, title, startMs, endMs) }
+                .getOrElse { failedLine("The calendar did not take \"$title\".") }
+            _cardAdds.update { it + (key to if (why == null) CardAdd.Added(calName) else CardAdd.NotAdded(why)) }
+            // Said on the card, and so not again on the calendar.
+            if (why != null) heard(why)
+        }
+    }
+
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
     suspend fun importIcs(calId: String?, ics: String): Boolean = carry {
         val a = api ?: return@carry false

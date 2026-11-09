@@ -634,13 +634,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             }
+            // A tab only where there is a keyboard to press them on.
             if (safeTab == SettingsTab.Shortcuts) {
-            // Where there is a keyboard to press them on.
-            if (!io.nisfeb.talon.ui.isTouchPrimary) {
                 KeybindsSection(uiSettings)
                 Spacer(Modifier.height(8.dp))
-            }
-
             }
             if (safeTab == SettingsTab.Home) {
             Text(
@@ -701,9 +698,6 @@ fun SettingsScreen(
                     onChange = { saveHomeLayout(homeLayout.with(it)) },
                 )
             }
-            }
-            if (safeTab == SettingsTab.Chats) {
-
             }
             if (safeTab == SettingsTab.Account) {
             Text(
@@ -1278,6 +1272,7 @@ private fun BlockedPeopleSection() {
         onAdd = { blocking.set(it, true) },
         onRemove = { blocking.set(it, false) },
     )
+    blocking.problem.collectAsState().value?.let { io.nisfeb.talon.ui.ProblemLine(it) }
     Text(
         "They can't message or call you. Their ship is told that you blocked them.",
         style = MaterialTheme.typography.bodySmall,

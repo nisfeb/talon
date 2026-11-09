@@ -4,6 +4,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
@@ -176,6 +177,17 @@ class StoryRendererTest {
                 waitForIdle()
                 Thread.sleep(300)
                 assertEquals(1, writes.count { "add-event" in it }, "the event went to the ship twice")
+            }
+            // Scrolled away mid-add and back: the row is composed anew.
+            // With the add's state its own it came back armed, reading
+            // "Adding…", and a tap wrote a second copy (review of #99).
+            render(parts("📅 Standup\n${formatCalSummary(start, end)}\n${encodeCalTag(start, end, "Standup")}"), calendar = repo) {
+                waitUntil(timeoutMillis = 5_000) { shows("Adding…") }
+                onNodeWithText("Adding…").assertIsNotEnabled()
+                onNodeWithText("Adding…").performClick()
+                waitForIdle()
+                assertTrue(!shows("Personal"), "no menu to pick from again")
+                assertEquals(1, writes.count { "add-event" in it })
                 takes.complete(Unit)
             }
         } finally {

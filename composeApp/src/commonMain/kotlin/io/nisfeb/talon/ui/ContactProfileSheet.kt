@@ -232,6 +232,7 @@ fun ContactProfileSheet(
                     Spacer(Modifier.weight(1f))
                     BlockRow(ship, label)
                 }
+                LocalShipBlocking.current?.problem?.collectAsState()?.value?.let { ProblemLine(it) }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -305,15 +306,26 @@ val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) ->
  * ship ([io.nisfeb.talon.urbit.TlonChatRepo.blockShip]); the write runs on
  * the repo's scope. Null in a tree with no ship.
  */
-class ShipBlocking(val blocked: kotlinx.coroutines.flow.StateFlow<Set<String>?>, val set: (ship: String, blocked: Boolean) -> Unit)
+class ShipBlocking(
+    val blocked: kotlinx.coroutines.flow.StateFlow<Set<String>?>,
+    /** The last block or unblock the ship did not take, until the next one is asked. */
+    val problem: kotlinx.coroutines.flow.StateFlow<io.nisfeb.talon.util.Problem?> = kotlinx.coroutines.flow.MutableStateFlow(null),
+    val set: (ship: String, blocked: Boolean) -> Unit,
+)
 
 val LocalShipBlocking = androidx.compose.runtime.staticCompositionLocalOf<ShipBlocking?> { null }
 
 /** [ShipBlocking] for [repo], as both shells provide it. */
-fun shipBlocking(repo: io.nisfeb.talon.urbit.TlonChatRepo) = ShipBlocking(repo.blockedShips) { ship, block ->
-    repo.pushScope.launch {
-        runCatching { if (block) repo.blockShip(ship) else repo.unblockShip(ship) }
-            .onFailure { io.nisfeb.talon.util.Log.w("Blocking", "block $ship=$block failed: ${it.message}") }
+fun shipBlocking(repo: io.nisfeb.talon.urbit.TlonChatRepo): ShipBlocking {
+    val problem = kotlinx.coroutines.flow.MutableStateFlow<io.nisfeb.talon.util.Problem?>(null)
+    return ShipBlocking(repo.blockedShips, problem) { ship, block ->
+        problem.value = null
+        repo.pushScope.launch {
+            runCatching { if (block) repo.blockShip(ship) else repo.unblockShip(ship) }.onFailure {
+                io.nisfeb.talon.util.Log.w("Blocking", "block $ship=$block failed: ${it.message}")
+                problem.value = io.nisfeb.talon.util.problemOf(if (block) "Couldn't block ${shipHandle(ship)}" else "Couldn't unblock ${shipHandle(ship)}", it)
+            }
+        }
     }
 }
 

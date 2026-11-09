@@ -1520,12 +1520,50 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 5_000) { shown("Block ~bus?") }
         assertTrue(onAllNodesWithText("Their ship is told that you blocked them.", substring = true).fetchSemanticsNodes().isNotEmpty(), "said before it is done")
         onAllNodesWithText("Block").onLast().performClick()
-        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("trunk").isNotEmpty() }
+        // Left once the ship took it, not before.
+        waitUntil(timeoutMillis = 20_000) { backs == 1 }
         assertEquals(
-            listOf("""chat chat-dm-rsvp {"ship":"~bus","ok":false}""", """chat chat-block-ship {"ship":"~bus"}""", """trunk trunk-action {"block":"~bus"}"""),
+            // The block first: a decline that failed ahead of it left them not blocked.
+            listOf("""chat chat-block-ship {"ship":"~bus"}""", """trunk trunk-action {"block":"~bus"}""", """chat chat-dm-rsvp {"ship":"~bus","ok":false}"""),
             // Opening it marked it read on our own %activity, as any chat.
             ship.pokes.filter { it.app != "activity" }.map { "${it.app} ${it.mark} ${it.json}" },
         )
-        assertEquals(1, backs)
+    }
+
+    private fun ComposeUiTest.says(part: String) = onAllNodesWithText(part, substring = true).fetchSemanticsNodes().isNotEmpty()
+
+    // Accept's failure went to the composer, which a request does not
+    // show; Decline and Block said nothing and left (review of #99).
+    @Test
+    fun `a request the ship will not answer says so in the bar, and the chat is not left`() = chat(
+        seed = strangerSaid,
+        prepare = { refuse = { if (it.mark == "chat-dm-rsvp") "no" else null } },
+    ) { ship, _ ->
+        waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
+        onNodeWithText("Accept").performClick()
+        waitUntil(timeoutMillis = 20_000) { says("Couldn't accept the request") }
+        assertTrue(shown("~bus wants to message you"), "still a request")
+        onNodeWithText("Decline").performClick()
+        waitUntil(timeoutMillis = 20_000) { says("Couldn't decline the request") }
+        assertTrue(!says("Couldn't accept"), "the last answer's line, not both")
+        onNodeWithText("Block").performClick()
+        waitUntil(timeoutMillis = 5_000) { shown("Block ~bus?") }
+        onAllNodesWithText("Block").onLast().performClick()
+        waitUntil(timeoutMillis = 20_000) { says("Couldn't block them") }
+        assertTrue(ship.pokesTo("chat").any { it.mark == "chat-block-ship" }, "blocked all the same: only the decline was refused")
+        assertEquals(0, backs)
+    }
+
+    // A thread has its own composer, and a reply there accepts the request.
+    @Test
+    fun `a request's thread does not open`() = chat(seed = {
+        strangerSaid()
+        messages().upsert(msg("~bus/170141184507", "~bus", "and another thing", 2_000, parent = "~bus/170141184506"))
+    }) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("1 reply").fetchSemanticsNodes().isNotEmpty() }
+        onNodeWithText("1 reply").clickAction()
+        waitForIdle()
+        assertTrue(threads.isEmpty(), "$threads")
     }
 }

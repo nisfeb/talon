@@ -3176,12 +3176,6 @@ fun TalonApp(
                     settingsOpen = true
                     sidebarSettingsOpen = true
                 },
-                onSignOut = {
-                    app.signOutActive()
-                    TalonSyncService.stop(context)
-                    closeSections()
-                    switchShipAction()
-                },
                 allShips = allShips,
                 activeShip = loggedInShip,
                 // The sync status's Sign in: the lapsed login's form again.

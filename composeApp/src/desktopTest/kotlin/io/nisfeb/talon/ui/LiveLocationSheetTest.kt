@@ -330,6 +330,20 @@ class LiveLocationSheetTest {
         }
     }
 
+    // The token was read once, with the version at sign-in: one added on
+    // the ship after that was never seen until the next (review of #99).
+    @Test
+    fun `a Mapbox token added since sign-in is found when the choices open`() = card(ship().also { orreryVersion = 143; mapbox = false }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+        mapbox = true
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("works it out from the drive home") }
+        assertEquals(2, ship.api.count { "/api/travel" in it }, "asked again as the choices opened, and only then")
+    }
+
     @Test
     fun `theirs, not home by their time, says so`() {
         inbound = """{"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true, "late": "${iso(now - 60_000)}"}}"""

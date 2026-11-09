@@ -44,6 +44,9 @@ fun isShipSlow(t: Throwable): Boolean =
     t !is io.nisfeb.talon.urbit.PokeNacked && (
         isTransientNetworkError(t) ||
             t is io.nisfeb.talon.urbit.PokeUnacked ||
+            // The channel was reaped or given up between streams: the next
+            // one takes the write. Refused to this login is the ship's no.
+            (t is io.nisfeb.talon.urbit.ChannelGone && !t.forbidden) ||
             t.message.orEmpty().let { it.startsWith("channel PUT: HTTP 5") || it.startsWith("not connected") || SHIP_DOWN.matches(it) }
         )
 

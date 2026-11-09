@@ -148,6 +148,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ai.hasModelFor
@@ -878,11 +879,33 @@ fun DmChatScreen(
     // until the database says: guarded until then, so nothing loads early,
     // but the composer is there at once, as it was; the request's bar takes
     // its place within the first read.
-    val request by remember(whom) {
-        if (!whom.startsWith("~")) kotlinx.coroutines.flow.flowOf(false)
-        else db.dmInvites().stream().map { l -> l.any { it.ship == whom } }
-    }.collectAsState(initial = if (whom.startsWith("~")) null else false)
+    // Held with the chat it is of: this screen is not made again for
+    // another chat, and the last one's answer stood until the database
+    // said, so a request opened after a chat drew a moment unguarded.
+    val requestUnread: Boolean? = if (whom.startsWith("~")) null else false
+    val requestOf by androidx.compose.runtime.produceState(whom to requestUnread, whom) {
+        if (whom.startsWith("~")) db.dmInvites().stream().collect { l -> value = whom to l.any { it.ship == whom } }
+        else value = whom to false
+    }
+    val request = if (requestOf.first == whom) requestOf.second else requestUnread
     val guarded = request != false
+    // What Accept, Decline or Block could not do, said in the bar: the
+    // composer, where a send's failure shows, is not there in a request.
+    var requestProblem by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    var requestBusy by remember(whom) { mutableStateOf(false) }
+    // The write on the repo's scope, so leaving does not stop it; what
+    // the screen does with its answer, on the screen's.
+    fun answerRequest(what: String, leave: Boolean, write: suspend () -> Unit) {
+        if (requestBusy) return
+        requestBusy = true
+        requestProblem = null
+        val done = repo.pushScope.async { runCatching { write() } }
+        scope.launch {
+            val r = try { done.await() } finally { requestBusy = false }
+            r.onFailure { requestProblem = io.nisfeb.talon.util.problemOf(what, it) }
+            if (r.isSuccess && leave) onBack()
+        }
+    }
 
     Column(
         // The foot's inset is padded inside the picture's box below, so
@@ -1273,7 +1296,8 @@ fun DmChatScreen(
                                 // old bottom-sheet's auto-close.
                                 messageActionMenuFor(rowMsg)
                             },
-                            onOpenThread = onOpenThreadForMessage,
+                            // A thread has a composer of its own, and a reply accepts.
+                            onOpenThread = if (guarded) { _ -> } else onOpenThreadForMessage,
                             // A request answers nothing and opens nothing of theirs.
                             onSwipe = if (guarded) { _ -> } else onSwipeMessage,
                             onReactionTap = if (guarded) { _, _, _ -> } else onReactionForMessage,
@@ -1329,9 +1353,11 @@ fun DmChatScreen(
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
         if (request == true) DmRequestBar(
             who = contactMap.conversationLabel(whom),
-            onAccept = { repo.pushScope.launch { runCatching { repo.acceptDmInvite(whom) }.onFailure { composerState.failed("accept", it) } } },
-            onDecline = { repo.pushScope.launch { runCatching { repo.declineDmInvite(whom) } }; onBack() },
-            onBlock = { repo.pushScope.launch { runCatching { repo.blockShip(whom) } }; onBack() },
+            problem = requestProblem,
+            busy = requestBusy,
+            onAccept = { answerRequest("Couldn't accept the request", leave = false) { repo.acceptDmInvite(whom) } },
+            onDecline = { answerRequest("Couldn't decline the request", leave = true) { repo.declineDmInvite(whom) } },
+            onBlock = { answerRequest("Couldn't block them", leave = true) { repo.blockShip(whom) } },
         ) else io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
@@ -2133,7 +2159,14 @@ private fun PinnedPostBanner(
  * and Block leave it. Block says what Tlon tells their ship.
  */
 @Composable
-private fun DmRequestBar(who: String, onAccept: () -> Unit, onDecline: () -> Unit, onBlock: () -> Unit) {
+private fun DmRequestBar(
+    who: String,
+    problem: io.nisfeb.talon.util.Problem?,
+    busy: Boolean,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onBlock: () -> Unit,
+) {
     var confirmBlock by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
@@ -2145,11 +2178,12 @@ private fun DmRequestBar(who: String, onAccept: () -> Unit, onDecline: () -> Uni
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        problem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmBlock = true }) { Text("Block") }
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmBlock = true }, enabled = !busy) { Text("Block") }
             Spacer(Modifier.weight(1f))
-            io.nisfeb.talon.ui.OutlinedButton(onClick = onDecline) { Text("Decline") }
-            io.nisfeb.talon.ui.Button(onClick = onAccept) { Text("Accept") }
+            io.nisfeb.talon.ui.OutlinedButton(onClick = onDecline, enabled = !busy) { Text("Decline") }
+            io.nisfeb.talon.ui.Button(onClick = onAccept, enabled = !busy) { Text("Accept") }
         }
     }
     if (confirmBlock) io.nisfeb.talon.ui.ConfirmDestructive(

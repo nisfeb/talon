@@ -891,6 +891,17 @@ fun App(
                 }
             }
         }
+        // Quiet hours for an iPhone its ship pushes to: the gateway holds
+        // the alerts, so it is told them, again when they change or the
+        // phone moves to its ship's pushes.
+        LaunchedEffect(loggedInShip) {
+            val ship = loggedInShip ?: return@LaunchedEffect
+            kotlinx.coroutines.flow.merge(uiSettings.reach.map { }, relaySettings.changes)
+                .collectLatest {
+                    kotlinx.coroutines.delay(1_500)
+                    io.nisfeb.talon.notify.reportQuiet(ship, uiSettings.reach.value, relaySettings, relayClient)
+                }
+        }
         // The unread count on the app icon, by the owner's choice (iOS):
         // set while open, and told to whoever pushes, so each alert while
         // closed adds one to the true count. Off clears it everywhere.
@@ -3667,7 +3678,6 @@ fun App(
                                         // The drawer's sign-out: the ship's
                                         // pushes stop, and another saved ship
                                         // opens rather than the login form.
-                                        onSignOut = { loggedInShip?.let { forgetShip(it, false) } },
                                         onOpenSelfProfile = { showSelfProfile = true },
                                         kebabItems = kebabItems,
                                         onOpenStatusFeed = onOpenStatusFeed,

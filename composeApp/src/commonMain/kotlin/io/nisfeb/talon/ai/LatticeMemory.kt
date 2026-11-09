@@ -572,13 +572,17 @@ class LatticeKeys(
             val text = within(20_000) { lattice.get("skills") }
             if (text == null) SkillAccess.Unknown
             else {
-                val canSave = try {
+                // Asked once per key and kept: lattice has no route that
+                // tells a key its own scope, and asking with every read
+                // of the skills was a second request each time the
+                // assistant started. Only lattice's own answer is kept.
+                val canSave = SKILLS_LOCK.withLock { SAVE_OK[token] }?.takeIf { now() - it.first < SAVE_OK_FOR_MS }?.second ?: try {
                     within(10_000) { lattice.post("skill-save", mapOf("name" to "")) }
                     false
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: LatticeError.Refused) {
-                    e.status == 400
+                    (e.status == 400).also { ok -> if (e.status == 400 || e.status == 403) SKILLS_LOCK.withLock { SAVE_OK[token] = now() to ok } }
                 } catch (e: Throwable) {
                     false
                 }
@@ -622,6 +626,12 @@ class LatticeKeys(
         private val SKILLS = mutableMapOf<String, CachedSkills>()
         private val SKILLS_LOCK = Mutex()
 
+        /** Whether a key may save skills, by token, and when lattice said so. */
+        private val SAVE_OK = mutableMapOf<String, Pair<Long, Boolean>>()
+
+        /** A key's scope changes only when the owner edits the key: asked again after this, or a restart. */
+        const val SAVE_OK_FOR_MS = 6 * 60 * 60_000L
+
         /** Bumped by [refreshSkills]: a cached index from before it is read again. */
         @kotlin.concurrent.Volatile
         private var skillsGeneration = 0
@@ -650,6 +660,7 @@ class LatticeKeys(
             absent.clear()
             INDEXES.clear()
             SKILLS.clear()
+            SAVE_OK.clear()
             SKILLS_REFUSED.value = emptySet()
             minted.clear()
         }

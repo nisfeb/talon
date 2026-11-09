@@ -28,6 +28,16 @@ fun badgeCount(unreads: List<UnreadEntity>, threads: List<ThreadUnreadEntity>): 
  * Its ship's pushes go through the relay's gateway, by handle; the relay's
  * own, by device id. Neither: nothing to tell.
  */
+/**
+ * Tell the gateway the owner's quiet hours, for an iPhone its ship pushes
+ * to for [ship]. The relay's own pushes read them from the ship, and
+ * every other device holds an alert itself: nothing to tell.
+ */
+suspend fun reportQuiet(ship: String, reach: io.nisfeb.talon.ui.ReachSettings, settings: RelaySettings, relay: RelayClient): Boolean {
+    val gateway = settings.gatewayFor(ship)?.takeIf { settings.viaShipPush(ship) } ?: return true
+    return relay.gatewayQuiet(gateway, reach)
+}
+
 suspend fun reportBadge(ship: String, count: Int?, settings: RelaySettings, relay: RelayClient): Boolean {
     val gateway = settings.gatewayFor(ship)
     return when {

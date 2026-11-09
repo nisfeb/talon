@@ -88,6 +88,14 @@ class NetErrorsTest {
         assertTrue(isShipSlow(failure { ch.poke("hood", "helm-hi", JsonObject(emptyMap())) }))
     }
 
+    // A write on a channel given up between streams goes again on the
+    // next: as a refusal, a queued follow was deleted.
+    @Test
+    fun `a channel the ship no longer has is the ship out of reach, but one refused to this login is not`() {
+        assertTrue(isShipSlow(io.nisfeb.talon.urbit.ChannelGone()))
+        assertFalse(isShipSlow(io.nisfeb.talon.urbit.ChannelGone(forbidden = true)))
+    }
+
     @Test
     fun `another service's 502 or a proxy's page is not the ship`() {
         listOf(

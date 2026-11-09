@@ -184,11 +184,14 @@ class TlonChatRepo(
      * contact added, a call's recording notice) failed at once as "slow
      * or out of reach" with the ship fine. A running repo waits for its
      * channel, up to [channelWaitMs]; a stopped one says so at once.
+     * A channel given up (a lost watch, reaped) stays here until the next
+     * pass opens another, and every write on it fails as gone: it is
+     * waited past the same way, not handed out.
      */
     private suspend fun liveChannel(): UrbitChannel {
-        channel?.let { return it }
+        channel?.takeIf { !it.gone }?.let { return it }
         if (!started) error("not connected")
-        return kotlinx.coroutines.withTimeoutOrNull(channelWaitMs) { channelNow.filterNotNull().first() }
+        return kotlinx.coroutines.withTimeoutOrNull(channelWaitMs) { channelNow.filterNotNull().first { !it.gone } }
             ?: error("not connected")
     }
 
@@ -4973,12 +4976,16 @@ class TlonChatRepo(
      * blocks chats.
      */
     suspend fun blockShip(ship: String) = carry {
-        if (db.dmInvites().has(ship)) rsvpDmInvite(ship, accept = false)
         val ch = liveChannel()
+        // The block first: a decline that failed ahead of it left them
+        // not blocked at all.
         ch.poke(app = "chat", mark = "chat-block-ship", payload = buildJsonObject { put("ship", ship) })
-        _blockedShips.update { (it ?: emptySet()) + ship }
+        // Only onto a list that was read: one ship put on a list not yet
+        // read showed as the whole of it, and everyone else as not blocked.
+        if (_blockedShips.value == null) readBlocked(ch) else _blockedShips.update { it?.plus(ship) }
         runCatching { ch.poke(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.call.TrunkWire.ACTION_MARK, io.nisfeb.talon.call.TrunkWire.blockAction(ship, true)) }
             .onFailure { Log.i(TAG, "calls not blocked (no trunk?): ${it.message}") }
+        if (db.dmInvites().has(ship)) rsvpDmInvite(ship, accept = false)
     }
 
     /** Undo [blockShip]: chats and calls both. */
@@ -5275,6 +5282,12 @@ class TlonChatRepo(
      * change. On the repo's scope, so leaving Settings midway still sets
      * them all, and one batch at a time. Channels with a level of their own
      * keep it. Answers how many groups changed.
+     *
+     * One write per group, not one for the bucket: %settings' only batch
+     * replaces the whole bucket, and would take with it a level another
+     * device set that this one has not heard of yet. A write the ship
+     * does not take is kept and sent again (SettingsSyncImpl's outbox),
+     * so none is lost partway.
      */
     suspend fun setEveryGroupLevel(level: String): Int = carry {
         everyGroupLevel.withLock {
