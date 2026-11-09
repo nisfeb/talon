@@ -250,10 +250,10 @@ class OrreryApi(
             .getOrElse { e ->
                 val refused = e as? OrreryError.Refused
                 return Instructed(note = when (refused?.status) {
-                    503 -> "Orrery has no model key on your ship, so nothing read that. Set one for its generator under Assistant in Settings."
+                    503 -> "Orrery has no model key on your Groundwire node, so nothing read that. Set one for its generator under Assistant in Settings."
                     429 -> "Orrery has made all of today's model calls. Try again tomorrow."
                     502 -> "Orrery's model did not answer: ${refused.reason}"
-                    else -> refused?.reason ?: e.message ?: "The ship did not answer."
+                    else -> refused?.reason ?: e.message ?: "Your Groundwire node did not answer."
                 })
             }
         val o = reading { Json.parseToJsonElement(said).jsonObject }
@@ -472,13 +472,13 @@ class OrreryApi(
                 request(owner, HttpMethod.Post, "/api/actions/$id/refine", body.toString(), refineTimeout)
             }
         }.getOrElse { e ->
-            val why = (e as? OrreryError.Refused)?.reason ?: e.message ?: "The ship did not answer."
+            val why = (e as? OrreryError.Refused)?.reason ?: e.message ?: "Your Groundwire node did not answer."
             return Refined(null, emptyList(), why)
         }
         val o = reading { Json.parseToJsonElement(said).jsonObject }
         val note = o["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (o["ok"]?.jsonPrimitive?.contentOrNull == "false" || o["ok"]?.toString() == "false") {
-            return Refined(null, emptyList(), note.ifBlank { "The ship would not take that." })
+            return Refined(null, emptyList(), note.ifBlank { "Your Groundwire node would not take that." })
         }
         return Refined(
             action = (o["action"] as? JsonObject)?.let { actionOf(it) },
@@ -1004,8 +1004,8 @@ internal suspend fun proxyAnswered(resp: HttpResponse): ProxyAnswered? {
 
 sealed class OrreryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Refused(val status: Int, val reason: String) : OrreryError("HTTP $status: $reason")
-    class Unreachable(cause: Throwable) : OrreryError("no answer from the ship", cause)
-    class Garbled(cause: Throwable) : OrreryError("the ship's answer could not be read", cause)
+    class Unreachable(cause: Throwable) : OrreryError("no answer from your Groundwire node", cause)
+    class Garbled(cause: Throwable) : OrreryError("your Groundwire node's answer could not be read", cause)
 }
 
 private fun names(a: kotlinx.serialization.json.JsonElement?): List<String> =

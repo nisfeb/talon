@@ -1153,8 +1153,8 @@ fun DmListScreen(
             // rail holds it, at its foot, instead.
             if (!io.nisfeb.talon.ui.LocalRailShown.current) {
                 val open = Modifier.padding(end = 4.dp).size(32.dp).clickable { onOpenShipSwitcher() }
-                activeShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
-                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
+                activeShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch node") }
+                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch node", modifier = open)
             }
         }
         activeShip?.let { io.nisfeb.talon.ui.SyncStatusBanner(repo, it, onSignIn) }
@@ -1955,7 +1955,7 @@ internal fun ShipSwitcherDrawer(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "Ships",
+                "Nodes",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 6.dp),
@@ -2048,7 +2048,7 @@ internal fun ShipSwitcherDrawer(
                 )
                 Spacer(Modifier.size(12.dp))
                 Text(
-                    "Add ship",
+                    "Add node",
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontWeight = FontWeight.Medium,
                     ),
@@ -2086,7 +2086,7 @@ internal fun ShipSwitcherDrawer(
                 Text(
                     "Signs out and removes everything stored on this device for " +
                         "${io.nisfeb.talon.ui.shipHandle(ship)}: its chats, groups and unread marks. Nothing on the " +
-                        "ship itself is touched, and signing in again downloads it " +
+                        "Groundwire node itself is touched, and signing in again downloads it " +
                         "afresh.",
                 )
             },

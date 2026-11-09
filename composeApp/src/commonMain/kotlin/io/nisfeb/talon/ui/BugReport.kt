@@ -88,10 +88,10 @@ fun ReportBugDialog(mail: MailRepo?, about: List<Pair<String, String>>, onDismis
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (sent) {
-                    Text("It went to $BUG_REPORT_TO as mail from your ship. Thank you.")
+                    Text("It went to $BUG_REPORT_TO as mail from your Groundwire node. Thank you.")
                     return@Column
                 }
-                Text("Say what happened and what you expected. It goes to Groundwire's developer at $BUG_REPORT_TO as Auspex mail from your ship.")
+                Text("Say what happened and what you expected. It goes to Groundwire's developer at $BUG_REPORT_TO as Auspex mail from your Groundwire node.")
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it; problem = null; copied = false },
@@ -104,7 +104,7 @@ fun ReportBugDialog(mail: MailRepo?, about: List<Pair<String, String>>, onDismis
                     Text("Include recent logs (${logs.size} lines)", modifier = Modifier.weight(1f))
                     TextButton(onClick = { showLogs = !showLogs }) { Text(if (showLogs) "Hide" else "Show") }
                 }
-                Quiet("Logs can name ships and chats you used. They go only if this is ticked.")
+                Quiet("Logs can name nodes and chats you used. They go only if this is ticked.")
                 if (showLogs) {
                     SelectionContainer {
                         Text(
@@ -116,8 +116,8 @@ fun ReportBugDialog(mail: MailRepo?, about: List<Pair<String, String>>, onDismis
                 }
                 when {
                     canSend -> Unit
-                    mail == null || availability == MailAvailability.UNKNOWN -> Quiet("Checking for Auspex mail on your ship…")
-                    else -> Quiet("Sending needs Auspex mail on your ship, which it does not have yet. Copy the report and post it at github.com/nisfeb/talon/issues instead.")
+                    mail == null || availability == MailAvailability.UNKNOWN -> Quiet("Checking for Auspex mail on your Groundwire node…")
+                    else -> Quiet("Sending needs Auspex mail on your Groundwire node, which it does not have yet. Copy the report and post it at github.com/nisfeb/talon/issues instead.")
                 }
                 stage?.let { Quiet("$it…") }
                 problem?.let { Quiet("Not sent: $it", error = true) }

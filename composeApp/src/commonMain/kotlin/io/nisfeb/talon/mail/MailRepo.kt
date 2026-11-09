@@ -482,7 +482,7 @@ class MailRepo(
         when {
             e.isSignedOut -> {
                 _availability.value = MailAvailability.SIGNED_OUT
-                _error.value = "Signed out of the ship."
+                _error.value = "Signed out of your Groundwire node."
                 // Nothing retries its way back from this one; the next read
                 // that goes through, once signed in again, starts it.
                 poller?.let { it.cancel(); poller = null; pollStopped = true }
@@ -574,8 +574,8 @@ class MailRepo(
             // In words: it showed the save's own text, a transport's included.
             _problem.value = "Could not file to Lattice: " + when {
                 io.nisfeb.talon.util.isTransientNetworkError(it) || Regex("returned 50[234]$").containsMatchIn(it.message.orEmpty()) ->
-                    "your ship did not answer. Try again when it's back."
-                else -> "your ship did not keep it. Try again shortly."
+                    "your Groundwire node did not answer. Try again when it's back."
+                else -> "your Groundwire node did not keep it. Try again shortly."
             }
         }.getOrNull()
     }.await()
@@ -784,7 +784,7 @@ class MailRepo(
         fun why(fallback: String) = _error.value?.takeIf { it != errorBefore } ?: fallback
         var kept = false
         val problem = run {
-            if (!saveDraft(draft)) return@run why("the message did not reach the ship.")
+            if (!saveDraft(draft)) return@run why("the message did not reach your Groundwire node.")
             kept = true
             val refs = mutableListOf<AttachRef>()
             for ((i, f) in files.withIndex()) {
@@ -797,7 +797,7 @@ class MailRepo(
                 refs += AttachRef(name = f.name, mime = f.mime, hash = hash)
             }
             progress("Sending")
-            if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("the ship did not take it.")
+            if (!send(draft.to, draft.subject, draft.body, draft.prev, refs)) return@run why("your Groundwire node did not take it.")
             runSuspendCatching { deleteDraft(draft.id) }
             null
         }
@@ -884,7 +884,7 @@ class MailRepo(
                     // Signed out is the whole app's state; anything else is
                     // this one write, said until dismissed.
                     if (e.isSignedOut) onFailure(e) else _problem.value =
-                        if (e is AuspexError.Unreachable) e.said() + " That was not done." else "The ship did not do that: ${e.said()}"
+                        if (e is AuspexError.Unreachable) e.said() + " That was not done." else "Your Groundwire node did not do that: ${e.said()}"
                     return@launch
                 }
                 if (relist) relistSoon()
@@ -1073,7 +1073,7 @@ class MailRepo(
             // nor anywhere the list could open it, and was lost.
             val ok = runSuspendCatching { saveDraft(d) }.getOrDefault(false)
             if (!ok) {
-                val line = "${named(d.subject)} was not saved: the draft did not reach the ship. It is kept here until Groundwire closes."
+                val line = "${named(d.subject)} was not saved: the draft did not reach your Groundwire node. It is kept here until Groundwire closes."
                 _unsent.update { list -> list.filterNot { it.draft.id == d.id } + Unsent(line, d, files) }
             }
         }

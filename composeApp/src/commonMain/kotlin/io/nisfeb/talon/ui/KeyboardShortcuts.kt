@@ -135,7 +135,7 @@ fun refusalFor(combo: KeyCombo, isMacHost: Boolean): String? {
     val held = combo.ctrl || combo.meta || combo.alt
     if (!held && !combo.key.matches(Regex("F\\d+"))) return "Hold Ctrl, ⌘ or Alt with it: a key on its own is typing."
     val primaryOnly = (if (isMacHost) combo.meta && !combo.ctrl else combo.ctrl && !combo.meta) && !combo.alt
-    if (primaryOnly && !combo.shift && combo.key.toIntOrNull() in 1..9) return "${combo.label(isMacHost)} switches ships."
+    if (primaryOnly && !combo.shift && combo.key.toIntOrNull() in 1..9) return "${combo.label(isMacHost)} switches nodes."
     if (primaryOnly && combo.key in setOf("Equals", "Minus", "0")) return "${combo.label(isMacHost)} sizes text."
     return null
 }
@@ -201,7 +201,7 @@ fun rebind(stored: Map<String, KeyCombo?>, id: String, combo: KeyCombo, isMacHos
 fun fixedShortcuts(isMacHost: Boolean): List<Pair<String, String>> {
     val mod = if (isMacHost) "⌘" else "Ctrl+"
     return listOf(
-        "${mod}1 to ${mod}9" to "Switch to a ship",
+        "${mod}1 to ${mod}9" to "Switch to a node",
         "$mod= and $mod-" to "Larger and smaller text",
         "${mod}0" to "Text at its usual size",
         "Esc" to "Back",

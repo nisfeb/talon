@@ -276,7 +276,7 @@ class OrrerySwitchTest {
     fun `a ship without Orrery has no switch to turn on`() {
         missing = true
         page(orrery = null) { _, _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("is not on your ship. Install it from the Apps page.") }
+            waitUntil(timeoutMillis = 5_000) { shows("is not on your Groundwire node. Install it from the Apps page.") }
             onNodeWithText("Enable Groundwire Assistant").assertIsNotEnabled()
         }
     }

@@ -697,9 +697,9 @@ class AssistantScreenTest {
     fun `a change the ship never answers is said to be unknown`() = assistant(withOrrery = true) {
         bodies[jax] = mutableListOf(jaxNeeds("park at JAX"))
         observeDown = true
-        answer = "Your ship did not answer."
+        answer = "Your Groundwire node did not answer."
         changeNeeds()
-        waitUntil(timeoutMillis = 15_000) { shows("Your ship did not answer.") }
+        waitUntil(timeoutMillis = 15_000) { shows("Your Groundwire node did not answer.") }
         assertTrue("may or may not have taken it" in toolSaid(), toolSaid())
     }
 

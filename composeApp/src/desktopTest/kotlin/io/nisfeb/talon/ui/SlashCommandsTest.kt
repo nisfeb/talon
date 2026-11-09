@@ -140,7 +140,7 @@ class SlashCommandsTest {
         // hit the ship and get a server-side error.
         val r = run("/pet ~ZOD myname")
         assertTrue(r is CommandResult.Error)
-        assertTrue((r as CommandResult.Error).message.contains("isn't a ship patp"))
+        assertTrue((r as CommandResult.Error).message.contains("isn't an address"))
     }
 
     @Test
@@ -374,7 +374,7 @@ class SlashCommandsTest {
     @Test
     fun `a command that fails says why in words and keeps the error whole behind the button`() {
         val nick = run("/nick Bus") as CommandResult.Error
-        assertEquals("/nick: your ship is slow or out of reach. Try again when it's back.", nick.message)
+        assertEquals("/nick: your Groundwire node is slow or out of reach. Try again when it's back.", nick.message)
         assertTrue("not connected" in nick.details.orEmpty(), "${nick.details}")
         val down = HttpClient(MockEngine { throw java.net.UnknownHostException("hacker-news.firebaseio.com: Name or service not known") })
         val hn = runBlocking { runCommand("/hn", repo, down) } as CommandResult.Error

@@ -445,7 +445,7 @@ fun CalendarScreen(
     }
     fun tick(id: String, done: Boolean) {
         scope.launch {
-            if (!repo.setDone(id, done)) status = repo.failedLine("The ship did not take the change.")
+            if (!repo.setDone(id, done)) status = repo.failedLine("Your Groundwire node did not take the change.")
         }
     }
     /** Closes the editor and says what is happening; the calendar's
@@ -472,11 +472,11 @@ fun CalendarScreen(
     }
     /** Answer an invitation, saying what did not go: the copy, or the word to its host. */
     fun answerInvite(key: String, host: String, st: String, cal: String) =
-        say("Answering…", "The ship did not take the answer.") {
+        say("Answering…", "Your Groundwire node did not take the answer.") {
             val got = repo.answerInvite(key, st, cal) ?: return@say false
             status = when {
                 !got.ok -> "The event could not be put on that calendar" + if (got.told) "; $host has your answer." else ", and $host could not be told yet. $RETOLD"
-                !got.told -> "Answered, but $host could not be told yet: their ship did not answer. $RETOLD"
+                !got.told -> "Answered, but $host could not be told yet: their node did not answer. $RETOLD"
                 else -> null
             }
             true
@@ -485,7 +485,7 @@ fun CalendarScreen(
     fun answer(r: CalendarRow, st: String) {
         viewing = null
         if (r.host.isNotEmpty()) answerInvite("${r.host}/${r.id}", r.host, st, r.cal)
-        else say("Answering…", "The ship did not take the answer.") {
+        else say("Answering…", "Your Groundwire node did not take the answer.") {
             // Refused when the event names no guest who is the owner;
             // looked for behind the write, which leaving does not stop.
             val since = nowMs()
@@ -544,10 +544,10 @@ fun CalendarScreen(
             status = when {
                 !posted && !mailed -> return@say false
                 !mailed -> "Posted to ${labelOf(whom)}, but the invite could not be mailed to its members."
-                !posted -> "Mailed the invite to ${members!!.size} ship${if (members.size == 1) "" else "s"}, but the post to ${labelOf(whom)} did not go."
+                !posted -> "Mailed the invite to ${members!!.size} ${if (members.size == 1) "person" else "people"}, but the post to ${labelOf(whom)} did not go."
                 members == null -> "Posted to ${labelOf(whom)}. The member list could not be read, so no invites were mailed."
                 members.isEmpty() -> "Posted to ${labelOf(whom)}."
-                else -> "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ship${if (members.size == 1) "" else "s"}."
+                else -> "Posted to ${labelOf(whom)} and mailed the invite to ${members.size} ${if (members.size == 1) "person" else "people"}."
             }
             true
         }
@@ -608,7 +608,7 @@ fun CalendarScreen(
                 if (showTasks) Icon(TalonIcons.CalendarMonth, contentDescription = "Month")
                 else Icon(TalonIcons.Checklist, contentDescription = "Tasks")
             }
-            io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { say("Refreshing…", "The ship did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
+            io.nisfeb.talon.ui.IconButton(tip = "Refresh", onClick = { say("Refreshing…", "Your Groundwire node did not answer.") { repo.refreshAll(); repo.error.value == null } }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
             }
             io.nisfeb.talon.ui.IconButton(tip = "Calendars", onClick = { managing = true }) {
@@ -618,14 +618,14 @@ fun CalendarScreen(
         when (availability) {
             CalendarAvailability.ABSENT -> {
                 Text(
-                    "This ship has no calendar yet. The Today widget on the home page can install it.",
+                    "This node has no calendar yet. The Today widget on the home page can install it.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(16.dp),
                 )
                 return@Column
             }
             CalendarAvailability.SIGNED_OUT -> {
-                Text("Signed out of the ship.", modifier = Modifier.padding(16.dp))
+                Text("Signed out of your Groundwire node.", modifier = Modifier.padding(16.dp))
                 return@Column
             }
             else -> Unit
@@ -1029,7 +1029,7 @@ fun CalendarScreen(
                         if (!readOnlyHere && r.repeats) {
                             TextButton(onClick = {
                                 val idx = r.idx
-                                act("Skipping this one…", "The ship did not skip it.") {
+                                act("Skipping this one…", "Your Groundwire node did not skip it.") {
                                     repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", r.id); put("idx", idx) })
                                 }
                                 viewing = null
@@ -1088,7 +1088,7 @@ fun CalendarScreen(
                             )
                             TextButton(onClick = { confirmDelete = false }) { Text("Keep") }
                             TextButton(onClick = {
-                                removeNow(r.id, if (r.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${r.name}\"; it is still there.")
+                                removeNow(r.id, if (r.repeats) "Deleting the series…" else "Deleting…", "Your Groundwire node did not delete \"${r.name}\"; it is still there.")
                                 viewing = null
                             }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
                         }
@@ -1130,7 +1130,7 @@ fun CalendarScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("The invite goes as text with an .ics file any calendar imports.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("To, ships separated by commas") }, placeholder = { Text("~sampel-palnet, ~zod") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = to, onValueChange = { to = it }, label = { Text("To, people separated by commas") }, placeholder = { Text("~sampel-palnet, ~zod") }, modifier = Modifier.fillMaxWidth())
                     io.nisfeb.talon.ui.ShipSuggestions(to, onPick = { to = it }, separator = ", ")
                 }
             },
@@ -1172,7 +1172,7 @@ fun CalendarScreen(
                 val series = editingSeries
                 // The one-off went in but the ship would not skip the old.
                 var halfDone = false
-                val bothKept = "\"${d.name.trim()}\" is on its new day and time, but the ship kept the old one too: open it and choose Skip this one."
+                val bothKept = "\"${d.name.trim()}\" is on its new day and time, but the node kept the old one too: open it and choose Skip this one."
                 // The calendar acks a poke before it reads it, and keeps
                 // why it refused one: looked for after [savedAt], under the
                 // poke's id, an add's being "" (it has none of its own).
@@ -1188,7 +1188,7 @@ fun CalendarScreen(
                 val card = if (target != null) textOf(ghost!!) else null
                 if (ghost != null) pendingRows = pendingRows + ghost
                 if (id != null) pendingEdits = pendingEdits + (id to d)
-                act(if (id == null) "Adding…" else "Saving…", "The ship did not take the change; \"${d.name.trim()}\" is as it was.") {
+                act(if (id == null) "Adding…" else "Saving…", "Your Groundwire node did not take the change; \"${d.name.trim()}\" is as it was.") {
                     // The whole write on the repo's scope: leaving the screen
                     // no longer cancels it partway (a series edit is two pokes).
                     val (written, check) = repo.carry {
@@ -1251,7 +1251,7 @@ fun CalendarScreen(
                     // Not saved: the editor back with what was typed, and why.
                     // It closed for good, and a ship down for a restart lost the edit.
                     if (!ok && editing == null) {
-                        editFailed = refused?.let { "Not saved: $it" } ?: repo.failedLine("The ship did not take the change.")
+                        editFailed = refused?.let { "Not saved: $it" } ?: repo.failedLine("Your Groundwire node did not take the change.")
                         editing = id to d
                     }
                     if (ok) {
@@ -1293,13 +1293,13 @@ fun CalendarScreen(
             },
             onDelete = if (id == null) null else {
                 {
-                    removeNow(id, if (draft.repeats) "Deleting the series…" else "Deleting…", "The ship did not delete \"${draft.name.trim()}\"; it is still there.")
+                    removeNow(id, if (draft.repeats) "Deleting the series…" else "Deleting…", "Your Groundwire node did not delete \"${draft.name.trim()}\"; it is still there.")
                 }
             },
             onSkip = if (id == null || editingIdx == null) null else {
                 {
                     val idx = editingIdx!!
-                    act("Skipping this one…", "The ship did not skip it.") {
+                    act("Skipping this one…", "Your Groundwire node did not skip it.") {
                         repo.pokeEvent(buildJsonObject { put("action", "skip-event"); put("id", id); put("idx", idx) })
                     }
                 }
@@ -1320,45 +1320,45 @@ fun CalendarScreen(
             zones = zones,
             sync = syncRows,
             conflicts = conflicts,
-            onClearConflicts = { say("Clearing…", "The ship did not clear them.") { repo.clearConflicts() } },
+            onClearConflicts = { say("Clearing…", "Your Groundwire node did not clear them.") { repo.clearConflicts() } },
             defaultCalendar = defaultCalendar,
             onSetDefaultCalendar = { repo.defaultCalendar.value = it },
             deviceZone = deviceZone,
-            onSetZone = { z -> act("Setting the zone…", "The ship did not take the zone.") { repo.setZone(z) } },
+            onSetZone = { z -> act("Setting the zone…", "Your Groundwire node did not take the zone.") { repo.setZone(z) } },
             leadMin = leadMin,
-            onSetLeadMin = { m -> act("Saving…", "The ship did not take the change.") { repo.setLeadMin(m) } },
+            onSetLeadMin = { m -> act("Saving…", "Your Groundwire node did not take the change.") { repo.setLeadMin(m) } },
             onDismiss = { managing = false },
             status = status,
-            onMakeLocal = { id -> say("Making it local…", "The ship would not make that calendar local.") { repo.makeLocal(id) } },
+            onMakeLocal = { id -> say("Making it local…", "Your Groundwire node would not make that calendar local.") { repo.makeLocal(id) } },
             onOpenWebSettings = onOpenWebSettings,
             onShare = { id, ship, edit ->
                 status = "Sharing with $ship…"
                 scope.launch {
                     status = try {
                         when (repo.share(id, ship, edit)) {
-                            null -> "The ship would not share that calendar."
+                            null -> "Your Groundwire node would not share that calendar."
                             false -> "$ship could not be reached (down, or no calendar there yet). The share is recorded; share again once it is up to send the offer."
                             true -> null
                         }
                     } catch (e: io.nisfeb.talon.mail.AuspexError.Unreachable) {
-                        "The ship could not be reached; nothing was shared."
+                        "Your Groundwire node could not be reached; nothing was shared."
                     }
                 }
             },
-            onRevoke = { id, ship -> say("Revoking…", "The ship did not revoke it.") { repo.revoke(id, ship) } },
-            onAccept = { key -> say("Accepting…", "The ship would not accept that offer.") { repo.accept(key) } },
-            onDecline = { key -> say("Declining…", "The ship did not decline it.") { repo.decline(key) } },
+            onRevoke = { id, ship -> say("Revoking…", "Your Groundwire node did not revoke it.") { repo.revoke(id, ship) } },
+            onAccept = { key -> say("Accepting…", "Your Groundwire node would not accept that offer.") { repo.accept(key) } },
+            onDecline = { key -> say("Declining…", "Your Groundwire node did not decline it.") { repo.decline(key) } },
             onSync = { say("Syncing…", "A sync did not start; the rows say which.") { repo.syncNow() } },
             onAdd = { name, colour ->
                 val id = io.nisfeb.talon.calendar.newCalendarId(name, calendars.map { it.id })
-                say("Adding \"$name\"…", "The ship did not add the calendar.") {
+                say("Adding \"$name\"…", "Your Groundwire node did not add the calendar.") {
                     repo.poke(buildJsonObject { put("action", "add-calendar"); put("id", id); put("name", name); put("color", colour) })
                 }
             },
             onEdit = { id, name, colour ->
-                say("Saving…", "The ship did not take the change.") { repo.poke(buildJsonObject { put("action", "edit-calendar"); put("id", id); put("name", name); put("color", colour) }) }
+                say("Saving…", "Your Groundwire node did not take the change.") { repo.poke(buildJsonObject { put("action", "edit-calendar"); put("id", id); put("name", name); put("color", colour) }) }
             },
-            onDelete = { id -> say("Deleting the calendar…", "The ship did not delete it.") { repo.poke(buildJsonObject { put("action", "del-calendar"); put("id", id) }) } },
+            onDelete = { id -> say("Deleting the calendar…", "Your Groundwire node did not delete it.") { repo.poke(buildJsonObject { put("action", "del-calendar"); put("id", id) }) } },
         )
     }
 }
@@ -1610,7 +1610,7 @@ private fun EventEditor(
                             }
                     }
                     Text(
-                        "Your ship sends these as browser notifications where you have allowed them, and to the calendars it syncs with.",
+                        "Your Groundwire node sends these as browser notifications where you have allowed them, and to the calendars it syncs with.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -1888,7 +1888,7 @@ private fun CalendarsDialog(
                                 }
                             }
                             OutlinedTextField(
-                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with a ship") },
+                                value = shareShip, onValueChange = { shareShip = it }, label = { Text("Share with someone") },
                                 placeholder = { Text("~sampel-palnet, or a word name") }, singleLine = false, maxLines = 6,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -2002,7 +2002,7 @@ private fun CalendarsDialog(
                         }
                     }
                     Text(
-                        "Sent by your ship as well as each event's own reminders.",
+                        "Sent by your Groundwire node as well as each event's own reminders.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

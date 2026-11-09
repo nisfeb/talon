@@ -227,10 +227,10 @@ class SettingsScreenTest {
     @Test
     fun `showing raw ship names is switched and reported`() = settings {
         tap("General")
-        switchBeside("Always show ~ship names").performClick()
+        switchBeside("Always show addresses").performClick()
         waitForIdle()
         assertEquals(listOf(true), patpChanges)
-        switchBeside("Always show ~ship names").assertIsOn()
+        switchBeside("Always show addresses").assertIsOn()
     }
 
     // The local comet's Terminal link opened the Urbit tab once the comet
@@ -471,7 +471,7 @@ class SettingsScreenTest {
             settings(calls = controller) {
                 waitUntil(timeoutMillis = 10_000) { controller.wire.value == 8 }
                 tap("About")
-                waitUntil(timeoutMillis = 5_000) { shows("so your ship's copy is behind") }
+                waitUntil(timeoutMillis = 5_000) { shows("so your node's copy is behind") }
                 assertTrue(shows(io.nisfeb.talon.TalonBuild.versionName))
                 tap("Copy version info")
                 val copied = did.single()
@@ -496,7 +496,7 @@ class SettingsScreenTest {
     @Test
     fun `without calling, About leaves the desk out`() = settings {
         tap("About")
-        assertTrue(shows("github.com/nisfeb/talon") && !shows("Your ship's calling app"))
+        assertTrue(shows("github.com/nisfeb/talon") && !shows("Your Groundwire node's calling app"))
         tap("Copy version info")
         assertTrue("%trunk" !in did.single())
     }

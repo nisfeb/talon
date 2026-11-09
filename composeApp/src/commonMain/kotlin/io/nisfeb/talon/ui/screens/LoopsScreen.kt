@@ -448,7 +448,7 @@ fun LoopDetail(
             // and silently can't post. Surface that, with a one-tap grant.
             if (loop.writesAuthorized) {
                 Text(
-                    "Authorized to act on your ship (send messages, poke agents)." +
+                    "Authorized to act on your Groundwire node (send messages, ask its apps)." +
                         if (loop.askBeforeSharing) " Asks before sharing calendars." else "",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -469,7 +469,7 @@ fun LoopDetail(
                         )
                         Text(
                             "It can read your chats but can't send messages or act on your " +
-                                "ship. The write grant is per-device and doesn't sync, so a job " +
+                                "Groundwire node. The write grant is per-device and doesn't sync, so a job " +
                                 "authorized on another device arrives read-only here. Enable it " +
                                 "only for prompts you trust — it then acts unattended, with no " +
                                 "confirmation.",
@@ -674,7 +674,7 @@ private fun LoopForm(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Let this loop act on your ship", style = MaterialTheme.typography.bodyMedium)
+                Text("Let this loop act on your Groundwire node", style = MaterialTheme.typography.bodyMedium)
                 Text(
                     if (writesAuthorized) {
                         "On: it can send messages and change data unattended, " +

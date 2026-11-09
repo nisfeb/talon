@@ -371,7 +371,7 @@ internal fun rememberCallWiring(
                 controller.beginCallRecording { recordProblem = it }
             },
             text = "Recording captures both voices. Groundwire first posts \"${io.nisfeb.talon.call.CallController.RECORDING_ON}\" " +
-                "in your chat with ${nameFor(peer)}, and records only once your ship has sent it. " +
+                "in your chat with ${nameFor(peer)}, and records only once your Groundwire node has sent it. " +
                 "A transcript is made by Armillary's speech model, only if you publish one afterwards.",
         )
     }
@@ -462,7 +462,7 @@ private fun TrunkInstallPrompt(controller: CallController) {
         onDismissRequest = { controller.dismissInstall() },
         title = {
             Text(
-                if (outdated != null) "Your ship's calling app is out of date"
+                if (outdated != null) "Your Groundwire node's calling app is out of date"
                 else "Calling needs one more app",
             )
         },
@@ -473,11 +473,11 @@ private fun TrunkInstallPrompt(controller: CallController) {
                         // Naming the mismatch matters: without it an old
                         // desk just refuses pokes and every control
                         // looks broken for no visible reason.
-                        "Your ship runs an older version of %trunk than this " +
+                        "Your node runs an older version of %trunk than this " +
                             "app speaks, so calls and party lines won't work " +
                             "properly until it's updated."
                     } else {
-                        "Calls run through %trunk, a small app on your ship. " +
+                        "Calls run through %trunk, a small app on your Groundwire node. " +
                             "It isn't installed yet."
                     },
                 )

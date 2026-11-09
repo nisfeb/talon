@@ -861,7 +861,7 @@ class TlonChatRepoStartupTest {
         }
     }
 
-    // A settings change the ship did not answer went only with a new
+    // A settings change the node did not answer went only with a new
     // channel's settings bootstrap: a resumed channel never sent it, and
     // the next bootstrap's ship-wins apply then wiped it (review H7).
     @Test

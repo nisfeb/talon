@@ -173,12 +173,12 @@ class OrreryAiRowsTest {
     fun `the reading row says why it cannot run, by what the ship answered`() {
         probe = HttpStatusCode.NotFound
         rows { _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on your ship. Install it from the Apps page.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on your Groundwire node. Install it from the Apps page.") }
             assertFalse(shows("Orrery needs an AI model"), "no model to offer where there is no orrery")
             assertFalse(shows("More Orrery settings"), "nor a page to open")
         }
         probe = HttpStatusCode.Forbidden
-        rows { _, _ -> waitUntil(timeoutMillis = 5_000) { shows("Signed out of your ship.") } }
+        rows { _, _ -> waitUntil(timeoutMillis = 5_000) { shows("Signed out of your Groundwire node.") } }
     }
 
     // A 502 while the ship restarted: the row said "Checking your ship for
@@ -187,8 +187,8 @@ class OrreryAiRowsTest {
     fun `a check that failed is said under the reading row, and that it is asked again`() {
         probe = HttpStatusCode.BadGateway
         rows(answered = false) { _, orrery ->
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Groundwire asks again by itself.") }
-            assertTrue(shows("Checking your ship for Orrery."))
+            waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer. Groundwire asks again by itself.") }
+            assertTrue(shows("Checking your Groundwire node for Orrery."))
             assertFalse(shows("Bad Gateway"), "never the proxy's page")
             assertEquals(OrreryAvailability.UNKNOWN, orrery.availability.value)
         }
@@ -287,7 +287,7 @@ class OrreryAiRowsTest {
             waitUntil(timeoutMillis = 5_000) { shows("at 20:00") }
             onAllNodesWithText("Change")[0].performScrollTo().performClick()
             onNodeWithText("21:30").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship did not take the new time.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not take the new time.") }
             assertTrue(shows("at 20:00") && !shows("at 21:30"))
         }
         version = 129

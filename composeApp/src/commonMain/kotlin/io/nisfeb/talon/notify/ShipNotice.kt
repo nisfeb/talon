@@ -89,8 +89,8 @@ fun shipPushStatusLine(debug: JsonElement?, deviceId: String): String? {
         val drop = (d["drops"] as? kotlinx.serialization.json.JsonArray)?.map { it.obj() }
             ?.firstOrNull { (it?.get("id") as? JsonPrimitive)?.contentOrNull == deviceId }
         val why = (drop?.get("reason") as? JsonPrimitive)?.contentOrNull
-        return if (why != null) "Your ship stopped pushing here (its push service answered $why). Groundwire sets it up again when it next starts."
-        else "Your ship does not have this device yet. Groundwire sets it up again when it next starts."
+        return if (why != null) "Your Groundwire node stopped pushing here (its push service answered $why). Groundwire sets it up again when it next starts."
+        else "Your Groundwire node does not have this device yet. Groundwire sets it up again when it next starts."
     }
     val sentAt = device["sent"].obj()?.long("at")
     val last = device["last"].obj()
@@ -98,7 +98,7 @@ fun shipPushStatusLine(debug: JsonElement?, deviceId: String): String? {
     val code = last?.long("code")
     if (lastAt != null && code != null && code !in 200..299 && (sentAt == null || lastAt > sentAt)) {
         val what = if (code == 0L) "got no answer" else "got $code"
-        return "The last notification ${ago(lastAt)} $what from the push service; your ship tries again."
+        return "The last notification ${ago(lastAt)} $what from the push service; your Groundwire node tries again."
     }
     return if (sentAt != null) "Last notification ${ago(sentAt)}." else "No notification sent here yet."
 }

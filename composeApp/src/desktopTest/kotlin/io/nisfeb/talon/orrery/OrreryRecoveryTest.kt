@@ -95,13 +95,13 @@ class OrreryRecoveryTest {
 
     // A phone started before its wifi, or a 502 while the ship restarted:
     // the beacon and the actions started only when the first check said
-    // present, and Settings said "Checking your ship for Orrery." all day.
+    // present, and Settings said "Checking your Groundwire node for Orrery." all day.
     @Test
     fun `a first check that failed is tried again, and the beacon starts once orrery answers`() {
         downFor.set(2)
         attached { repo, _ ->
             until("the failed check is said, in words") { repo.error.value != null }
-            assertEquals("Your ship did not answer. Groundwire asks again by itself.", repo.error.value)
+            assertEquals("Your Groundwire node did not answer. Groundwire asks again by itself.", repo.error.value)
             until("orrery answers in the end") { repo.availability.value == OrreryAvailability.PRESENT }
             until("the beacon runs") { asked.any { it.endsWith("/beacon/rev") } }
             until("what is waiting is read") { repo.actions.value.map { it.id } == listOf("a1") }

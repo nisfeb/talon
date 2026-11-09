@@ -294,7 +294,7 @@ private fun Body(
                 ) {
                     Text(a.title.ifBlank { a.kind }, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        a.note.ifBlank { "The ship gave no reason." },
+                        a.note.ifBlank { "Your Groundwire node gave no reason." },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

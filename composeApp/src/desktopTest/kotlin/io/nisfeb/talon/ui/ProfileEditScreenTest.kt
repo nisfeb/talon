@@ -125,7 +125,7 @@ class ProfileEditScreenTest {
             override suspend fun keys(ship: String) = Result.success<AzimuthRpc.Keys?>(null)
         }) {
             onNodeWithText("Public keys").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("Azimuth holds no keys for this ship.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Azimuth holds no keys for this node.") }
         }
         profile(keys = object : AzimuthRpc by zodKeys {
             override suspend fun keys(ship: String) = Result.failure<AzimuthRpc.Keys?>(IllegalStateException("down"))

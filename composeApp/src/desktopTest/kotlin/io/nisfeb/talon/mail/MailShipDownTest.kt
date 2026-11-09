@@ -65,17 +65,17 @@ class MailShipDownTest {
 
     @Test
     fun `a ship that is down is said in words, never the web server's page, and the line can be put away`() = list {
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship isn't answering") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node isn't answering") }
         assertFalse(shows("<html") || shows("Bad Gateway") || shows("nginx"), "no markup on screen")
-        onNodeWithText("Your ship isn't answering", substring = true).performClick()
-        waitUntil(timeoutMillis = 5_000) { !shows("Your ship isn't answering") }
+        onNodeWithText("Your Groundwire node isn't answering", substring = true).performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("Your Groundwire node isn't answering") }
     }
 
     @Test
     fun `the line goes by itself once the ship is back, without waiting for the next poll`() = list {
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship isn't answering") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node isn't answering") }
         down = false
         // Asked again within a second, not at the hour-long poll this repo has.
-        waitUntil(timeoutMillis = 5_000) { shows("Lunch") && !shows("Your ship isn't answering") }
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch") && !shows("Your Groundwire node isn't answering") }
     }
 }

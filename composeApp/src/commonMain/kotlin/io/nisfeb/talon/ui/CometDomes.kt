@@ -199,10 +199,10 @@ fun GroundwireLine(ship: String) {
     androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         androidx.compose.material3.Text(
             when {
-                checking -> "Asking your ship about Groundwire…"
-                r == null -> "Your ship did not answer about Groundwire."
+                checking -> "Asking your node about Groundwire…"
+                r == null -> "Your node did not answer about Groundwire."
                 r.isNotEmpty() -> "Groundwire comet"
-                else -> "Not on Groundwire, as your ship knows it"
+                else -> "Not on Groundwire, as your node knows it"
             },
             style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
             color = if (!r.isNullOrEmpty() && !checking) androidx.compose.material3.MaterialTheme.colorScheme.primary

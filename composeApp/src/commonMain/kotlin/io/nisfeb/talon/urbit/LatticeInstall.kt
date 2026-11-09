@@ -93,7 +93,7 @@ object LatticeInstall {
             // channel that is not up and a session that has gone. The
             // old wording blamed the ship for both.
             return Result.failure(
-                IllegalStateException("Your ship did not take the install. It may be offline, or signed out here."),
+                IllegalStateException("Your Groundwire node did not take the install. It may be offline, or signed out here."),
             )
         }
         val deadline = nowMs() + timeoutMs
@@ -131,7 +131,7 @@ object LatticeInstall {
         }
         return {
             val url = shipUrl()
-            if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
+            if (url == null) Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
             else installAndWait(
                 http, url, poke, desk = desk,
                 installed = { installed?.invoke(url) ?: isInstalled(http, url) },
@@ -176,8 +176,8 @@ object LatticeInstall {
         if (!resp.status.isSuccess()) {
             error(
                 when (resp.status.value) {
-                    403 -> "Your ship did not accept that; sign in to it again."
-                    404 -> "The Grubbery shell is not answering on this ship."
+                    403 -> "Your Groundwire node did not accept that; sign in to it again."
+                    404 -> "The Grubbery shell is not answering on this node."
                     // The web server in front of a ship that is down: not a refusal.
                     in 502..504 -> SHIP_DOWN
                     else -> "The shell would not add $name (HTTP ${resp.status.value})."
@@ -208,7 +208,7 @@ object LatticeInstall {
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
         if (url == null) {
-            Result.failure(IllegalStateException("Not signed in to a ship."))
+            Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
         } else {
             runSuspendCatching {
                 // The shell has to be there before it can be asked for
@@ -224,7 +224,7 @@ object LatticeInstall {
                 }
                 error(
                     "$name was asked for and has not answered yet. The shell syncs it over the network, " +
-                        "and it asks you to approve what it reaches: open /apps/$name on your ship.",
+                        "and it asks you to approve what it reaches: open /apps/$name on your node.",
                 )
             }
         }
@@ -254,7 +254,7 @@ object LatticeInstall {
         }
         if (!resp.status.isSuccess()) {
             error(
-                if (resp.status.value == 401 || resp.status.value == 403) "Your ship did not accept that; sign in to it again."
+                if (resp.status.value == 401 || resp.status.value == 403) "Your Groundwire node did not accept that; sign in to it again."
                 else if (resp.status.value in 502..504) SHIP_DOWN
                 else "Grubbery would not fetch its apps (HTTP ${resp.status.value}).",
             )
@@ -294,7 +294,7 @@ object LatticeInstall {
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
         if (url == null) {
-            Result.failure(IllegalStateException("Not signed in to a ship."))
+            Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
         } else {
             runSuspendCatching {
                 if (answers(url)) return@runSuspendCatching
@@ -319,10 +319,10 @@ object LatticeInstall {
 
     /** What an install ends on while the fetched apps wait for the owner's approval. */
     const val APPROVE_APPS =
-        "Grubbery has its apps now. Approve what they reach on your ship's permits page, and they will open."
+        "Grubbery has its apps now. Approve what they reach on your Groundwire node's permits page, and they will open."
 
     /** A proxy's 502 to 504, said as what it is. */
-    internal const val SHIP_DOWN = "Your ship is down or out of reach. Try again when it's back."
+    internal const val SHIP_DOWN = "Your Groundwire node is down or out of reach. Try again when it's back."
 
     private const val POLL_MS = 3_000L
 

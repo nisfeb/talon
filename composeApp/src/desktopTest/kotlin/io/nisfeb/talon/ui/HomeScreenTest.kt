@@ -183,7 +183,7 @@ class HomeScreenTest {
     @Test
     fun `the page greets the ship, and says what this ship does not have`() = home {
         assertTrue(shows("~zod") && shows("Good "), "a greeting by name")
-        assertTrue(shows("This ship has no mail app yet."))
+        assertTrue(shows("This node has no mail app yet."))
         assertTrue(shows("This host has no calendar."))
     }
 
@@ -460,7 +460,7 @@ class HomeScreenTest {
     ) {
         waitUntil(timeoutMillis = 5_000) { shows("Install the calendar") }
         onNodeWithText("Install the calendar").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer") }
         assertTrue(!shows("Connection refused"))
     }
 

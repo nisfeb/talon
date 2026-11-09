@@ -159,7 +159,7 @@ class LiveShareService : Service() {
         NotificationCompat.Builder(this, Notifications.CHANNEL_TRIP)
             .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle("Sharing where you are")
-            .setContentText("Your ship sends where you are each minute until the share ends.")
+            .setContentText("Your Groundwire node sends where you are each minute until the share ends.")
             .setContentIntent(open)
             .addAction(0, "Stop", stop)
             .setOngoing(true)

@@ -725,7 +725,7 @@ private fun AdminBody(
             OutlinedTextField(
                 value = inviteText,
                 onValueChange = { inviteText = it },
-                label = { Text("~ship, or a word name") },
+                label = { Text("~address, or a word name") },
                 keyboardOptions = io.nisfeb.talon.ui.GoKeyboard,
                 keyboardActions = io.nisfeb.talon.ui.goActions { if (invitePatp != null) invite() },
                 modifier = Modifier.weight(1f).submitOnEnter(invitePatp != null, invite),
@@ -937,17 +937,17 @@ internal fun lineAskText(ask: io.nisfeb.talon.call.LineAsk, host: String, member
     when {
         ask is io.nisfeb.talon.call.LineAsk.Asking -> "Asking $host to open it…"
         ask == io.nisfeb.talon.call.LineAsk.OwnShip ->
-            "Your ship didn't take the request. Check that %trunk is installed and running on it."
+            "Your Groundwire node didn't take the request. Check that %trunk is installed and running on it."
         ask == io.nisfeb.talon.call.LineAsk.Refused ->
             "$host turned it down. Its %trunk may be out of date."
         // A host refuses a bigger roster without a word.
         members > LINE_ROSTER_CAP ->
             "$host won't open it: a party line holds at most $LINE_ROSTER_CAP members, and this group has $members."
         ask == io.nisfeb.talon.call.LineAsk.Ignored ->
-            "$host has %trunk but didn't open the line. Its call settings may not let your ship ring it."
+            "$host has %trunk but didn't open the line. Its call settings may not let your Groundwire node ring it."
         else ->
             "$host hasn't answered. This group's line lives on $host, which needs %trunk installed and running. " +
-                "It may also be offline, or not let your ship ring it."
+                "It may also be offline, or not let your Groundwire node ring it."
     }
 
 @Composable
@@ -1135,7 +1135,7 @@ private fun PartyLineSection(
                 when {
                     sfuBase == null -> "None configured — party lines won't connect"
                     customSfu != null -> "$sfuBase · chosen by this group"
-                    else -> "$sfuBase · the host ship's"
+                    else -> "$sfuBase · the host node's"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1505,7 +1505,7 @@ private fun ChannelSettingsDialog(
             note = null
             runCatching { block() }
                 .onSuccess { after(); onChanged() }
-                .onFailure { note = io.nisfeb.talon.util.problemOf("Your ship did not take it", it) }
+                .onFailure { note = io.nisfeb.talon.util.problemOf("Your Groundwire node did not take it", it) }
             busy = false
         }
     }
@@ -1540,14 +1540,14 @@ private fun ChannelSettingsDialog(
                 // group notebook takes its readers from the group.
                 if (notebook) Text("In a notebook, everyone who can read it can also write in it.", style = MaterialTheme.typography.bodySmall)
                 else when (val w = writers) {
-                    null -> Text("Asking your ship…", style = MaterialTheme.typography.bodySmall)
+                    null -> Text("Asking your Groundwire node…", style = MaterialTheme.typography.bodySmall)
                     TlonChatRepo.ChannelWriters.NotJoined -> Text(
-                        "Your ship hasn't joined this channel, so it can't say who can post. Join it on this ship to change this.",
+                        "Your Groundwire node hasn't joined this channel, so it can't say who can post. Join it on this node to change this.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                     is TlonChatRepo.ChannelWriters.NoAnswer -> Text(
-                        "Your ship didn't say who can post (${w.why}). Close this and open it again to retry.",
+                        "Your Groundwire node didn't say who can post (${w.why}). Close this and open it again to retry.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -1679,7 +1679,7 @@ private fun DisappearingSection(
         }
         h == null -> Text("Reading…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         nests.isEmpty() -> Text(
-            "Your ship hosts none of this group's chats or galleries, so there is nothing here it can delete.",
+            "Your Groundwire node hosts none of this group's chats or galleries, so there is nothing here it can delete.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1691,7 +1691,7 @@ private fun DisappearingSection(
             val current = now.singleOrNull().takeUnless { unfinished }
             Text(
                 "Deletes every message, for everyone, once it is older than the time you pick. " +
-                    "Members' notifications and their ships' logs can keep copies.",
+                    "Members' notifications and their nodes' logs can keep copies.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1731,7 +1731,7 @@ private fun DisappearingSection(
             if (missed.isNotEmpty()) {
                 Text(
                     "Not covered: ${missed.joinToString(", ") { it.title.ifBlank { it.nest.substringAfterLast('/') } }}. " +
-                        "Your ship can only delete in chats and galleries it hosts for this group.",
+                        "Your Groundwire node can only delete in chats and galleries it hosts for this group.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1747,7 +1747,7 @@ private fun DisappearingSection(
                 Text(
                     "Every message in this group's channels, from every member, is deleted for everyone once it is " +
                         "${d.label(seconds)} old. Messages already older than that are deleted now. " +
-                        "Members' notifications and their ships' logs can still hold copies.",
+                        "Members' notifications and their nodes' logs can still hold copies.",
                 )
             },
             confirmButton = {

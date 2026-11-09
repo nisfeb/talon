@@ -244,7 +244,7 @@ fun MailComposer(
         val (good, bad) = parseRecipients(edits.recipientDraft)
         good.forEach { if (it !in recipients) recipients += it }
         edits.recipientDraft = bad.joinToString(" ")
-        problem = if (bad.isEmpty()) null else "Not a ship: ${bad.joinToString(", ")}"
+        problem = if (bad.isEmpty()) null else "Not an address: ${bad.joinToString(", ")}"
         return recipients.toList()
     }
 
@@ -500,7 +500,7 @@ fun MailComposer(
                                 oversize = picked
                                 problem = null
                             } else {
-                                problem = "${picked.displayName} is over $MAIL_CAP, which is the ship's limit."
+                                problem = "${picked.displayName} is over $MAIL_CAP, which is your Groundwire node's limit."
                             }
                         } else {
                             files += picked
@@ -520,7 +520,7 @@ fun MailComposer(
             text = {
                 Text(
                     "${big.displayName} is ${if (kb >= 1024) "${kb / 1024} MB" else "$kb KB"}, and a mail " +
-                        "carries $MAIL_CAP at most. Your ship can hold it instead, " +
+                        "carries $MAIL_CAP at most. Your Groundwire node can hold it instead, " +
                         "and the message carries a link to it. Anyone who has the link can open it, " +
                         "including people the message was not sent to.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -568,7 +568,7 @@ private val MAIL_CAP = "${AuspexApi.MAX_BLOB_BYTES / (1024 * 1024)} MB"
 internal fun storeFailedLine(name: String, e: Throwable): String = when {
     e is io.nisfeb.talon.urbit.UploadFailed ->
         "$name was not stored. ${e.message}" +
-            if (e.message.orEmpty().contains("no image storage")) " A ship stores files once storage is set up in Landscape." else ""
+            if (e.message.orEmpty().contains("no image storage")) " A node stores files once storage is set up in Landscape." else ""
     else -> io.nisfeb.talon.util.problemOf("$name was not stored", e).line
 }
 

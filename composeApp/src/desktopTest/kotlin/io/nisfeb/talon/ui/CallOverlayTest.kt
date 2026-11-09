@@ -156,7 +156,7 @@ class CallOverlayTest {
     fun `an old calling app is offered an update, and Not now leaves it`() {
         ship.scries["trunk/version"] = """{"wire":5}"""
         overlay {
-            showing("Your ship's calling app is out of date")
+            showing("Your Groundwire node's calling app is out of date")
             onNodeWithText("Not now").performClick()
             waitUntil(timeoutMillis = 5_000) { !shows("out of date") }
             assertTrue(ship.pokesTo("hood").isEmpty(), "nothing installed")

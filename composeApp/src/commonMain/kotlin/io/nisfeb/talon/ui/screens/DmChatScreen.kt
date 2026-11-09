@@ -1609,7 +1609,7 @@ fun DmChatScreen(
                     ) {
                         Text(
                             "Publishes this message and its thread replies as a " +
-                                "note on your own ship.",
+                                "note on your own Groundwire node.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedTextField(
@@ -2188,7 +2188,7 @@ private fun DmRequestBar(
     }
     if (confirmBlock) io.nisfeb.talon.ui.ConfirmDestructive(
         title = "Block $who?",
-        text = "They won't be able to message or call you, and this request is declined. Their ship is told that you blocked them.",
+        text = "They won't be able to message or call you, and this request is declined. Their node is told that you blocked them.",
         confirm = "Block",
         onConfirm = onBlock,
         onDismiss = { confirmBlock = false },
@@ -2214,7 +2214,7 @@ private fun EmptyChatPlaceholder(
         )
         Text(
             text = when {
-                unread -> "Your ship did not send this chat. Open it again to retry."
+                unread -> "Your Groundwire node did not send this chat. Open it again to retry."
                 isDm -> "Say hi to $label — your first message starts the DM."
                 else -> "Be the first to post in this channel."
             },
@@ -2829,7 +2829,7 @@ internal fun QueuedNote() {
             modifier = Modifier.size(14.dp),
         )
         Text(
-            "Queued · sends when your ship is back",
+            "Queued · sends when your Groundwire node is back",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

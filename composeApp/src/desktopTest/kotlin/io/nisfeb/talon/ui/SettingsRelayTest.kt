@@ -75,7 +75,7 @@ class SettingsRelayTest {
     private fun ComposeUiTest.register(code: String) {
         onNodeWithText("Register this device").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Register with relay") }
-        onNode(hasSetTextAction() and hasText("+code")).performTextInput(code)
+        onNode(hasSetTextAction() and hasText("Access code")).performTextInput(code)
         onAllNodesWithText("Register").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
     }
 
@@ -111,7 +111,7 @@ class SettingsRelayTest {
     @Test
     fun `a refused registration says what to check, and keeps nothing`() = panel(client = relay(ok = false)) {
         register("wrong")
-        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your Groundwire node.") }
         assertEquals("", relaySettings.deviceIdFor("~zod"))
     }
 
@@ -159,7 +159,7 @@ class SettingsRelayTest {
             onNodeWithText("Use the relay").performScrollTo().performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }
             assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
-            assertTrue(shows("Use my ship"))
+            assertTrue(shows("Use my node"))
         }
     }
 

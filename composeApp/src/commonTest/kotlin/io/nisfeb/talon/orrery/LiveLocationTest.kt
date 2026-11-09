@@ -129,9 +129,9 @@ class LiveLocationTest {
             "Couldn't share: home: this ship does not know where home is; give hours too",
             shareProblem("share", OrreryError.Refused(400, "home: this ship does not know where home is; give hours too")),
         )
-        assertEquals("Couldn't stop: the ship said no (500)", shareProblem("stop", OrreryError.Refused(500, "")))
-        assertEquals("Couldn't share: your ship didn't answer. Try again.", shareProblem("share", OrreryError.Unreachable(RuntimeException("java.net.ConnectException: refused"))))
-        assertEquals("Couldn't share. Try again.", shareProblem("share", IllegalStateException("Not attached to a ship.")))
+        assertEquals("Couldn't stop: the node said no (500)", shareProblem("stop", OrreryError.Refused(500, "")))
+        assertEquals("Couldn't share: your Groundwire node didn't answer. Try again.", shareProblem("share", OrreryError.Unreachable(RuntimeException("java.net.ConnectException: refused"))))
+        assertEquals("Couldn't share. Try again.", shareProblem("share", IllegalStateException("Not attached to a Groundwire node.")))
     }
 
     // Orrery 137: a share from a ship it does not know waits as an ask.

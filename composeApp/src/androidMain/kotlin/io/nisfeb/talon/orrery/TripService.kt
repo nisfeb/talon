@@ -172,7 +172,7 @@ class TripService : Service() {
         NotificationCompat.Builder(this, Notifications.CHANNEL_TRIP)
             .setSmallIcon(R.drawable.ic_stat_talon)
             .setContentTitle(if (trip.name.isBlank()) "On the way" else "On the way to ${trip.name}")
-            .setContentText("Your ship hears where you are each minute until you get there.")
+            .setContentText("Your Groundwire node hears where you are each minute until you get there.")
             .setContentIntent(open)
             .addAction(0, "Stop", stop)
             .setOngoing(true)

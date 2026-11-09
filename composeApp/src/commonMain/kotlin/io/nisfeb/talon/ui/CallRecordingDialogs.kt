@@ -125,7 +125,7 @@ fun RecordingResultDialog(
                     Text(
                         "Publishing sends each speaker's audio to Armillary's " +
                             "transcription model and puts the transcript on " +
-                            "your ship, where anyone who can read your Lattice " +
+                            "your Groundwire node, where anyone who can read your Lattice " +
                             "namespace can see it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

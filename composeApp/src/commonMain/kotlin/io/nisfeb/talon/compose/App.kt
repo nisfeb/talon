@@ -938,7 +938,7 @@ fun App(
                 io.nisfeb.talon.util.Log.i("Landing", "$text (${secs}s)")
                 if (!landingHidden) landingProgress = io.nisfeb.talon.ui.LandingProgress(text, secs, slow = secs > 600)
             }
-            step("Connecting to your ship")
+            step("Connecting to your Groundwire node")
             repo.bootstrapping.first { !it }
             // Join, then keep reconciling the group list until the group
             // is really here. A fresh comet is busy with updates and the
@@ -955,13 +955,13 @@ fun App(
                 val slow = nowMs() - began > 600_000L
                 if (nowMs() - lastJoin > (if (slow) 90_000L else 30_000L)) {
                     asks++
-                    step(if (asks == 1) "Joining Nisfeb Software" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
+                    step(if (asks == 1) "Joining Nisfeb Software" else "Joining Nisfeb Software, try $asks. The node is still installing updates")
                     runCatching { repo.acceptInvite(flag) }
                     lastJoin = nowMs()
                 }
                 runCatching { repo.refreshGroups() }
                 if (db.groups().getGroup(flag) == null) {
-                    step(if (asks <= 1) "Waiting for the ship to confirm the group" else "Joining Nisfeb Software, try $asks. The ship is still installing updates")
+                    step(if (asks <= 1) "Waiting for the node to confirm the group" else "Joining Nisfeb Software, try $asks. The node is still installing updates")
                     kotlinx.coroutines.delay(if (slow) 15_000 else 5_000)
                 }
             }
@@ -978,7 +978,7 @@ fun App(
                     .firstOrNull { it.nest.startsWith("chat/") }?.nest
                 if (whom == null) {
                     polls++
-                    step("Joined Nisfeb Software. Waiting for its channels to arrive" + if (polls > 6) " (the ship is still busy)" else "")
+                    step("Joined Nisfeb Software. Waiting for its channels to arrive" + if (polls > 6) " (the node is still busy)" else "")
                     runCatching { repo.refreshGroups() }
                     kotlinx.coroutines.delay(if (nowMs() - began > 600_000L) 15_000 else 5_000)
                 }
@@ -2660,7 +2660,7 @@ fun App(
                         orrery = orreryRepo.takeIf { orreryGate == true },
                         armillary = armillaryRepo,
                         latticeInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(http, url) ?: error("The ship could not be asked.") }
+                            { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(http, url) ?: error("Your Groundwire node could not be asked.") }
                         },
                         latticeKey = sessionStore.active()?.ship.let { s -> remember(s, db) { s?.let { db.latticeKeys().stream(it) } } },
                         onNewLatticeKey = sessionStore.active()?.let { s ->
@@ -2678,7 +2678,7 @@ fun App(
                             }
                         },
                         groupsInstalled = sessionStore.active()?.shipUrl?.let { url ->
-                            { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("The ship could not be asked.") }
+                            { io.nisfeb.talon.urbit.GroupsInstall.installedOrUnknown(session.http, url) ?: error("Your Groundwire node could not be asked.") }
                         },
                         onInstallGroups = io.nisfeb.talon.urbit.GroupsInstall.installer(
                             session.http,
@@ -3881,8 +3881,8 @@ fun App(
                             railFooter = {
                                 // The signed-in ship's own mark, coloured as in the switcher.
                                 val open = Modifier.size(32.dp).clickable { drawerScope.launch { drawerState.open() } }
-                                loggedInShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch ship") }
-                                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch ship", modifier = open)
+                                loggedInShip?.let { io.nisfeb.talon.ui.ShipMark(it, size = 32.dp, modifier = open, contentDescription = "Switch node") }
+                                    ?: io.nisfeb.talon.ui.TalonLogo(contentDescription = "Switch node", modifier = open)
                             },
                             // The assistant takes over the whole area beside the
                             // rail and manages its OWN panes (conversations/jobs

@@ -173,7 +173,7 @@ fun NewDmScreen(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Name, ~ship or group code", maxLines = 1) },
+                placeholder = { Text("Name, address or group code", maxLines = 1) },
                 prefix = { Text("To: ", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
                 textStyle = MaterialTheme.typography.bodyMedium,

@@ -1882,7 +1882,7 @@ class TlonChatRepo(
 
     suspend fun addContact(ship: String, nickname: String? = null) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "addContact: $ship isn't an address" }
         val name = nickname?.trim()?.takeIf { it.isNotBlank() }
         // Confirmed, both: the screen says the contact was added, and a
         // ship that never answered was that, after its 15 s wait.
@@ -1938,7 +1938,7 @@ class TlonChatRepo(
      */
     suspend fun removeContact(ship: String) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "removeContact: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "removeContact: $ship isn't an address" }
         // Confirmed, as an add is: the screen says they were removed, and
         // a ship that never answered was taken for one that had.
         ch.poke(
@@ -1954,7 +1954,7 @@ class TlonChatRepo(
 
     suspend fun setPetName(ship: String, name: String) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "setPetName: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "setPetName: $ship isn't an address" }
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
@@ -2066,7 +2066,7 @@ class TlonChatRepo(
     suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
         val ch = liveChannel()
         val body = scryNewest(ch, "groups", "/v3/groups", "/v2/groups") as? JsonObject
-            ?: error("The ship's list of groups could not be read.")
+            ?: error("Your Groundwire node's list of groups could not be read.")
         val me = ourPatp
         Log.i(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
         // The list is every group whole: %groups encodes each entry of
@@ -2099,7 +2099,7 @@ class TlonChatRepo(
         // out, it vanished from Administration (and lost its Pin) for the
         // five minutes the list is kept. The list we had stays instead.
         parsed.firstOrNull { it.second == null }?.let { (flag, _) ->
-            error("$flag could not be read from the ship. Try again.")
+            error("$flag could not be read from your Groundwire node. Try again.")
         }
 
         val out = ArrayList<AdminGroup>(parsed.size)
@@ -2561,7 +2561,7 @@ class TlonChatRepo(
             val body = runCatching { scryNewest(ch, "groups-ui", "/v10/init", "/v7/init") }
                 .onFailure { Log.w(TAG, "scry groups-ui init failed", it) }
                 .getOrThrow() as? JsonObject
-                ?: error("the ship's answer about invites was not readable")
+                ?: error("your Groundwire node's answer about invites was not readable")
             foreigns = body["foreigns"] as? JsonObject ?: run {
                 Log.w(TAG, "refreshInvites: no foreigns in init response, keys=${body.keys}")
                 _invites.value = emptyList()
@@ -3035,7 +3035,7 @@ class TlonChatRepo(
         ) as? JsonObject
             // No answer is not an empty feed: stored as one, a timed-out
             // refresh replaced what was showing with "No activity yet".
-            ?: error("the ship did not answer for its activity")
+            ?: error("your Groundwire node did not answer for its activity")
         val items = parseActivityFeed(body)
         _activityFeed.value = items
         return items
@@ -3299,7 +3299,7 @@ class TlonChatRepo(
         }
 
         val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)", memo = "$app/$postsKey")
-        val obj = probe as? JsonObject ?: error("the ship did not send $whom")
+        val obj = probe as? JsonObject ?: error("your Groundwire node did not send $whom")
         val posts = obj[postsKey] as? JsonObject
         if (posts == null) {
             Log.w(TAG, "refreshConversation($whom): no '$postsKey' key; keys=${obj.keys}")
@@ -3379,7 +3379,7 @@ class TlonChatRepo(
         }
 
         val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom", memo = "$app/$postsKey") as? JsonObject
-            ?: error("the ship did not send older messages of $whom")
+            ?: error("your Groundwire node did not send older messages of $whom")
 
         val posts = body[postsKey] as? JsonObject
         if (posts != null) {
@@ -3722,7 +3722,7 @@ class TlonChatRepo(
      * on such a post; this is the floor under them.
      */
     private fun requireOnShip(vararg ids: String?) =
-        require(ids.none { it?.startsWith("local_") == true }) { "this message has not reached your ship yet." }
+        require(ids.none { it?.startsWith("local_") == true }) { "this message has not reached your Groundwire node yet." }
 
     /** [m], which the ship never took, gone from here and from the queue. */
     private suspend fun forgetUnsent(m: MessageEntity) {
@@ -3938,7 +3938,7 @@ class TlonChatRepo(
         val prior = runCatching {
             ch.scry("channels", "/v5/$nest/posts/post/${dotAtom(postId)}") as? JsonObject
         }.getOrNull()?.get("essay") as? JsonObject
-            ?: error("The ship did not send the post as it stands, so nothing was changed. Try again.")
+            ?: error("Your Groundwire node did not send the post as it stands, so nothing was changed. Try again.")
         val priorMeta = prior["meta"] as? JsonObject
         val content = MarkdownBlocks.mergeEdit(
             prior = prior["content"] as? JsonArray,

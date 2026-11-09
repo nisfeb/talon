@@ -11,8 +11,8 @@ class OrreryProblemLinesTest {
 
     @Test
     fun `a failed read is said by what failed`() {
-        assertEquals("Your ship did not answer", readProblemLine(down))
-        assertEquals("Orrery is not on your ship now", readProblemLine(OrreryError.Refused(404, "not found")))
+        assertEquals("Your Groundwire node did not answer", readProblemLine(down))
+        assertEquals("Orrery is not on your Groundwire node now", readProblemLine(OrreryError.Refused(404, "not found")))
         assertEquals("Orrery no longer takes this device's key", readProblemLine(OrreryError.Refused(403, "forbidden")))
         assertEquals("Orrery could not be read: busy", readProblemLine(OrreryError.Refused(500, "busy")))
         assertEquals("Orrery could not be read", readProblemLine(OrreryError.Refused(500, "<html>")), "never an error page")
@@ -31,10 +31,10 @@ class OrreryProblemLinesTest {
 
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
-        assertEquals("Your ship did not answer. Groundwire asks again by itself.", probeProblemLine(down))
-        assertEquals("Orrery on your ship could not answer: crash. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "crash")))
-        assertEquals("Orrery on your ship could not answer. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "<html></html>")))
-        assertEquals("Your ship's answer about Orrery could not be read. Groundwire asks again by itself.", probeProblemLine(OrreryError.Garbled(RuntimeException())))
+        assertEquals("Your Groundwire node did not answer. Groundwire asks again by itself.", probeProblemLine(down))
+        assertEquals("Orrery on your Groundwire node could not answer: crash. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "crash")))
+        assertEquals("Orrery on your Groundwire node could not answer. Groundwire asks again by itself.", probeProblemLine(OrreryError.Refused(500, "<html></html>")))
+        assertEquals("Your Groundwire node's answer about Orrery could not be read. Groundwire asks again by itself.", probeProblemLine(OrreryError.Garbled(RuntimeException())))
     }
 
     @Test

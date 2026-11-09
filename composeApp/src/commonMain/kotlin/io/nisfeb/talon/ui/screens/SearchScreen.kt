@@ -677,8 +677,8 @@ private fun SearchSyntaxDialog(onDismiss: () -> Unit) {
         title = { Text("Advanced search") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SyntaxRow("from:~ship", "messages from one person")
-                SyntaxRow("in:chat/~ship/channel", "one conversation")
+                SyntaxRow("from:~address", "messages from one person")
+                SyntaxRow("in:chat/~address/channel", "one conversation")
                 SyntaxRow("since:1w", "newer than the offset (m, h, d, w, mo)")
                 SyntaxRow("has:image", "messages with an image")
                 SyntaxRow("has:link", "messages with a link")

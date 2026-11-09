@@ -71,6 +71,6 @@ class ActionNotificationsTest {
     fun `a failure notifies with the ship's reason, or says it gave none`() {
         val n = failureNotification(a("x1", status = "failed").copy(note = "no calendar called Work"))
         assertEquals(ActionNotification("failed:x1", "Did not go through: Buy swim goggles", "no calendar called Work"), n)
-        assertEquals("The ship gave no reason.", failureNotification(a("x2", status = "failed")).body)
+        assertEquals("Your Groundwire node gave no reason.", failureNotification(a("x2", status = "failed")).body)
     }
 }

@@ -151,7 +151,7 @@ fun AppsSettingsScreen(
                         io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Grubbery and its apps are here."
                         // The desk is on the ship; what it may reach is
                         // the owner's to allow, on the ship's own page.
-                        else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
+                        else -> "Added ${row.name} to your Grubbery shell. Open it on your Groundwire node to approve what it reaches."
                     }
                 },
                 onFailure = { note = io.nisfeb.talon.util.failureLine("The install did not finish", it) },
@@ -201,7 +201,7 @@ fun AppsSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "Mail, the calendar and Lattice run on your ship, inside Grubbery.",
+                "Mail, the calendar and Lattice run on your Groundwire node, inside Grubbery.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -319,7 +319,7 @@ fun AppsSettingsScreen(
             Spacer(Modifier.height(16.dp))
             Text("Permissions", style = MaterialTheme.typography.bodyLarge)
             Text(
-                "Each app asks your ship for what it needs. Your ship's permits page is where those are answered.",
+                "Each app asks your Groundwire node for what it needs. Your node's permits page is where those are answered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -329,11 +329,11 @@ fun AppsSettingsScreen(
                     modifier = Modifier.fillMaxWidth().clickable { openPermits() }.padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Open permits on your ship", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text("Open permits on your node", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 }
             } else {
                 Text(
-                    "Sign in to a ship to reach its permits page.",
+                    "Sign in to a node to reach its permits page.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

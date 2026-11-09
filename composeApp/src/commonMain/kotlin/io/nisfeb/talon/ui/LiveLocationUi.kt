@@ -287,7 +287,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         androidx.compose.material3.FilterChip(selected = !autoBy, onClick = { autoBy = false; autoChosen = true }, label = { Text("Set a time") })
                     }
                     if (checkIn && canAutoCheckIn && autoBy) Text(
-                        "Your ship works it out from the drive home, with traffic, plus your travel buffer.",
+                        "Your Groundwire node works it out from the drive home, with traffic, plus your travel buffer.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     else if (checkIn) ClockTimeButton(byMin, { byMin = it }, label = "Home by")
@@ -303,7 +303,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     Switch(checked = exact, onCheckedChange = { exact = it })
                 }
                 Text(
-                    "Your ship sends where you are each minute while this runs. Stop it any time.",
+                    "Your Groundwire node sends where you are each minute while this runs. Stop it any time.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (busy) Text("Waiting for location access…", style = MaterialTheme.typography.bodySmall)
@@ -342,7 +342,7 @@ internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
 ).joinToString(" · ")
 
 internal fun outboundDetail(s: OutShare): String = listOfNotNull(
-    if (s.sending) "Sending to your ship" else null,
+    if (s.sending) "Sending to your Groundwire node" else null,
     s.untilMs?.let { "until ${formatClock(it)}" } ?: "until you're home",
     s.byMs?.let { "check in by ${formatClock(it)}" },
     if (s.exact) "exact" else "area only",
@@ -350,8 +350,8 @@ internal fun outboundDetail(s: OutShare): String = listOfNotNull(
 
 /** What a failed share or stop says: the ship's reason when it gave one, never an exception's text. */
 internal fun shareProblem(what: String, e: Throwable): String = when (e) {
-    is OrreryError.Refused -> "Couldn't $what: ${e.reason.ifBlank { "the ship said no (${e.status})" }}"
-    is OrreryError.Unreachable -> "Couldn't $what: your ship didn't answer. Try again."
+    is OrreryError.Refused -> "Couldn't $what: ${e.reason.ifBlank { "the node said no (${e.status})" }}"
+    is OrreryError.Unreachable -> "Couldn't $what: your Groundwire node didn't answer. Try again."
     else -> "Couldn't $what. Try again."
 }
 

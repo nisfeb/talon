@@ -193,7 +193,7 @@ class OrreryRepo(
 
     /** The ship's calendars, for the executor's picks. */
     suspend fun calendars(): Result<List<io.nisfeb.talon.calendar.CalendarInfo>> = runCatching {
-        CalendarApi(http, shipUrl ?: error("Not attached to a ship.")).calendars()
+        CalendarApi(http, shipUrl ?: error("Not attached to a Groundwire node.")).calendars()
     }
 
     private val _schema = MutableStateFlow<JsonObject?>(null)
@@ -700,7 +700,7 @@ class OrreryRepo(
                 },
                 onFailure = { e ->
                     _told.value = null
-                    _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + (e.message ?: "the ship did not answer")
+                    _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + (e.message ?: "the node did not answer")
                 },
             )
         }
@@ -766,7 +766,7 @@ class OrreryRepo(
     suspend fun readActions(): Result<List<OrreryAction>> =
         runCatching { attached().actions(keyToken()) }.onSuccess { published(it) }
 
-    private fun attached(): OrreryApi = api ?: error("Not attached to a ship.")
+    private fun attached(): OrreryApi = api ?: error("Not attached to a Groundwire node.")
 
     private suspend fun keyToken(): String? = ship?.let { db.orreryAccounts().get(it)?.token }
 
@@ -1052,7 +1052,7 @@ class OrreryRepo(
 
     suspend fun enable(): Result<Unit> = scope.async { runCatching {
         val a = attached()
-        val s = ship ?: error("Not attached to a ship.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         // Everything the ship has; the lists are only a fallback.
         val full = runCatching { a.schema() }.getOrNull()
         val key = a.mint(
@@ -1398,7 +1398,7 @@ class OrreryRepo(
                     rowLock.withLock { stillOurs().also { if (it) db.orreryAccounts().delete(s) } }
                 }
                 if (ours) {
-                    _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
+                    _error.value = "Your Groundwire node no longer accepts this install's key. Turn the pipe on again to mint a new one."
                     turnOff()
                 } else {
                     requeue()
@@ -1994,8 +1994,8 @@ class OrreryRepo(
      * does not take the answer back halfway.
      */
     suspend fun setAction(id: String, status: String, note: String = "", proposed: Boolean = false): Result<Unit> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        val s = ship ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         // This install's key where it has one, else the owner's own say.
         val token = db.orreryAccounts().get(s)?.token
         // Done on a proposal is approve, then done: the answer below stays
@@ -2027,8 +2027,8 @@ class OrreryRepo(
      * not drop the revision or what it filed beside it.
      */
     suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        val s = ship ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         val answer = a.refine(db.orreryAccounts().get(s)?.token, id, text)
         answer.action?.let { revised ->
             _actions.value = (_actions.value.map { if (it.id == revised.id) revised else it } + answer.extras)
@@ -2057,7 +2057,7 @@ class OrreryRepo(
                 answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
                 // No answer is not a refusal: said as one, a proxy's error page was the reason.
-                _answerProblem.value = if (e is OrreryError.Unreachable) "Your ship did not answer, so that answer was not given. Try it again."
+                _answerProblem.value = if (e is OrreryError.Unreachable) "Your Groundwire node did not answer, so that answer was not given. Try it again."
                 else "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
             }
@@ -2071,7 +2071,7 @@ class OrreryRepo(
      * value the ship answered it holds, until the list shows it.
      */
     suspend fun markAction(id: String, high: Boolean? = null, snoozeMinutes: Int? = null): Result<Unit> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         val token = keyToken()
         val (field, held) = if (high != null) "priority" to a.priority(token, id, high)
         else "snooze_until" to a.snooze(token, id, snoozeMinutes ?: error("Say high or a snooze."))
@@ -2353,9 +2353,9 @@ suspend fun settleOrreryGate(
 /** A failed check for orrery, said plainly: no status codes and no error pages. */
 internal fun probeProblemLine(e: Throwable): String = when (e) {
     is OrreryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
-        ?.let { "Orrery on your ship could not answer: $it." } ?: "Orrery on your ship could not answer."
-    is OrreryError.Garbled -> "Your ship's answer about Orrery could not be read."
-    else -> "Your ship did not answer."
+        ?.let { "Orrery on your Groundwire node could not answer: $it." } ?: "Orrery on your Groundwire node could not answer."
+    is OrreryError.Garbled -> "Your Groundwire node's answer about Orrery could not be read."
+    else -> "Your Groundwire node did not answer."
 } + " Groundwire asks again by itself."
 
 /** The first pause before a failed check for orrery is tried again, and the most it grows to. */

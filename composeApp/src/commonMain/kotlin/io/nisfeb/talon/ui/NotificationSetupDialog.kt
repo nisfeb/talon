@@ -50,16 +50,16 @@ fun NotificationSetupDialog(
                     )
                 } else {
                     Text(
-                        "With the app closed, an ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your ship on its own. Groundwire's relay watches " +
-                            "your ship and sends this ${io.nisfeb.talon.ui.iosDeviceName} a notification when something arrives. It signs in to your " +
-                            "ship once with your +code, keeps an encrypted session, and forgets the code.",
+                        "With the app closed, an ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your Groundwire node on its own. Groundwire's relay watches " +
+                            "your node and sends this ${io.nisfeb.talon.ui.iosDeviceName} a notification when something arrives. It signs in to your " +
+                            "node once with your access code (+code), keeps an encrypted session, and forgets the code.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (code == null) {
                         OutlinedTextField(
                             value = typed,
                             onValueChange = { typed = it },
-                            label = { Text("+code") },
+                            label = { Text("Access code") },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),

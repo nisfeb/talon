@@ -102,7 +102,7 @@ class AppsSettingsScreenTest {
     fun `each app says whether it answers, and Groups is installed where it is missing`() = apps {
         row("Lattice", "working")
         row("Groups", "not installed")
-        assertTrue(shows("Chat runs on Groups, which this ship does not have."))
+        assertTrue(shows("Chat runs on Groups, which this node does not have."))
         onNodeWithText("Install").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Installed Groups.") }
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not installed").fetchSemanticsNodes().isEmpty() }
@@ -124,7 +124,7 @@ class AppsSettingsScreenTest {
     ) {
         row("Groups", "not installed")
         onNodeWithText("Install").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("The install did not finish: your ship is slow or out of reach.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The install did not finish: your Groundwire node is slow or out of reach.") }
         assertTrue(!shows("url="))
     }
 
@@ -165,7 +165,7 @@ class AppsSettingsScreenTest {
     @Test
     fun `permits open on the ship, and Check again asks each app afresh`() = apps {
         row("Lattice", "working")
-        onNodeWithText("Open permits on your ship").performClick()
+        onNodeWithText("Open permits on your node").performClick()
         assertTrue("open https://zod.test/~/login?redirect=/apps/grubbery/permits" in did, did.toString())
         val asked = did.count { it == "asked lattice" }
         onNodeWithText("Check again").performClick()
@@ -174,8 +174,8 @@ class AppsSettingsScreenTest {
 
     @Test
     fun `signed out, the permits page is only mentioned`() = apps(shipUrl = null) {
-        waitUntil(timeoutMillis = 5_000) { shows("Sign in to a ship to reach its permits page.") }
-        assertTrue(!shows("Open permits on your ship"))
+        waitUntil(timeoutMillis = 5_000) { shows("Sign in to a node to reach its permits page.") }
+        assertTrue(!shows("Open permits on your node"))
     }
 
     // sneagan, 2026-10-19: the assistants' memory key. Made on first use;

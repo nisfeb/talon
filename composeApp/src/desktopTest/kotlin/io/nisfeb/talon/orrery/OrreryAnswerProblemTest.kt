@@ -65,7 +65,7 @@ class OrreryAnswerProblemTest {
             proxied = true
             repo.answer("a2", "dismissed")
             withTimeout(5_000) { while (repo.answerProblem.value.let { it == null || it == refused }) delay(20) }
-            assertEquals("Your ship did not answer, so that answer was not given. Try it again.", repo.answerProblem.value)
+            assertEquals("Your Groundwire node did not answer, so that answer was not given. Try it again.", repo.answerProblem.value)
             proxied = false
 
             probeStatus = HttpStatusCode.InternalServerError

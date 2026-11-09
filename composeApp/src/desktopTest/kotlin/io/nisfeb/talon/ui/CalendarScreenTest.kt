@@ -672,7 +672,7 @@ class CalendarScreenTest {
         field("Name").performTextReplacement("Dentist, moved")
         down = true
         save()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship isn't answering") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node isn't answering") }
         assertTrue(onAllNodes(hasSetTextAction() and hasText("Dentist, moved")).fetchSemanticsNodes().isNotEmpty(), "the edit is still there")
         assertTrue(!shows("did not take") && !shows("<html"), "not a refusal, and no markup")
         assertTrue(writes.isEmpty())
@@ -688,7 +688,7 @@ class CalendarScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("Repeats") }
         refuse = true
         save()
-        waitUntil(timeoutMillis = 5_000) { shows("The ship did not take the change") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not take the change") }
         assertTrue(!shows("isn't answering"))
     }
 
@@ -855,7 +855,7 @@ class CalendarScreenTest {
     @Test
     fun `an event shared with a group is posted there, and its members are mailed the invite`() = sharing(roster = true) { ship ->
         shareWithGroup()
-        waitUntil(timeoutMillis = 5_000) { shows("and mailed the invite to 2 ships.") }
+        waitUntil(timeoutMillis = 5_000) { shows("and mailed the invite to 2 people.") }
         assertTrue(ship.pokesTo("channels").any { "Dentist" in it.json.toString() })
         val sent = mailed.single()
         assertTrue("~bus" in sent && "~nec" in sent && "~zod" !in sent && "event.ics" in sent, sent)

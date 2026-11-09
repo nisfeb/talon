@@ -71,7 +71,7 @@ class ContactProfileSheetTest {
     fun `Block asks first, says their ship is told, and then offers Unblock`() = card {
         onNodeWithText("Block").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Block Mittens?") }
-        assertTrue(shows("Their ship is told that you blocked them."))
+        assertTrue(shows("Their node is told that you blocked them."))
         assertTrue(did.none { it.startsWith("block") }, "nothing before the confirm")
         onAllNodesWithText("Block").onLast().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Unblock") }

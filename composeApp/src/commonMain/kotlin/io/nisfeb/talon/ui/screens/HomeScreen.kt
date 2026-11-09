@@ -1041,9 +1041,9 @@ private fun MailPanel(
         when {
             mail == null || availability == MailAvailability.NO_GRUBBERY ||
                 availability == MailAvailability.NOT_FETCHED ->
-                Empty("This ship has no mail app yet.")
+                Empty("This node has no mail app yet.")
 
-            availability == MailAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
+            availability == MailAvailability.SIGNED_OUT -> Empty("Signed out of your Groundwire node.")
 
             page == null -> Empty("Looking…")
 
@@ -1348,7 +1348,7 @@ private fun CalendarPanel(
             calendar == null -> Empty("This host has no calendar.")
 
             availability == CalendarAvailability.ABSENT -> {
-                Empty("This ship has no calendar yet.")
+                Empty("This node has no calendar yet.")
                 if (onInstall != null) {
                     TextButton(
                         enabled = !installing,
@@ -1366,7 +1366,7 @@ private fun CalendarPanel(
                 }
             }
 
-            availability == CalendarAvailability.SIGNED_OUT -> Empty("Signed out of the ship.")
+            availability == CalendarAvailability.SIGNED_OUT -> Empty("Signed out of your Groundwire node.")
 
             // The first read failed with nothing kept to show: said, and
             // asked again on a tap. It said "Looking…" for good.
@@ -1529,13 +1529,13 @@ private fun EventRow(
  */
 internal fun installFailedLine(e: Throwable, what: String = "The calendar"): String = when {
     // A proxy's 502 too: said as a phrase in a sentence, it began in lower case.
-    io.nisfeb.talon.util.isShipSlow(e) -> "Your ship did not answer. Try again when it's back."
+    io.nisfeb.talon.util.isShipSlow(e) -> "Your Groundwire node did not answer. Try again when it's back."
     else -> io.nisfeb.talon.util.readableReason(e.message) ?: "$what did not install. Try again shortly."
 }
 
 /** What a tick the ship did not take says: an untick said "was not ticked". */
 internal fun tickFailedLine(name: String, done: Boolean): String =
-    "\"${name.ifBlank { "The task" }}\" was not ${if (done) "ticked" else "unticked"}: the ship did not take it."
+    "\"${name.ifBlank { "The task" }}\" was not ${if (done) "ticked" else "unticked"}: your Groundwire node did not take it."
 
 /** When a row is, said the way somebody glancing at it needs. */
 internal fun whenLabel(row: CalendarRow, nowMs: Long, zone: TimeZone, twentyFourHour: Boolean): String {

@@ -114,7 +114,7 @@ fun LoginQrShareScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                "Enter your ship URL and +code. Scan the QR with Groundwire on " +
+                "Enter your node address and access code (+code). Scan the QR with Groundwire on " +
                     "your other device to sign in there, or copy the link.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -137,8 +137,8 @@ fun LoginQrShareScreen(
                     OutlinedTextField(
                         value = url,
                         onValueChange = { url = it },
-                        label = { Text("Ship URL") },
-                        placeholder = { Text("https://your-ship.example.com") },
+                        label = { Text("Node address") },
+                        placeholder = { Text("https://your-node.example.com") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -146,7 +146,7 @@ fun LoginQrShareScreen(
                     OutlinedTextField(
                         value = code,
                         onValueChange = { code = it },
-                        label = { Text("+code") },
+                        label = { Text("Access code") },
                         // No password masking on this screen — the
                         // person creating the QR is intentionally
                         // sharing this credential and benefits from

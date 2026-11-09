@@ -75,7 +75,7 @@ fun rememberInviteFriend(ship: String?, name: String? = null): () -> String? {
     return remember(ship, name, sharer) {
         {
             if (ship == null) {
-                "Sign in to a ship first: the invite says who to add."
+                "Sign in to a node first: the invite says who to add."
             } else {
                 val text = groundwireInviteMessage(ship, name)
                 if (sharer.share(text, "Join me on Groundwire")) null
@@ -110,7 +110,7 @@ fun InviteFriendCard(ship: String?, name: String? = null, modifier: Modifier = M
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Text(
-                "Sends one message with everything they need: where to get the app, and your ship to add.",
+                "Sends one message with everything they need: where to get the app, and your address to add.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

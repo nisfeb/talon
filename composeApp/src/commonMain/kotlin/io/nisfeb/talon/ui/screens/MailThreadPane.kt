@@ -324,7 +324,7 @@ fun MailThreadPane(
                 onAction = { loading = true; scope.launch { read() } },
             )
 
-            t == null -> MailAbsent("This thread is no longer on the ship.")
+            t == null -> MailAbsent("This thread is no longer on your Groundwire node.")
 
             t.messages.isEmpty() -> MailAbsent(
                 if (t.unreadable > 0) {
@@ -498,7 +498,7 @@ private fun ThreadActions(
             title = { Text("Delete this thread?") },
             text = {
                 Text(
-                    "Every copy on this ship goes, including any forged one " +
+                    "Every copy on this Groundwire node goes, including any forged one " +
                         "kept as evidence. Nobody else's copy is touched.",
                 )
             },

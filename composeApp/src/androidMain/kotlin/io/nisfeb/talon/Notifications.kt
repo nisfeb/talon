@@ -214,13 +214,13 @@ object Notifications {
         if (mgr.getNotificationChannel(CHANNEL_EVENING) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_EVENING, "Evening review", NotificationManager.IMPORTANCE_DEFAULT)
-                    .apply { description = "Your ship's reminder to organize the day's tasks" },
+                    .apply { description = "Your Groundwire node's reminder to organize the day's tasks" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_SHIP) == null) {
             mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_SHIP, "From your ship", NotificationManager.IMPORTANCE_DEFAULT)
-                    .apply { description = "Reminders and other pushes your ship sends" },
+                NotificationChannel(CHANNEL_SHIP, "From your node", NotificationManager.IMPORTANCE_DEFAULT)
+                    .apply { description = "Reminders and other pushes your Groundwire node sends" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_LEAVE) == null) {
@@ -232,7 +232,7 @@ object Notifications {
         if (mgr.getNotificationChannel(CHANNEL_TRIP) == null) {
             mgr.createNotificationChannel(
                 NotificationChannel(CHANNEL_TRIP, "On the way", NotificationManager.IMPORTANCE_LOW)
-                    .apply { description = "Shown while your ship hears where you are each minute on the way to an appointment" },
+                    .apply { description = "Shown while your Groundwire node hears where you are each minute on the way to an appointment" },
             )
         }
         if (mgr.getNotificationChannel(CHANNEL_DICTATING) == null) {

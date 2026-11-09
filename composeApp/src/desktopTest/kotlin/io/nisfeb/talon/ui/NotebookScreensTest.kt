@@ -187,7 +187,7 @@ class NotebookScreensTest {
         // answerApi says nothing: the route is not there (404).
         showing("Soups")
         add("New folder", "Stocks")
-        showing("Your ship couldn't take it")
+        showing("Your Groundwire node couldn't take it")
     }
 
     @Test
@@ -276,7 +276,7 @@ class NotebookScreensTest {
         onNodeWithContentDescription("Edit").performClick()
         onNode(hasSetTextAction()).performTextInput(" more")
         onNodeWithContentDescription("Save").performClick()
-        showing("Your ship is slow")
+        showing("Your Groundwire node is slow")
         assertTrue(!shows("Couldn't save") && !shows("Connection refused"))
         assertTrue(shows("Markdown"), "still editing, the text kept")
     }

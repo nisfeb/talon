@@ -143,14 +143,14 @@ class ArmillaryConnectTest {
         show(ai, repo(ai))
         mint = { HttpStatusCode.BadGateway to """{"error":"the vendor did not answer"}""" }
         onNodeWithText("Set up this device").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship refused: the vendor did not answer.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node refused: the vendor did not answer.") }
         assertFalse(shows("HTTP 502"), "no status codes on the card")
         onNodeWithText("This device isn't connected yet.").assertExists()
 
         mint = { null }
         onNodeWithText("Set up this device").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Connected through your vendor.") }
-        assertFalse(shows("Your ship refused"), "the reason goes once there is a key")
+        assertFalse(shows("Your Groundwire node refused"), "the reason goes once there is a key")
     }
 
     @Test
@@ -173,8 +173,8 @@ class ArmillaryConnectTest {
         down = true
         val ai = settings()
         show(ai, repo(ai))
-        onNodeWithText("Checking your ship.").assertExists()
-        onNodeWithText("Your ship did not answer. Groundwire asks again by itself.").assertExists()
+        onNodeWithText("Checking your Groundwire node.").assertExists()
+        onNodeWithText("Your Groundwire node did not answer. Groundwire asks again by itself.").assertExists()
         assertFalse(shows("Bad Gateway"), "never the proxy's page")
     }
 
@@ -184,7 +184,7 @@ class ArmillaryConnectTest {
         val ai = settings()
         show(ai, repo(ai))
         onNodeWithText("This device isn't connected yet.").assertExists()
-        onNodeWithText("Your ship did not answer. Try Refresh in a moment.").assertExists()
+        onNodeWithText("Your Groundwire node did not answer. Try Refresh in a moment.").assertExists()
         onNodeWithText("Set up this device").assertExists()
     }
 

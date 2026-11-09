@@ -89,7 +89,7 @@ class GroupInvitesScreenTest {
     @Test
     fun `accepting joins the group, and it waits as joining, not as an invite`() = invites { ship ->
         onNodeWithText("Accept").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Waiting for ~nec, which hosts the group, to answer your ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Waiting for ~nec, which hosts the group, to answer your Groundwire node.") }
         assertTrue(onAllNodesWithText("Accept").fetchSemanticsNodes().isEmpty(), "nothing left to accept")
         val join = ship.pokesTo("groups").first { it.mark == "group-join" }.json.toString()
         assertTrue("\"flag\":\"~nec/garden\"" in join, join)
@@ -107,7 +107,7 @@ class GroupInvitesScreenTest {
     fun `a join the host has not answered is joining, not an invite, and is not announced again`() = invitesWith(
         prepare = { scries["groups-ui/v7/init"] = joining },
     ) { ship, repo ->
-        assertTrue(shows("Joining") && shows("Waiting for ~nec, which hosts the group, to answer your ship."))
+        assertTrue(shows("Joining") && shows("Waiting for ~nec, which hosts the group, to answer your Groundwire node."))
         assertTrue(onAllNodesWithText("Accept").fetchSemanticsNodes().isEmpty())
         assertTrue(repo.invitesFlow.value.orEmpty().isEmpty(), "nothing waits on an answer, so no badge counts it")
         val told = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -137,7 +137,7 @@ class GroupInvitesScreenTest {
     ) {
         waitUntil(timeoutMillis = 5_000) { shows("Urbit Curious") }
         assertTrue(shows("from ~tansyr-tilbus") && shows("~sarhut is likely offline"))
-        assertTrue(shows("~nec let your ship in. Getting the group.") && !shows("~nec is likely offline"))
+        assertTrue(shows("~nec let your Groundwire node in. Getting the group.") && !shows("~nec is likely offline"))
     }
 
     @Test

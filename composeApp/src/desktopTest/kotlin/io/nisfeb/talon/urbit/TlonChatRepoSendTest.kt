@@ -259,7 +259,7 @@ class TlonChatRepoSendTest {
         )
         for ((what, act) in refused) {
             val e = assertFailsWith<IllegalArgumentException>(what) { act() }
-            assertEquals("this message has not reached your ship yet.", e.message, what)
+            assertEquals("this message has not reached your Groundwire node yet.", e.message, what)
         }
         assertTrue(ship.attempted.isEmpty(), "${ship.attempted}")
         assertTrue(db.messages().latestAnyFor(nest, 10).isEmpty(), "no reply or quote stored")

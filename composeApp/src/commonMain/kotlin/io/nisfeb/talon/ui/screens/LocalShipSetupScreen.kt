@@ -57,7 +57,7 @@ fun LocalShipSetupScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Setting up your ship",
+                "Setting up your Groundwire node",
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
             )
             Text(
@@ -100,14 +100,14 @@ fun LocalShipSetupScreen(
                     val b = state as LocalShipState.Booting
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Text(
-                        if (b.firstBoot) "Booting the ship. This takes a couple of minutes the first time."
-                        else "Starting the ship.",
+                        if (b.firstBoot) "Booting the node. This takes a couple of minutes the first time."
+                        else "Starting the node.",
                         style = MaterialTheme.typography.bodyMedium,
                         textAlign = TextAlign.Center,
                     )
                     if (b.firstBoot) {
                         Text(
-                            "For the first few minutes after it boots, the ship installs updates and uses most of a CPU core. " +
+                            "For the first few minutes after it boots, the node installs updates and uses most of a CPU core. " +
                                 "Groundwire may stutter or freeze for a minute at a time until it settles.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

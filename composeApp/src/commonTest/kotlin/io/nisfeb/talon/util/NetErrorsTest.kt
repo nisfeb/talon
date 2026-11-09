@@ -20,7 +20,7 @@ import kotlin.test.assertTrue
 /**
  * A proxy's 502, 503 or 504 on a scry, an app's own request, a thread, a
  * poke or a sign-in is the ship down or slow, said so: a note save on one
- * read "Your ship couldn't take it (PUT /notes/...: HTTP 502)". A scry's
+ * read "Your Groundwire node couldn't take it (PUT /notes/...: HTTP 502)". A scry's
  * 500 is not, since it is the path a read falls back from. The messages
  * are the ones the real channel and session give, through a mock engine.
  */
@@ -67,9 +67,9 @@ class NetErrorsTest {
         )
         got.forEach { e ->
             assertTrue(isShipSlow(e), e.message)
-            assertEquals("your ship is down or out of reach", readableReason(e.message), e.message)
+            assertEquals("your Groundwire node is down or out of reach", readableReason(e.message), e.message)
             val p = problemOf("Couldn't save", e)
-            assertEquals("Couldn't save: your ship is slow or out of reach. Try again when it's back.", p.line, e.message)
+            assertEquals("Couldn't save: your Groundwire node is slow or out of reach. Try again when it's back.", p.line, e.message)
             assertTrue(p.calm)
             assertFalse(notServed(e), "a 50x says nothing of the path: ${e.message}")
         }
@@ -109,7 +109,7 @@ class NetErrorsTest {
             "say scry x: HTTP 502",
         ).forEach { m ->
             assertFalse(isShipSlow(IllegalStateException(m)), m)
-            assertTrue(readableReason(m) != "your ship is down or out of reach", m)
+            assertTrue(readableReason(m) != "your Groundwire node is down or out of reach", m)
         }
         assertNull(readableReason("HTTP 502 <html><body>Bad Gateway</body></html>"))
         // A refusal is never the ship slow, whatever it says.

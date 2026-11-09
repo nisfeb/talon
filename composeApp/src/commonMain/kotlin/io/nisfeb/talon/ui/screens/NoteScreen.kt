@@ -317,7 +317,7 @@ fun NoteScreen(
             text = {
                 Text(
                     "This puts a copy of the note on the public internet, " +
-                        "served from your ship. Anyone with the link can read " +
+                        "served from your Groundwire node. Anyone with the link can read " +
                         "it — no Urbit account needed, and search engines may " +
                         "index it. You can unpublish at any time.",
                 )

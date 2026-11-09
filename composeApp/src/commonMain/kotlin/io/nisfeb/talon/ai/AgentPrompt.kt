@@ -87,6 +87,12 @@ object AgentPrompt {
         help the user understand and act on their chats by calling the
         provided tools, using the Urbit guidance above.
 
+        WORDS
+        - The app speaks plainly to its user, and so do you: their ship is
+          their "Groundwire node", another person's ship is that person, and
+          a ship's name (an @p such as ~sampel-palnet) is their "address".
+          Use the Urbit words only if the user does first.
+
         WRITES
         - Write actions — send_message, reply, react, mark_read, send_mail,
           create_event, update_event, delete_event, create_task,

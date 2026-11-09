@@ -141,7 +141,7 @@ fun AiSettingsSection(
         else {
             // No buying here, and no pointing anywhere to buy (the store's
             // rule): a ship that already has Armillary connects this device.
-            Quiet("AI in Groundwire runs through Armillary on your ship. Connect this device to use what your ship already has.")
+            Quiet("AI in Groundwire runs through Armillary on your Groundwire node. Connect this device to use what your node already has.")
             OutlinedButton(enabled = armillary != null, onClick = connect) { Text("Connect this device") }
         }
     } else {
@@ -159,7 +159,7 @@ fun AiSettingsSection(
         // In the app, signed in: the browser asked for the access key.
         val openModels = if (shipUrl != null) io.nisfeb.talon.ui.rememberShipPage(shipUrl, page, "Armillary", inApp) else ({ uri.openUri(page) })
         TextButton(onClick = openModels) { Text("Manage models in Armillary") }
-        Quiet("Pick your own models, or use your own provider key, on Armillary's page on your ship.")
+        Quiet("Pick your own models, or use your own provider key, on Armillary's page on your Groundwire node.")
     }
 
     // ── Features ───────────────────────────────────────────────
@@ -171,7 +171,7 @@ fun AiSettingsSection(
         row == null -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "Connect this device to turn on."
         // A ship that is its own vendor on its own key pays nothing, and its zero balance is no reason.
         inference?.free != true && account?.hasView == true && account!!.balanceMicro <= 0 -> if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up to turn on." else "No credit on your Armillary account."
-        row.apiKey.isBlank() -> "Waiting on this device's key from your ship."
+        row.apiKey.isBlank() -> "Waiting on this device's key from your Groundwire node."
         else -> null
     }
     @Composable
@@ -238,8 +238,8 @@ fun OrrerySettingsSection(
             onClick = { note = null; edit { it.copy(orrery = true) } },
         ) { Text("Enable Groundwire Assistant") }
         Quiet(
-            if (missing) "The assistant (Orrery) is not on your ship. Install it from the Apps page."
-            else "A private notebook about your life, kept on your own ship. Off, for all your devices.",
+            if (missing) "The assistant (Orrery) is not on your Groundwire node. Install it from the Apps page."
+            else "A private notebook about your life, kept on your own Groundwire node. Off, for all your devices.",
         )
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,9 +262,9 @@ fun OrrerySettingsSection(
             title = { Text("Turn the assistant off?") },
             text = {
                 Text(
-                    "On all your devices, Groundwire stops reading and sending, and your ship stops reading your chats " +
+                    "On all your devices, Groundwire stops reading and sending, and your Groundwire node stops reading your chats " +
                         "and email and writing your brief. Each device's key to Orrery is taken back. What Orrery " +
-                        "already wrote down stays on your ship until you delete it there.",
+                        "already wrote down stays on your node until you delete it there.",
                 )
             },
             confirmButton = {
@@ -275,7 +275,7 @@ fun OrrerySettingsSection(
                         val off = { edit { it.copy(orrery = false) }; Unit }
                         val missed = orrery?.switchOff(after = off) ?: run { off(); emptyList() }
                         note = missed.takeIf { it.isNotEmpty() }?.let {
-                            "Orrery is off, but your ship did not confirm it stopped ${it.joinToString(" and ")}. Check Orrery's own settings on your ship."
+                            "Orrery is off, but your Groundwire node did not confirm it stopped ${it.joinToString(" and ")}. Check Orrery's own settings on your node."
                         }
                         busy = false
                     }
@@ -288,7 +288,7 @@ fun OrrerySettingsSection(
 
     Spacer(Modifier.height(12.dp))
     HorizontalDivider()
-    if (orrery == null) Quiet("Sign in to a ship to set Orrery up.")
+    if (orrery == null) Quiet("Sign in to a Groundwire node to set Orrery up.")
     if (orrery != null) ReadingRow(orrery, orreryHere, spend[AiFeature.OrreryTriage.name])
     if (orrery != null && orreryHere) EveningReminderRow(orrery)
     Spacer(Modifier.height(12.dp))
@@ -311,14 +311,14 @@ private fun EveningReminderRow(orrery: OrreryRepo) {
     var at by remember { mutableStateOf<String?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { orrery.reviewAt().onSuccess { at = it }.onFailure { problem = "Your ship did not say when it reminds you." } }
+    LaunchedEffect(Unit) { orrery.reviewAt().onSuccess { at = it }.onFailure { problem = "Your Groundwire node did not say when it reminds you." } }
     Spacer(Modifier.height(12.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Evening review reminder", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
             Quiet(
                 when {
-                    at == null -> "Asking your ship…"
+                    at == null -> "Asking your Groundwire node…"
                     at == "" -> "Off. You can still open the review from Home or Orrery."
                     io.nisfeb.talon.ui.isShipNoticeSupported -> "Each evening at $at, when there is something to organize."
                     else -> "Your phone is reminded each evening at $at, when there is something to organize."
@@ -337,7 +337,7 @@ private fun EveningReminderRow(orrery: OrreryRepo) {
                             problem = null
                             val was = at
                             at = choice
-                            scope.launch { orrery.setReviewAt(choice).onFailure { at = was; problem = "Your ship did not take the new time." } }
+                            scope.launch { orrery.setReviewAt(choice).onFailure { at = was; problem = "Your Groundwire node did not take the new time." } }
                         },
                     )
                 }
@@ -360,7 +360,7 @@ private fun OrreryAbout(folded: Boolean) {
         if (!open) return
     }
     Text(
-        "Orrery is a private notebook about your life, kept on your own ship. When it is on, Groundwire and your ship " +
+        "Orrery is a private notebook about your life, kept on your own Groundwire node. When it is on, Groundwire and your node " +
             "notice things that matter in your conversations, like where someone is, a plan you made, or something " +
             "a friend is going through, and write them down in Orrery. Orrery then helps you keep track: it can " +
             "remind you, write you a daily brief, and suggest things to do.",
@@ -371,20 +371,20 @@ private fun OrreryAbout(folded: Boolean) {
         // Orrery 58 turned every reader on from the start, and its chat
         // reader reads every DM until some are picked: "the chats you
         // choose" undersold what the switch allows.
-        "Your ship read your chats and email: every direct message unless you pick which ones, the group " +
-            "channels you pick, and your mail. You can turn each of these off in Orrery's own settings on your ship.",
+        "Your node read your chats and email: every direct message unless you pick which ones, the group " +
+            "channels you pick, and your mail. You can turn each of these off in Orrery's own settings on your node.",
         "Groundwire read your calls and your contacts' status lines on each of your devices, and share your contacts " +
             "and, if you allow it, where you are.",
-        "An AI model do the reading. Groundwire reads on this device. Your ship reads with the models your Armillary " +
+        "An AI model do the reading. Groundwire reads on this device. Your node reads with the models your Armillary " +
             "vendor picks, which keep nothing, unless you choose others in Orrery's own settings.",
-        "Orrery keep what it finds on your ship. It is not sent to the makers of Groundwire or anyone else.",
+        "Orrery keep what it finds on your node. It is not sent to the makers of Groundwire or anyone else.",
         "Orrery suggest things like a calendar entry or a message. Nothing is done until you approve it " +
             "under Actions.",
     ).forEach { Text("\u2022 $it", style = MaterialTheme.typography.bodyMedium) }
     Quiet(
-        "Turning it off stops all of it, on every device: Groundwire stops reading and sending, your ship stops " +
+        "Turning it off stops all of it, on every device: Groundwire stops reading and sending, your node stops " +
             "reading your chats and email and writing your brief, and Orrery disappears from Groundwire. What Orrery " +
-            "already wrote down stays on your ship until you delete it there.",
+            "already wrote down stays on your node until you delete it there.",
     )
 }
 
@@ -513,10 +513,10 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
     // Said only when something is wrong: an app that answers needs no line.
     when (where) {
         ArmillaryAvailability.PRESENT -> Unit
-        ArmillaryAvailability.MISSING -> Quiet("Armillary is not on your ship. Install it from the Apps page.")
-        ArmillaryAvailability.SIGNED_OUT -> Quiet("Signed out of the ship.")
+        ArmillaryAvailability.MISSING -> Quiet("Armillary is not on your Groundwire node. Install it from the Apps page.")
+        ArmillaryAvailability.SIGNED_OUT -> Quiet("Signed out of your Groundwire node.")
         ArmillaryAvailability.UNKNOWN -> {
-            Quiet("Checking your ship.")
+            Quiet("Checking your Groundwire node.")
             // Why it is still checking, where a check failed.
             checkProblem?.let { Quiet(it, error = true) }
         }
@@ -542,7 +542,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 label = { Text("Another vendor") }, placeholder = { Text(ArmillaryRepo.DEFAULT_VENDOR) },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
-            Quiet("Any ship running Armillary can be your vendor, your own included.")
+            Quiet("Any node running Armillary can be your vendor, your own included.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val typed = vendorTyped.trim()
                 TextButton(enabled = here && isValidPatp(typed) && typed != a.vendor, onClick = {
@@ -606,12 +606,12 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
             keyProblem?.let { Quiet(it, error = true) }
             if (settingUp) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                Quiet("Asking your ship for a key. This can take half a minute.")
+                Quiet("Asking your Groundwire node for a key. This can take half a minute.")
             } else Button(onClick = { repo?.setUpDevice(io.nisfeb.talon.ui.platformLabel) }) { Text("Set up this device") }
         }
     }
     if (noPublicUrl) Quiet(
-        "Your ship has no public URL, so Groundwire reaches Armillary through the address you signed in with. " +
+        "Your Groundwire node has no public URL, so Groundwire reaches Armillary through the address you signed in with. " +
             "Set Public URL in Armillary's Payments view so your other apps can reach it too.",
         error = true,
     )
@@ -692,7 +692,7 @@ private fun ArmillaryLines(p: AiProvider, repo: ArmillaryRepo?) {
                 note = null
                 scope.launch {
                     repo?.cancelSubscription()
-                        ?.onSuccess { note = "Asked your ship to stop it renewing. The account says so once the vendor confirms." to false }
+                        ?.onSuccess { note = "Asked your Groundwire node to stop it renewing. The account says so once the vendor confirms." to false }
                         ?.onFailure { note = keyProblemLine(it) to true }
                 }
             }) { Text("Cancel it") }
@@ -736,7 +736,7 @@ private fun BraveLeoLines(p: AiProvider, repo: ArmillaryRepo, leaseDisabled: Boo
     Heading("Brave Leo")
     val got = read
     if (got == null) {
-        Quiet("Asking your ship for the key.")
+        Quiet("Asking your Groundwire node for the key.")
         return
     }
     val inf = got.getOrElse {
@@ -779,7 +779,7 @@ private fun LeoField(name: String, value: String, shown: String = value, extra: 
 
 /** What deleting the account at its vendor costs, said before it is done. */
 internal fun deleteAccountWarning(a: Account): String = buildString {
-    append("${a.vendor} deletes everything it holds for your ship: the account, its ledger, its checkouts and its keys.")
+    append("${a.vendor} deletes everything it holds for your Groundwire node: the account, its ledger, its checkouts and its keys.")
     if (a.subscriptionActive) append(" Your subscription stops now.")
     if (a.balanceMicro > 0) append(" The ${money(a.balanceMicro)} left on it is lost.")
     append(" Stripe and BTCPay Server keep their own records of your payments. This cannot be undone.")
@@ -788,7 +788,7 @@ internal fun deleteAccountWarning(a: Account): String = buildString {
 /** A deletion the ship did not take, said on the card that is still there; null when it took it. */
 internal fun deleteRefusedLine(answer: DeleteAnswer, vendor: String): String? = when (answer) {
     DeleteAnswer.Unsupported ->
-        "Armillary on your ship cannot delete accounts yet. Update it from the Grubbery shell on your ship, or message $vendor to ask."
+        "Armillary on your Groundwire node cannot delete accounts yet. Update it from the Grubbery shell on your node, or message $vendor to ask."
     is DeleteAnswer.Refused -> "$vendor did not delete it: ${answer.reason}"
     else -> null
 }
@@ -797,9 +797,9 @@ internal fun deleteRefusedLine(answer: DeleteAnswer, vendor: String): String? = 
 internal fun deletionLine(d: Deletion): String {
     val vendor = d.vendor.ifBlank { "the vendor" }
     return when (d.answer) {
-        DeleteAnswer.Queued -> "Your ship has asked $vendor to delete your Armillary account, and keeps asking until it answers."
-        DeleteAnswer.NothingHeld -> "Your ship bought from no vendor, so there was no Armillary account to delete."
-        else -> "Your Armillary account at $vendor is deleted. It holds nothing for your ship now."
+        DeleteAnswer.Queued -> "Your Groundwire node has asked $vendor to delete your Armillary account, and keeps asking until it answers."
+        DeleteAnswer.NothingHeld -> "Your Groundwire node bought from no vendor, so there was no Armillary account to delete."
+        else -> "Your Armillary account at $vendor is deleted. It holds nothing for your Groundwire node now."
     }
 }
 
@@ -941,7 +941,7 @@ internal const val BROWSER_DID_NOT_OPEN = "The checkout page did not open in you
 /** While a checkout is asked for: who is asked, how long it has been. */
 internal fun askingLine(vendor: String?, elapsedMs: Long): String =
     "Asking ${vendor?.ifBlank { null } ?: "the vendor"} for a checkout, ${(elapsedMs / 1000).coerceAtLeast(0)} s. " +
-        "From some ships this takes a minute or two."
+        "From some nodes this takes a minute or two."
 
 /**
  * Whether Top up and Subscribe stay shut: while a checkout is asked for,
@@ -973,7 +973,7 @@ internal fun paymentLine(p: Payment?, row: Checkout?): String? {
     val noPage = p.url.isBlank() && row?.url.isNullOrBlank()
     return when (p.phase) {
         Payment.Phase.WAITING -> when {
-            noPage -> "Your ship is waiting for the vendor's checkout. Do not order again: it opens from here when it comes"
+            noPage -> "Your Groundwire node is waiting for the vendor's checkout. Do not order again: it opens from here when it comes"
             p.rail == ArmillaryRepo.BTC_RAIL -> "Waiting for your bitcoin payment to confirm, usually ten to twenty minutes"
             else -> "Waiting for your payment"
         }
@@ -997,7 +997,7 @@ internal fun checkoutPage(p: Payment?, row: Checkout?): String? {
 
 /** The AI section's first line. [canBuy] false names no top up (isArmillaryPurchaseSupported). */
 internal fun armillaryIntro(canBuy: Boolean): String =
-    "Groundwire's AI comes through Armillary on your ship: " + (if (canBuy) "you top up, your ship pays for what you use, " else "your ship pays for what you use, ") +
+    "Groundwire's AI comes through Armillary on your Groundwire node: " + (if (canBuy) "you top up, your node pays for what you use, " else "your node pays for what you use, ") +
         "and every feature below runs on the models your vendor picks. They keep nothing they read."
 
 /** The assistant's row, naming quick dictation only where there is any (isQuickDictationSupported). */
@@ -1095,8 +1095,8 @@ private fun StartWithArmillary(onStart: () -> Unit) {
             Text("Turn on AI", style = MaterialTheme.typography.titleSmall)
             Text(
                 pitchFeatures(isAssistantSupported, isQuickDictationSupported, isCallRecordingSupported) + ", paid as you go from a few dollars. " +
-                    "Armillary buys the models for you through your own ship: no accounts to make and no keys " +
-                    "to copy in. You top up, your ship spends it, and the balance is on this screen.",
+                    "Armillary buys the models for you through your own Groundwire node: no accounts to make and no keys " +
+                    "to copy in. You top up, your node spends it, and the balance is on this screen.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1153,14 +1153,14 @@ private fun ReadingRow(orrery: OrreryRepo, here: Boolean, spent: Double?) {
     var busy by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Read calls and status lines on this device", style = MaterialTheme.typography.bodyLarge)
-        Quiet("Notes facts from your calls and your contacts' status lines and sends them to Orrery. Your ship reads your chats, calendar and mail itself.")
+        Quiet("Notes facts from your calls and your contacts' status lines and sends them to Orrery. Your Groundwire node reads your chats, calendar and mail itself.")
         spent?.let { Quiet(money(kotlin.math.round(it * 1_000_000).toLong()) + " this month.") }
         if (!here) {
             Quiet(
                 when (availability) {
-                    OrreryAvailability.MISSING -> "Orrery is not on your ship. Install it from the Apps page."
-                    OrreryAvailability.SIGNED_OUT -> "Signed out of your ship."
-                    else -> "Checking your ship for Orrery."
+                    OrreryAvailability.MISSING -> "Orrery is not on your Groundwire node. Install it from the Apps page."
+                    OrreryAvailability.SIGNED_OUT -> "Signed out of your Groundwire node."
+                    else -> "Checking your Groundwire node for Orrery."
                 },
             )
             // Why it is still checking, where a check failed.
@@ -1210,7 +1210,7 @@ private fun LocationRow() {
             Text("Send where I am", style = MaterialTheme.typography.bodyMedium)
             // It said "Never the coordinates", but since orrery 69 each fix also
             // goes up to the metre, for the leave alert (2026-11-01).
-            Quiet("When this phone moves a few hundred metres, it tells Orrery on your ship where you are, to the metre, for leave alerts and the shares you start. What Orrery learns about you keeps only the place, or the neighbourhood or town.")
+            Quiet("When this phone moves a few hundred metres, it tells Orrery on your Groundwire node where you are, to the metre, for leave alerts and the shares you start. What Orrery learns about you keeps only the place, or the neighbourhood or town.")
             if (on && !sharing.allowed()) Quiet("Location access for Groundwire is off, or not all the time, so nothing is sent.", error = true)
             if (on && !sharing.names) Quiet("This phone cannot look place names up, so only places Orrery knows are sent.")
         }
@@ -1236,7 +1236,7 @@ private fun HealthRow() {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Send my health", style = MaterialTheme.typography.bodyMedium)
-            Quiet("Each day's steps, workouts and sleep from Health Connect: totals and times, never heart rate or where. Your ship keeps them to itself.")
+            Quiet("Each day's steps, workouts and sleep from Health Connect: totals and times, never heart rate or where. Your Groundwire node keeps them to itself.")
             if (on && !background) Quiet("Health Connect lets Groundwire read only while it is open, so today goes up when you open Groundwire.")
         }
         Switch(checked = on, onCheckedChange = { want ->
@@ -1301,7 +1301,7 @@ private fun MoreOrreryRow(orrery: OrreryRepo, inApp: Boolean) {
     Row(Modifier.fillMaxWidth().clickable { open() }, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Heading("More Orrery settings")
-            Quiet("Orrery's model, which chats and mail your ship reads, your preferences and where approved things go are set on Orrery's own page on your ship.")
+            Quiet("Orrery's model, which chats and mail your Groundwire node reads, your preferences and where approved things go are set on Orrery's own page on your node.")
         }
         TextButton(onClick = open) { Text("Open") }
     }

@@ -137,7 +137,7 @@ class OrreryViewStoreTest {
         assertEquals(old, s.view.value?.state)
         // Kept whole, so the page can tell no answer from a refused key.
         assertEquals(down, s.problem.value)
-        assertEquals("Your ship did not answer", readProblemLine(s.problem.value!!))
+        assertEquals("Your Groundwire node did not answer", readProblemLine(s.problem.value!!))
         assertEquals(old.toString(), kept.rows["state"]!!.json, "nothing written over what was kept")
         scope.cancel()
     }

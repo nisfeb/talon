@@ -104,7 +104,7 @@ class TlonChatRepoQueueTest {
         repo.send("~bus", "are you there")
         val busy = kotlinx.coroutines.withTimeout(5_000) { repo.shipSlow.first { it?.health != null }!! }
         assertEquals(ShipHealth.BUSY, busy.health)
-        assertEquals("Your ship is busy. 1 queued for when it catches up.", io.nisfeb.talon.util.shipSlowLine(busy.queued, busy.health))
+        assertEquals("Your Groundwire node is busy. 1 queued for when it catches up.", io.nisfeb.talon.util.shipSlowLine(busy.queued, busy.health))
         assertTrue("healthz: BUSY" in busy.details, busy.details)
         assertTrue(ship.requests.any { it == "GET /~_~/healthz" }, "${ship.requests}")
 

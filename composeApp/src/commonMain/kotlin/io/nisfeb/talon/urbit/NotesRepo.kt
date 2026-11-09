@@ -320,7 +320,7 @@ class NotesRepo(
      * the screen does not stop it.
      */
     private suspend fun write(flag: NotesFlag, path: String, body: JsonObject): String? = scope.async {
-        val ch = channel ?: return@async "Not connected to your ship."
+        val ch = channel ?: return@async "Not connected to your Groundwire node."
         val resp = runCatching { ch.apiJson(method = "POST", path = path, body = body) }
             .getOrElse { err -> return@async notSent(err) }
         NotesParser.writeRefusal(resp).also { if (it == null) refreshNotebook(flag) }
@@ -333,9 +333,9 @@ class NotesRepo(
      */
     private fun notSent(err: Throwable): String =
         if (io.nisfeb.talon.util.isShipSlow(err)) {
-            "Your ship is slow, so it didn't go through. Try again when it's back."
+            "Your Groundwire node is slow, so it didn't go through. Try again when it's back."
         } else {
-            "Your ship couldn't take it" +
+            "Your Groundwire node couldn't take it" +
                 (io.nisfeb.talon.util.readableReason(err.message)?.let { " ($it)" } ?: "") + "."
         }
 
@@ -360,7 +360,7 @@ class NotesRepo(
         // caller's scope cancelled it between the two, and replaceTree then
         // re-applied pending on every later scry, pinning the note as
         // "saving…" forever.
-        val ch = channel ?: return@async "Not connected to your ship."
+        val ch = channel ?: return@async "Not connected to your Groundwire node."
         val key = flag.flagString
         // The host's copy, put back if the save does not land. Left to the
         // read after it, a ship down for that read kept the unsaved body
@@ -588,7 +588,7 @@ class NotesRepo(
 
         /** What a save says when the note moved on since the editor opened. */
         const val NOTE_CHANGED =
-            "This note changed on the ship since you started editing, so the save was rejected to avoid overwriting it. " +
+            "This note changed on the node since you started editing, so the save was rejected to avoid overwriting it. " +
                 "Your text is still here: copy anything you need, then back out and re-open to get the latest version."
 
         /**

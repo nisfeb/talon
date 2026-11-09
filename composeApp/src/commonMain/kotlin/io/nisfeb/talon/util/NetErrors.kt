@@ -79,11 +79,11 @@ data class Problem(val line: String, val details: String? = null, val calm: Bool
 fun problemOf(what: String, err: Throwable): Problem {
     val slow = isShipSlow(err)
     val why = when {
-        slow -> "your ship is slow or out of reach. Try again when it's back."
+        slow -> "your Groundwire node is slow or out of reach. Try again when it's back."
         // Its reason where that reads as words ("banned", "not an admin"),
         // which is why it refused; a trace stays in the details.
         err is io.nisfeb.talon.urbit.PokeNacked ->
-            readableReason(err.reason)?.let { "the ship refused it ($it)." } ?: "the ship refused it."
+            readableReason(err.reason)?.let { "the node refused it ($it)." } ?: "the node refused it."
         else -> readableReason(err.message) ?: "something went wrong."
     }
     return Problem("$what: $why", errorDetailsOf(err), calm = slow)
@@ -95,10 +95,10 @@ fun problemOf(what: String, err: Throwable): Problem {
  * it has not said, or says it is idle.
  */
 fun shipSlowLine(queued: Int, health: io.nisfeb.talon.urbit.ShipHealth?): String = when (health) {
-    io.nisfeb.talon.urbit.ShipHealth.BUSY -> "Your ship is busy. $queued queued for when it catches up."
-    io.nisfeb.talon.urbit.ShipHealth.DOWN -> "Your ship is down. $queued queued for when it's back."
-    io.nisfeb.talon.urbit.ShipHealth.UNREACHABLE -> "Can't reach your ship. $queued queued for when it's back."
-    else -> "Your ship is slow. $queued queued for when it's back."
+    io.nisfeb.talon.urbit.ShipHealth.BUSY -> "Your Groundwire node is busy. $queued queued for when it catches up."
+    io.nisfeb.talon.urbit.ShipHealth.DOWN -> "Your Groundwire node is down. $queued queued for when it's back."
+    io.nisfeb.talon.urbit.ShipHealth.UNREACHABLE -> "Can't reach your Groundwire node. $queued queued for when it's back."
+    else -> "Your Groundwire node is slow. $queued queued for when it's back."
 }
 
 /**
@@ -114,7 +114,7 @@ fun failureLine(what: String, err: Throwable): String =
 internal fun readableReason(message: String?): String? {
     val first = message?.lineSequence()?.firstOrNull()?.trim().orEmpty()
     // The internal path never reaches the line: said as what it means.
-    if (SHIP_DOWN.matches(first)) return "your ship is down or out of reach"
+    if (SHIP_DOWN.matches(first)) return "your Groundwire node is down or out of reach"
     val technical = first.isEmpty() || first.length > 160 ||
         listOf("://", "Exception", "{", "<", "[url=").any { it in first }
     return first.takeUnless { technical }

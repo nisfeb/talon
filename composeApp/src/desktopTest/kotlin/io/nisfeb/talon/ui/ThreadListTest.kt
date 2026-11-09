@@ -409,7 +409,7 @@ class ThreadListTest {
         assertTrue(ship.pokesTo("groups").any { "~bus/crew" in it.json.toString() })
     }
 
-    // Offered to everyone in a channel, the ship refused it and nothing said why.
+    // Offered to everyone in a channel, the node refused it and nothing said why.
     @Test
     fun `in a channel we do not host another's reply offers no delete`() = thread(whom = nest, parentId = "170141184506", seed = {
         groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest, "~bus/crew")))
@@ -475,7 +475,7 @@ class ThreadListTest {
     fun `an edit the ship refuses stays open with its words and says why`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
         prepare = { refuse = { if (it.app == "channels") "nope" else null } }) { _, _ ->
         editReply("second try")
-        shows("Couldn't save the edit: the ship refused it (nope).")
+        shows("Couldn't save the edit: the node refused it (nope).")
         onNodeWithText("Edit message").assertExists()
         val box = onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.fetchSemanticsNode()
             .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text

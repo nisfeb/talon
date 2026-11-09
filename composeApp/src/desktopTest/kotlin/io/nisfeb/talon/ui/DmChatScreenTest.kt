@@ -517,8 +517,8 @@ class DmChatScreenTest {
     fun `a message sent while the connection drops is queued and said calmly, not as an error`() =
         chat(prepare = { lose = { if (it.app == "chat") kotlinx.io.IOException("The network connection was lost.") else null } }) { _, _ ->
             send("while it drops")
-            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Queued · sends when your ship is back").fetchSemanticsNodes().isNotEmpty() }
-            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Your ship is slow. 1 queued for when it's back.").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Queued · sends when your Groundwire node is back").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Your Groundwire node is slow. 1 queued for when it's back.").fetchSemanticsNodes().isNotEmpty() }
             onNodeWithText("Copy error details").assertExists()
             assertTrue(onAllNodesWithText("send failed", substring = true).fetchSemanticsNodes().isEmpty(), "not an error")
             assertTrue(onAllNodesWithText("Not sent").fetchSemanticsNodes().isEmpty())
@@ -834,7 +834,7 @@ class DmChatScreenTest {
             // tile from under one (CI, 2026-11-07).
             onAllNodesWithText("RI").onFirst().clickAction()
             // The profile is open once its "Show @p" is there.
-            waitUntil(timeoutMillis = 30_000) { onAllNodesWithText("Show @p").fetchSemanticsNodes().isNotEmpty() }
+            waitUntil(timeoutMillis = 30_000) { onAllNodesWithText("Show address").fetchSemanticsNodes().isNotEmpty() }
             onAllNodesWithText("LM").assertCountEquals(0)
             onAllNodesWithText("RI").assertCountEquals(2)
         }
@@ -1367,7 +1367,7 @@ class DmChatScreenTest {
     @Test
     fun `adding a contact the ship refuses says so`() = chat(seed = sam, prepare = { refuse = { if (it.app == "contacts") "nope" else null } }) { _, _ ->
         addSam()
-        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("add contact failed: the ship refused it").fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("add contact failed: the node refused it").fetchSemanticsNodes().isNotEmpty() }
     }
 
     // Real time: the poke is held on the ship's side while the chat goes.
@@ -1518,7 +1518,7 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
         onNodeWithText("Block").performClick()
         waitUntil(timeoutMillis = 5_000) { shown("Block ~bus?") }
-        assertTrue(onAllNodesWithText("Their ship is told that you blocked them.", substring = true).fetchSemanticsNodes().isNotEmpty(), "said before it is done")
+        assertTrue(onAllNodesWithText("Their node is told that you blocked them.", substring = true).fetchSemanticsNodes().isNotEmpty(), "said before it is done")
         onAllNodesWithText("Block").onLast().performClick()
         // Left once the ship took it, not before.
         waitUntil(timeoutMillis = 20_000) { backs == 1 }

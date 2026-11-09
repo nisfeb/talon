@@ -18,7 +18,7 @@ class CheckoutProgressTest {
     @Test
     fun `the asking line names the vendor and counts the seconds`() {
         assertEquals(
-            "Asking ~nisfeb for a checkout, 14 s. From some ships this takes a minute or two.",
+            "Asking ~nisfeb for a checkout, 14 s. From some nodes this takes a minute or two.",
             askingLine("~nisfeb", 14_400),
         )
         assertTrue(askingLine("", 0).startsWith("Asking the vendor for a checkout, 0 s."))

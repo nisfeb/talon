@@ -344,7 +344,7 @@ fun SettingsScreen(
             val darkNow = MaterialTheme.colorScheme.background.luminance() < 0.5f
             Text("Custom themes", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "Pick your own colors. Saved themes sync to your ship with " +
+                "Pick your own colors. Saved themes sync to your Groundwire node with " +
                     "your other settings, so they follow you to every device.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -433,11 +433,11 @@ fun SettingsScreen(
             // ── Ship naming ─────────────────────────────────────────
             val alwaysPatp by io.nisfeb.talon.ui.ShipNames.alwaysPatp.collectAsState()
             FeatureToggleRow(
-                label = "Always show ~ship names",
+                label = "Always show addresses",
                 description = "Ignore nicknames and planets' word names " +
                     "everywhere: rows, mentions and quoted posts show the " +
-                    "Urbit name. A comet keeps its word name, since its " +
-                    "Urbit name is its key.",
+                    "address. A comet keeps its word name, since its " +
+                    "address is its key.",
                 enabled = alwaysPatp,
                 onChange = { on ->
                     io.nisfeb.talon.ui.ShipNames.setAlwaysPatp(on)
@@ -448,13 +448,13 @@ fun SettingsScreen(
             FeatureToggleRow(
                 label = "Word names for planets and moons",
                 description = if (alwaysPatp) {
-                    "Turned off while \"Always show ~ship names\" is on."
+                    "Turned off while \"Always show addresses\" is on."
                 } else {
                     "Off by default. Comets always show word names -- " +
-                        "their Urbit name is their key. A planet's is " +
+                        "their address is their key. A planet's is " +
                         "not, so turning this on has Groundwire look each " +
-                        "one up from your own ship, which only works " +
-                        "where that ship can answer."
+                        "one up from your own Groundwire node, which only works " +
+                        "where that node can answer."
                 },
                 enabled = nonCometNames && !alwaysPatp,
                 onChange = { on ->
@@ -470,7 +470,7 @@ fun SettingsScreen(
                 label = "Custom accent color",
                 description = if (multiShip) {
                     "Tints the send icon, focused text fields, and per-" +
-                        "ship pip. On for multi-ship users by default."
+                        "node pip. On for multi-node users by default."
                 } else {
                     "Tints the send icon, focused text fields, and " +
                         "other primary-colored UI. Off keeps the brand " +
@@ -657,7 +657,7 @@ fun SettingsScreen(
             )
             Text(
                 "How the dial reads out temperature. Kept on this " +
-                    "device rather than on the ship: which units somebody reads " +
+                    "device rather than on your Groundwire node: which units somebody reads " +
                     "is a fact about them, not about their identity.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1099,13 +1099,13 @@ private fun AboutSection(
         ).collectAsState()
     if (callController != null) {
         AboutRow(
-            label = "Your ship's calling app",
+            label = "Your Groundwire node's calling app",
             value = when {
-                shipWire <= 0 -> "not installed on your ship"
+                shipWire <= 0 -> "not installed on your node"
                 shipWire < io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
                     "wire $shipWire · this app speaks " +
                         "${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}, so your " +
-                        "ship's copy is behind"
+                        "node's copy is behind"
                 shipWire > io.nisfeb.talon.call.TrunkWire.WIRE_VERSION ->
                     "wire $shipWire · newer than this app, which speaks " +
                         "${io.nisfeb.talon.call.TrunkWire.WIRE_VERSION}"
@@ -1275,7 +1275,7 @@ private fun BlockedPeopleSection() {
     )
     blocking.problem.collectAsState().value?.let { io.nisfeb.talon.ui.ProblemLine(it) }
     Text(
-        "They can't message or call you. Their ship is told that you blocked them.",
+        "They can't message or call you. Their node is told that you blocked them.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -1298,7 +1298,7 @@ private fun CallPolicySection(controller: io.nisfeb.talon.call.CallController) {
         Text("Who can call you", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Your ship decides this, so it applies to every device you're " +
+            "Your Groundwire node decides this, so it applies to every device you're " +
                 "signed in on — and to any other app sharing your call setup.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1378,7 +1378,7 @@ private fun CallServersSection(controller: io.nisfeb.talon.call.CallController) 
         Spacer(Modifier.height(4.dp))
         Text(
             "How a one-to-one call finds a path between you when you're " +
-                "on different networks. Stored on your ship, so it's the " +
+                "on different networks. Stored on your Groundwire node, so it's the " +
                 "same on every device. Party lines don't use these — they " +
                 "get their own from the group's server.",
             style = MaterialTheme.typography.bodySmall,
@@ -1828,7 +1828,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     )
     Text(
         if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-            "With the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears from your ship only " +
+            "With the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears from your Groundwire node only " +
                 "through a relay. The default endpoint is the Groundwire-operated host."
         } else {
             "Optional: register this device with a notification relay so " +
@@ -1941,7 +1941,7 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
     val shipUrl = config.activeShipUrl
     if (ship == null || shipUrl == null) {
         Text(
-            "Sign in to a ship to register with the relay.",
+            "Sign in to a Groundwire node to register with the relay.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1992,16 +1992,16 @@ private fun RelayRegistrationPanel(config: RelayPanelConfig) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Paste this ship's +code. The relay logs in once " +
+                        "Paste this Groundwire node's access code (+code). The relay logs in once " +
                             "to derive a session cookie, then forgets the " +
-                            "+code. See the design doc for full security " +
+                            "access code. See the design doc for full security " +
                             "details.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     OutlinedTextField(
                         value = code,
                         onValueChange = { code = it },
-                        label = { Text("+code") },
+                        label = { Text("Access code") },
                         singleLine = true,
                         visualTransformation =
                             androidx.compose.ui.text.input.PasswordVisualTransformation(),
@@ -2542,7 +2542,7 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     val files = repo?.files ?: io.nisfeb.talon.ui.FontFiles.default
     Text("Font", style = MaterialTheme.typography.bodyMedium)
     Text(
-        "Set on all your devices. A font you add is kept on your ship, private to you, and your other devices fetch it. A .ttf or .otf put in talon/fonts on your ship's grubbery is offered too.",
+        "Set on all your devices. A font you add is kept on your Groundwire node, private to you, and your other devices fetch it. A .ttf or .otf put in talon/fonts on your node's grubbery is offered too.",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -2591,7 +2591,7 @@ private fun FontSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     removing?.let { family ->
         io.nisfeb.talon.ui.ConfirmDestructive(
             title = "Remove $family?",
-            text = "It goes from all your devices and from your ship. To use it again, add the file again.",
+            text = "It goes from all your devices and from your Groundwire node. To use it again, add the file again.",
             confirm = "Remove",
             dismiss = "Keep",
             onConfirm = { repo?.remove(family) },
@@ -2633,9 +2633,9 @@ private fun PhoneNotificationsRow(config: RelayPanelConfig) {
             Text("Notifications on this ${io.nisfeb.talon.ui.iosDeviceName}", style = MaterialTheme.typography.bodyMedium)
             Text(
                 when (from) {
-                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your ship tells this ${io.nisfeb.talon.ui.iosDeviceName} when something arrives."
+                    io.nisfeb.talon.notify.PhoneNotifications.Ship -> "On: your Groundwire node tells this ${io.nisfeb.talon.ui.iosDeviceName} when something arrives."
                     io.nisfeb.talon.notify.PhoneNotifications.Relay -> "On: the relay tells this ${io.nisfeb.talon.ui.iosDeviceName} when something arrives."
-                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your ship."
+                    io.nisfeb.talon.notify.PhoneNotifications.Off -> "Off: with the app closed, this ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your Groundwire node."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2695,9 +2695,9 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
     val (title, body) = when {
         via -> "Notifications come from $name" to (
             if (io.nisfeb.talon.ui.isRelayNotificationSetupNeeded) {
-                "Your ship sends them to $device itself, through its calling app. The Groundwire relay only hands them to Apple."
+                "Your Groundwire node sends them to $device itself, through its calling app. The Groundwire relay only hands them to Apple."
             } else {
-                "Your ship sends them to $device itself, through its calling app. The Groundwire relay is not used."
+                "Your Groundwire node sends them to $device itself, through its calling app. The Groundwire relay is not used."
             }
             )
         declined -> "Notifications come from the Groundwire relay" to
@@ -2735,7 +2735,7 @@ internal fun ShipNotificationsRow(config: RelayPanelConfig) {
                 config.settings.setShipPushDeclined(ship, false)
                 declined = false
                 backToShip = true
-            }) { Text("Use my ship") }
+            }) { Text("Use my node") }
         }
     }
 }

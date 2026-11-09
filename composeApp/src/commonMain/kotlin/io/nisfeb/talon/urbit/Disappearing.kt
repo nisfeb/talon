@@ -269,10 +269,10 @@ object Disappearing {
     }
 
     /** The host's Groups app has no channel hooks: the scry is not there. */
-    class NoHooks : Exception("your ship's Groups app is too old for disappearing messages. Update it and try again.")
+    class NoHooks : Exception("your Groundwire node's Groups app is too old for disappearing messages. Update it and try again.")
 
     /** The ship took the hook but couldn't build it. */
-    class NotBuilt : Exception("your ship's Groups app couldn't build the disappearing-messages hook. This version of the app may be older than it.")
+    class NotBuilt : Exception("your Groundwire node's Groups app couldn't build the disappearing-messages hook. This version of the app may be older than it.")
 
     /** Read what the host holds. Throws [NoHooks] where channels-server has none. */
     internal suspend fun read(ch: UrbitChannel): Hooks {

@@ -279,8 +279,8 @@ enum class ArmillaryAvailability {
 
 sealed class ArmillaryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Refused(val status: Int, val reason: String) : ArmillaryError("HTTP $status: $reason")
-    class Unreachable(cause: Throwable) : ArmillaryError("no answer from the ship", cause)
-    class Garbled(cause: Throwable) : ArmillaryError("the ship's answer could not be read", cause)
+    class Unreachable(cause: Throwable) : ArmillaryError("no answer from your Groundwire node", cause)
+    class Garbled(cause: Throwable) : ArmillaryError("your Groundwire node's answer could not be read", cause)
 }
 
 /** What a client needs to run, as `GET /api/inference` answers it. */
@@ -565,4 +565,4 @@ fun money(micro: Long): String {
 }
 
 /** A checkout answered with neither a page nor the checkout's name. */
-internal const val NO_CHECKOUT_PAGE = "Your ship answered without a checkout page. Refresh, then try again."
+internal const val NO_CHECKOUT_PAGE = "Your Groundwire node answered without a checkout page. Refresh, then try again."

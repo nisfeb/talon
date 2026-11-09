@@ -94,7 +94,7 @@ class OrreryLateTest {
 
     @Test
     fun a_failure_is_said_in_a_line_without_codes() {
-        assertEquals("Done did not go through: your ship did not answer. Try it again.", markProblemLine("Done", OrreryError.Unreachable(RuntimeException("timeout"))))
+        assertEquals("Done did not go through: your Groundwire node did not answer. Try it again.", markProblemLine("Done", OrreryError.Unreachable(RuntimeException("timeout"))))
         assertEquals("Snooze did not go through: only an open action is marked.", markProblemLine("Snooze", OrreryError.Refused(409, "only an open action is marked")))
         assertEquals("Not high did not go through: Orrery gave no reason.", markProblemLine("Not high", OrreryError.Refused(500, "<html>")))
     }
@@ -173,7 +173,7 @@ class OrreryLateTest {
     @Test
     fun done_on_one_the_ship_carries_out_is_left_to_the_app() = runTest {
         val ship = Ship().apply { open = { row("proposed", kind = "message", payload = """{"priority":"high","via":"chat","to":"~bus","text":"late"}""") } }
-        assertEquals("Open Groundwire to answer this one: the ship carries it out.", ship.api.lateMove("a1", LateMove.DONE))
+        assertEquals("Open Groundwire to answer this one: your node carries it out.", ship.api.lateMove("a1", LateMove.DONE))
         assertEquals(emptyList<String>(), ship.sent, "approving it would send it")
     }
 
@@ -187,8 +187,8 @@ class OrreryLateTest {
         ship.answer = { _, _ -> HttpStatusCode.NotFound to """{"error":"no such action"}""" }
         assertEquals("Snooze did not go through: no such action.", ship.api.lateMove("a1", LateMove.SNOOZE))
         ship.down = true
-        assertEquals("Done did not go through: your ship did not answer. Try it again.", ship.api.lateMove("a1", LateMove.DONE))
-        assertEquals("Snooze did not go through: your ship did not answer. Try it again.", ship.api.lateMove("a1", LateMove.SNOOZE))
+        assertEquals("Done did not go through: your Groundwire node did not answer. Try it again.", ship.api.lateMove("a1", LateMove.DONE))
+        assertEquals("Snooze did not go through: your Groundwire node did not answer. Try it again.", ship.api.lateMove("a1", LateMove.SNOOZE))
     }
 
     // ─── the routes themselves ───────────────────────────────────────

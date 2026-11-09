@@ -57,7 +57,7 @@ class GrubberyAppsTest {
     fun `armillary is offered the shell's own add, and only where it is missing`() {
         val here = armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT)
         assertEquals(AppState.WORKING, here.state)
-        assertEquals("Answering on this ship.", here.detail)
+        assertEquals("Answering on this node.", here.detail)
         val gone = armillaryRow(io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING, "404")
         assertEquals(AppState.MISSING, gone.state)
         // Not kiln's: a shell desk, added through an authenticated call

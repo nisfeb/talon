@@ -88,13 +88,13 @@ class ContactsAndStatusTest {
 
     @Test
     fun `a ship already in the book, or words that are not a ship, cannot be added`() = book {
-        onNode(hasSetTextAction() and hasText("~patp, or a word name")).performTextInput("~mitlyn-ditrel")
+        onNode(hasSetTextAction() and hasText("~address, or a word name")).performTextInput("~mitlyn-ditrel")
         onNodeWithText("Add").assertIsNotEnabled()
     }
 
     @Test
     fun `a new ship goes in with its nickname`() = book {
-        onNode(hasSetTextAction() and hasText("~patp, or a word name")).performTextInput("sampel-palnet")
+        onNode(hasSetTextAction() and hasText("~address, or a word name")).performTextInput("sampel-palnet")
         onNode(hasSetTextAction() and hasText("nickname")).performTextInput("Sam")
         onNodeWithText("Add").assertIsEnabled().performClick()
         assertEquals(listOf("add ~sampel-palnet Sam"), did)

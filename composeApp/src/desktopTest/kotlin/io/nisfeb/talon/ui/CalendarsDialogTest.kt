@@ -109,7 +109,7 @@ class CalendarsDialogTest {
     fun `a calendar opened is shared, and a share revoked after asking`() = calendars {
         openRow("Garden")
         waitUntil(timeoutMillis = 5_000) { shows("~bus · read only") }
-        onNode(hasSetTextAction() and hasText("Share with a ship")).performScrollTo().performTextInput("~ridlur-figbud")
+        onNode(hasSetTextAction() and hasText("Share with someone")).performScrollTo().performTextInput("~ridlur-figbud")
         onNodeWithText("Read and edit").performClick()
         onNodeWithText("Share").performClick()
         val share = wrote("/share/share")

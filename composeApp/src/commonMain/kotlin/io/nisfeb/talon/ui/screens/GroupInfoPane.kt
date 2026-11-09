@@ -161,7 +161,7 @@ fun GroupInfoPane(
             text = {
                 Column {
                     Text(
-                        "They get an invite to this group on their ship. If the group " +
+                        "They get an invite to this group on their node. If the group " +
                             "only lets admins invite, the host refuses and you will see that here.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -170,7 +170,7 @@ fun GroupInfoPane(
                     androidx.compose.material3.OutlinedTextField(
                         value = inviteShip,
                         onValueChange = { inviteShip = it; inviteResult = null },
-                        label = { Text("~ship, or a word name") },
+                        label = { Text("~address, or a word name") },
                         // Room for all twelve words of a name: what does
                         // not fit has to scroll inside the box, which on a
                         // phone fights the screen and loses.

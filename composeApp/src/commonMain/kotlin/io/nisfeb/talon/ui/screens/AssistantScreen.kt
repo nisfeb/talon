@@ -355,7 +355,7 @@ fun AssistantScreen(
             val tools = mcpAgentTools(c, defs)
             mcpTools = tools
             val hidden = defs.size - tools.size
-            mcpStatus = "Ship tools: ${tools.size} available" +
+            mcpStatus = "Node tools: ${tools.size} available" +
                 if (hidden > 0) " · $hidden hidden" else ""
         }
         // Reuse the ship's already-handshaked client + tool list. This screen
@@ -369,7 +369,7 @@ fun AssistantScreen(
             publish(hit.first, hit.second)
             return@LaunchedEffect
         }
-        mcpStatus = "Connecting to ship tools…"
+        mcpStatus = "Connecting to node tools…"
         val client = McpClient(shipHttp, shipBase)
         runCatching {
             client.initialize()
@@ -380,7 +380,7 @@ fun AssistantScreen(
         }.onFailure { e ->
             mcpTools = emptyList()
             // In words: the exception's own text read as a stack trace.
-            mcpStatus = io.nisfeb.talon.util.problemOf("Ship tools unavailable", e).line
+            mcpStatus = io.nisfeb.talon.util.problemOf("Node tools unavailable", e).line
             Log.w("AssistantScreen", "MCP tool load failed", e)
         }
     }
@@ -1005,7 +1005,7 @@ fun AssistantScreen(
 
             if (!ready) {
                 Text(
-                    "The assistant needs an active ship session to run. Sign in and try again.",
+                    "The assistant needs an active Groundwire node session to run. Sign in and try again.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -1281,7 +1281,7 @@ private fun ConversationsTab(
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("Delete all conversations?") },
-            text = { Text("This also removes them from your ship.") },
+            text = { Text("This also removes them from your Groundwire node.") },
             confirmButton = {
                 io.nisfeb.talon.ui.DestructiveTextButton(onClick = {
                     confirmClear = false

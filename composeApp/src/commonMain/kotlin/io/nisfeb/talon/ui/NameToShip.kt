@@ -88,7 +88,7 @@ object NameToShip {
     fun hint(result: Result, typed: String): String? = when (result) {
         is Result.One -> null
         is Result.Several ->
-            "That name fits ${result.ships.size} ships. Use the full name to pick one."
-        Result.None -> if (typed.isBlank()) null else "No ship goes by that name."
+            "That name fits ${result.ships.size} people. Use the full name to pick one."
+        Result.None -> if (typed.isBlank()) null else "No one goes by that name."
     }
 }

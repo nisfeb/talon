@@ -34,7 +34,7 @@ class LandingBannerTest {
 
     @Test
     fun `the step and its time show, with the ship's last line`() = banner(LandingProgress("Joining Nisfeb Software", 125), line = "~zod:dojo> |install") {
-        assertTrue(shows("Getting your ship ready") && shows("Joining Nisfeb Software  ·  2m 5s"))
+        assertTrue(shows("Getting your Groundwire node ready") && shows("Joining Nisfeb Software  ·  2m 5s"))
         assertTrue(shows("~zod:dojo> |install"))
         onNodeWithText("Terminal").performClick()
         onNodeWithText("Hide").performClick()
@@ -42,12 +42,12 @@ class LandingBannerTest {
     }
 
     @Test
-    fun `a slow landing says it is slow, not broken`() = banner(LandingProgress("Waiting for the ship to confirm the group", 700, slow = true)) {
-        assertTrue(shows("Still getting your ship ready") && shows("Nothing has gone wrong"))
+    fun `a slow landing says it is slow, not broken`() = banner(LandingProgress("Waiting for the node to confirm the group", 700, slow = true)) {
+        assertTrue(shows("Still getting your Groundwire node ready") && shows("Nothing has gone wrong"))
     }
 
     @Test
-    fun `a short wait counts in seconds`() = banner(LandingProgress("Connecting to your ship", 9)) {
-        assertTrue(shows("Connecting to your ship  ·  9s"))
+    fun `a short wait counts in seconds`() = banner(LandingProgress("Connecting to your Groundwire node", 9)) {
+        assertTrue(shows("Connecting to your Groundwire node  ·  9s"))
     }
 }

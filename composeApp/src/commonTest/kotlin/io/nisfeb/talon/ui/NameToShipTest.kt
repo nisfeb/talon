@@ -33,7 +33,7 @@ class NameToShipTest {
         val r = NameToShip.resolve("..absolves...delay", known = listOf(twinA, twinB))
         assertTrue(r is NameToShip.Result.Several)
         assertEquals(setOf(twinA, twinB), (r as NameToShip.Result.Several).ships.toSet())
-        assertTrue(NameToShip.hint(r, "..absolves...delay")!!.contains("2 ships"))
+        assertTrue(NameToShip.hint(r, "..absolves...delay")!!.contains("2 people"))
     }
 
     @Test
@@ -74,7 +74,7 @@ class NameToShipTest {
         // An empty box says nothing; a typed name that matched
         // nobody says so, rather than letting the ship answer.
         assertEquals(null, NameToShip.hint(NameToShip.Result.None, ""))
-        assertEquals("No ship goes by that name.", NameToShip.hint(NameToShip.Result.None, "who?"))
+        assertEquals("No one goes by that name.", NameToShip.hint(NameToShip.Result.None, "who?"))
     }
 
     @Test

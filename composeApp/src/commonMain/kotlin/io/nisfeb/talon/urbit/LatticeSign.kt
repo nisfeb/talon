@@ -40,7 +40,7 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
             contentType(ContentType.Application.OctetStream)
             setBody(content)
         }
-        if (resp.status.value == 404) error("This ship's Lattice is too old to sign; it needs version 31.")
+        if (resp.status.value == 404) error("This node's Lattice is too old to sign; it needs version 31.")
         // The web server in front of a ship that is down: not a refusal.
         if (resp.status.value in 502..504) error(LatticeInstall.SHIP_DOWN)
         if (!resp.status.isSuccess()) error("Lattice refused to sign: ${reason(resp.bodyAsText(), resp.status.value)}")
@@ -74,21 +74,21 @@ class LatticeSign(private val http: HttpClient, shipUrl: String) {
             contentType(ContentType.Application.Json)
             setBody(body.toString())
         }
-        if (resp.status.value == 404) return Verdict.No("This ship's Lattice is too old to check signatures.")
+        if (resp.status.value == 404) return Verdict.No("This node's Lattice is too old to check signatures.")
         // A ship that is down has not said the signature is bad: its proxy's
         // page came back as the reason it did not check out.
         if (resp.status.value in 502..504) error(LatticeInstall.SHIP_DOWN)
         val text = resp.bodyAsText()
         if (!resp.status.isSuccess()) return Verdict.No(reason(text, resp.status.value))
         val o = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
-            ?: return Verdict.No("The ship answered something we could not read.")
+            ?: return Verdict.No("Your Groundwire node answered something we could not read.")
         val ok = o["ok"]?.jsonPrimitive?.content == "true"
         return if (ok) Verdict.Ok else Verdict.No(o["reason"]?.jsonPrimitive?.content ?: "The signature does not check out.")
     }
 
     private fun recordOf(body: String): SignedRecord {
         val o = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull()
-            ?: error("The ship answered something we could not read.")
+            ?: error("Your Groundwire node answered something we could not read.")
         fun field(k: String) = o[k]?.jsonPrimitive?.content ?: error("The signature came back without $k.")
         return SignedRecord(
             ship = field("ship"),

@@ -297,7 +297,7 @@ class OrreryApiTest {
     }
 
     // nginx's page for a ship that is down or restarting was read as the
-    // ship refusing, with "the ship answered with an error page" as why.
+    // ship refusing, with "the node answered with an error page" as why.
     @Test
     fun `a proxy's page for a ship that is down is no answer, never a refusal`() = runTest {
         val page = "<html><body><h1>502 Bad Gateway</h1></body></html>"

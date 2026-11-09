@@ -104,8 +104,8 @@ class LoginScreenTest {
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
     private fun ComposeUiTest.connect(url: String, code: String) {
-        onNodeWithText("Ship URL").performTextInput(url)
-        onNodeWithText("+code").performTextInput(code)
+        onNodeWithText("Node address").performTextInput(url)
+        onNodeWithText("Access code (+code)").performTextInput(code)
         onNodeWithText("Connect").performClick()
     }
 
@@ -128,13 +128,13 @@ class LoginScreenTest {
     // to type them again".
     @Test
     fun `backing out of the scanner keeps what was typed`() = login(scanCancels = true) { _ ->
-        onNodeWithText("Ship URL").performTextInput("zod.example.com")
-        onNodeWithText("+code").performTextInput("lidlut-tabwed")
+        onNodeWithText("Node address").performTextInput("zod.example.com")
+        onNodeWithText("Access code (+code)").performTextInput("lidlut-tabwed")
         onNodeWithText("Scan QR").performClick()
         waitForIdle()
-        assertEquals("zod.example.com", typed("Ship URL"))
+        assertEquals("zod.example.com", typed("Node address"))
         // Shown as dots; the field still holds the code.
-        assertEquals("•".repeat("lidlut-tabwed".length), typed("+code"))
+        assertEquals("•".repeat("lidlut-tabwed".length), typed("Access code (+code)"))
         assertEquals("lidlut-tabwed", LoginDraft.code.value)
     }
 
@@ -150,12 +150,12 @@ class LoginScreenTest {
                     if (shown) LoginScreen(session = UrbitSession(HttpClient(MockEngine { respondOk() }), store), onLoggedIn = {})
                 }
             }
-            onNodeWithText("Ship URL").performTextInput("zod.example.com")
+            onNodeWithText("Node address").performTextInput("zod.example.com")
             shown = false
             waitForIdle()
             shown = true
             waitForIdle()
-            assertEquals("zod.example.com", typed("Ship URL"))
+            assertEquals("zod.example.com", typed("Node address"))
         }
         login { loggedIn ->
             connect("zod.example.com", "lidlut-tabwed")
@@ -196,7 +196,7 @@ class LoginScreenTest {
     // What eyre answers to a wrong +code: 400, with its login page.
     fun `a wrong code says so and leaves the form to try again`() = login(answer = { respond("<html/>", HttpStatusCode.BadRequest) }) { loggedIn ->
         connect("https://zod.example.com", "wrong")
-        waitUntil(timeoutMillis = 5_000) { shows("Wrong +code") }
+        waitUntil(timeoutMillis = 5_000) { shows("Wrong access code") }
         assertTrue(loggedIn.isEmpty())
         assertNull(store.active())
         onNodeWithText("Connect").assertIsEnabled()
@@ -205,7 +205,7 @@ class LoginScreenTest {
     @Test
     fun `a ship that answers without a session cookie is not a ship`() = login(answer = { respond("<html/>", HttpStatusCode.OK) }) { loggedIn ->
         connect("https://example.com", "x")
-        waitUntil(timeoutMillis = 5_000) { shows("no ship signed you in there") }
+        waitUntil(timeoutMillis = 5_000) { shows("no node signed you in there") }
         assertTrue(loggedIn.isEmpty())
     }
 
@@ -237,7 +237,7 @@ class LoginScreenTest {
         val opened = mutableListOf<String>()
         login(notice = "Your session on ~zod expired", onRunLocalShip = { ranLocal++ }, opened = opened) { _ ->
             assertTrue(shows("Your session on ~zod expired"))
-            onNodeWithText("No ship? Run one on this computer (beta)").performClick()
+            onNodeWithText("No node? Run one on this computer (beta)").performClick()
             // The link is one span of a centred sentence: click its own glyphs.
             val link = onNodeWithText("Get one", substring = true)
             val layout = mutableListOf<TextLayoutResult>().also { link.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(it) }.single()
@@ -252,9 +252,9 @@ class LoginScreenTest {
     // The code was typed, then the mouse fetched to click Connect.
     @Test
     fun `Enter in the code signs in`() = login { loggedIn ->
-        onNodeWithText("Ship URL").performTextInput("zod.example.com")
-        onNodeWithText("+code").performTextInput("lidlut-tabwed")
-        onNodeWithText("+code").performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Enter) }
+        onNodeWithText("Node address").performTextInput("zod.example.com")
+        onNodeWithText("Access code (+code)").performTextInput("lidlut-tabwed")
+        onNodeWithText("Access code (+code)").performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Enter) }
         waitUntil(timeoutMillis = 5_000) { loggedIn.isNotEmpty() }
         assertEquals(listOf("~zod"), loggedIn)
     }

@@ -148,11 +148,11 @@ fun ContactProfileSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.clickable(onClick = copyRow(ship, "the @p")),
+                        modifier = Modifier.clickable(onClick = copyRow(ship, "the address")),
                     )
-                    TextButton(onClick = copyRow(ship, "the @p")) { Text("Copy @p") }
+                    TextButton(onClick = copyRow(ship, "the address")) { Text("Copy address") }
                 } else {
-                    TextButton(onClick = { showPatp = true }) { Text("Show @p") }
+                    TextButton(onClick = { showPatp = true }) { Text("Show address") }
                 }
             }
             // Asked of the ship once per comet, ever: see [CometDomes].
@@ -353,7 +353,7 @@ private fun BlockRow(ship: String, who: String) {
     else DestructiveTextButton(onClick = { confirm = true }) { Text("Block") }
     if (confirm) ConfirmDestructive(
         title = "Block $who?",
-        text = "They won't be able to message or call you. Their ship is told that you blocked them.",
+        text = "They won't be able to message or call you. Their node is told that you blocked them.",
         confirm = "Block",
         onConfirm = { blocking.set(ship, true) },
         onDismiss = { confirm = false },

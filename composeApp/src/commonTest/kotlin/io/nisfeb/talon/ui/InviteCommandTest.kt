@@ -59,16 +59,16 @@ class InviteCommandTest {
         )
         // A name for nobody says so, in the resolver's words.
         val no = parseInvite("/invite tlon nobody", null, groups) as InviteParse.Problem
-        assertEquals("No ship goes by that name.", no.message)
+        assertEquals("No one goes by that name.", no.message)
     }
 
     @Test
     fun `a refused invite says what the ship said`() {
         val nacked = io.nisfeb.talon.urbit.PokeNacked("groups", "group-action-4", "no-such-ship")
-        assertEquals("Your ship refused the invite: no-such-ship", inviteFailure(nacked))
+        assertEquals("Your Groundwire node refused the invite: no-such-ship", inviteFailure(nacked))
         val refused = io.nisfeb.talon.urbit.PokeNacked("groups", "group-action-4", "permission denied")
         assertTrue("only admins invite" in inviteFailure(refused), inviteFailure(refused))
-        assertTrue("no answer from your ship" in inviteFailure(RuntimeException()), inviteFailure(RuntimeException()))
+        assertTrue("no answer from your Groundwire node" in inviteFailure(RuntimeException()), inviteFailure(RuntimeException()))
     }
 
     // Silence is neither a yes nor a no, and used to be read as yes.

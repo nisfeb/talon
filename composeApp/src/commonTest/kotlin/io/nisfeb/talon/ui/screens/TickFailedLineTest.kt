@@ -7,8 +7,8 @@ import kotlin.test.assertEquals
 class TickFailedLineTest {
     @Test
     fun `a failed tick and a failed untick are each said as what they were`() {
-        assertEquals("\"Buy milk\" was not ticked: the ship did not take it.", tickFailedLine("Buy milk", done = true))
-        assertEquals("\"Buy milk\" was not unticked: the ship did not take it.", tickFailedLine("Buy milk", done = false))
-        assertEquals("\"The task\" was not unticked: the ship did not take it.", tickFailedLine("", done = false))
+        assertEquals("\"Buy milk\" was not ticked: your Groundwire node did not take it.", tickFailedLine("Buy milk", done = true))
+        assertEquals("\"Buy milk\" was not unticked: your Groundwire node did not take it.", tickFailedLine("Buy milk", done = false))
+        assertEquals("\"The task\" was not unticked: your Groundwire node did not take it.", tickFailedLine("", done = false))
     }
 }

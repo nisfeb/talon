@@ -70,7 +70,7 @@ fun parseInvite(
     nicknameOf: (String) -> String? = { null },
 ): InviteParse {
     val args = text.trim().split(Regex("\\s+")).drop(1)
-    val usage = "/invite <group>" + if (dmShip == null) " ~ship" else ""
+    val usage = "/invite <group>" + if (dmShip == null) " ~address" else ""
     val groupArg = args.getOrNull(0) ?: return InviteParse.Problem("Pick a group: $usage")
     val flag = groups.firstOrNull { it.flag.equals(groupArg, ignoreCase = true) }?.flag
         ?: matchGroups(groupArg, groups, limit = 2).singleOrNull()?.flag
@@ -82,6 +82,6 @@ fun parseInvite(
     }
     return when (val who = io.nisfeb.talon.ui.NameToShip.resolve(typed, known, nicknameOf)) {
         is NameToShip.Result.One -> InviteParse.Ok(flag, who.ship)
-        else -> InviteParse.Problem(NameToShip.hint(who, typed) ?: "\"$typed\" is not a ship.")
+        else -> InviteParse.Problem(NameToShip.hint(who, typed) ?: "\"$typed\" is not an address.")
     }
 }

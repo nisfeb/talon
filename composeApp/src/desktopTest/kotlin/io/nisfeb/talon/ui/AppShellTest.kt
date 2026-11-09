@@ -204,9 +204,9 @@ class AppShellTest {
 
     @Test
     fun `Add ship can be cancelled, back to the ship that was open`() = app {
-        onNodeWithContentDescription("Switch ship").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
-        onNodeWithText("Add ship").performClick()
+        onNodeWithContentDescription("Switch node").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add node") }
+        onNodeWithText("Add node").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Connect") }
         assertTrue(!present("New message"), "the login form, not the ship")
         onNodeWithText("Cancel").performClick()
@@ -576,7 +576,7 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("Set a location") && showing("Install the calendar") }
         assertTrue(!present("New message"), "the home page, not the list")
         onNodeWithContentDescription("Mail").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
+        waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this node does not have yet.") }
         onNodeWithContentDescription("Calendar").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("The Today widget on the home page can install it.") }
         onNodeWithContentDescription("Chats").performClick()
@@ -593,7 +593,7 @@ class AppShellTest {
             assertTrue(!present("Mail"), "a phone-width window has no rail")
             // Where the drawer, the home page and a saved tab all land.
             ui.setActiveRailTab(RailTab.Mail)
-            waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this ship does not have yet.") }
+            waitUntil(timeoutMillis = 5_000) { showing("Mail runs in Grubbery, which this node does not have yet.") }
             assertTrue(onAllNodesWithText("Mail").fetchSemanticsNodes().isNotEmpty() && present("Back"), "the mail screen's own header")
             onNodeWithContentDescription("Back").performClick()
             // The chat list; no rail, so no Chats button to look for.
@@ -1074,7 +1074,7 @@ class AppShellTest {
         onNodeWithText("1 invitation").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Garden party") }
         onNodeWithText("Maybe").performClick()
-        waitUntil(timeoutMillis = 5_000) { cal.answers.size == 1 && showing("The ship did not take the answer.") && !showing("Answering") }
+        waitUntil(timeoutMillis = 5_000) { cal.answers.size == 1 && showing("Your Groundwire node did not take the answer.") && !showing("Answering") }
 
         cal.answer = { """{"ok":false,"cal":"work","told":false}""" }
         onNodeWithText("Going").performClick()
@@ -1082,11 +1082,11 @@ class AppShellTest {
 
         cal.answer = { """{"ok":true,"cal":"work","told":false}""" }
         onNodeWithText("Going").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Answered, but ~nec could not be told yet: their ship did not answer. The calendar tries again in about an hour.") }
+        waitUntil(timeoutMillis = 5_000) { showing("Answered, but ~nec could not be told yet: their node did not answer. The calendar tries again in about an hour.") }
 
         cal.lose = true
         onNodeWithText("Going").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("No answer from the ship. Nothing was changed.") }
+        waitUntil(timeoutMillis = 5_000) { showing("No answer from the node. Nothing was changed.") }
     }
 
     // The answer runs on the calendar's own scope: leaving the calendar
@@ -1277,15 +1277,15 @@ class AppShellTest {
         onNodeWithContentDescription("More").performClick()
         onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
-        onNodeWithText("~patp, or a word name").performTextInput("~bus")
+        waitUntil(timeoutMillis = 5_000) { showing("~address, or a word name") }
+        onNodeWithText("~address, or a word name").performTextInput("~bus")
         waitForIdle()
         onNodeWithText("Add").performClick()
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("contacts").isNotEmpty() && onAllNodesWithText("~bus").fetchSemanticsNodes().isNotEmpty() }
         onAllNodesWithText("~bus")[0].performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Message") }
         onNodeWithText("Message").performClick()
-        waitUntil(timeoutMillis = 5_000) { !showing("~patp, or a word name") }
+        waitUntil(timeoutMillis = 5_000) { !showing("~address, or a word name") }
         assertTrue(!showing("Search contacts"), "Contacts is put down")
         // The sheet is gone, so the one "Message" left is the conversation's composer.
         waitUntil(timeoutMillis = 5_000) { showing("Message") }
@@ -1535,8 +1535,8 @@ class AppShellTest {
         onNodeWithContentDescription("More").performClick()
         onNodeWithText("People & sidebar").performClick()
         onNodeWithText("Contacts").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("~patp, or a word name") }
-        onNodeWithText("~patp, or a word name").performTextInput(who)
+        waitUntil(timeoutMillis = 5_000) { showing("~address, or a word name") }
+        onNodeWithText("~address, or a word name").performTextInput(who)
         waitForIdle()
         onNodeWithText("Add").performClick()
     }
@@ -1548,7 +1548,7 @@ class AppShellTest {
         refuse = { if (it.app == "contacts") "not now" else null }
     }) { ship ->
         addOnContacts("~bus")
-        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: the ship refused it (not now).") }
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: the node refused it (not now).") }
         assertTrue(ship.pokesTo("contacts").isNotEmpty())
         assertTrue(showing("~bus"), "what was typed is still in the box")
         assertTrue(showing("Copy error details"))
@@ -1559,7 +1559,7 @@ class AppShellTest {
         lose = { if (it.app == "contacts") kotlinx.io.IOException("connection reset") else null }
     }) {
         addOnContacts("~bus")
-        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: your ship is slow or out of reach. Try again when it's back.") }
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't add ~bus: your Groundwire node is slow or out of reach. Try again when it's back.") }
         assertTrue(onAllNodes(hasSetTextAction() and androidx.compose.ui.test.hasText("~bus")).fetchSemanticsNodes().isNotEmpty(), "kept")
     }
 
@@ -1570,7 +1570,7 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { showing("Remove") }
         ship.refuse = { if (it.app == "contacts") "not now" else null }
         onNodeWithText("Remove").performClick()
-        waitUntil(timeoutMillis = 10_000) { showing("Couldn't remove ~bus: the ship refused it (not now).") }
+        waitUntil(timeoutMillis = 10_000) { showing("Couldn't remove ~bus: the node refused it (not now).") }
         assertTrue(showing("Remove"), "still in the book, to try again")
     }
 
@@ -1613,7 +1613,7 @@ class AppShellTest {
         val relay = io.nisfeb.talon.notify.InMemoryRelaySettings().apply { setDeviceIdFor("~zod", "dev-zod") }
         app(sessions = { store }, relay = relay) { ship ->
             // Sign out lives with the ships, behind the switcher's mark.
-            onAllNodesWithContentDescription("Switch ship").onFirst().performClick()
+            onAllNodesWithContentDescription("Switch node").onFirst().performClick()
             waitUntil(timeoutMillis = 5_000) { showing("Sign out of") }
             onNodeWithText("Sign out of", substring = true).performClick()
             waitUntil(timeoutMillis = 10_000) { store.activeShip() == "~bus" && present("New message") }
@@ -1631,10 +1631,10 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { ship.requests.any { "/apps/auspex" in it } }
         Thread.sleep(1_000)
         waitForIdle()
-        onNodeWithContentDescription("Switch ship").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        onNodeWithContentDescription("Switch node").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add node") }
         val before = ship.requests.size
-        onNodeWithText("Add ship").performClick()
+        onNodeWithText("Add node").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Connect") }
         mainClock.advanceTimeBy(30_000)
         Thread.sleep(3_000)
@@ -1653,8 +1653,8 @@ class AppShellTest {
         waitUntil(timeoutMillis = 5_000) { showing("hello there") }
         onNodeWithText("~bus").performClick()
         waitUntil(timeoutMillis = 5_000) { !showing("Select a chat to begin") }
-        onNodeWithContentDescription("Switch ship").performClick()
-        waitUntil(timeoutMillis = 5_000) { showing("Add ship") }
+        onNodeWithContentDescription("Switch node").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("Add node") }
         onAllNodesWithText("~zod").onLast().performClick()
         waitForIdle()
         Thread.sleep(500)

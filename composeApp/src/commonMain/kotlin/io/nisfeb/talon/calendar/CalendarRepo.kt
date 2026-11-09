@@ -653,7 +653,7 @@ class CalendarRepo(
             }
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
-            if (!ok) onFailed(failedLine("The ship did not take \"${d.name.trim()}\"."))
+            if (!ok) onFailed(failedLine("Your Groundwire node did not take \"${d.name.trim()}\"."))
             refused?.let { onFailed(said(it)) }
             _pendingTasks.value = _pendingTasks.value - ghost
         }
@@ -851,7 +851,7 @@ class CalendarRepo(
 
     /** Dismiss orrery's action [id]; replaced in tests. */
     internal var dismissOrrery: suspend (id: String) -> Unit = { id ->
-        val url = shipUrl ?: error("not attached to a ship")
+        val url = shipUrl ?: error("not attached to a Groundwire node")
         io.nisfeb.talon.orrery.OrreryApi(http, http, url).transition(null, id, "dismissed", DISMISS_NOTE)
     }
 
@@ -1324,7 +1324,7 @@ class CalendarRepo(
      * Ticking a box and pulling the list are one request now.
      */
     suspend fun refreshTasks(): Result<Unit> = gate.withLock {
-        val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a ship."))
+        val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a Groundwire node."))
         runSuspendCatching {
             _tasks.value = shipTasks(a.tasks())
             _availability.value = CalendarAvailability.PRESENT

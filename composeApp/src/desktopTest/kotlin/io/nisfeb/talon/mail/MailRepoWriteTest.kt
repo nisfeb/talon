@@ -184,12 +184,12 @@ class MailRepoWriteTest {
                 "a refresh that landed while the write was out is newer than the snapshot, and stays",
             )
             assertEquals(false, r.cachedThread("0v1")!!.archived, "the thread is put back too")
-            assertEquals("The ship did not do that: writer is busy", r.problem.value)
+            assertEquals("Your Groundwire node did not do that: writer is busy", r.problem.value)
             assertEquals(MailAvailability.PRESENT, r.availability.value)
             // In the read's error it was gone again with the next read
             // that went well, often before anyone saw it.
             r.refresh()
-            assertEquals("The ship did not do that: writer is busy", r.problem.value, "a read that goes well does not wipe it")
+            assertEquals("Your Groundwire node did not do that: writer is busy", r.problem.value, "a read that goes well does not wipe it")
             r.clearProblem()
             assertNull(r.problem.value)
         }
@@ -401,7 +401,7 @@ class MailRepoWriteTest {
         r.keepDraft(draft, listOf(file))
         until("the draft kept here") { r.unsent.value.isNotEmpty() }
         val kept = r.unsent.value.single()
-        assertEquals("\"Plans\" was not saved: the draft did not reach the ship. It is kept here until Groundwire closes.", kept.line)
+        assertEquals("\"Plans\" was not saved: the draft did not reach your Groundwire node. It is kept here until Groundwire closes.", kept.line)
         // What the list's Open gives back: the text, and the file.
         val reopened = io.nisfeb.talon.ui.screens.unsentIntent(kept)
         assertEquals("half a thought" to listOf("notes.txt"), reopened.body to reopened.edits.files.map { it.displayName })
@@ -485,10 +485,10 @@ class MailRepoWriteTest {
             settle(r)
             until("our ship known") { r.ourShip != null }
             assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
-            assertEquals("Could not file to Lattice: your ship did not answer. Try again when it's back.", r.problem.value)
+            assertEquals("Could not file to Lattice: your Groundwire node did not answer. Try again when it's back.", r.problem.value)
             down.set(false)
             assertNull(r.publishToLattice("Plans", "0vt", "# Plans"))
-            assertEquals("Could not file to Lattice: your ship did not keep it. Try again shortly.", r.problem.value)
+            assertEquals("Could not file to Lattice: your Groundwire node did not keep it. Try again shortly.", r.problem.value)
         }
     }
 }

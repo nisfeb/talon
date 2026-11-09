@@ -96,17 +96,17 @@ fun ProfileEditScreen(
         if (keys === io.nisfeb.talon.ui.AzimuthRpc.None) return@LaunchedEffect
         // A comet is not in Azimuth at all, so asking can only fail.
         if (io.nisfeb.talon.ui.isComet(ourPatp)) {
-            keysProblem = "This is a comet: its name is the fingerprint of its own keys, so " +
+            keysProblem = "This is a comet: its address is the fingerprint of its own keys, so " +
                 "Azimuth holds no point for it. A Groundwire comet is attested on Bitcoin instead. " +
-                "Signing and checking still work; they use the key your ship publishes."
+                "Signing and checking still work; they use the key your Groundwire node publishes."
             return@LaunchedEffect
         }
         keys.keys(ourPatp).fold(
             onSuccess = { k ->
                 shipKeys = k
-                keysProblem = if (k == null) "Azimuth holds no keys for this ship." else null
+                keysProblem = if (k == null) "Azimuth holds no keys for this node." else null
             },
-            onFailure = { keysProblem = "Could not read your keys from your ship's Azimuth mirror." },
+            onFailure = { keysProblem = "Could not read your keys from your Groundwire node's Azimuth mirror." },
         )
     }
 
@@ -315,7 +315,7 @@ fun ProfileEditScreen(
                                 clipboard.setText(androidx.compose.ui.text.AnnotatedString(ourPatp))
                                 patpCopied = true
                             }) {
-                                Text("Ship", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Address", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(
                                     if (patpCopied) "Copied $ourPatp" else ourPatp,
                                     style = MaterialTheme.typography.bodySmall,
@@ -337,7 +337,7 @@ fun ProfileEditScreen(
                                     )
                                 } else {
                                     Text(
-                                        "Your ship's networking keys, as Azimuth holds them.",
+                                        "Your Groundwire node's networking keys, as Azimuth holds them.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -351,7 +351,7 @@ fun ProfileEditScreen(
                             }
                             if (signer != null) {
                                 Text(
-                                    "Sign something with this ship's key, or check what someone else signed.",
+                                    "Sign something with this node's key, or check what someone else signed.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

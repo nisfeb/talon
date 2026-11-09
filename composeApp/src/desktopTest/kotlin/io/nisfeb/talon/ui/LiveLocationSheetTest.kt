@@ -258,7 +258,7 @@ class LiveLocationSheetTest {
         waitUntil(timeoutMillis = 5_000) { shows("For 8 hours") }
         onNodeWithText("For 8 hours").performClick()
         onNodeWithText("Share").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are") && !shows("Sending to your ship") }
+        waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are") && !shows("Sending to your Groundwire node") }
         assertTrue(!shows("Couldn't share"), "asked again, the old reason goes")
     }
 
@@ -361,25 +361,25 @@ class LiveLocationSheetTest {
             tap("Share my location")
             onNodeWithText("Share").performClick()
             waitUntil(timeoutMillis = 2_000) { !shows("Share where you are with ~bus") }
-            waitUntil(timeoutMillis = 2_000) { shows("Sending to your ship") }
+            waitUntil(timeoutMillis = 2_000) { shows("Sending to your Groundwire node") }
             assertTrue(shows("You're sharing where you are"), "shown at once")
             onNodeWithText("Stop").assertIsNotEnabled()
             waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /apps/orrery/api/location/share") } }
             gate.countDown()
-            waitUntil(timeoutMillis = 5_000) { !shows("Sending to your ship") }
+            waitUntil(timeoutMillis = 5_000) { !shows("Sending to your Groundwire node") }
             assertTrue(shows("You're sharing where you are"))
             onNodeWithText("Stop").assertIsEnabled()
         }
     }
 
     @Test
-    fun `no answer says the ship did not answer`() = card(ship().apply {
+    fun `no answer says the node did not answer`() = card(ship().apply {
         answerApiStatus = { method, path, _ ->
             if (method == "DELETE") throw java.io.IOException("connection reset") else null
         }
     }.also { out = """[{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": true, "since": "${iso(now)}"}]""" }) { _, _, _ ->
         tap("Stop")
-        waitUntil(timeoutMillis = 5_000) { shows("Couldn't stop: your ship didn't answer. Try again.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Couldn't stop: your Groundwire node didn't answer. Try again.") }
         assertTrue(shows("You're sharing where you are"), "still shared: it was not stopped")
     }
 

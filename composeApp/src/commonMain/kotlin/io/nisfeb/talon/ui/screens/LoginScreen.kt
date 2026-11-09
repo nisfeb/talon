@@ -152,7 +152,7 @@ fun syncNoticeLine(signedOutOf: String?): String =
 
 /** What the login form says when a ship run here booted but did not sign
  *  in: the sign-in's own plain words, not the exception's text. */
-fun bootedLoginNotice(err: Throwable): String = "The ship booted. " + friendlyError(err)
+fun bootedLoginNotice(err: Throwable): String = "Your Groundwire node booted. " + friendlyError(err)
 
 /** What the login form says to a ship whose sign-in lapsed. */
 fun lapsedLoginNotice(ship: String): String =
@@ -352,8 +352,8 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = shipUrl,
                         onValueChange = { shipUrl = it },
-                        label = { Text("Ship URL") },
-                        placeholder = { Text("https://your-ship.example.com") },
+                        label = { Text("Node address") },
+                        placeholder = { Text("https://your-node.example.com") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
                         enabled = !connecting,
                         singleLine = true,
@@ -362,7 +362,7 @@ fun LoginScreen(
                     OutlinedTextField(
                         value = code,
                         onValueChange = { code = it },
-                        label = { Text("+code") },
+                        label = { Text("Access code (+code)") },
                         visualTransformation = if (codeVisible) VisualTransformation.None
                             else PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = androidx.compose.ui.text.input.ImeAction.Go),
@@ -473,7 +473,7 @@ fun LoginScreen(
             onRunLocalShip?.let { run ->
                 Spacer(Modifier.height(12.dp))
                 TextButton(onClick = run, enabled = !connecting) {
-                    Text("No ship? Run one on this computer (beta)")
+                    Text("No node? Run one on this computer (beta)")
                 }
             }
 
@@ -560,13 +560,13 @@ internal fun friendlyError(err: Throwable): String {
     val msg = err.message.orEmpty()
     return when {
         // Eyre answers a wrong +code with 400.
-        "HTTP 400" in msg || "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong +code. Try again."
+        "HTTP 400" in msg || "HTTP 401" in msg || "HTTP 403" in msg -> "Wrong access code. Try again."
         "UnknownHostException" in err::class.simpleName.orEmpty() ||
             "host" in msg.lowercase() && "resolve" in msg.lowercase() ->
-            "Can't reach that ship URL — check it and your connection"
+            "Can't reach that node address — check it and your connection"
         "SSL" in err::class.simpleName.orEmpty() ||
             "certificate" in msg.lowercase() ->
-            "TLS error connecting — the ship's certificate was rejected"
+            "TLS error connecting — the node's certificate was rejected"
         // OkHttp's UnknownServiceException for a cleartext-blocked HTTP
         // call. The Android manifest sets usesCleartextTraffic="true",
         // so this should be unreachable on stock builds — but custom
@@ -576,16 +576,16 @@ internal fun friendlyError(err: Throwable): String {
         "CLEARTEXT" in msg ->
             "This build blocks plain HTTP — use https:// or rebuild with cleartext allowed"
         "Expected URL scheme" in msg ->
-            "Add http:// or https:// to the ship URL"
+            "Add http:// or https:// to the node address"
         "no urbauth cookie" in msg ->
-            "That address answered, but no ship signed you in there. Check the URL."
+            "That address answered, but no node signed you in there. Check the URL."
         "ConnectException" in err::class.simpleName.orEmpty() ->
-            "Connection refused — is the ship running?"
+            "Connection refused — is the node running?"
         // A timeout or a dropped connection: the network or a busy ship,
         // not the code. It read as "Couldn't sign in: Request timeout has
         // expired [url=…]".
         io.nisfeb.talon.util.isTransientNetworkError(err) ->
-            "The ship didn't answer in time. Check your connection and try again."
+            "Your Groundwire node didn't answer in time. Check your connection and try again."
         else -> "Couldn't sign in: " + (io.nisfeb.talon.util.readableReason(msg) ?: "something went wrong.")
     }
 }

@@ -227,9 +227,9 @@ private fun JoiningRow(invite: TlonChatRepo.InviteSummary, busy: Boolean, onCanc
             // row sits there with no reason given.
             val host = io.nisfeb.talon.ui.shipHandle(invite.flag.substringBefore('/'))
             Text(
-                if (invite.hostAnswered) "$host let your ship in. Getting the group."
-                else "Waiting for $host, which hosts the group, to answer your ship. " +
-                    "If this lasts, $host is likely offline; your ship keeps asking. " +
+                if (invite.hostAnswered) "$host let your Groundwire node in. Getting the group."
+                else "Waiting for $host, which hosts the group, to answer your Groundwire node. " +
+                    "If this lasts, $host is likely offline; your node keeps asking. " +
                     "Stop joining puts it back as an invite you can decline.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
