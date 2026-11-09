@@ -69,10 +69,14 @@ class LiveLocationSheetTest {
     private val live: MutableList<Long?> = java.util.concurrent.CopyOnWriteArrayList()
     private val maps: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
+    /** The ship's orrery, as GET /api/version answers. */
+    @Volatile private var orreryVersion = 141
+
     private fun ship(onShare: (String) -> Unit = {}) = FakeShip("~zod").apply {
         answerApi = { method, path, body ->
             when {
                 path == "/apps/orrery/api/state" -> "{}"
+                path == "/apps/orrery/api/version" -> """{"version":$orreryVersion}"""
                 method == "GET" && path == "/apps/orrery/api/location" -> doc
                 method == "POST" && path == "/apps/orrery/api/location/share" -> {
                     onShare(body)
@@ -255,7 +259,18 @@ class LiveLocationSheetTest {
 
     // A check-in (orrery 142): until home, by a time, or the ship tells them.
     @Test
-    fun `Check in sends a time to be home by, and the card says it`() = card { ship, _, _ ->
+    fun `an orrery before 142 is not offered a check-in, which it would ignore`() = card { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/version" in it } }
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        waitForIdle()
+        assertTrue(!shows("Check in"))
+    }
+
+    @Test
+    fun `Check in sends a time to be home by, and the card says it`() = card(ship().also { orreryVersion = 142 }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/version" in it } }
         tap("Share my location")
         waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
         assertTrue(!shows("Check in"), "only for until home")

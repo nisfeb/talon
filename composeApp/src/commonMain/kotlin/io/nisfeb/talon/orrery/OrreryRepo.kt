@@ -546,6 +546,7 @@ class OrreryRepo(
     val live: LiveLocation = object : LiveLocation {
         override val shares: StateFlow<LocationShares?> = _shares.asStateFlow()
         override val canShare: Boolean get() = canShareLocation
+        override val canCheckIn: Boolean get() = (_version.value ?: 0) >= CHECK_IN_VERSION
 
         override suspend fun refresh() {
             runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }

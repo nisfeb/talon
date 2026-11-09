@@ -62,6 +62,9 @@ data class InShare(
     val lateByMs: Long? = null,
 )
 
+/** The orrery that keeps a check-in's time and tells the peer when it passes. */
+const val CHECK_IN_VERSION = 142
+
 /** How long a share runs, as orrery's share route takes it. */
 enum class ShareLength(val label: String, val hours: Int?) {
     Hour("For 1 hour", 1),
@@ -162,6 +165,9 @@ interface LiveLocation {
 
     /** Whether this device can send fixes, so offer to share. */
     val canShare: Boolean
+
+    /** Whether the ship's orrery keeps a check-in ([CHECK_IN_VERSION]): an older one ignores the time, so it is not offered. */
+    val canCheckIn: Boolean
 
     /** Read the shares again: cheap, a scry where the ship allows one. */
     suspend fun refresh()

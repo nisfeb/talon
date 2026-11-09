@@ -255,7 +255,8 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         Text(l.label, Modifier.padding(start = 8.dp))
                     }
                 }
-                if (length == ShareLength.Home) {
+                // Gated, not faked: an older orrery would take the time and tell no one.
+                if (length == ShareLength.Home && live.canCheckIn) {
                     Row(Modifier.fillMaxWidth().clickable { checkIn = !checkIn }, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Check in")
@@ -299,7 +300,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         return@launch
                     }
                     // The ship's answer lands where the share shows: no waiting on it here.
-                    live.share(ships, length, exact, byMs = if (checkIn && length == ShareLength.Home) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null)
+                    live.share(ships, length, exact, byMs = if (checkIn && length == ShareLength.Home && live.canCheckIn) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null)
                     onDone()
                 }
             }) { Text("Share") }
