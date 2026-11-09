@@ -43,6 +43,7 @@ class FileUiSettings(
         val hideComposerButtons: Boolean = false,
         val chatBubbles: Boolean = true,
         val chatBackgroundImage: String = "",
+        val reach: ReachSettings = ReachSettings(),
         val recentSearches: List<String> = emptyList(),
         // Accent settings — `enabled` is nullable so we can tell
         // "user never opted in" apart from "user explicitly off",
@@ -106,6 +107,9 @@ class FileUiSettings(
 
     private val _chatBackgroundImage = MutableStateFlow(initial.chatBackgroundImage)
     override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+
+    private val _reach = MutableStateFlow(initial.reach)
+    override val reach: StateFlow<ReachSettings> = _reach.asStateFlow()
 
     private val _recentSearches = MutableStateFlow(initial.recentSearches)
     override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
@@ -313,6 +317,12 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setReach(settings: ReachSettings) {
+        if (_reach.value == settings) return
+        _reach.value = settings
+        persistCurrent()
+    }
+
     override fun setRecentSearches(searches: List<String>) {
         if (_recentSearches.value == searches) return
         _recentSearches.value = searches
@@ -402,6 +412,7 @@ class FileUiSettings(
                 hideComposerButtons = _hideComposerButtons.value,
                 chatBubbles = _chatBubbles.value,
                 chatBackgroundImage = _chatBackgroundImage.value,
+                reach = _reach.value,
                 recentSearches = _recentSearches.value,
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,

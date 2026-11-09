@@ -1,4 +1,5 @@
 package io.nisfeb.talon.urbit
+import io.nisfeb.talon.ui.toJson
 import io.nisfeb.talon.ai.profile
 import io.nisfeb.talon.ai.switches
 import io.nisfeb.talon.ai.withSwitches
@@ -162,6 +163,10 @@ class SettingsSyncImpl(
         const val ENTRY_POWER_FEATURES = "power-features"
         const val ENTRY_HIDE_COMPOSER_BUTTONS = "hide-composer-buttons"
         const val ENTRY_CHAT_BUBBLES = "chat-bubbles"
+        // Who can reach the owner and when: who can message, favourites,
+        // quiet hours (io.nisfeb.talon.ui.ReachSettings). The relay reads
+        // it too, to hold an iPhone's pushes in quiet hours.
+        const val ENTRY_REACH = "reach"
         const val ENTRY_ACCENT = "accent"
         const val ENTRY_THEMES = "themes"
         // Installed fonts and the chosen family; the files themselves
@@ -341,6 +346,7 @@ class SettingsSyncImpl(
         watch(settings.powerFeaturesEnabled, ENTRY_POWER_FEATURES) { bool(it) }
         watch(settings.hideComposerButtons, ENTRY_HIDE_COMPOSER_BUTTONS) { bool(it) }
         watch(settings.chatBubbles, ENTRY_CHAT_BUBBLES) { bool(it) }
+        watch(settings.reach, ENTRY_REACH, ::encodeReach)
         watch(settings.railItemOrder, ENTRY_RAIL_ITEM_ORDER, ::encodeRailItemOrder)
         watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
         watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
@@ -363,6 +369,8 @@ class SettingsSyncImpl(
 
     private fun encodeThemes(t: io.nisfeb.talon.ui.theme.ThemeSettings): JsonElement =
         Json.parseToJsonElement(t.toJson())
+
+    private fun encodeReach(r: io.nisfeb.talon.ui.ReachSettings): JsonElement = Json.parseToJsonElement(r.toJson())
 
     private fun bool(v: Boolean): JsonElement = buildJsonObject { put("enabled", v) }
     private fun str(v: String): JsonElement = buildJsonObject { put("value", v) }
@@ -407,6 +415,8 @@ class SettingsSyncImpl(
                 ?.let { applyLocal(entry, bool(it)) { settings.setHideComposerButtons(it) } }
             ENTRY_CHAT_BUBBLES -> obj["enabled"].asBool()
                 ?.let { applyLocal(entry, bool(it)) { settings.setChatBubbles(it) } }
+            ENTRY_REACH -> io.nisfeb.talon.ui.reachFromJson(obj.toString())
+                ?.let { r -> applyLocal(entry, encodeReach(r)) { settings.setReach(r) } }
             ENTRY_RAIL_ITEM_ORDER -> {
                 val names = (obj["order"] as? JsonArray)?.mapNotNull { it.asStr() } ?: return
                 val items = names.mapNotNull { n ->
@@ -823,6 +833,7 @@ class SettingsSyncImpl(
             push(ENTRY_POWER_FEATURES, bool(settings.powerFeaturesEnabled.value))
             push(ENTRY_HIDE_COMPOSER_BUTTONS, bool(settings.hideComposerButtons.value))
             push(ENTRY_CHAT_BUBBLES, bool(settings.chatBubbles.value))
+            push(ENTRY_REACH, encodeReach(settings.reach.value))
             push(ENTRY_RAIL_ITEM_ORDER, encodeRailItemOrder(settings.railItemOrder.value))
             push(ENTRY_ACCENT, encodeAccent(settings.accentSettings.value))
             push(ENTRY_THEMES, encodeThemes(settings.themeSettings.value))

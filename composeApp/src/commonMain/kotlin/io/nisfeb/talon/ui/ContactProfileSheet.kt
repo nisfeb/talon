@@ -227,7 +227,11 @@ fun ContactProfileSheet(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Add to contacts") }
                 }
-                BlockRow(ship, label)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    FavouriteButton(ship)
+                    Spacer(Modifier.weight(1f))
+                    BlockRow(ship, label)
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -315,6 +319,17 @@ fun shipBlocking(repo: io.nisfeb.talon.urbit.TlonChatRepo) = ShipBlocking(repo.b
 
 /** Asks our ship for a ship's profile when it holds none ([io.nisfeb.talon.urbit.TlonChatRepo.meetIfUnknown]). */
 val LocalFetchProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/** A favourite reaches the owner in quiet hours ([ReachSettings.favourites]). */
+@Composable
+private fun FavouriteButton(ship: String) {
+    val ui = LocalUiSettings.current ?: return
+    val reach by ui.reach.collectAsState()
+    val fav = ship in reach.favourites
+    TextButton(onClick = { ui.setReach(reach.copy(favourites = if (fav) reach.favourites - ship else reach.favourites + ship)) }) {
+        Text(if (fav) "★ Favourite" else "☆ Add to favourites")
+    }
+}
 
 /** Block or unblock [ship] from the profile: chats and calls, with what Tlon tells their ship. */
 @Composable

@@ -74,6 +74,14 @@ class DesktopUiSettingsTest {
     }
 
     @Test
+    fun `who can reach you persists and survives reload, and anyone with no quiet hours is the default`() {
+        assertEquals(ReachSettings(), newStore().reach.value)
+        val r = ReachSettings(whoCanMessage = WhoCanMessage.Added, favourites = setOf("~nec"), quiet = QuietHours(on = true))
+        newStore().setReach(r)
+        assertEquals(r, newStore().reach.value)
+    }
+
+    @Test
     fun `a file saved while groups had a List or Cards choice still loads`() {
         file.writeText("""{"chatBubbles":false,"groupCards":true}""")
         assertFalse(newStore().chatBubbles.value)

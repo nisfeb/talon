@@ -253,8 +253,17 @@ fun DmListScreen(
     // writes; the row-build runs on Default so it never lands on Main.
     // Pending DM requests — strangers who opened a DM we haven't accepted.
     // Rendered as a "Requests" section at the top of the list.
-    val dmInvites by remember { db.dmInvites().stream() }
+    val allDmInvites by remember { db.dmInvites().stream() }
         .collectAsState(initial = emptyList())
+    // With only people added (2026-11-08), anyone else's request folds under
+    // one line, closed, below the rest: there, not in the way.
+    val reach = io.nisfeb.talon.ui.LocalUiSettings.current?.reach?.collectAsState()?.value ?: io.nisfeb.talon.ui.ReachSettings()
+    val book by repo.bookContacts.collectAsState()
+    val (dmInvites, heldInvites) = remember(allDmInvites, reach, book) {
+        if (reach.whoCanMessage == io.nisfeb.talon.ui.WhoCanMessage.Anyone) allDmInvites to emptyList()
+        else allDmInvites.partition { it.ship in book || it.ship in reach.favourites }
+    }
+    var heldOpen by remember { mutableStateOf(false) }
     // What the orrery triage noticed in what people said, waiting for a word.
     val noticed by remember(activeShip, orreryOn) {
         activeShip?.takeIf { orreryOn }?.let { db.orreryNoticed().pending(it) } ?: kotlinx.coroutines.flow.flowOf(emptyList())
@@ -1321,7 +1330,7 @@ fun DmListScreen(
             // Pending DM requests pinned to the top — Accept opens the
             // conversation, Decline dismisses it. Always shown (any tab)
             // so a new DM can't hide behind a folder/special selection.
-            if (dmInvites.isNotEmpty()) {
+            if (allDmInvites.isNotEmpty()) {
                 item(key = "__dm_requests_header", contentType = "req_header") {
                     Text(
                         "Requests",
@@ -1351,6 +1360,41 @@ fun DmListScreen(
                             }
                         },
                     )
+                }
+                if (heldInvites.isNotEmpty()) {
+                    item(key = "__held_requests", contentType = "req_held") {
+                        val n = heldInvites.size
+                        Text(
+                            (if (heldOpen) "Hide " else "") + "$n from people you haven't added",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                                .clickable(onClickLabel = if (heldOpen) "Hide them" else "Show them") { heldOpen = !heldOpen }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                    }
+                    if (heldOpen) items(
+                    items = heldInvites,
+                    key = { "held:${it.ship}" },
+                    contentType = { "req" },
+                ) { invite ->
+                    DmRequestRow(
+                        ship = invite.ship,
+                        contactMap = contactMap,
+                        onOpen = { currentOnOpenConversation(invite.ship) },
+                        onAccept = {
+                            repo.pushScope.launch {
+                                runCatching { repo.acceptDmInvite(invite.ship) }
+                            }
+                            currentOnOpenConversation(invite.ship)
+                        },
+                        onDecline = {
+                            repo.pushScope.launch {
+                                runCatching { repo.declineDmInvite(invite.ship) }
+                            }
+                        },
+                    )
+                }
                 }
             }
             if (selectedFolderId == null && selectedSpecial == SpecialTab.Unread) {

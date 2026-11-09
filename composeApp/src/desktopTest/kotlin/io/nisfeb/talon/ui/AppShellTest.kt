@@ -1404,13 +1404,47 @@ class AppShellTest {
         home()
         onNodeWithContentDescription("Settings").performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Appearance") }
-        onAllNodesWithText("Chats").onLast().performClick()
+        onNodeWithText("Notifications").performClick()
         waitUntil(timeoutMillis = 10_000) { showing("Blocked people") && showing("~bus") }
         onNodeWithText("Remove").performClick()
         waitUntil(timeoutMillis = 10_000) { ship.pokesTo("trunk").any { "unblock" in it.json.toString() } }
         assertEquals(listOf("""chat-unblock-ship {"ship":"~bus"}"""), ship.pokesTo("chat").map { "${it.mark} ${it.json}" })
         assertTrue(ship.pokesTo("trunk").any { it.json.toString() == """{"unblock":"~bus"}""" })
         waitUntil(timeoutMillis = 5_000) { showing("Nobody blocked.") }
+    }
+
+    // 2026-11-08: quiet hours hold what notifies, but a favourite's; and
+    // with only people added, a stranger's request waits silently.
+    @Test
+    fun `in quiet hours only a favourite notifies, and with only people added a stranger's request is silent`() {
+        val notified = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val notifier = object : io.nisfeb.talon.notify.Notifier {
+            override fun notify(title: String, body: String, key: String?) { notified += key ?: title }
+            override fun clear(key: String) {}
+        }
+        val now = io.nisfeb.talon.ui.localMinuteOfDay()
+        val ui = InMemoryUiSettings().apply {
+            setReach(io.nisfeb.talon.ui.ReachSettings(
+                whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Added,
+                favourites = setOf("~nec"),
+                quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = (now + 1380) % 1440, toMin = (now + 60) % 1440),
+            ))
+        }
+        app(ui = ui, notifier = notifier) { ship ->
+            home()
+            waitForIdle()
+            fun dm(from: String, id: String, text: String) = runBlocking {
+                ship.emit("""{"id":1,"response":"diff","json":{"whom":"$from","id":"$from/$id","response":{"add":{"essay":{"content":[{"inline":["$text"]}],"author":"$from","sent":${System.currentTimeMillis()},"kind":"/chat","blob":null,"meta":null},"time":null}}}}""")
+            }
+            dm("~bus", "170141184508", "a stranger at night")
+            dm("~nec", "170141184509", "a favourite at night")
+            waitUntil(timeoutMillis = 20_000) { "~nec" in notified }
+            runBlocking { ship.emit("""{"id":1,"response":"diff","json":["~wes","~nec"]}""") }
+            waitUntil(timeoutMillis = 20_000) { "dm:~nec" in notified }
+            // Each decided in order: ~bus before ~nec, ~wes before ~nec.
+            assertTrue("~bus" !in notified, "quiet hours: $notified")
+            assertTrue("dm:~wes" !in notified, "a stranger's request waits: $notified")
+        }
     }
 
     // A chat opened from a tab that shows one beside it stays on that tab.

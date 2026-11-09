@@ -1581,7 +1581,10 @@ fun App(
             // against), so a brand-new DM no longer arrives silently.
             DisposableEffect(repo, notifier) {
                 repo.dmInviteListener = { ship ->
-                    runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you", "dm:$ship") }
+                    // Held, not dropped: it still waits under Requests, and in the notices.
+                    if (io.nisfeb.talon.ui.requestReaches(uiSettings.reach.value, ship, ship in repo.bookContacts.value, io.nisfeb.talon.ui.localMinuteOfDay())) {
+                        runCatching { notifier.notify(callContacts.displayName(ship), "wants to message you", "dm:$ship") }
+                    }
                     noticeRepo.record(
                         "dm:$ship", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
                         callContacts.displayName(ship), "wants to message you", "dm:$ship",
@@ -1674,7 +1677,11 @@ fun App(
                                 nameFor = { callContacts.displayName(it) },
                             )
                         lastSeenIds = diff.newLastSeen
+                        val minute = io.nisfeb.talon.ui.localMinuteOfDay()
                         for (n in diff.notifications) {
+                            // Quiet hours: only a favourite's gets through.
+                            val author = rows.firstOrNull { it.whom == n.whom }?.author ?: n.whom
+                            if (!io.nisfeb.talon.ui.messageReaches(uiSettings.reach.value, author, minute)) continue
                             runCatching { notifier.notify(n.title, n.body, n.whom) }
                         }
                     }
@@ -1914,6 +1921,7 @@ fun App(
               io.nisfeb.talon.ui.LocalCallTo provides callTarget,
               io.nisfeb.talon.ui.LocalFetchProfile provides remember(repo) { { ship: String -> repo.meetIfUnknown(ship); Unit } },
               io.nisfeb.talon.ui.LocalShipBlocking provides remember(repo) { io.nisfeb.talon.ui.shipBlocking(repo) },
+              io.nisfeb.talon.ui.LocalUiSettings provides uiSettings,
               io.nisfeb.talon.ui.LocalOpenProfile provides { ship: String -> profileSheetShip = ship },
               io.nisfeb.talon.ui.LocalCometDomes provides remember(session, db) {
                   session.baseUrl?.takeIf { it.isNotBlank() }?.let { io.nisfeb.talon.ui.CometDomes(session.http, it, db) }

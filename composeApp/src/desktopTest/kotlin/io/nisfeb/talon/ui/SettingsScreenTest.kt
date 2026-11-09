@@ -136,6 +136,23 @@ class SettingsScreenTest {
         return switches[nearest]
     }
 
+    // 2026-11-08: who can reach you, in one place under Notifications.
+    @Test
+    fun `who can message you, quiet hours and favourites are set under Notifications`() = settings {
+        tap("Notifications")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Who can reach you").fetchSemanticsNodes().isNotEmpty() }
+        tap("People I've added")
+        assertEquals(io.nisfeb.talon.ui.WhoCanMessage.Added, ui.reach.value.whoCanMessage)
+        assertTrue(onAllNodesWithText("waits under Requests", substring = true).fetchSemanticsNodes().isNotEmpty(), "said what it means")
+        switchBeside("Quiet hours").performClick()
+        waitForIdle()
+        assertTrue(ui.reach.value.quiet.on)
+        assertTrue(ui.reach.value.quiet.zone.isNotEmpty(), "the zone goes with it, for the relay")
+        assertTrue(onAllNodesWithText("From 10:00 PM").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText("to 7:00 AM").fetchSemanticsNodes().isNotEmpty())
+        tap("Anyone")
+        assertEquals(io.nisfeb.talon.ui.WhoCanMessage.Anyone, ui.reach.value.whoCanMessage)
+    }
+
     @Test
     fun `the theme is stored as chosen`() = settings {
         tap("Dark")

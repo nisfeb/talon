@@ -29,6 +29,10 @@ interface UiSettings {
     val chatBackgroundImage: StateFlow<String>
     fun setChatBackgroundImage(path: String)
 
+    /** Who can reach the owner, and when ([ReachSettings]). A choice of the owner's, so it syncs. */
+    val reach: StateFlow<ReachSettings>
+    fun setReach(settings: ReachSettings)
+
     /**
      * The last searches run on this device, newest first, at most five
      * (see [io.nisfeb.talon.ui.screens.withRecentSearch]). This device's
@@ -343,6 +347,12 @@ class InMemoryUiSettings(
         _chatBackgroundImage.value = path
     }
 
+    private val _reach = MutableStateFlow(ReachSettings())
+    override val reach: StateFlow<ReachSettings> = _reach.asStateFlow()
+    override fun setReach(settings: ReachSettings) {
+        _reach.value = settings
+    }
+
     private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
     override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
     override fun setRecentSearches(searches: List<String>) {
@@ -494,3 +504,5 @@ class InMemoryUiSettings(
 /** [UiSettings.keybinds] where a host keeps none: the defaults alone. */
 private val NoKeybinds: StateFlow<Map<String, KeyCombo?>> = MutableStateFlow<Map<String, KeyCombo?>>(emptyMap()).asStateFlow()
 
+/** The shell's [UiSettings], for a sheet with no path to them otherwise: a profile's favourite star. Null in a tree with none. */
+val LocalUiSettings = androidx.compose.runtime.staticCompositionLocalOf<UiSettings?> { null }

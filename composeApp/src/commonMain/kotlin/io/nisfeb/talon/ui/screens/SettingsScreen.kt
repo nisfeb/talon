@@ -551,7 +551,6 @@ fun SettingsScreen(
 
             }
             if (safeTab == SettingsTab.Chats) {
-            BlockedPeopleSection()
             Text(
                 "Chat list order",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -750,6 +749,7 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
             }
             if (safeTab == SettingsTab.Notifications) {
+            ReachSection(uiSettings)
             NotifyRulesSection(onSetAllGroupsNotify)
             Spacer(Modifier.height(12.dp))
             // Said plainly, so a missed call is not how the owner learns it (B3-3).
@@ -1203,6 +1203,68 @@ internal fun aiFeatureEnabled(state: AiSettings.Config, feature: AiSettings.Feat
         // Unified assistant: either legacy flag counts as enabled.
         AiSettings.Feature.Agent -> state.assistantOn()
     }
+
+/**
+ * Who can reach you, in one place (2026-11-08): who can message you, quiet
+ * hours and the favourites who get through them, and who is blocked. The
+ * ship lets anyone open a DM as a request; these decide what alerts.
+ */
+@Composable
+private fun ReachSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
+    val reach by uiSettings.reach.collectAsState()
+    fun set(r: io.nisfeb.talon.ui.ReachSettings) = uiSettings.setReach(r)
+    Text("Who can reach you", style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(8.dp))
+    Text("Who can message you", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+    Text(
+        if (reach.whoCanMessage == io.nisfeb.talon.ui.WhoCanMessage.Anyone) "Anyone can send you a request. You're told, and you choose whether to answer."
+        else "Only people you've added notify you. Anyone else's message waits under Requests, without a notification, and they aren't told.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = reach.whoCanMessage == io.nisfeb.talon.ui.WhoCanMessage.Anyone,
+            onClick = { set(reach.copy(whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Anyone)) },
+            label = { Text("Anyone") },
+        )
+        FilterChip(
+            selected = reach.whoCanMessage == io.nisfeb.talon.ui.WhoCanMessage.Added,
+            onClick = { set(reach.copy(whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Added)) },
+            label = { Text("People I've added") },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    // Set here, the zone goes with it, for the relay, which has no clock of yours.
+    fun quiet(q: io.nisfeb.talon.ui.QuietHours) = set(reach.copy(quiet = q.copy(zone = kotlinx.datetime.TimeZone.currentSystemDefault().id)))
+    FeatureToggleRow(
+        label = "Quiet hours",
+        description = if (reach.quiet.on) "Messages don't notify you between these times, except your favourites'. They're still there when you look."
+        else "A time each day when messages don't notify you, except your favourites'.",
+        enabled = reach.quiet.on,
+        onChange = { quiet(reach.quiet.copy(on = it)) },
+    )
+    if (reach.quiet.on) Row(verticalAlignment = Alignment.CenterVertically) {
+        io.nisfeb.talon.ui.ClockTimeButton(reach.quiet.fromMin, { quiet(reach.quiet.copy(fromMin = it)) }, label = "From")
+        io.nisfeb.talon.ui.ClockTimeButton(reach.quiet.toMin, { quiet(reach.quiet.copy(toMin = it)) }, label = "to")
+    }
+    ShipListEditor(
+        title = "Favourites",
+        empty = "Nobody yet. Add someone here, or with the star on their profile.",
+        ships = reach.favourites,
+        onAdd = { set(reach.copy(favourites = reach.favourites + it)) },
+        onRemove = { set(reach.copy(favourites = reach.favourites - it)) },
+    )
+    Text(
+        "Favourites notify you even in quiet hours, and still do when only people you've added can message you.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+    BlockedPeopleSection()
+    HorizontalDivider()
+    Spacer(Modifier.height(8.dp))
+}
 
 /** Who is blocked from reaching you, chats and calls both ([io.nisfeb.talon.ui.ShipBlocking]). */
 @Composable

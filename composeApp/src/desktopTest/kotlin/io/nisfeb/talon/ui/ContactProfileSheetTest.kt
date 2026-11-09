@@ -28,6 +28,8 @@ class ContactProfileSheetTest {
     private val did: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val fetched: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
     private val ship = "~mitlyn-ditrel"
+    private val ui = InMemoryUiSettings()
+
     /** Who the sheet blocked: as the repo's list, so Unblock follows. */
     private val blockedNow = kotlinx.coroutines.flow.MutableStateFlow<Set<String>?>(emptySet())
     private val blocking = ShipBlocking(blockedNow) { who, on ->
@@ -46,6 +48,7 @@ class ContactProfileSheetTest {
                 LocalCallTo provides if (trunk) { to: String -> did += "call $to" } else null,
                 LocalFetchProfile provides { who: String -> fetched += who },
                 LocalShipBlocking provides blocking,
+                LocalUiSettings provides ui,
             ) {
                 TalonTheme(darkTheme = false) {
                     ContactProfileSheet(
@@ -76,6 +79,17 @@ class ContactProfileSheetTest {
         onNodeWithText("Unblock").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { !shows("Unblock") }
         assertEquals(listOf("block $ship", "unblock $ship"), did.filter { "block" in it })
+    }
+
+    // A favourite gets through quiet hours (2026-11-08).
+    @Test
+    fun `the star makes them a favourite, and takes it back`() = card {
+        onNodeWithText("☆ Add to favourites").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("★ Favourite") }
+        assertEquals(setOf(ship), ui.reach.value.favourites)
+        onNodeWithText("★ Favourite").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("☆ Add to favourites") }
+        assertEquals(emptySet(), ui.reach.value.favourites)
     }
 
     @Test

@@ -1613,6 +1613,7 @@ fun TalonApp(
         LocalCallTo provides callTarget,
         LocalFetchProfile provides remember(app.repo) { { ship: String -> app.repo.meetIfUnknown(ship); Unit } },
         LocalShipBlocking provides remember(app.repo) { shipBlocking(app.repo) },
+        LocalUiSettings provides app.uiSettings,
         io.nisfeb.talon.mail.LocalMailTo provides
             if (mailAvailable) {
                 { peer: String ->

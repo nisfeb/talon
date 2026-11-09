@@ -73,6 +73,8 @@ class HomeListTest {
         /** Groups by their latest activity, as a phone set to Recent has them; else the saved order. */
         recent: Boolean = false,
         drafts: InMemoryDraftStore = InMemoryDraftStore(),
+        /** The shell's settings, as [io.nisfeb.talon.ui.LocalUiSettings] hands them on. */
+        ui: io.nisfeb.talon.ui.UiSettings = io.nisfeb.talon.ui.InMemoryUiSettings(),
         /** The shells' own lists for these tabs; null hides the tab. */
         threadsTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
         partyLinesTab: (@androidx.compose.runtime.Composable () -> Unit)? = null,
@@ -95,6 +97,7 @@ class HomeListTest {
         try {
             runComposeUiTest {
                 setContent {
+                    androidx.compose.runtime.CompositionLocalProvider(io.nisfeb.talon.ui.LocalUiSettings provides ui) {
                     TalonTheme(darkTheme = false) {
                         if (shown.value) DmListScreen(
                             db = db, repo = repo, drafts = drafts,
@@ -112,6 +115,7 @@ class HomeListTest {
                             threadsTab = threadsTab,
                             partyLinesTab = partyLinesTab,
                         )
+                    }
                     }
                 }
                 waitForIdle()
@@ -547,6 +551,23 @@ class HomeListTest {
         assertTrue(onAllNodesWithText("hey stranger", substring = true).fetchSemanticsNodes().isEmpty(), "not a chat yet")
         tap("Accept")
         shows("hey stranger", substring = true)
+    }
+
+    // With only people added, a stranger's request folds under one line,
+    // closed; a favourite's stays in view (2026-11-08).
+    @Test
+    fun `with only people added, strangers' requests fold under one line`() = home(
+        ui = io.nisfeb.talon.ui.InMemoryUiSettings().apply {
+            setReach(io.nisfeb.talon.ui.ReachSettings(whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Added, favourites = setOf("~nec")))
+        },
+        seed = { dmInvites().upsertAll(listOf(DmInviteEntity("~bus", 1), DmInviteEntity("~wes", 2), DmInviteEntity("~nec", 3))) },
+    ) {
+        shows("~nec")
+        shows("2 from people you haven't added")
+        assertTrue(onAllNodesWithText("~bus").fetchSemanticsNodes().isEmpty(), "folded away")
+        tap("2 from people you haven't added")
+        shows("~bus")
+        shows("~wes")
     }
 
     @Test

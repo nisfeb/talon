@@ -75,6 +75,9 @@ class AndroidUiSettings(
     private val _chatBackgroundImage = MutableStateFlow(prefs.getString(KEY_CHAT_BACKGROUND_IMAGE, "") ?: "")
     override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
 
+    private val _reach = MutableStateFlow(reachFromJson(prefs.getString(KEY_REACH, null)) ?: ReachSettings())
+    override val reach: StateFlow<ReachSettings> = _reach.asStateFlow()
+
     // One search a line: the search field is a single line, so a line
     // break is never in one.
     private val _recentSearches = MutableStateFlow(
@@ -289,6 +292,12 @@ class AndroidUiSettings(
         _chatBackgroundImage.value = path
     }
 
+    override fun setReach(settings: ReachSettings) {
+        if (_reach.value == settings) return
+        prefs.edit().putString(KEY_REACH, settings.toJson()).apply()
+        _reach.value = settings
+    }
+
     override fun setRecentSearches(searches: List<String>) {
         if (_recentSearches.value == searches) return
         prefs.edit().putString(KEY_RECENT_SEARCHES, searches.joinToString("\n")).apply()
@@ -450,6 +459,7 @@ class AndroidUiSettings(
         private const val KEY_ACCENT_MODE = "accent_mode"
         private const val KEY_ACCENT_HEX = "accent_hex"
         private const val KEY_THEMES = "custom_themes"
+        private const val KEY_REACH = "reach"
         private const val KEY_FONTS = "fonts"
 private const val KEY_MIC_NS = "mic_noise_suppression"
 private const val KEY_MIC_AEC = "mic_echo_cancellation"
