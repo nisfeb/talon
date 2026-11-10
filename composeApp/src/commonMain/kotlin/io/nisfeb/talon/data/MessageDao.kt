@@ -169,6 +169,14 @@ abstract class MessageDao {
     @Query("SELECT * FROM messages WHERE whom = :whom AND (id = :da OR id LIKE '%/' || :da) LIMIT 1")
     abstract suspend fun findByDa(whom: String, da: String): MessageEntity?
 
+    /**
+     * A DM or group DM post by its number, in whichever conversation holds
+     * it. Talon's quote of a DM names the chat as its sender saw it, which
+     * for the other side is their own ship, where the post is not.
+     */
+    @Query("SELECT * FROM messages WHERE id LIKE '%/' || :da AND whom NOT LIKE '%/%' LIMIT 1")
+    abstract suspend fun findDmByDa(da: String): MessageEntity?
+
     /** Oldest non-deleted top-level post id for a conversation (pagination cursor). */
     @Query("""
         SELECT id FROM messages

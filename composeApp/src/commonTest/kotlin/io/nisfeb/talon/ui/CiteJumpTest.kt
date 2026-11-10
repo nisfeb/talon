@@ -57,6 +57,14 @@ class CiteJumpTest {
         assertEquals(0, f.fetches, "a local hit must not scry")
     }
 
+    // A DM quote from the other side names our own ship: the post's own
+    // chat is where the jump goes, not a DM with ourselves.
+    @Test
+    fun `a post cite jumps to the chat the post is in`() = runTest {
+        val f = Fake(local = mapOf(("~me" to "170.141") to msg("~bus", "~bus/170141")))
+        assertEquals(CiteJump.Message("~bus", "~bus/170141", null), jump(cite("~me", postDa = "170.141"), f))
+    }
+
     @Test
     fun `a reply cite opens the parent thread anchored on the reply`() = runTest {
         val whom = "chat/~zod/b"
