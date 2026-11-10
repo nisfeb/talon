@@ -1394,6 +1394,62 @@ class AppShellTest {
         }
     }
 
+    // Reported on 1.8.39 desktop: a quote did not jump to the post it
+    // quotes. Opening its channel also revealed the group in the list, and
+    // the reveal opened the group's latest channel over it, dropping the jump.
+    @Test
+    fun `a quote jumps to the post it quotes, in its own channel`() = app(seed = {
+        val general = "chat/~bus/general"
+        groups().upsertGroups(listOf(io.nisfeb.talon.data.GroupEntity("~bus/crew", "The Crew", null)))
+        groups().upsertChannelGroups(listOf(
+            io.nisfeb.talon.data.ChannelGroupEntity(general, "~bus/crew", title = "general"),
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/random", "~bus/crew", title = "random"),
+        ))
+        messages().upsert(MessageEntity(general, "170141184500", "~bus", 1_000, """[{"inline":["the original plan"]}]""", "/chat"))
+        for (i in 1..60) {
+            val n = i.toString().padStart(3, '0')
+            messages().upsert(MessageEntity(general, "170141184${500 + i}", "~nec", 1_000L + i * 1_000, """[{"inline":["row $n"]}]""", "/chat"))
+        }
+        messages().upsert(MessageEntity(general, "170141184600", "~bus", 90_000,
+            """[{"block":{"cite":{"chan":{"nest":"$general","where":"/msg/170141184500"}}}},{"inline":["see above"]}]""", "/chat"))
+        // The group's latest channel, which the reveal used to open.
+        messages().upsert(MessageEntity("chat/~bus/random", "170141184700", "~bus", 99_000, """[{"inline":["elsewhere news"]}]""", "/chat"))
+    }) {
+        home()
+        io.nisfeb.talon.notify.OpenChatRequests.request("chat/~bus/general", null)
+        waitUntil(timeoutMillis = 10_000) { showing("see above") && showing("Post in") }
+        assertTrue(!showing("row 001"), "the quoted post starts out of sight")
+        onAllNodesWithText("Post in", substring = true).onLast().performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("row 001") }
+        Thread.sleep(1_000)
+        waitForIdle()
+        // The list beside the chat shows "see above" as the latest, so the
+        // chat is judged by the quoted post still being there.
+        assertTrue(showing("row 001"), "still at the quoted post, in general")
+    }
+
+    // A DM quote names the chat as its sender saw it: from ~bus's Talon,
+    // "~zod", our own ship. It showed nothing here and opened a DM with
+    // ourselves; the post is found by its number, in the chat it is in.
+    @Test
+    fun `a quote from the other side of a DM shows the post and jumps to it`() = app(seed = {
+        messages().upsert(MessageEntity("~bus", "~zod/170141184500", "~zod", 1_000, """[{"inline":["the original plan"]}]""", "/chat"))
+        for (i in 1..60) {
+            val n = i.toString().padStart(3, '0')
+            messages().upsert(MessageEntity("~bus", "~bus/170141184${500 + i}", "~bus", 1_000L + i * 1_000, """[{"inline":["row $n"]}]""", "/chat"))
+        }
+        messages().upsert(MessageEntity("~bus", "~bus/170141184600", "~bus", 90_000,
+            """[{"block":{"cite":{"chan":{"nest":"~zod","where":"/msg/~zod/170141184500"}}}},{"inline":["see above"]}]""", "/chat"))
+    }) {
+        home()
+        io.nisfeb.talon.notify.OpenChatRequests.request("~bus", null)
+        waitUntil(timeoutMillis = 10_000) { showing("see above") && showing("the original plan") }
+        assertTrue(!showing("row 001"), "the quoted post starts out of sight")
+        onAllNodesWithText("Post in", substring = true).onLast().performClick()
+        // A DM with ourselves has no row 001: it is the DM with ~bus.
+        waitUntil(timeoutMillis = 10_000) { showing("row 001") }
+    }
+
     // 2026-11-08: chats could not be blocked at all; Settings' only Blocked
     // list was the calls'. The ship's list, read at sign-in, and Remove
     // lets them reach you again, chats and calls both.

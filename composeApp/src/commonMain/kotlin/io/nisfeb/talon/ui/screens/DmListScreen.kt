@@ -485,6 +485,7 @@ fun DmListScreen(
     // keep a frozen callback identity that still dispatches through to
     // the latest outer function. Same pattern as DmChatScreen.
     val currentOnOpenConversation by rememberUpdatedState(onOpenConversation)
+    val currentOpenWhom by rememberUpdatedState(openWhom)
     val hapticRoot = LocalHapticFeedback.current
     val onRowOpen: (String) -> Unit = remember {
         { whom -> currentOnOpenConversation(whom) }
@@ -662,8 +663,12 @@ fun DmListScreen(
         }
         expandedGroups = expandedGroups + flag
         // Same landing as a manual expand: on a wide layout the group's
-        // most recent channel opens beside the list and glows.
-        if (autoOpenOnExpand && !editMode) {
+        // most recent channel opens beside the list and glows. Only when
+        // no chat is open: a quote's channel or a joined group's is where
+        // the reveal lands, and opening the latest channel over it lost
+        // the jump to the quoted post, or took the reader elsewhere
+        // (reported on 1.8.39 desktop).
+        if (autoOpenOnExpand && !editMode && currentOpenWhom == null) {
             homeRows.filterIsInstance<HomeRow.GroupChild>()
                 .filter { it.groupFlag == flag }
                 .maxByOrNull { it.m?.sentMs ?: 0L }

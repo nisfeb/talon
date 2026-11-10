@@ -14,8 +14,13 @@ class TalonCiteResolver(
     // wants it; the database keys posts on the bare digits. Compared
     // as given, no quoted post was ever found locally, and every one
     // of them went to the ship.
-    override suspend fun findLocal(whom: String, da: String): MessageEntity? =
-        db.messages().findByDa(whom, da.replace(".", ""))
+    // A DM quote names the chat as its sender saw it, which for the other
+    // side is their own ship: the post is then found by its number.
+    override suspend fun findLocal(whom: String, da: String): MessageEntity? {
+        val digits = da.replace(".", "")
+        return db.messages().findByDa(whom, digits)
+            ?: if ('/' !in whom) db.messages().findDmByDa(digits) else null
+    }
 
     override suspend fun fetchPost(whom: String, da: String): MessageEntity? =
         repo.fetchCitePost(whom, da)
@@ -103,9 +108,12 @@ suspend fun resolveCiteJump(
     val parent = find(postDa) { resolver.fetchPost(whom, postDa) }
         ?: return CiteJump.Message(whom, channelPostId(whom, postDa), flag)
 
-    val replyDa = cite.replyDa ?: return CiteJump.Message(whom, parent.id, flag)
-    val reply = find(replyDa) { resolver.fetchReply(whom, postDa, replyDa) }
-    return CiteJump.Reply(whom, parent.id, reply?.id, flag)
+    // The chat the post is in, which for a DM quote is not always the one
+    // the cite names (see TalonCiteResolver.findLocal).
+    val at = parent.whom
+    val replyDa = cite.replyDa ?: return CiteJump.Message(at, parent.id, flag)
+    val reply = find(replyDa) { resolver.fetchReply(at, postDa, replyDa) }
+    return CiteJump.Reply(at, parent.id, reply?.id, flag)
 }
 
 private fun channelPostId(whom: String, postDa: String): String? =
