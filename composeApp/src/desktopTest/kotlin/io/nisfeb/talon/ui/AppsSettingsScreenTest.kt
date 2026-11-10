@@ -46,6 +46,7 @@ class AppsSettingsScreenTest {
         installGroups: (suspend () -> Result<Unit>)? = { did += "install groups"; groupsHere = true; Result.success(Unit) },
         grubbery: (suspend () -> Result<Unit>)? = null,
         withOrrery: Boolean = false,
+        assistantOff: Boolean = false,
         shipUrl: String? = "https://zod.test",
         memoryKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
         renewKey: (suspend () -> Result<Unit>)? = null,
@@ -71,7 +72,7 @@ class AppsSettingsScreenTest {
                     ) {
                         TalonTheme(darkTheme = false) {
                             AppsSettingsScreen(
-                                mail = null, calendar = null, orrery = orrery,
+                                mail = null, calendar = null, orrery = orrery, assistantOff = assistantOff,
                                 latticeInstalled = { did += "asked lattice"; latticeHere },
                                 groupsInstalled = { groupsHere },
                                 onInstallGroups = installGroups,
@@ -159,6 +160,18 @@ class AppsSettingsScreenTest {
             waitUntil(timeoutMillis = 5_000) { shows("Added Orrery to your Grubbery shell.") }
             waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under Assistant.") }
             assertTrue("add orrery" in did)
+        }
+    }
+
+    // 2026-11-10: someone looked here for Orrery to turn it on, found
+    // nothing, and bought Armillary credit hoping it would appear.
+    @Test
+    fun `with the assistant off, Orrery is listed as off with where to turn it on`() {
+        groupsHere = true
+        apps(assistantOff = true) {
+            row("Orrery", "off")
+            assertTrue(shows("Turn on Groundwire Assistant in Settings, under Assistant, to use it."))
+            assertTrue(onAllNodesWithText("Install").fetchSemanticsNodes().isEmpty(), "nothing to install: it may be on the node already")
         }
     }
 

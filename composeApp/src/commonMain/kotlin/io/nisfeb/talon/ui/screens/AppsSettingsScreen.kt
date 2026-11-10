@@ -56,8 +56,10 @@ import io.nisfeb.talon.util.runSuspendCatching
 fun AppsSettingsScreen(
     mail: MailRepo?,
     calendar: CalendarRepo?,
-    /** The pipe into orrery on the ship; null where no ship is known. */
+    /** The pipe into orrery on the ship; null where no ship is known, or the assistant is off. */
     orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** The assistant's switch is off: Orrery is listed as off, with where to turn it on. */
+    assistantOff: Boolean = false,
     /** Armillary on the ship, where the AI features buy their inference; null where no ship is known. */
     armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
@@ -124,6 +126,9 @@ fun AppsSettingsScreen(
         add(latticeRow(lattice))
         add(groupsRow(groups))
         if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
+        // Off, nothing asks the ship, and the row was left out: the one
+        // place people looked for it said nothing (2026-11-10).
+        else if (assistantOff) add(io.nisfeb.talon.ui.orreryOffRow())
         if (armillaryAvailability != null) add(io.nisfeb.talon.ui.armillaryRow(armillaryAvailability, armillaryError))
     }
 
@@ -348,4 +353,5 @@ private fun stateWord(state: AppState): String = when (state) {
     AppState.MISSING -> "not installed"
     AppState.SIGNED_OUT -> "signed out"
     AppState.UNKNOWN -> "unknown"
+    AppState.OFF -> "off"
 }
