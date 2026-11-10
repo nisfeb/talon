@@ -107,6 +107,16 @@ section flag made with `mutableStateOf(false)`. Before calling a new
 section done, check that back leaves it and that the drawer can switch
 away from it, not only that it opens.
 
+## A message in a thread does what a message in the chat does
+
+A message is drawn by two composables: `MessageRow` in `DmChatScreen.kt` for the chat, and `ThreadMessage` in `ThreadList.kt` for a thread's parent and replies. Features added to the chat's row kept missing from the thread's. The names on a reaction's hover were missing because the thread had its own copy of the chip.
+
+- Share the piece, never copy it. A chip, card or affordance on a message is one composable that both rows call (`ReactionChip`, `StoryRenderer`, `FoldLongPost`).
+- A change to one row is made to the other in the same change. Where the thread truly differs (a reply has no thread of its own), say so in the guard's list.
+- Test both. A message behaviour tested in the chat gets the same test in `ThreadListTest`.
+
+`ThreadParityGuardTest` fails the build when the chat's row calls a composable the thread's row does not. Its `chatOnly` list names each exception with why, and the known gaps are marked there as gaps.
+
 ## Test coverage caveat
 
 `desktopTest` (~7k lines) carries most of the automated coverage.
