@@ -17,7 +17,9 @@ import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -83,6 +85,9 @@ class ThreadListTest {
                         // What the shells provide from the bubbles setting.
                         LocalChatLook provides look,
                         io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
+                        // The shell's profile sheet, and lattice's answer for an urb:// card.
+                        LocalOpenProfile provides { ship: String -> profiles += ship },
+                        LocalUrbFetcher provides { url: String -> kotlinx.coroutines.flow.flowOf(io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl(url, "A page title", "its first lines")) },
                     ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
@@ -104,6 +109,7 @@ class ThreadListTest {
     }
 
     private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val profiles = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun msg(id: String, author: String, text: String, sent: Long, parentId: String? = null, status: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", parentId = parentId, status = status)
@@ -354,6 +360,40 @@ class ThreadListTest {
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
         val react = ship.pokesTo("channels").single().json.toString()
         assertTrue("react" in react && "170.141.184.507" in react, react)
+    }
+
+    // The chat named who reacted on hover and the thread did not
+    // (reported on 1.8.39 desktop): the thread kept its own copy of the chip.
+    @Test
+    fun `hovering a reaction in a thread names who reacted, as in the chat`() = thread(seed = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~bus/170141184507", "~bus", "an answer", 2_000, parentId = parent))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~zod", "🔥"))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~nec", "🔥"))
+    }) { _, _ ->
+        shows("an answer")
+        val chip = onNodeWithText("🔥", substring = true)
+        assertTrue(onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isEmpty(), "no names until hovered")
+        chip.performMouseInput { moveTo(center) }
+        mainClock.advanceTimeBy(800)
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        chip.performMouseInput { exit() }
+    }
+
+    // The thread lacked what the chat's row has: the poster's picture,
+    // opening their profile, and a card for a link (sneagan, 2026-11-10:
+    // "these should be at parity").
+    @Test
+    fun `a reply shows its poster's picture, which opens the profile, and its link's card`() = thread(seed = {
+        contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam Bell", null, null)))
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~sampel-palnet/170141184507", "~sampel-palnet", "see urb://~zod/notes", 2_000, parentId = parent))
+    }) { _, _ ->
+        shows("A page title")
+        shows("SB")
+        onAllNodesWithText("SB").onFirst().performClick()
+        waitUntil(timeoutMillis = 5_000) { profiles.isNotEmpty() }
+        assertEquals(listOf("~sampel-palnet"), profiles.toList())
     }
 
     @Test
