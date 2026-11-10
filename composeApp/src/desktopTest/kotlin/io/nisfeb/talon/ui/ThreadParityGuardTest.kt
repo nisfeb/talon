@@ -23,13 +23,7 @@ class ThreadParityGuardTest {
 
     private val chatOnly = mapOf(
         "MessageRow" to "the chat row's own name",
-        "Spacer" to "layout, not a feature",
         "ThreadIndicator" to "a reply in a thread has no thread of its own",
-        // Gaps, not choices (2026-11-10). Bring each to the thread and drop it here.
-        "Avatar" to "gap: the thread shows a byline, no picture",
-        "LinkPreviewCard" to "gap: a link in a thread has no preview card",
-        "UrbUnfurlCard" to "gap: an urb:// link in a thread has no card",
-        "FurumCard" to "gap: a furum link in a thread has no card",
     )
 
     /** Composables called in the body of [fn], up to the next top-level declaration. */

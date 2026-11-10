@@ -111,11 +111,11 @@ away from it, not only that it opens.
 
 A message is drawn by two composables: `MessageRow` in `DmChatScreen.kt` for the chat, and `ThreadMessage` in `ThreadList.kt` for a thread's parent and replies. Features added to the chat's row kept missing from the thread's. The names on a reaction's hover were missing because the thread had its own copy of the chip.
 
-- Share the piece, never copy it. A chip, card or affordance on a message is one composable that both rows call (`ReactionChip`, `StoryRenderer`, `FoldLongPost`).
+- Share the piece, never copy it. A chip, card or affordance on a message is one composable that both rows call (`MessageAvatar`, `MessageLinkCards`, `MessageActionsDots`, `ReactionChip`, `StoryRenderer`).
 - A change to one row is made to the other in the same change. Where the thread truly differs (a reply has no thread of its own), say so in the guard's list.
 - Test both. A message behaviour tested in the chat gets the same test in `ThreadListTest`.
 
-`ThreadParityGuardTest` fails the build when the chat's row calls a composable the thread's row does not. Its `chatOnly` list names each exception with why, and the known gaps are marked there as gaps.
+`ThreadParityGuardTest` fails the build when the chat's row calls a composable the thread's row does not. Its `chatOnly` list names each exception with why. The guard sees only the composables the two rows call. It does not see the action menus, the composer or what a tap does, so those stay on the reviewer.
 
 ## Test coverage caveat
 

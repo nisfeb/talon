@@ -346,8 +346,11 @@ fun ThreadList(
             }
         }
 
-    val onMentionTap: (String) -> Unit = remember(onOpenConversation) {
-        { patp -> onOpenConversation(patp) }
+    // A name or a picture opens the profile, as in the chat: the shell's
+    // sheet where it has one, else the conversation as before.
+    val openProfile = io.nisfeb.talon.ui.LocalOpenProfile.current
+    val onMentionTap: (String) -> Unit = remember(onOpenConversation, openProfile) {
+        { patp -> openProfile?.invoke(patp) ?: onOpenConversation(patp) }
     }
     val onLinkTap: (String) -> Unit = io.nisfeb.talon.ui.rememberLinkOpener()
     val onImageTap: (String) -> Unit = remember(onOpenImage) {
@@ -495,6 +498,8 @@ fun ThreadList(
                         onMentionTap = onMentionTap,
                         onLinkTap = onLinkTap,
                         onImageTap = onImageTap,
+                        http = http,
+                        onAvatarTap = onMentionTap,
                         menuExpanded = actionTarget?.id == p.id,
                         onMenuExpand = { actionTarget = p },
                         onMenuDismiss = { actionTarget = null },
@@ -527,6 +532,8 @@ fun ThreadList(
                     onMentionTap = onMentionTap,
                     onLinkTap = onLinkTap,
                     onImageTap = onImageTap,
+                    http = http,
+                    onAvatarTap = onMentionTap,
                     menuExpanded = actionTarget?.id == replyMsg.id,
                     onMenuExpand = { actionTarget = replyMsg },
                     onMenuDismiss = { actionTarget = null },
@@ -746,6 +753,9 @@ private fun ThreadMessage(
     onMentionTap: (String) -> Unit,
     onLinkTap: (String) -> Unit,
     onImageTap: (String) -> Unit,
+    /** For the link cards under a message, as the chat's. */
+    http: io.ktor.client.HttpClient,
+    onAvatarTap: (String) -> Unit,
     /** True when this row's action menu is open (driven by the
      *  screen-level `actionTarget` so only one menu shows at a time). */
     menuExpanded: Boolean,
@@ -836,31 +846,15 @@ private fun ThreadMessage(
                 },
             )
             .padding(top = if (showHeader) 10.dp else 2.dp, bottom = 2.dp),
-        horizontalArrangement = if (onRight) Arrangement.End else Arrangement.Start,
+        // Spaced as the chat's row, for the picture beside the message.
+        horizontalArrangement = when {
+            !bubbles -> Arrangement.spacedBy(10.dp)
+            onRight -> Arrangement.End
+            else -> Arrangement.spacedBy(8.dp)
+        },
     ) {
-        // Desktop affordance: a hover-revealed "⋯" — the reliable way to
-        // open the menu when tap-to-open is off (selection owns left-drag;
-        // SelectionContainer eats the row's right-click). A plain Icon, NOT
-        // IconButton — its 48dp min touch size inflates short rows.
-        // Top-aligned + alpha-toggled so the slot never shifts. Mirrors
-        // DmChatScreen.MessageRow: beside the bubble, on its inner side.
-        @Composable
-        fun androidx.compose.foundation.layout.RowScope.Dots() {
-            if (tapOpens) return
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = "Message actions",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Top)
-                    .alpha(if (hovered || menuExpanded) 1f else 0f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onMenuExpand)
-                    .padding(2.dp)
-                    .size(20.dp),
-            )
-        }
-        if (onRight) Dots()
+        if (!onRight) MessageAvatar(m.author, contactMap, showHeader) { onAvatarTap(m.author) }
+        if (onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
         Column(
             modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
             horizontalAlignment = if (onRight) Alignment.End else Alignment.Start,
@@ -924,6 +918,7 @@ private fun ThreadMessage(
                 }
             } else folded()
             SendStateNote(m.status)
+            MessageLinkCards(parts, http, onLinkTap)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
@@ -965,7 +960,7 @@ private fun ThreadMessage(
                 actionMenu()
             }
         }
-        if (!onRight) Dots()
+        if (!onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
     }
 }
 

@@ -1746,8 +1746,6 @@ private fun MessageRow(
     val clock = remember(m.sentMs) { io.nisfeb.talon.util.formatClock(m.sentMs) }
     val mine = m.author == ourPatp
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
-    val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
-    val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
     val grouped = remember(row.reactions) {
         // Normalize on read too: rows stored before we normalized on write
         // still carry FE0F, and would otherwise render as a separate chip.
@@ -1857,19 +1855,7 @@ private fun MessageRow(
         verticalAlignment = Alignment.Top,
     ) {
         val onRight = bubbles && mine
-        if (!onRight) {
-            if (row.showHeader) {
-                Avatar(
-                    label = authorLabel,
-                    url = avatarUrl,
-                    colorHex = avatarColor,
-                    size = AVATAR_SIZE,
-                    onClick = { onAvatarTap(m.author) },
-                )
-            } else {
-                Spacer(Modifier.width(AVATAR_SIZE))
-            }
-        }
+        if (!onRight) MessageAvatar(m.author, contactMap, row.showHeader) { onAvatarTap(m.author) }
         if (onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
         Column(
             modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
@@ -1953,34 +1939,7 @@ private fun MessageRow(
                 folded()
             }
             SendStateNote(m.status)
-            // A request's links are not fetched for a card ([LocalGuardedContent]).
-            val guarded = io.nisfeb.talon.ui.LocalGuardedContent.current
-            val firstLink = remember(parts) { firstLinkUrl(parts) }.takeUnless { guarded }
-            if (firstLink != null) {
-                LinkPreviewCard(
-                    url = firstLink,
-                    http = http,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }.takeUnless { guarded }
-            if (firstUrb != null) {
-                io.nisfeb.talon.ui.UrbUnfurlCard(
-                    urbUrl = firstUrb,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }.takeUnless { guarded }
-            if (firstFurum != null) {
-                io.nisfeb.talon.ui.FurumCard(
-                    link = firstFurum,
-                    http = http,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
+            MessageLinkCards(parts, http, onLinkTap)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
@@ -2044,6 +2003,47 @@ private fun MessageRow(
 }
 
 /**
+ * The poster's picture beside the first message of their run, and its
+ * width kept empty beside the rest. Shared by the chat and the thread.
+ */
+@Composable
+internal fun MessageAvatar(author: String, contactMap: ContactMap, show: Boolean, onClick: () -> Unit) {
+    if (!show) {
+        Spacer(Modifier.width(AVATAR_SIZE))
+        return
+    }
+    Avatar(
+        label = remember(author, contactMap) { contactMap.displayName(author) },
+        url = remember(author, contactMap) { contactMap.avatar(author) },
+        colorHex = remember(author, contactMap) { contactMap.shipColor(author) },
+        size = AVATAR_SIZE,
+        onClick = onClick,
+    )
+}
+
+/**
+ * The cards under a message for its first web, urb:// and furum links.
+ * Shared by the chat and the thread. A request's links are not fetched
+ * for a card ([io.nisfeb.talon.ui.LocalGuardedContent]).
+ */
+@Composable
+internal fun MessageLinkCards(parts: List<io.nisfeb.talon.urbit.StoryPart>, http: HttpClient, onLinkTap: (String) -> Unit) {
+    val guarded = io.nisfeb.talon.ui.LocalGuardedContent.current
+    val firstLink = remember(parts) { firstLinkUrl(parts) }.takeUnless { guarded }
+    if (firstLink != null) {
+        LinkPreviewCard(url = firstLink, http = http, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+    val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }.takeUnless { guarded }
+    if (firstUrb != null) {
+        io.nisfeb.talon.ui.UrbUnfurlCard(urbUrl = firstUrb, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+    val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }.takeUnless { guarded }
+    if (firstFurum != null) {
+        io.nisfeb.talon.ui.FurumCard(link = firstFurum, http = http, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+/**
  * Desktop affordance: a hover-revealed "⋯" beside the bubble is the
  * reliable way to open the menu when tap-to-open is off (selection owns
  * left-drag; SelectionContainer swallows the row's right-click). A plain
@@ -2051,7 +2051,7 @@ private fun MessageRow(
  * the slot never shifts.
  */
 @Composable
-private fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit, modifier: Modifier = Modifier) {
+internal fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit, modifier: Modifier = Modifier) {
     if (LocalTapOpensMenu.current) return
     Icon(
         Icons.Filled.MoreVert,
