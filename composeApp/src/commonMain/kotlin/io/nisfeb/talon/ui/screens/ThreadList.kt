@@ -72,7 +72,6 @@ import io.nisfeb.talon.ui.ContactMap
 import io.nisfeb.talon.ui.EmojiCatalog
 import io.nisfeb.talon.ui.ReactionPalette
 import io.nisfeb.talon.ui.StoryRenderer
-import io.nisfeb.talon.ui.combinedClickableWithSecondary
 import io.nisfeb.talon.ui.onSecondaryClick
 import io.nisfeb.talon.urbit.StoryCache
 import io.nisfeb.talon.urbit.TlonChatRepo
@@ -931,34 +930,20 @@ private fun ThreadMessage(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    // The chat's own chip, so the thread gets what it gets
+                    // (the names on hover were missing from a copy here).
                     grouped.forEach { (emoji, count, mine) ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (mine) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant
-                                )
-                                .combinedClickableWithSecondary(
-                                    onClick = { onReactionTap(m, reactions, emoji) },
-                                    onLongClick = { onReactionLongPress(reactions) },
-                                )
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                ReactionPalette.display(emoji),
-                                fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            if (count > 1) {
-                                Text(
-                                    " $count",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
+                        ReactionChip(
+                            emoji = emoji,
+                            count = count,
+                            mine = mine,
+                            reactors = io.nisfeb.talon.ui.reactorsLine(
+                                reactions.filter { ReactionPalette.normalize(it.emoji) == emoji }.map { it.author },
+                                ourPatp,
+                            ) { contactMap.displayName(it) },
+                            onClick = { onReactionTap(m, reactions, emoji) },
+                            onLongClick = { onReactionLongPress(reactions) },
+                        )
                     }
                 }
             }

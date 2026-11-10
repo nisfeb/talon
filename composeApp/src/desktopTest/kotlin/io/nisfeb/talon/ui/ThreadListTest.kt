@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -354,6 +355,24 @@ class ThreadListTest {
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
         val react = ship.pokesTo("channels").single().json.toString()
         assertTrue("react" in react && "170.141.184.507" in react, react)
+    }
+
+    // The chat named who reacted on hover and the thread did not
+    // (reported on 1.8.39 desktop): the thread kept its own copy of the chip.
+    @Test
+    fun `hovering a reaction in a thread names who reacted, as in the chat`() = thread(seed = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~bus/170141184507", "~bus", "an answer", 2_000, parentId = parent))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~zod", "🔥"))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~nec", "🔥"))
+    }) { _, _ ->
+        shows("an answer")
+        val chip = onNodeWithText("🔥", substring = true)
+        assertTrue(onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isEmpty(), "no names until hovered")
+        chip.performMouseInput { moveTo(center) }
+        mainClock.advanceTimeBy(800)
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        chip.performMouseInput { exit() }
     }
 
     @Test
