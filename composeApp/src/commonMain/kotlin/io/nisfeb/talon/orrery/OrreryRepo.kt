@@ -563,12 +563,13 @@ class OrreryRepo(
         // closes on the tap (sneagan, 2026-11-08: it stayed open while the
         // ship answered); each confirmed as the ship takes it, then read
         // back, which a failed read leaves as said.
-        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?, autoBy: Boolean): Job = scope.launch {
+        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?, autoBy: Boolean, group: Boolean): Job = scope.launch {
             val until = length.hours?.let { now() + it * 3_600_000L }
+            groupShared().let { setGroupShared(if (group) it + ships else it - ships.toSet()) }
             _shareProblems.update { it - ships.toSet() }
             _shares.update { s ->
                 val was = s ?: LocationShares(emptyList(), emptyList())
-                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true, byMs = byMs.takeIf { length.hours == null }) })
+                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true, byMs = byMs.takeIf { length.hours == null }, group = group) })
             }
             try {
                 for ((i, ship) in ships.withIndex()) {
@@ -597,6 +598,7 @@ class OrreryRepo(
                         attached().unshareLocation(ship)
                         _shares.update { s -> s?.copy(out = s.out.filter { it.ship != ship }) }
                     }
+                    setGroupShared(groupShared() - ships.toSet())
                 } finally {
                     location.live(_shares.value?.let { sendFastUntil(it, now()) })
                     refresh()
@@ -617,8 +619,20 @@ class OrreryRepo(
         }
     }.await()
 
+    // Which shares were started as a group's, by ship. The ship keeps one
+    // grant a person and not where it came from.
+    // ponytail: kept on this device only, so a group share started on
+    // another shows here as each member's own; sync it if that matters.
+    private suspend fun groupShared(): Set<String> =
+        ship?.let { db.orrerySent().get(it, GROUP_SHARES_KEY)?.value }?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+
+    private suspend fun setGroupShared(ships: Set<String>) {
+        ship?.let { db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(it, GROUP_SHARES_KEY, ships.joinToString(","), now())) }
+    }
+
     private suspend fun readShares() {
-        val s = locationShares(attached().locationDoc(), now())
+        val marked = groupShared()
+        val s = locationShares(attached().locationDoc(), now()).let { r -> r.copy(out = r.out.map { it.copy(group = it.ship in marked) }) }
         // A share still being sent is kept: the ship has not got it yet.
         _shares.update { was -> s.copy(out = s.out + was?.out.orEmpty().filter { it.sending && s.outTo(it.ship) == null }) }
         location.live(sendFastUntil(s, now()))
@@ -2168,6 +2182,8 @@ class OrreryRepo(
         "talon/" + platform.lowercase().replace(Regex("[^a-z0-9.]+"), "-").trim('-').take(50)
 
     private fun now(): Long = nowMs()
+
+    private val GROUP_SHARES_KEY = "location:group"
 
     companion object {
         private const val TAG = "OrreryRepo"

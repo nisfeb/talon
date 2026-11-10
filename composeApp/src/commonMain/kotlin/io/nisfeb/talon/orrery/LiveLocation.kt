@@ -46,7 +46,30 @@ data class OutShare(
     val sending: Boolean = false,
     /** A check-in (orrery 142): if the owner is not home by then, the ship tells them. */
     val byMs: Long? = null,
+    /**
+     * Started from a group's Info on this device, with the group's other
+     * members; false for one shared with a person on their own, or
+     * started on another device.
+     */
+    val group: Boolean = false,
 )
+
+/**
+ * A group's Info, from the shares this ship runs: the members sharing as
+ * the group ([group], what its Stop ends), the members with a share of
+ * their own ([own], which a group share and its Stop leave as they are),
+ * who a group share would go to ([toShare]), and whether to offer one:
+ * whenever a member has no share yet. One running share with a member
+ * used to hide the offer altogether (2026-11-10).
+ */
+data class GroupShareView(val group: List<String>, val own: List<String>, val toShare: List<String>, val offer: Boolean)
+
+fun groupShareView(others: List<String>, out: List<OutShare>): GroupShareView {
+    val mine = out.filter { it.ship in others }
+    val group = mine.filter { it.group }.map { it.ship }
+    val own = mine.filterNot { it.group }.map { it.ship }
+    return GroupShareView(group, own, toShare = others - own.toSet(), offer = (others - group.toSet() - own.toSet()).isNotEmpty())
+}
 
 data class InShare(
     val ship: String,
@@ -190,7 +213,7 @@ interface LiveLocation {
      * scope. The first refusal stops it, lands in [shareProblems], and the
      * shares made before it stand.
      */
-    fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false): kotlinx.coroutines.Job
+    fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false, group: Boolean = false): kotlinx.coroutines.Job
 
     /** Why the last share with a ship failed, by ship; cleared when it is asked for again. */
     val shareProblems: StateFlow<Map<String, Throwable>>

@@ -15,8 +15,9 @@ actual fun rememberLocationSharing(): LocationSharing? = remember {
         override fun allowed() = IosLocationWatch.allowed()
         override val names: Boolean = false
         override suspend fun start(): Boolean = suspendCancellableCoroutine { c ->
-            IosLocationWatch.start { ok -> if (c.isActive) c.resume(ok) }
+            IosLocationWatch.start { ok -> if (ok) IosLocationWatch.sendNow(); if (c.isActive) c.resume(ok) }
         }
+        override fun sendNow() = IosLocationWatch.sendNow()
         override fun stop() = IosLocationWatch.set(false)
     }
 }

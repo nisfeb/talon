@@ -431,6 +431,48 @@ class LiveLocationSheetTest {
         assertEquals(null, live.last())
     }
 
+    // 2026-11-10: one share with a member hid the group's offer, and a
+    // group share would have replaced that member's own exact share.
+    @Test
+    fun `a member's own share is kept, the group is still offered, and its Stop ends only the group's`() {
+        out = """[{"ship": "~bus", "until": "${iso(now + 8 * 3_600_000)}", "home": false, "exact": true}]"""
+        card(group = crew) { ship, repo, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("has a share of their own, kept as it is.") }
+            tap("Share my location with the group")
+            waitUntil(timeoutMillis = 5_000) { shows("Share where you are with the group's 1 other member") }
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are with 1 of its members") }
+            assertEquals(
+                listOf("""POST /apps/orrery/api/location/share {"ship":"~nec","hours":1,"precision":"area"}"""),
+                ship.api.filter { "/location/share" in it },
+            )
+            assertTrue(!shows("Share my location with the group"), "everyone has a share now")
+            tap("Stop")
+            waitUntil(timeoutMillis = 5_000) { shows("Share my location with the group") }
+            assertEquals(listOf("DELETE /apps/orrery/api/location/share/~nec "), ship.api.filter { it.startsWith("DELETE") })
+            assertEquals(listOf("~bus"), repo.live.shares.value?.out?.map { it.ship })
+            assertTrue(shows("has a share of their own, kept as it is."))
+        }
+    }
+
+    // Stopping first was the only way to a new length or precision.
+    @Test
+    fun `a running share is changed from the profile without stopping it`() {
+        out = """[{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": false}]"""
+        card { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Change") }
+            tap("Change")
+            waitUntil(timeoutMillis = 5_000) { shows("Share where you are with") }
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+            assertEquals(
+                listOf("""POST /apps/orrery/api/location/share {"ship":"~bus","hours":1,"precision":"exact"}"""),
+                ship.api.filter { "/location/share" in it },
+            )
+            assertTrue(ship.api.none { it.startsWith("DELETE") }, "replaced, not stopped")
+        }
+    }
+
     @Test
     fun `a member's refusal stops the share there, says why, and the shares before it stand`() = card(group = crew, ship = ship().apply {
         answerApiStatus = { method, path, body ->

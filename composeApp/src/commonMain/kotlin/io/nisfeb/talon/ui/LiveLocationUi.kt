@@ -67,7 +67,8 @@ fun LiveLocationProfileRows(ship: String, who: String) {
     if (shares?.asking(ship) == true) AskRow(ship, who)
     shares?.from(ship)?.let { InboundRow(it, who) }
     val out = shares?.outTo(ship)
-    if (out != null) OutboundRow(out)
+    // Change, where this device can send: stopping first was the only way to a new length or precision.
+    if (out != null) OutboundRow(out, onChange = { asking = true }.takeIf { live.canShare })
     else if (live.canShare) TextButton(onClick = { asking = true }) { Text("Share my location") }
     ShareProblem(live.shareProblems.collectAsState().value[ship])
     if (asking) ShareLocationDialog(listOf(ship), "Share where you are with $who", exactFirst = true, onDone = { asking = false })
@@ -84,7 +85,8 @@ fun GroupLiveLocationRows(members: List<String>, us: String) {
     val shares by live.shares.collectAsState()
     LaunchedEffect(Unit) { live.refresh() }
     val others = members.filter { it != us }
-    val sharedWith = shares?.out.orEmpty().map { it.ship }.filter { it in others }
+    val view = io.nisfeb.talon.orrery.groupShareView(others, shares?.out.orEmpty())
+    val sharedWith = view.group
     val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -97,12 +99,18 @@ fun GroupLiveLocationRows(members: List<String>, us: String) {
             problem = null
             scope.launch { live.stop(sharedWith).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
-    } else if (live.canShare && others.isNotEmpty() && others.size <= GROUP_SHARE_MAX) {
+    }
+    // A share of their own is theirs: the group's share and its Stop leave it as it is.
+    if (view.own.isNotEmpty()) Text(
+        view.own.joinToString { shipHandle(it) } + (if (view.own.size == 1) " has" else " have") + " a share of their own, kept as it is.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (live.canShare && view.offer && others.size <= GROUP_SHARE_MAX) {
         TextButton(onClick = { asking = true }) { Text("Share my location with the group") }
     }
     val problems by live.shareProblems.collectAsState()
     ShareProblem(others.firstNotNullOfOrNull { problems[it] })
-    if (asking) ShareLocationDialog(others, "Share where you are with the group's ${others.size} members", exactFirst = false, onDone = { asking = false })
+    if (asking) ShareLocationDialog(view.toShare, "Share where you are with the group's ${view.toShare.size} ${if (view.toShare.size == 1) "other member" else "members"}", exactFirst = false, group = true, onDone = { asking = false })
 }
 
 /** Settings' list of the shares this ship runs, each with Stop. */
@@ -211,7 +219,7 @@ private fun LiveMapDialog(ship: String, who: String, onDone: () -> Unit) {
 }
 
 @Composable
-private fun OutboundRow(s: OutShare, label: String? = null) {
+private fun OutboundRow(s: OutShare, label: String? = null, onChange: (() -> Unit)? = null) {
     val live = LocalLiveLocation.current ?: return
     val scope = rememberCoroutineScope()
     var problem by remember(s.ship) { mutableStateOf<String?>(null) }
@@ -221,6 +229,7 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
             Text(outboundDetail(s), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
+        if (onChange != null) TextButton(enabled = !s.sending, onClick = onChange) { Text("Change") }
         // Not while the ship has yet to take it: a stop could land first, and the share after.
         TextButton(enabled = !s.sending, onClick = {
             problem = null
@@ -230,7 +239,7 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
 }
 
 @Composable
-private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, onDone: () -> Unit) {
+private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, group: Boolean = false, onDone: () -> Unit) {
     val live = LocalLiveLocation.current ?: return
     val sending = rememberLocationSharing()
     val scope = rememberCoroutineScope()
@@ -316,7 +325,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                 problem = null
                 scope.launch {
                     // The phone sends only while "Send where I am" is on: turned on here, its prompts with it.
-                    if (sending != null && !sending.on.value && !sending.start()) {
+                    if (!readyToShare(sending)) {
                         problem = "Groundwire needs location access all the time to send where you are."
                         busy = false
                         return@launch
@@ -324,7 +333,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     // The ship's answer lands where the share shows: no waiting on it here.
                     val checking = checkIn && length == ShareLength.Home && canCheckIn
                     val auto = checking && canAutoCheckIn && autoBy
-                    live.share(ships, length, exact, byMs = if (checking && !auto) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null, autoBy = auto)
+                    live.share(ships, length, exact, byMs = if (checking && !auto) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null, autoBy = auto, group = group)
                     onDone()
                 }
             }) { Text("Share") }
