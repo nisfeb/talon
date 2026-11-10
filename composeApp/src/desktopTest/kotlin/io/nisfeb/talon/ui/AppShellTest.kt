@@ -1450,6 +1450,19 @@ class AppShellTest {
         waitUntil(timeoutMillis = 10_000) { showing("row 001") }
     }
 
+    // 2026-11-10: with the assistant off, the Apps page left Orrery out,
+    // and the place people looked to turn it on said nothing.
+    @Test
+    fun `with the assistant off, the Apps page lists Orrery as off and says where to turn it on`() = app {
+        home()
+        onNodeWithContentDescription("Settings").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("General") }
+        onAllNodesWithText("General").onFirst().performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("whether they answer") }
+        onNodeWithText("Apps").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Turn on Groundwire Assistant in Settings, under Assistant, to use it.") }
+    }
+
     // 2026-11-08: chats could not be blocked at all; Settings' only Blocked
     // list was the calls'. The ship's list, read at sign-in, and Remove
     // lets them reach you again, chats and calls both.

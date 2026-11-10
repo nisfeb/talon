@@ -23,6 +23,9 @@ enum class AppState {
 
     /** Not asked yet, or asked and the ship did not answer. */
     UNKNOWN,
+
+    /** Turned off in Talon, so not asked. */
+    OFF,
 }
 
 /** Which desk an install would fetch, and from whom. */
@@ -113,6 +116,10 @@ fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: St
     io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of your Groundwire node.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.UNKNOWN -> AppRow("Orrery", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
+
+/** Orrery while the assistant's switch is off: nothing has asked the ship, so say where it is turned on. */
+fun orreryOffRow(): AppRow =
+    AppRow("Orrery", AppState.OFF, "Turn on Groundwire Assistant in Settings, under Assistant, to use it.", null)
 
 /**
  * Armillary is its own desk app from the same publisher, added to the

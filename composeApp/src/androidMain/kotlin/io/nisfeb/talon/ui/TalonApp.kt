@@ -2384,6 +2384,7 @@ fun TalonApp(
                 calendar = calendarRepo,
                 // Off, Orrery is nowhere in Talon, the Apps page too.
                 orrery = orreryRepo.takeIf { orreryGate == true },
+                assistantOff = orreryGate != true,
                 armillary = armillaryRepo,
                 latticeInstalled = app.sessionStore.active()?.shipUrl?.let { url ->
                     { io.nisfeb.talon.urbit.LatticeInstall.installedOrUnknown(app.ktorHttp, url) ?: error("Your Groundwire node could not be asked.") }
