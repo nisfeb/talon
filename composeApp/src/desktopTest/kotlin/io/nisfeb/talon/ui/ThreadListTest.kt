@@ -74,6 +74,10 @@ class ThreadListTest {
         val stream = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(stream)
         runBlocking { db.seed() }
+        // The contact map starts from the last one any screen built, which
+        // another test in this JVM may have left; the app forgets it too
+        // on a change of ship.
+        io.nisfeb.talon.ui.LastContactMap.forget()
         try {
             runComposeUiTest {
                 setContent {
@@ -385,15 +389,16 @@ class ThreadListTest {
     // "these should be at parity").
     @Test
     fun `a reply shows its poster's picture, which opens the profile, and its link's card`() = thread(seed = {
-        contacts().upsertAll(listOf(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Sam Bell", null, null)))
         messages().upsert(msg(parent, "~bus", "the question", 1_000))
-        messages().upsert(msg("~sampel-palnet/170141184507", "~sampel-palnet", "see urb://~zod/notes", 2_000, parentId = parent))
+        // A ship no other test names, so its picture's letters are its own
+        // (LN), whatever contact maps ran before this one.
+        messages().upsert(msg("~lagrev-nocfep/170141184507", "~lagrev-nocfep", "see urb://~zod/notes", 2_000, parentId = parent))
     }) { _, _ ->
         shows("A page title")
-        shows("SB")
-        onAllNodesWithText("SB").onFirst().performClick()
+        shows("LN")
+        onAllNodesWithText("LN").onFirst().performClick()
         waitUntil(timeoutMillis = 5_000) { profiles.isNotEmpty() }
-        assertEquals(listOf("~sampel-palnet"), profiles.toList())
+        assertEquals(listOf("~lagrev-nocfep"), profiles.toList())
     }
 
     @Test
