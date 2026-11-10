@@ -97,7 +97,9 @@ fun contactStatus(c: ContactEntity): Pair<String, Long>? {
  */
 fun teachNames(body: OBody, goesBy: Set<String>?): List<OBody> {
     if (goesBy == null) return listOf(body)
-    val fresh = (body.aliases + listOfNotNull(body.name)).filter { it.isNotBlank() }.distinct() - goesBy
+    // A ship name is never sent (see [shipAlias]), so never counted as
+    // one the ship lacks: it went up as an empty upsert every pass.
+    val fresh = (body.aliases + listOfNotNull(body.name)).filter { it.isNotBlank() && !shipAlias(it) }.distinct() - goesBy
     return if (fresh.isEmpty()) emptyList() else listOf(OBody(body.id, name = null, aliases = fresh))
 }
 
@@ -140,10 +142,20 @@ fun callFacts(
 const val MAX_BODIES = 50
 const val MAX_OBS = 200
 
+/**
+ * A name orrery reads as a ship: its +ship-alias, a `~` first once
+ * trimmed. A key may not send one, since a ship is the owner's to assign
+ * (orrery 125, security audit 3.3), and one in a batch had the whole
+ * batch refused as "not in scope: aliases", every pass, from then on.
+ * Kept on the body here for matching; never sent.
+ */
+internal fun shipAlias(name: String): Boolean = name.trim().startsWith("~")
+
 fun OBody.toJson(): JsonObject = buildJsonObject {
     put("id", id)
     name?.let { put("name", it) }
-    if (aliases.isNotEmpty()) put("aliases", buildJsonArray { aliases.forEach { add(JsonPrimitive(it)) } })
+    val sent = aliases.filterNot(::shipAlias)
+    if (sent.isNotEmpty()) put("aliases", buildJsonArray { sent.forEach { add(JsonPrimitive(it)) } })
 }
 
 fun Obs.toJson(): JsonObject = buildJsonObject {
