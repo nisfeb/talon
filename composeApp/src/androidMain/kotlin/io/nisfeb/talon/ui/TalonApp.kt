@@ -735,6 +735,7 @@ fun TalonApp(
         }
     }
     var bookmarksOpen by remember { sections.flag() }
+    var locationsOpen by remember { sections.flag() }
     var calendarOpen by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     /** The mail thread a tap outside mail asked for. */
@@ -1811,6 +1812,7 @@ fun TalonApp(
             statusFeedOpen -> "StatusFeed"
             mailOpen -> "Mail"
             bookmarksOpen -> "Bookmarks"
+            locationsOpen -> "Locations"
             calendarOpen -> "Calendar"
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
@@ -2199,6 +2201,8 @@ fun TalonApp(
                     modifier = mod,
                 )
             }
+
+            locationsOpen -> io.nisfeb.talon.ui.LocationsScreen(onBack = { locationsOpen = false }, modifier = mod)
 
             bookmarksOpen -> BookmarksScreen(
                 db = app.db,
@@ -3167,6 +3171,7 @@ fun TalonApp(
                     }
                 },
                 onOpenBookmarks = { bookmarksOpen = true },
+                onOpenLocations = { locationsOpen = true },
                 onOpenActivity = { activityOpen = true },
                 onOpenCalendar = { calendarOpen = true },
                 onOpenContacts = { contactsOpen = true },
