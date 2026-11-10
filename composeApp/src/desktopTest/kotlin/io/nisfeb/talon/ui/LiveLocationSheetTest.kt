@@ -395,7 +395,11 @@ class LiveLocationSheetTest {
             show(false)
             waitForIdle()
             gate.countDown()
-            runBlocking { withTimeout(5_000) { while (repo.live.shares.value?.outTo("~bus") == null) delay(20) } }
+            // Until the ship has taken it, not only until it shows: a share
+            // shows at once, as being sent, and the phone is told to send
+            // fast when the ship answers. Read a moment sooner, on a slow
+            // machine, that had not happened yet (CI, 2026-11-10).
+            runBlocking { withTimeout(10_000) { while (repo.live.shares.value?.outTo("~bus")?.sending != false || live.lastOrNull() == null) delay(20) } }
             assertTrue(live.lastOrNull() != null, "the phone sends fast for it")
         }
     }
