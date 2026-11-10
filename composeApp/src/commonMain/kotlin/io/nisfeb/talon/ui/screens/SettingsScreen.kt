@@ -1234,8 +1234,8 @@ private fun ReachSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
     fun quiet(q: io.nisfeb.talon.ui.QuietHours) = set(reach.copy(quiet = q.onThisClock()))
     FeatureToggleRow(
         label = "Quiet hours",
-        description = if (reach.quiet.on) "Messages don't notify you between these times, except your favourites'. They're still there when you look."
-        else "A time each day when messages don't notify you, except your favourites'.",
+        description = if (reach.quiet.on) "Messages don't notify you between these times, except your favorites'. They're still there when you look."
+        else "A time each day when messages don't notify you, except your favorites'.",
         enabled = reach.quiet.on,
         onChange = { quiet(reach.quiet.copy(on = it)) },
     )
@@ -1244,14 +1244,14 @@ private fun ReachSection(uiSettings: io.nisfeb.talon.ui.UiSettings) {
         io.nisfeb.talon.ui.ClockTimeButton(reach.quiet.toMin, { quiet(reach.quiet.copy(toMin = it)) }, label = "to")
     }
     ShipListEditor(
-        title = "Favourites",
+        title = "Favorites",
         empty = "Nobody yet. Add someone here, or with the star on their profile.",
         ships = reach.favourites,
         onAdd = { set(reach.copy(favourites = reach.favourites + it)) },
         onRemove = { set(reach.copy(favourites = reach.favourites - it)) },
     )
     Text(
-        "Favourites notify you even in quiet hours, and still do when only people you've added can message you.",
+        "Favorites notify you even in quiet hours, and still do when only people you've added can message you.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

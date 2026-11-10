@@ -84,11 +84,11 @@ class ContactProfileSheetTest {
     // A favourite gets through quiet hours (2026-11-08).
     @Test
     fun `the star makes them a favourite, and takes it back`() = card {
-        onNodeWithText("☆ Add to favourites").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("★ Favourite") }
+        onNodeWithText("☆ Add to favorites").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("★ Favorite") }
         assertEquals(setOf(ship), ui.reach.value.favourites)
-        onNodeWithText("★ Favourite").performScrollTo().performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("☆ Add to favourites") }
+        onNodeWithText("★ Favorite").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("☆ Add to favorites") }
         assertEquals(emptySet(), ui.reach.value.favourites)
     }
 

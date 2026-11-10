@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import okio.Path.Companion.toPath
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -1324,6 +1325,29 @@ class DmChatScreenTest {
         onAllNodesWithText("SB").onFirst().clickAction()
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("Add to contacts").performClick()
+    }
+
+    private val opensProfile = androidx.compose.ui.test.SemanticsMatcher("the name atop the chat, opening their profile") {
+        val click = androidx.compose.ui.semantics.SemanticsActions.OnClick
+        click in it.config && it.config[click].label == "Open profile"
+    }
+
+    // sneagan, 2026-11-10: the name at the top of a DM opens their profile,
+    // as their picture on a message does.
+    @Test
+    fun `the name atop a DM opens their profile, and atop a request does not`() {
+        // The chat is ~bus's, whoever wrote in it: the name atop it is theirs.
+        chat(seed = sam) { _, _ ->
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("hi from sam").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isEmpty(), "no profile yet")
+            onNode(opensProfile).assertTextEquals("~bus")
+            onNode(opensProfile).clickAction()
+            waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Add to contacts").fetchSemanticsNodes().isNotEmpty() }
+        }
+        chat(seed = strangerSaid) { _, _ ->
+            waitUntil(timeoutMillis = 20_000) { shown("~bus wants to message you") }
+            assertTrue(onAllNodes(opensProfile).fetchSemanticsNodes().isEmpty(), "a request opens nothing of theirs")
+        }
     }
 
     // A user report: clicking an avatar no longer showed the profile. It

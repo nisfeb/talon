@@ -339,7 +339,7 @@ private fun FavouriteButton(ship: String) {
     val reach by ui.reach.collectAsState()
     val fav = ship in reach.favourites
     TextButton(onClick = { ui.setReach(reach.copy(favourites = if (fav) reach.favourites - ship else reach.favourites + ship)) }) {
-        Text(if (fav) "★ Favourite" else "☆ Add to favourites")
+        Text(if (fav) "★ Favorite" else "☆ Add to favorites")
     }
 }
 
