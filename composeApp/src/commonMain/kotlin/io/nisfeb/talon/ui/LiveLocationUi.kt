@@ -1,12 +1,16 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -366,3 +370,103 @@ internal fun shareProblem(what: String, e: Throwable): String = when (e) {
 
 /** How often a shown share is read again: the phone sends a fix a minute. */
 const val LIVE_REREAD_MS = 60_000L
+
+/**
+ * Everyone sharing where they are with this ship, in one place, with
+ * the asks waiting on the owner and the shares the owner runs (sneagan,
+ * 2026-11-10: "like find my friends", "everyone on one full screen
+ * map"). Where there is a map it fills the page, a named pin each, with
+ * the list a tap away; elsewhere the list is the page. Read on opening
+ * and each minute while it shows, a share showing or not: one that
+ * starts while the page is open appears on it.
+ */
+@Composable
+fun LocationsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val live = LocalLiveLocation.current
+    val shares = live?.shares?.collectAsState()?.value
+    val inbound = shares?.inbound.orEmpty()
+    // The map first where there is one and someone to show on it.
+    var listChosen by remember { mutableStateOf<Boolean?>(null) }
+    val canMap = isLiveMapSupported && inbound.isNotEmpty()
+    val list = !canMap || (listChosen ?: false)
+    var focus by remember { mutableStateOf<String?>(null) }
+    Column(modifier = modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            NavIcon(onBack = onBack)
+            Text(
+                "Locations",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                modifier = Modifier.padding(start = 4.dp).weight(1f),
+            )
+            if (canMap) TextButton(onClick = { listChosen = !list }) {
+                Text(if (list) "Map" else locationsListLabel(shares?.asks.orEmpty().size))
+            }
+        }
+        androidx.compose.material3.HorizontalDivider()
+        if (live == null) return@Column
+        // Real time, as [WatchShares]: a test's virtual clock would spin it.
+        LaunchedEffect(live) {
+            live.refresh()
+            withContext(Dispatchers.Default) {
+                while (true) {
+                    delay(LIVE_REREAD_MS)
+                    live.refresh()
+                }
+            }
+        }
+        if (!list) {
+            PeopleMapView(
+                inbound.map { MapPin(it.ship, locationName(it), it.lat, it.lon, it.accuracyM) }, focus,
+                Modifier.fillMaxWidth().weight(1f),
+            )
+            // Who is on it: a tap looks at one of them, Everyone at them all.
+            if (inbound.size > 1) Row(
+                Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(onClick = { focus = null }) { Text("Everyone") }
+                inbound.forEach { p -> TextButton(onClick = { focus = p.ship }) { Text(locationName(p)) } }
+            }
+            return@Column
+        }
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val s = shares
+            if (s == null) {
+                Text("Asking your Groundwire node…", style = MaterialTheme.typography.bodyMedium)
+                return@Column
+            }
+            s.asks.forEach { AskRow(it, shipHandle(it)) }
+            if (s.inbound.isEmpty()) Text("Nobody is sharing where they are with you.", style = MaterialTheme.typography.bodyMedium)
+            val open = rememberOpenInMaps()
+            s.inbound.forEach { p ->
+                // On a phone a tap shows them on the map; elsewhere Open map hands the point on.
+                Row(
+                    Modifier.fillMaxWidth().then(if (isLiveMapSupported) Modifier.clickable { focus = p.ship; listChosen = false } else Modifier),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(locationName(p), style = MaterialTheme.typography.bodyLarge)
+                        Text(inboundDetail(p, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (p.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { open(p.lat, p.lon) }) { Text("Open map") }
+                }
+            }
+            if (s.out.isNotEmpty()) {
+                androidx.compose.material3.HorizontalDivider()
+                Text("Sharing where you are with", style = MaterialTheme.typography.labelLarge)
+                var changing by remember { mutableStateOf<String?>(null) }
+                s.out.forEach { o -> OutboundRow(o, label = shipHandle(o.ship), onChange = { changing = o.ship }.takeIf { live.canShare }) }
+                changing?.let { ship -> ShareLocationDialog(listOf(ship), "Share where you are with ${shipHandle(ship)}", exactFirst = true, onDone = { changing = null }) }
+            }
+        }
+    }
+}
+
+/** The map's way to the list, saying when someone waits there for an answer. */
+internal fun locationsListLabel(asks: Int): String = if (asks > 0) "List ($asks waiting)" else "List"
+
+/** Who a share is from: the name orrery keeps for them, else their ship's. */
+internal fun locationName(s: InShare): String = s.name.takeIf { it.isNotBlank() && it != s.ship } ?: shipHandle(s.ship)

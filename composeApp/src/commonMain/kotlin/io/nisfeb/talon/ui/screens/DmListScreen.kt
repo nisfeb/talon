@@ -142,6 +142,8 @@ fun DmListScreen(
     threadsTab: (@Composable () -> Unit)? = null,
     threadsUnread: Int = 0,
     onOpenBookmarks: () -> Unit,
+    /** Everyone sharing where they are with us; offered only where the ship's orrery is in use. */
+    onOpenLocations: () -> Unit = {},
     onOpenActivity: () -> Unit,
     onOpenCalendar: () -> Unit = {},
     /** Open the curated Contacts (book) screen. Always shown in the
@@ -1038,6 +1040,16 @@ fun DmListScreen(
                             onClick = {
                                 menuOpen = false
                                 onOpenBookmarks()
+                            },
+                        )
+                    }
+                    // With the assistant off there are no shares to show: not offered.
+                    if (io.nisfeb.talon.orrery.LocalLiveLocation.current != null) {
+                        DropdownMenuItem(
+                            text = { Text("Locations") },
+                            onClick = {
+                                menuOpen = false
+                                onOpenLocations()
                             },
                         )
                     }

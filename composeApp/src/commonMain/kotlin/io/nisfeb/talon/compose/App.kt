@@ -415,6 +415,7 @@ fun App(
     var showActions by remember { sections.flag() }
     var showEvening by remember { sections.flag() }
     var showBookmarks by remember { sections.flag() }
+    var showLocations by remember { sections.flag() }
     var showCalendar by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     var assistantListen by remember { mutableStateOf(false) }
@@ -2832,6 +2833,7 @@ fun App(
                         onOpenWebSettings = onOpenCalendarPage,
                         db = db, chat = repo, mail = mailRepo, ourShip = ship,
                     )
+                    showLocations -> io.nisfeb.talon.ui.LocationsScreen(onBack = { showLocations = false })
                     showBookmarks -> BookmarksScreen(
                         db = db,
                         repo = repo,
@@ -3722,6 +3724,7 @@ fun App(
                                         },
                                         onOpenInvites = { showInvites = true },
                                         onOpenBookmarks = onOpenBookmarks,
+                                        onOpenLocations = { showLocations = true },
                                         onOpenActivity = onOpenActivity,
                                         onOpenCalendar = onOpenCalendar,
                                         onOpenContacts = { showContacts = true },

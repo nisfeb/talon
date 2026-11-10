@@ -307,6 +307,52 @@ class AppShellTest {
         }
     }
 
+    // sneagan, 2026-11-10: a place for everyone sharing where they are,
+    // "like find my friends". It opens from the menu, shows who shares,
+    // who asks and what we share, and Back leaves it (a section that could
+    // not be left shipped more than once).
+    @Test
+    fun `Locations lists who shares with us, who asks and what we share, and Back leaves it`() {
+        val now = System.currentTimeMillis()
+        fun iso(ms: Long) = kotlin.time.Instant.fromEpochMilliseconds(ms).toString()
+        val doc = """{"out": [{"ship": "~fed", "until": "${iso(now + 3_600_000)}", "home": false, "exact": true, "since": "${iso(now)}"}],
+            "in": {"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now - 60_000)}", "until": "${iso(now + 3_600_000)}", "home": false}},
+            "asks": {"~nec": {"lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true}}}"""
+        app(
+            ai = orreryOn,
+            setup = {
+                answerApi = { method, path, _ ->
+                    when {
+                        path == "/apps/orrery/api/state" -> "{}"
+                        method == "GET" && path == "/apps/orrery/api/location" -> doc
+                        else -> null
+                    }
+                }
+            },
+        ) { ship ->
+            home()
+            onNodeWithContentDescription("More").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("Locations") }
+            onNodeWithText("Locations").performClick()
+            waitUntil(timeoutMillis = 10_000) { showing("Bus") && showing("Open map") }
+            assertTrue(showing("~nec wants to share where they are"), "the ask")
+            assertTrue(showing("Sharing where you are with") && showing("~fed"), "ours")
+            assertTrue(!present("Chats"), "it takes the whole window")
+            assertTrue(ship.api.none { "/location/" in it }, "reading shares writes none: ${ship.api}")
+            onNodeWithContentDescription("Back").performClick()
+            home()
+        }
+    }
+
+    // Gated, not greyed: with the assistant off there is nothing to show.
+    @Test
+    fun `with the assistant off the menu offers no Locations`() = app {
+        home()
+        onNodeWithContentDescription("More").performClick()
+        waitUntil(timeoutMillis = 5_000) { showing("People & sidebar") }
+        assertTrue(!showing("Locations"))
+    }
+
     // Off means off: with Orrery off, no screen asks the ship where anyone is.
     @Test
     fun `with Orrery off the DM asks nothing about location`() = app(
