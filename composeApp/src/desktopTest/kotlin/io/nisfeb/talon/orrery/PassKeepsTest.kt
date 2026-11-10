@@ -528,7 +528,9 @@ class PassKeepsTest {
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
             db.orrerySent().put(OrrerySentEntity("~zod", "scope:checked", io.nisfeb.talon.util.nowMs().toString(), io.nisfeb.talon.util.nowMs()))
-            db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Rose", null, null))
+            // A name the ship lacks, so the next pass has something to write: its
+            // ship name alone is never sent (orrery 125 refuses it from a key).
+            db.contacts().upsert(io.nisfeb.talon.data.ContactEntity("~sampel-palnet", "Rosie", null, null))
             val http = HttpClient(
                 MockEngine { req ->
                     val url = req.url.toString()
