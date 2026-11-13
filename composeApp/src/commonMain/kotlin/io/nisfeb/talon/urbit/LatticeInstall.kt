@@ -247,11 +247,42 @@ object LatticeInstall {
             (resp.status.isSuccess() && resp.contentType()?.match(ContentType.Application.Json) == true)
     }.getOrDefault(false)
 
-    /** Ask the shell to fetch its stock desks (lattice, mail, the calendar) from their repositories. Idempotent. */
+    /**
+     * Ask the shell for its default apps, one at a time by name: each stock
+     * entry it boots with ("setup":"boot") that is not installed yet. Never
+     * Install all (/desks/sync-defaults), which also brings every desk the
+     * shell only offers. A shell whose list has no lattice gets lattice
+     * from [PUBLISHER] directly. Idempotent.
+     */
     suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runSuspendCatching {
-        val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/sync-defaults") {
+        val base = shipUrl.trimEnd('/')
+        val stock = http.get("$base/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
+        refuse(stock)
+        val entries = (runCatching { Json.parseToJsonElement(stock.bodyAsText()) }.getOrNull() as? JsonArray)
+            .orEmpty().mapNotNull { it as? JsonObject }
+        if (entries.none { it["name"]?.jsonPrimitive?.content == "lattice" }) {
+            addDesk(http, base, "lattice", cookie = cookie).getOrThrow()
+        }
+        entries.filter { isDefault(it) && it["synced"]?.jsonPrimitive?.booleanOrNull != true }
+            .mapNotNull { it["name"]?.jsonPrimitive?.content }
+            .forEach { name ->
+                refuse(
+                    http.post("$base/apps/grubbery/desks/sync") {
+                        cookie?.let { header(HttpHeaders.Cookie, it) }
+                        contentType(ContentType.Application.Json)
+                        setBody(buildJsonObject { put("name", name) }.toString())
+                    },
+                )
+            }
+    }
+
+    /** A stock entry the shell boots with. A shell too old to say which is all defaults. */
+    private fun isDefault(entry: JsonObject): Boolean =
+        entry["setup"]?.jsonPrimitive?.content.let { it == null || it == "boot" }
+
+    private fun refuse(resp: HttpResponse) {
         if (!resp.status.isSuccess()) {
             error(
                 if (resp.status.value == 401 || resp.status.value == 403) "Your Groundwire node did not accept that; sign in to it again."
@@ -261,13 +292,14 @@ object LatticeInstall {
         }
     }
 
-    /** Whether the shell says every stock desk has been fetched; null where it did not say. */
+    /** Whether the shell says every default stock desk has been fetched; null where it did not say. */
     suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runSuspendCatching {
         val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
         val arr = (if (resp.status.isSuccess()) Json.parseToJsonElement(resp.bodyAsText()) else null) as? JsonArray
-        arr?.all { (it as? JsonObject)?.get("synced")?.jsonPrimitive?.booleanOrNull == true }
+        arr?.mapNotNull { it as? JsonObject }?.filter(::isDefault)
+            ?.all { it["synced"]?.jsonPrimitive?.booleanOrNull == true }
     }.getOrNull()
 
     /**
