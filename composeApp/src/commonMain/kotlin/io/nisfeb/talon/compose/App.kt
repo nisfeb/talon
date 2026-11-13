@@ -1401,6 +1401,10 @@ fun App(
         // New orrery proposals notify; one answered anywhere is taken back.
         // Not while Actions is on screen: the list is the news.
         LaunchedEffect(orreryRepo, notifier, noticeRepo) {
+            // Shares with no end still run: said every thirty days, on the device that sends.
+            orreryRepo.onAlwaysReminder = { ships ->
+                notifier.notify("Location sharing", io.nisfeb.talon.orrery.alwaysReminderText(ships.map { io.nisfeb.talon.ui.shipHandle(it) }), "location:always")
+            }
             orreryRepo.onActions = { raise, clear ->
                 // The ship's own nag about a late one too: iOS shows it as
                 // pushed, under its tag, where the app's own slot is not.
@@ -1950,6 +1954,7 @@ fun App(
               io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
               io.nisfeb.talon.ui.LocalPlaceName provides citePlaceName,
           ) {
+            io.nisfeb.talon.ui.ShareBackOffer()
             outsideCite?.let { cite ->
                 io.nisfeb.talon.ui.ReferencedPostDialog(
                     cite = cite,

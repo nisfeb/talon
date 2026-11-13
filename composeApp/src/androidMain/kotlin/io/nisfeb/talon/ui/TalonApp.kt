@@ -932,6 +932,13 @@ fun TalonApp(
     // back. Not while Actions is on screen: the list is the news.
     val actionContext = LocalContext.current
     LaunchedEffect(orreryRepo) {
+        // Shares with no end still run: said every thirty days.
+        orreryRepo.onAlwaysReminder = { ships ->
+            io.nisfeb.talon.Notifications.showAction(
+                actionContext, "location-always", "Location sharing",
+                io.nisfeb.talon.orrery.alwaysReminderText(ships.map { io.nisfeb.talon.ui.shipHandle(it) }),
+            )
+        }
         orreryRepo.onActions = { raise, clear ->
             clear.forEach {
                 io.nisfeb.talon.Notifications.clearAction(actionContext, it)
@@ -1651,6 +1658,7 @@ fun TalonApp(
         io.nisfeb.talon.ui.LocalCitationOpen provides openCitation,
         io.nisfeb.talon.ui.LocalDisplayName provides citeDisplayName,
     ) {
+    io.nisfeb.talon.ui.ShareBackOffer()
     outsideCite?.let { cite ->
         io.nisfeb.talon.ui.ReferencedPostDialog(
             cite = cite,

@@ -87,11 +87,12 @@ class LiveLocationSheetTest {
                     val asked = kotlinx.serialization.json.Json.parseToJsonElement(body).jsonObject
                     val to = asked["ship"]!!.jsonPrimitive.content
                     val hours = asked["hours"]?.jsonPrimitive?.content?.toLong()
+                    val always = asked["always"]?.jsonPrimitive?.content == "true"
                     val until = hours?.let { "\"${iso(now + it * 3_600_000)}\"" } ?: "null"
                     val exact = asked["precision"]?.jsonPrimitive?.content == "exact"
                     // "auto": the ship works it out, here half an hour and five minutes off.
                     val by = asked["by"]?.jsonPrimitive?.content?.let { if (it == "auto") iso(now + 35 * 60_000) else it }?.let { "\"$it\"" } ?: "null"
-                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}", "by": $by}"""
+                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null && !always}, "always": $always, "exact": $exact, "since": "${iso(now)}", "by": $by}"""
                     """{"ship": "$to"}"""
                 }
                 // Orrery 137: accept moves the ask's fix in, decline drops it.
@@ -138,6 +139,8 @@ class LiveLocationSheetTest {
                         LocalMapsLauncher provides MapsLauncher { lat, lng -> maps += "$lat,$lng" },
                     ) {
                         TalonTheme(darkTheme = false) {
+                            // As the shells have it, over whatever page shows.
+                            ShareBackOffer()
                             if (group != null) androidx.compose.foundation.layout.Column {
                                 androidx.compose.material3.Text("Group Info")
                                 if (shown) GroupLiveLocationRows(group, us = "~zod")
@@ -529,6 +532,64 @@ class LiveLocationSheetTest {
         }) { _, _, _ ->
             tap("Accept")
             waitUntil(timeoutMillis = 5_000) { shows("Couldn't accept: no ask from that ship") }
+        }
+    }
+
+    // sneagan, 2026-11-10: "a way to share location with someone
+    // indefinitely", offered only where the ship keeps one (orrery 146).
+    @Test
+    fun `Always shares with no end, as the ship reads it, and the card says so`() = card(ship().also { orreryVersion = 146 }) { ship, _, _ ->
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Always, until I stop") }
+        tap("Always, until I stop")
+        waitUntil(timeoutMillis = 5_000) { shows("when you move a few hundred metres, not each minute") }
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("always, until you stop") }
+        assertEquals(listOf("""POST /apps/orrery/api/location/share {"ship":"~bus","always":true,"precision":"exact"}"""), ship.api.filter { "/location/share" in it })
+    }
+
+    @Test
+    fun `an older ship is not offered Always`() = card(ship().also { orreryVersion = 145 }) { _, _, _ ->
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        assertTrue(!shows("Always, until I stop"))
+    }
+
+    private val anAlwaysAsk get() = """{"~bus": {"lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": false, "always": true, "asked": "${iso(now)}"}}"""
+
+    // Offered, not required (sneagan, 2026-11-10): theirs is accepted either way.
+    @Test
+    fun `accepting a share with no end offers to share back, and saying no still accepts`() {
+        asks = anAlwaysAsk
+        card(ship().also { orreryVersion = 146 }) { ship, _, _ ->
+            tap("Accept")
+            waitUntil(timeoutMillis = 5_000) { shows("always shares with you. Share where you are with them too?") }
+            tap("Cancel")
+            waitUntil(timeoutMillis = 5_000) { !shows("Share where you are with them too?") }
+            assertTrue(shows("~bus is sharing where they are"), "theirs is accepted")
+            assertTrue(ship.api.none { "/location/share" in it }, "nothing of ours was shared")
+        }
+    }
+
+    @Test
+    fun `sharing back from the offer shares with no end, the area unless asked`() {
+        asks = anAlwaysAsk
+        card(ship().also { orreryVersion = 146 }) { ship, _, _ ->
+            tap("Accept")
+            waitUntil(timeoutMillis = 5_000) { shows("Share where you are with them too?") }
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+            assertEquals(listOf("""POST /apps/orrery/api/location/share {"ship":"~bus","always":true,"precision":"area"}"""), ship.api.filter { "/location/share" in it })
+        }
+    }
+
+    @Test
+    fun `an ask that ends is accepted with no offer`() {
+        asks = anAsk
+        card(ship().also { orreryVersion = 146 }) { _, _, _ ->
+            tap("Accept")
+            waitUntil(timeoutMillis = 5_000) { shows("~bus is sharing where they are") }
+            assertTrue(!shows("Share where you are with them too?"))
         }
     }
 }

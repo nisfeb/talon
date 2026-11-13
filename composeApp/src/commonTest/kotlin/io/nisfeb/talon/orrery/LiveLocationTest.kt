@@ -160,4 +160,52 @@ class LiveLocationTest {
         assertTrue(fixDue(now - 60_000, now, fast = true), "a minute on, it goes")
         assertTrue(fixDue(now - 1, now, fast = false), "a significant move goes at once")
     }
+
+    // Shares with no end (orrery 146; sneagan, 2026-11-10).
+    @Test
+    fun `a share with no end is asked for as the ship reads it, with neither hours nor home`() {
+        assertEquals("""{"ship":"~bus","always":true,"precision":"area"}""", shareBody("~bus", ShareLength.Always, exact = false))
+        // A check-in belongs to until home alone.
+        assertEquals("""{"ship":"~bus","always":true,"precision":"exact"}""", shareBody("~bus", ShareLength.Always, exact = true, byMs = 1_000, autoBy = true))
+    }
+
+    @Test
+    fun `a share with no end shows either way however old its fix, and an ask says when it is one`() {
+        val now = 1_800_000_000_000L
+        val old = kotlin.time.Instant.fromEpochMilliseconds(now - 30L * 24 * 3_600_000).toString()
+        val fresh = kotlin.time.Instant.fromEpochMilliseconds(now).toString()
+        val doc = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"out": [{"ship": "~bus", "until": null, "home": false, "always": true, "exact": true}, {"ship": "~nec", "until": null, "home": false, "exact": true}],
+                "in": {"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "$old", "until": null, "home": false, "always": true},
+                       "~nec": {"name": "Nec", "lat": "1", "lon": "2", "at": "$old", "until": null, "home": false}},
+                "asks": {"~fed": {"lat": "1", "lon": "2", "at": "$fresh", "until": null, "always": true}, "~wes": {"lat": "1", "lon": "2", "at": "$fresh", "until": null}}}""",
+        ) as kotlinx.serialization.json.JsonObject
+        val s = locationShares(doc, now)
+        assertEquals(listOf("~bus"), s.out.map { it.ship }, "one with no end and no home is no share, unless always")
+        assertEquals(true, s.out.single().always)
+        assertEquals(listOf("~bus"), s.inbound.map { it.ship }, "a quiet month shows only when always")
+        assertEquals(listOf("~fed", "~wes"), s.asks)
+        assertEquals(setOf("~fed"), s.alwaysAsks)
+    }
+
+    @Test
+    fun `a share with no end never has the phone send each minute`() {
+        val now = 1_000_000L
+        val always = OutShare("~bus", null, home = false, exact = true, always = true)
+        assertEquals(null, sendFastUntil(LocationShares(listOf(always), emptyList()), now))
+        val hour = OutShare("~nec", now + 3_600_000, home = false, exact = true)
+        assertEquals(now + 3_600_000, sendFastUntil(LocationShares(listOf(always, hour), emptyList()), now), "one that ends still does")
+    }
+
+    @Test
+    fun `the reminder comes every thirty days while a share with no end runs`() {
+        val now = 100L * ALWAYS_REMINDER_MS
+        assertEquals(false, alwaysReminderDue(null, now, anyAlways = true), "first seen: the month counts from now")
+        assertEquals(false, alwaysReminderDue(now - ALWAYS_REMINDER_MS + 1, now, anyAlways = true))
+        assertEquals(true, alwaysReminderDue(now - ALWAYS_REMINDER_MS, now, anyAlways = true))
+        assertEquals(false, alwaysReminderDue(now - 2 * ALWAYS_REMINDER_MS, now, anyAlways = false), "none runs, none said")
+        assertEquals("Bus can always see where you are. Open Locations to change or stop it.", alwaysReminderText(listOf("Bus")))
+        assertEquals("Bus and Nec can always see where you are. Open Locations to change or stop it.", alwaysReminderText(listOf("Bus", "Nec")))
+        assertEquals("3 people can always see where you are. Open Locations to change or stop it.", alwaysReminderText(listOf("a", "b", "c")))
+    }
 }

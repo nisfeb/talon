@@ -243,11 +243,13 @@ private fun OutboundRow(s: OutShare, label: String? = null, onChange: (() -> Uni
 }
 
 @Composable
-private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, group: Boolean = false, onDone: () -> Unit) {
+private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, group: Boolean = false, first: ShareLength = ShareLength.Hour, onDone: () -> Unit) {
     val live = LocalLiveLocation.current ?: return
     val sending = rememberLocationSharing()
     val scope = rememberCoroutineScope()
-    var length by remember { mutableStateOf(ShareLength.Hour) }
+    var length by remember { mutableStateOf(first) }
+    // Gated, not faked: an older orrery would end a share with no end at once.
+    var canAlways by remember { mutableStateOf(live.canAlways) }
     var exact by remember { mutableStateOf(exactFirst) }
     // A check-in (orrery 142): home by a time, or they are told, by the ship.
     var checkIn by remember { mutableStateOf(false) }
@@ -263,6 +265,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
     LaunchedEffect(live) {
         live.refreshCheckIn()
         canCheckIn = live.canCheckIn
+        canAlways = live.canAlways
         canAutoCheckIn = live.canAutoCheckIn
         if (!autoChosen) autoBy = canAutoCheckIn
     }
@@ -273,7 +276,7 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ShareLength.entries.forEach { l ->
+                ShareLength.entries.filter { it != ShareLength.Always || canAlways }.forEach { l ->
                     Row(
                         Modifier.fillMaxWidth().selectable(selected = length == l, onClick = { length = l }),
                         verticalAlignment = Alignment.CenterVertically,
@@ -316,7 +319,8 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     Switch(checked = exact, onCheckedChange = { exact = it })
                 }
                 Text(
-                    "Your Groundwire node sends where you are each minute while this runs. Stop it any time.",
+                    if (length == ShareLength.Always) "Your Groundwire node sends where you are when you move a few hundred metres, not each minute. Stop it any time."
+                    else "Your Groundwire node sends where you are each minute while this runs. Stop it any time.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (busy) Text("Waiting for location access…", style = MaterialTheme.typography.bodySmall)
@@ -350,13 +354,13 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
 internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
     s.lateByMs?.let { "Not home yet, meant to be by ${formatClock(it)}" },
     s.atMs?.let { "Updated ${shortRelativeTime(it, nowMs)}" },
-    s.untilMs?.let { "until ${formatClock(it)}" } ?: if (s.home) "until they're home" else null,
+    s.untilMs?.let { "until ${formatClock(it)}" } ?: if (s.always) "always" else if (s.home) "until they're home" else null,
     if ((s.accuracyM ?: 0.0) >= 1000.0) "area only" else null,
 ).joinToString(" · ")
 
 internal fun outboundDetail(s: OutShare): String = listOfNotNull(
     if (s.sending) "Sending to your Groundwire node" else null,
-    s.untilMs?.let { "until ${formatClock(it)}" } ?: "until you're home",
+    s.untilMs?.let { "until ${formatClock(it)}" } ?: if (s.always) "always, until you stop" else "until you're home",
     s.byMs?.let { "check in by ${formatClock(it)}" },
     if (s.exact) "exact" else "area only",
 ).joinToString(" · ")
@@ -470,3 +474,19 @@ internal fun locationsListLabel(asks: Int): String = if (asks > 0) "List ($asks 
 
 /** Who a share is from: the name orrery keeps for them, else their ship's. */
 internal fun locationName(s: InShare): String = s.name.takeIf { it.isNotBlank() && it != s.ship } ?: shipHandle(s.ship)
+
+/**
+ * Someone's share with no end was just accepted: offer to share back,
+ * with the same choices, Always first. Offered, not required: Cancel
+ * leaves theirs accepted. Shown once, by the shell, over whatever page
+ * the accept was on (the row it came from goes as the ask does).
+ */
+@Composable
+fun ShareBackOffer() {
+    val live = LocalLiveLocation.current ?: return
+    val ship = live.shareBack.collectAsState().value ?: return
+    ShareLocationDialog(
+        listOf(ship), "${shipHandle(ship)} always shares with you. Share where you are with them too?",
+        exactFirst = false, first = ShareLength.Always, onDone = { live.shareBackDone() },
+    )
+}
