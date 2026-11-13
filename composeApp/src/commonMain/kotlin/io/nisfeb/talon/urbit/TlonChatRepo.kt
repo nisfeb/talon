@@ -184,11 +184,14 @@ class TlonChatRepo(
      * contact added, a call's recording notice) failed at once as "slow
      * or out of reach" with the ship fine. A running repo waits for its
      * channel, up to [channelWaitMs]; a stopped one says so at once.
+     * A channel given up (a lost watch, reaped) stays here until the next
+     * pass opens another, and every write on it fails as gone: it is
+     * waited past the same way, not handed out.
      */
     private suspend fun liveChannel(): UrbitChannel {
-        channel?.let { return it }
+        channel?.takeIf { !it.gone }?.let { return it }
         if (!started) error("not connected")
-        return kotlinx.coroutines.withTimeoutOrNull(channelWaitMs) { channelNow.filterNotNull().first() }
+        return kotlinx.coroutines.withTimeoutOrNull(channelWaitMs) { channelNow.filterNotNull().first { !it.gone } }
             ?: error("not connected")
     }
 
@@ -323,6 +326,7 @@ class TlonChatRepo(
         val was = appForegrounded
         appForegrounded = foreground
         if (foreground && !was) {
+            _tryingSinceMs.value = nowMs()
             openWhom?.let { whom -> scope.launch { runCatching { markRead(whom) } } }
         }
     }
@@ -414,9 +418,16 @@ class TlonChatRepo(
     /** The ship's follows, read as a connect reads them. */
     internal suspend fun bootstrapFollowedThreadsForTest() = bootstrapFollowedThreads(channel!!)
 
-    /** When this run began talking to the ship, for "since" while it has never heard from it. */
-    @Volatile var startedMs: Long = nowMs()
-        private set
+    private val _tryingSinceMs = MutableStateFlow(nowMs())
+
+    /**
+     * When this run began talking to the ship, or the app last came back
+     * to the front: the sync status gives a reconnect its grace from here
+     * ([io.nisfeb.talon.ui.syncStatus]). Behind, the OS cuts the stream,
+     * and the app came back already saying "Can't reach" in red of a ship
+     * that was there all along (sneagan's users, 2026-11-08).
+     */
+    val tryingSinceMs: StateFlow<Long> = _tryingSinceMs.asStateFlow()
 
     @Volatile private var heardMs = 0L
 
@@ -444,7 +455,7 @@ class TlonChatRepo(
     fun start(session: UrbitSession) {
         if (started) return
         started = true
-        startedMs = nowMs()
+        _tryingSinceMs.value = nowMs()
         ourPatp = session.ourPatp
         // What a ship serves is learnt once a login, not again on every
         // reconnect: a new login may be another ship, or this one upgraded.
@@ -498,7 +509,7 @@ class TlonChatRepo(
                 h, url,
                 poke = { app, mark, body -> runCatching { pokeRaw(app, mark, body) }.isSuccess },
                 // Chat read nothing without it: read it all again now.
-                onGroups = { forceReconnect() },
+                onGroups = { readAllAgain() },
             )
             if (asked.isNotEmpty()) Log.i(TAG, "added to the ship: ${asked.joinToString()}")
         }
@@ -568,7 +579,12 @@ class TlonChatRepo(
     private suspend fun runSessionLoop(session: UrbitSession) {
         var backoffMs = 2_000L
         var firstRun = true
+        var gaveUpBefore = false
         while (scope.isActive && started) {
+            if (readAllNext) {
+                readAllNext = false
+                firstRun = true
+            }
             val ended = runCatching { runSessionOnce(session, firstRun) }
                 .onFailure { Log.w(TAG, "session iteration ended", it) }
             // A channel the ship reaped is no trouble: the next pass opens a
@@ -584,7 +600,18 @@ class TlonChatRepo(
             firstRun = false
             // Back off exponentially after failures; reset on a normal
             // "stream completed" exit (rare, but polite).
-            backoffMs = if (ok) 2_000L else (backoffMs * 2).coerceAtMost(60_000L)
+            // A channel given up for a watch it lost ended its pass without
+            // an error, so the next began 2 s later with a new channel and
+            // the whole pass again: on a ship timing every watch out, that
+            // every few seconds for as long as it lasted. The first goes
+            // again as soon as ever; a run of them backs off as failures do.
+            val gaveUp = gaveUpWatch.also { gaveUpWatch = false }
+            backoffMs = when {
+                gaveUp && gaveUpBefore -> (backoffMs * 2).coerceAtMost(60_000L)
+                ok || gaveUp -> 2_000L
+                else -> (backoffMs * 2).coerceAtMost(60_000L)
+            }
+            gaveUpBefore = gaveUp
             // Jitter. A ship restart drops every client at the same
             // instant, so a fixed delay brings them all back on the same
             // tick and the ship meets the whole fleet at once.
@@ -602,6 +629,9 @@ class TlonChatRepo(
             if (woken) backoffMs = 2_000L
         }
     }
+
+    /** The pass just ended gave its channel up for a watch it lost ([runSessionLoop]'s backoff). */
+    private var gaveUpWatch = false
 
     private val _loadFailed = MutableStateFlow(false)
 
@@ -738,7 +768,10 @@ class TlonChatRepo(
             Log.i(TAG, "resuming the channel")
             // What came while it was down is replayed: nothing to read again.
             forcedReconnect = false
-            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+            // Through the one drain job, as every drain goes: launched on
+            // the side, a failed one dropped drainJob while the sleeping
+            // chain lived on, and each reconnect added a chain.
+            scheduleDrain(0, wake = true)
         } else {
             Log.i(TAG, "opening channel (firstRun=$firstRun)")
             // Pagination markers are per-(channel, ship). A new channel
@@ -923,6 +956,7 @@ class TlonChatRepo(
                         runCatching { bootstrapDmInvites(ch, notify = !firstRun) }
                             .onFailure { Log.e(TAG, "dm-invites scry failed", it) }
                     }
+                    launch { readBlocked(ch) }
                     // Group invites had no bootstrap at all — refreshInvites ran
                     // only when the Invites screen was opened, so an invite that
                     // arrived while you weren't looking never lit the badge.
@@ -968,7 +1002,7 @@ class TlonChatRepo(
             }
             // The ship is back: what waited for it goes, now that the reading
             // above has reaped any queued channel post that landed after all.
-            pushScope.launch { runCatching { drainQueue() }.onFailure { Log.w(TAG, "queue not sent", it) } }
+            scheduleDrain(0, wake = true)
 
             // Stage two: deep history fill-out. Fires on firstRun only —
             // reconnects already pulled the same window via the small
@@ -1021,6 +1055,7 @@ class TlonChatRepo(
             // next pass makes a new one with every watch. Returned, not
             // streamed, so the deep read launched above still finishes.
             if (ch.gone) {
+                gaveUpWatch = true
                 lastBootstrapMs = 0L
                 // Ended on the ship too: a stream refused as unknown (its
                 // first PUT lost) leaves a channel the pass's later watches
@@ -1083,6 +1118,24 @@ class TlonChatRepo(
      * signed out: the loop then waits on this alone, and a sign-in just
      * after a refused try was dropped, leaving chat asleep.
      */
+    /**
+     * %groups is up on a ship that had none: everything read again, on a
+     * new channel. A resumed channel replays only what streamed, and chat
+     * read nothing without %groups, so forceReconnect alone resumed it and
+     * the list said "Couldn't load your chats." until the app restarted.
+     * Not debounced as that is: a reconnect a moment before, the app coming
+     * to the front, had it skipped.
+     */
+    private fun readAllAgain() {
+        readAllNext = true
+        channel?.deleteSoon(kotlinx.coroutines.CoroutineScope(io.nisfeb.talon.util.ioDispatcher))
+        lastReconnectMs = 0L
+        forceReconnect()
+    }
+
+    /** The next pass reads as a first one does ([readAllAgain]). */
+    @Volatile private var readAllNext = false
+
     fun forceReconnect() {
         val now = nowMs()
         if (!_signedOut.value && now - lastReconnectMs < FORCE_RECONNECT_DEBOUNCE_MS) {
@@ -1586,29 +1639,52 @@ class TlonChatRepo(
         scheduleDrain(pause)
     }
 
-    /** True while the drain job is waiting out its backoff, not yet sending. */
-    @kotlin.concurrent.Volatile private var drainSleeping = false
+    /**
+     * Held to read and set [drainJob] and [drainSleeper]: a reconnect's
+     * wake and a failed drain's handover both found no drain, both
+     * launched one, and the one not kept retried on its own for good.
+     */
+    private val drainSchedule = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    /** The drain job while it waits out its backoff, not yet sending. */
+    private var drainSleeper: Job? = null
 
     /**
      * Drain after [afterMs]. A drain already scheduled stands, unless it is
      * still asleep and [wake] says the ship has answered since.
      */
     private fun scheduleDrain(afterMs: Long, wake: Boolean = false) {
-        val job = drainJob
-        if (job?.isActive == true) {
-            if (!(wake && drainSleeping)) return
-            job.cancel()
-        }
-        drainJob = pushScope.launch {
-            drainSleeping = true
-            try {
-                delay(if (afterMs == 0L) 0L else jittered(afterMs))
-            } finally {
-                drainSleeping = false
+        kotlinx.atomicfu.locks.synchronized(drainSchedule) {
+            val job = drainJob
+            if (job?.isActive == true) {
+                if (!(wake && drainSleeper === job)) return
+                job.cancel()
             }
-            drainQueue()
+            // Started once it is drainJob and the sleeper, so it cannot wake
+            // and send before either says so.
+            val next = pushScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                drainsAlive.update { it + 1 }
+                try {
+                    val self = coroutineContext[Job]
+                    try {
+                        delay(if (afterMs == 0L) 0L else jittered(afterMs))
+                    } finally {
+                        kotlinx.atomicfu.locks.synchronized(drainSchedule) { if (drainSleeper === self) drainSleeper = null }
+                    }
+                    drainQueue()
+                } finally {
+                    drainsAlive.update { it - 1 }
+                }
+            }
+            drainJob = next
+            drainSleeper = next
+            next.start()
         }
     }
+
+    /** Drain jobs alive: one at most, besides one finishing as it hands over. */
+    private val drainsAlive = MutableStateFlow(0)
+    internal val drainsAliveForTest: Int get() = drainsAlive.value
 
     /**
      * Messages queued behind another of their conversation, never sent:
@@ -1725,7 +1801,7 @@ class TlonChatRepo(
             drop()
             return true
         }
-        drainJob = null
+        kotlinx.atomicfu.locks.synchronized(drainSchedule) { drainJob = null }
         stillSlow(t)
         return false
     }
@@ -1806,7 +1882,7 @@ class TlonChatRepo(
 
     suspend fun addContact(ship: String, nickname: String? = null) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "addContact: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "addContact: $ship isn't an address" }
         val name = nickname?.trim()?.takeIf { it.isNotBlank() }
         // Confirmed, both: the screen says the contact was added, and a
         // ship that never answered was that, after its 15 s wait.
@@ -1862,7 +1938,7 @@ class TlonChatRepo(
      */
     suspend fun removeContact(ship: String) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "removeContact: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "removeContact: $ship isn't an address" }
         // Confirmed, as an add is: the screen says they were removed, and
         // a ship that never answered was taken for one that had.
         ch.poke(
@@ -1878,7 +1954,7 @@ class TlonChatRepo(
 
     suspend fun setPetName(ship: String, name: String) {
         val ch = liveChannel()
-        require(ship.startsWith("~")) { "setPetName: $ship isn't a patp" }
+        require(ship.startsWith("~")) { "setPetName: $ship isn't an address" }
         ch.poke(
             app = "contacts",
             mark = "contact-action-1",
@@ -1990,7 +2066,7 @@ class TlonChatRepo(
     suspend fun fetchAdminGroupsLive(): List<AdminGroup> {
         val ch = liveChannel()
         val body = scryNewest(ch, "groups", "/v3/groups", "/v2/groups") as? JsonObject
-            ?: error("The ship's list of groups could not be read.")
+            ?: error("Your Groundwire node's list of groups could not be read.")
         val me = ourPatp
         Log.i(TAG, "fetchAdminGroups: ${body.size} total groups, me=$me")
         // The list is every group whole: %groups encodes each entry of
@@ -2023,7 +2099,7 @@ class TlonChatRepo(
         // out, it vanished from Administration (and lost its Pin) for the
         // five minutes the list is kept. The list we had stays instead.
         parsed.firstOrNull { it.second == null }?.let { (flag, _) ->
-            error("$flag could not be read from the ship. Try again.")
+            error("$flag could not be read from your Groundwire node. Try again.")
         }
 
         val out = ArrayList<AdminGroup>(parsed.size)
@@ -2485,7 +2561,7 @@ class TlonChatRepo(
             val body = runCatching { scryNewest(ch, "groups-ui", "/v10/init", "/v7/init") }
                 .onFailure { Log.w(TAG, "scry groups-ui init failed", it) }
                 .getOrThrow() as? JsonObject
-                ?: error("the ship's answer about invites was not readable")
+                ?: error("your Groundwire node's answer about invites was not readable")
             foreigns = body["foreigns"] as? JsonObject ?: run {
                 Log.w(TAG, "refreshInvites: no foreigns in init response, keys=${body.keys}")
                 _invites.value = emptyList()
@@ -2959,7 +3035,7 @@ class TlonChatRepo(
         ) as? JsonObject
             // No answer is not an empty feed: stored as one, a timed-out
             // refresh replaced what was showing with "No activity yet".
-            ?: error("the ship did not answer for its activity")
+            ?: error("your Groundwire node did not answer for its activity")
         val items = parseActivityFeed(body)
         _activityFeed.value = items
         return items
@@ -3223,7 +3299,7 @@ class TlonChatRepo(
         }
 
         val probe = scryFirstMatching(ch, app, paths, label = "refreshConversation($whom)", memo = "$app/$postsKey")
-        val obj = probe as? JsonObject ?: error("the ship did not send $whom")
+        val obj = probe as? JsonObject ?: error("your Groundwire node did not send $whom")
         val posts = obj[postsKey] as? JsonObject
         if (posts == null) {
             Log.w(TAG, "refreshConversation($whom): no '$postsKey' key; keys=${obj.keys}")
@@ -3303,7 +3379,7 @@ class TlonChatRepo(
         }
 
         val body = scryFirstMatching(ch, app, paths, label = "loadOlder $whom", memo = "$app/$postsKey") as? JsonObject
-            ?: error("the ship did not send older messages of $whom")
+            ?: error("your Groundwire node did not send older messages of $whom")
 
         val posts = body[postsKey] as? JsonObject
         if (posts != null) {
@@ -3460,7 +3536,7 @@ class TlonChatRepo(
             error(
                 if (config.service == "presigned-url") {
                     "%storage is in presigned-url mode with no S3 credentials. " +
-                        "Talon uploads need direct credentials — add them in " +
+                        "Groundwire uploads need direct credentials — add them in " +
                         "Landscape's storage settings, or switch the agent with " +
                         "`:storage &storage-action [%toggle-service %credentials]`."
                 } else {
@@ -3646,7 +3722,7 @@ class TlonChatRepo(
      * on such a post; this is the floor under them.
      */
     private fun requireOnShip(vararg ids: String?) =
-        require(ids.none { it?.startsWith("local_") == true }) { "this message has not reached your ship yet." }
+        require(ids.none { it?.startsWith("local_") == true }) { "this message has not reached your Groundwire node yet." }
 
     /** [m], which the ship never took, gone from here and from the queue. */
     private suspend fun forgetUnsent(m: MessageEntity) {
@@ -3862,7 +3938,7 @@ class TlonChatRepo(
         val prior = runCatching {
             ch.scry("channels", "/v5/$nest/posts/post/${dotAtom(postId)}") as? JsonObject
         }.getOrNull()?.get("essay") as? JsonObject
-            ?: error("The ship did not send the post as it stands, so nothing was changed. Try again.")
+            ?: error("Your Groundwire node did not send the post as it stands, so nothing was changed. Try again.")
         val priorMeta = prior["meta"] as? JsonObject
         val content = MarkdownBlocks.mergeEdit(
             prior = prior["content"] as? JsonArray,
@@ -4877,6 +4953,50 @@ class TlonChatRepo(
     /** Decline a pending DM request: poke `chat-dm-rsvp` with `ok=false`. */
     suspend fun declineDmInvite(ship: String) = rsvpDmInvite(ship, accept = false)
 
+    private val _blockedShips = MutableStateFlow<Set<String>?>(null)
+
+    /** Ships blocked for chats ([blockShip]), as %chat last said; null until read. */
+    val blockedShips: StateFlow<Set<String>?> = _blockedShips.asStateFlow()
+
+    /** Read %chat's blocked list again: a scry, so no event on the ship. */
+    suspend fun refreshBlocked() = readBlocked(liveChannel())
+
+    private suspend fun readBlocked(ch: UrbitChannel) {
+        val body = runCatching { ch.scry("chat", "/blocked") }
+            .onFailure { Log.w(TAG, "chat/blocked scry failed", it) }
+            .getOrNull() as? JsonArray ?: return
+        _blockedShips.value = body.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }.toSet()
+    }
+
+    /**
+     * Block [ship] from reaching us: %chat refuses their DMs from now on
+     * (and tells their ship so, as Tlon does), %trunk ignores their calls,
+     * and a request of theirs is declined. On the repo's scope: leaving
+     * the screen does not stop it halfway. A ship without %trunk still
+     * blocks chats.
+     */
+    suspend fun blockShip(ship: String) = carry {
+        val ch = liveChannel()
+        // The block first: a decline that failed ahead of it left them
+        // not blocked at all.
+        ch.poke(app = "chat", mark = "chat-block-ship", payload = buildJsonObject { put("ship", ship) })
+        // Only onto a list that was read: one ship put on a list not yet
+        // read showed as the whole of it, and everyone else as not blocked.
+        if (_blockedShips.value == null) readBlocked(ch) else _blockedShips.update { it?.plus(ship) }
+        runCatching { ch.poke(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.call.TrunkWire.ACTION_MARK, io.nisfeb.talon.call.TrunkWire.blockAction(ship, true)) }
+            .onFailure { Log.i(TAG, "calls not blocked (no trunk?): ${it.message}") }
+        if (db.dmInvites().has(ship)) rsvpDmInvite(ship, accept = false)
+    }
+
+    /** Undo [blockShip]: chats and calls both. */
+    suspend fun unblockShip(ship: String) = carry {
+        val ch = liveChannel()
+        ch.poke(app = "chat", mark = "chat-unblock-ship", payload = buildJsonObject { put("ship", ship) })
+        _blockedShips.update { it?.minus(ship) }
+        runCatching { ch.poke(io.nisfeb.talon.call.TrunkWire.AGENT, io.nisfeb.talon.call.TrunkWire.ACTION_MARK, io.nisfeb.talon.call.TrunkWire.blockAction(ship, false)) }
+            .onFailure { Log.i(TAG, "calls not unblocked (no trunk?): ${it.message}") }
+    }
+
     private suspend fun rsvpDmInvite(ship: String, accept: Boolean) {
         val ch = liveChannel()
         ch.poke(
@@ -5150,6 +5270,35 @@ class TlonChatRepo(
     // Every level set here is told to %activity as well as kept.
     init {
         (settingsSync as? SettingsSyncImpl)?.levelMirror = { whom, level -> mirrorLevel(whom, level) }
+    }
+
+    private val everyGroupLevel = Mutex()
+
+    /**
+     * Every joined group's notification level set to [level] at once, each
+     * synced and told to %activity as a group's own is. A group already
+     * there, the default included, is skipped: the same tap again sends
+     * nothing, and a ship with sixty groups is asked only for those that
+     * change. On the repo's scope, so leaving Settings midway still sets
+     * them all, and one batch at a time. Channels with a level of their own
+     * keep it. Answers how many groups changed.
+     *
+     * One write per group, not one for the bucket: %settings' only batch
+     * replaces the whole bucket, and would take with it a level another
+     * device set that this one has not heard of yet. A write the ship
+     * does not take is kept and sent again (SettingsSyncImpl's outbox),
+     * so none is lost partway.
+     */
+    suspend fun setEveryGroupLevel(level: String): Int = carry {
+        everyGroupLevel.withLock {
+            val sync = settingsSync ?: error("settings do not sync on this device")
+            val levels = db.notifyPrefs().all().associate { it.whom to it.level }
+            val changing = db.groups().allGroups()
+                .map { io.nisfeb.talon.data.groupLevelKey(it.flag) }
+                .filter { (levels[it] ?: io.nisfeb.talon.data.NotifyLevel.DEFAULT) != level }
+            changing.forEach { sync.setNotifyLevel(it, level) }
+            changing.size
+        }
     }
 
     /**

@@ -35,7 +35,7 @@ class ChannelWaitTest {
     @AfterTest
     fun close() {
         runBlocking { repo.stopAndJoinForTest() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
@@ -67,6 +67,25 @@ class ChannelWaitTest {
         assertEquals("not connected", e?.message)
         assertTrue(System.currentTimeMillis() - started >= 400, "it waited first")
         assertTrue(ship.pokesTo("contacts").isEmpty())
+    }
+
+    // A channel given up (a lost watch, reaped) stayed the one handed out
+    // until the next pass opened another, and every write on it failed as
+    // gone: a queued follow was deleted as refused (review of #99).
+    @Test
+    fun `a write waits past a channel the ship no longer has, and goes on the next`() = live {
+        // Given up, as the session gives one up after a lost watch.
+        val reaped = FakeShip("~zod").channel.also { it.retire() }
+        assertTrue(reaped.gone)
+        repo.startedForTest()
+        repo.attachForTest(reaped, "~zod")
+        val add = async { runCatching { repo.addContact("~bus") } }
+        delay(300)
+        assertTrue(add.isActive, "waiting for a channel that works, not failed on the one gone")
+        repo.attachForTest(ship.channel, "~zod")
+        val done = withTimeout(10_000) { add.await() }
+        assertTrue(done.isSuccess, "${done.exceptionOrNull()}")
+        assertTrue(ship.pokesTo("contacts").isNotEmpty())
     }
 
     @Test

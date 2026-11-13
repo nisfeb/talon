@@ -89,6 +89,6 @@ class CalendarTaskInFlightTest {
         assertEquals(1, repo.pendingTasks.value.size)
         release.complete(Unit)
         until { repo.pendingTasks.value.isEmpty() }
-        assertEquals("The ship did not take \"Buy milk\".", said)
+        assertEquals("Your Groundwire node did not take \"Buy milk\".", said)
     }
 }

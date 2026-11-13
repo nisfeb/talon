@@ -14,7 +14,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
@@ -185,35 +185,35 @@ class BraveLeoCardTest {
 
         answer = { HttpStatusCode.InternalServerError to """{"error":"boom"}""" }
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship refused: boom.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node refused: boom.") }
         assertTrue(onAllNodesWithText("Server endpoint").fetchSemanticsNodes().isEmpty(), "no answer is not the old one")
 
         // Closing and opening again asks again.
         answer = { HttpStatusCode.NotFound to """{"error":"no key yet"}""" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship holds no Armillary key for this device yet.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node holds no Armillary key for this device yet.") }
 
         answer = { HttpStatusCode.NotFound to "" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your Groundwire node.") }
 
         // nginx's page for a ship that is down: no answer, never its HTML.
         answer = { HttpStatusCode.BadGateway to "<html><body>502 Bad Gateway</body></html>" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Try Refresh in a moment.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer. Try Refresh in a moment.") }
         assertTrue(onAllNodesWithText("html", substring = true).fetchSemanticsNodes().isEmpty())
 
         answer = { HttpStatusCode.NotFound to "" }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Armillary is not on your Groundwire node.") }
         answer = { throw java.io.IOException("connection reset") }
         more("Use in Brave Leo")
         more("Use in Brave Leo")
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer. Try Refresh in a moment.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer. Try Refresh in a moment.") }
         assertTrue(seen.all { it.startsWith("GET ") }, seen.toString())
     }
 
@@ -226,7 +226,7 @@ class BraveLeoCardTest {
             runBlocking { it.refresh() }
         }
         show(ai, missing)
-        onNodeWithText("Armillary is not on your ship. Install it from the Apps page.").assertExists()
+        onNodeWithText("Armillary is not on your Groundwire node. Install it from the Apps page.").assertExists()
         assertTrue(onAllNodesWithText("More").fetchSemanticsNodes().isEmpty(), "nothing behind More either")
     }
 }

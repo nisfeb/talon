@@ -44,8 +44,12 @@ import kotlin.test.Test
 /**
  * Renders App Store screenshots headlessly at the exact 6.9" size Apple
  * requires (1320x2868 @3x). Staged demo data only — never a real ship.
- * Run:  ./gradlew :composeApp:desktopTest --tests '*StoreScreenshots*'
+ * Run:  TALON_STORE_SHOTS=1 ./gradlew :composeApp:desktopTest --tests '*StoreScreenshots*'
  * Output: PNG files under build/store-screenshots/
+ *
+ * Only when asked, as GenerateTalonIcons is: it is a renderer, not a
+ * test, and its scene, driven by hand, took writes from other threads
+ * mid-composition, which failed a CI run inside Compose (2026-11-07).
  */
 class StoreScreenshots {
 
@@ -190,6 +194,7 @@ class StoreScreenshots {
 
     @Test
     fun render() {
+        if (System.getenv("TALON_STORE_SHOTS") != "1") return
         val tmp = createTempDirectory(prefix = "talon-shots-").toFile()
         val db = Room.databaseBuilder<AppDatabase>(File(tmp, "shots.db").absolutePath)
             .setDriver(BundledSQLiteDriver())
@@ -214,7 +219,6 @@ class StoreScreenshots {
                 onOpenConversation = {},
                 onOpenSearch = {},
                 onNewMessage = {},
-                onSignOut = {},
                 onOpenSelfProfile = {},
                 onOpenStatusFeed = {},
                 onOpenBookmarks = {},
@@ -281,7 +285,6 @@ class StoreScreenshots {
                 onOpenConversation = {},
                 onOpenSearch = {},
                 onNewMessage = {},
-                onSignOut = {},
                 onOpenSelfProfile = {},
                 onOpenStatusFeed = {},
                 onOpenBookmarks = {},
@@ -311,7 +314,6 @@ class StoreScreenshots {
                         onOpenConversation = {},
                         onOpenSearch = {},
                         onNewMessage = {},
-                        onSignOut = {},
                         onOpenSelfProfile = {},
                         onOpenStatusFeed = {},
                         onOpenBookmarks = {},
@@ -343,7 +345,7 @@ class StoreScreenshots {
             )
         }
 
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db, repo) }
         tmp.deleteRecursively()
     }
 }

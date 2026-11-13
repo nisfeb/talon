@@ -26,7 +26,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import kotlin.test.Test
@@ -387,7 +387,7 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Activity -> "Activity"
     RailItem.Assistant -> "Assistant"
     RailItem.Profile -> "My profile"
-    RailItem.Administration -> "Administration"
+    RailItem.Administration -> "Group Moderation"
     RailItem.Invites -> "Invites"
     RailItem.Actions -> "Actions"
     RailItem.Settings -> "Settings"

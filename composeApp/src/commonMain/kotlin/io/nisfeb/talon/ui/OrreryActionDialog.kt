@@ -125,16 +125,16 @@ fun OrreryActionDialog(
                         proposed && action.kind == "task" -> "Approve adds it to your task list."
                         proposed && event != null -> "Approve puts it on your calendar at that time. You can move it there after."
                         proposed && how != null -> "Approve sends this message $how."
-                        proposed && change != null -> "Approve lets the ship make this change."
-                        proposed -> "Approve accepts it. Talon cannot carry this kind out, so mark it done once you have."
-                        action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "The ship gave no reason." }
+                        proposed && change != null -> "Approve lets your Groundwire node make this change."
+                        proposed -> "Approve accepts it. Groundwire cannot carry this kind out, so mark it done once you have."
+                        action.status == "failed" -> "It did not go through. " + action.note.ifBlank { "Your Groundwire node gave no reason." }
                         // The ship carries it out on its own executor, the
                         // moment the owner approves.
-                        event != null -> "Approved. The ship puts it on your calendar."
-                        how != null -> "Approved. The ship sends it $how."
-                        change != null -> "Approved. The ship makes the change itself."
+                        event != null -> "Approved. Your Groundwire node puts it on your calendar."
+                        how != null -> "Approved. Your Groundwire node sends it $how."
+                        change != null -> "Approved. Your Groundwire node makes the change itself."
                         action.kind == "task" -> "Approved, and on your task list. Tick it there, or mark it done here."
-                        else -> "Approved. Talon cannot carry this kind out. Mark it done once you have."
+                        else -> "Approved. Groundwire cannot carry this kind out. Mark it done once you have."
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -205,7 +205,7 @@ fun OrreryActionDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "The ship rewrites the proposal and shows it here, still waiting for you.",
+                        "Your Groundwire node rewrites the proposal and shows it here, still waiting for you.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -277,7 +277,7 @@ fun OrreryActionDialog(
                                         // or refused.
                                         answer.action?.let { shown = it; refinement = ""; saying = Saying.NOTHING }
                                         refined = when {
-                                            answer.action == null -> answer.note.ifBlank { "The ship would not take that." }
+                                            answer.action == null -> answer.note.ifBlank { "Your Groundwire node would not take that." }
                                             answer.extras.isEmpty() -> answer.note.ifBlank { "Revised." }
                                             // Filed the way any proposal is: under the
                                             // owner's auto list a task can land approved,

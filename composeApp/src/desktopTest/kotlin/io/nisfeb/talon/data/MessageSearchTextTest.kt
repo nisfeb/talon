@@ -44,7 +44,7 @@ class MessageSearchTextTest {
             for (word in listOf("meet", "here", "tomorrow", "~nec", "plans")) assertEquals(listOf("1"), db.find(word), word)
             for (word in listOf("ship", "link", "break", "image", "inline", "href")) assertEquals(emptyList(), db.find(word), word)
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 
@@ -64,7 +64,7 @@ class MessageSearchTextTest {
             for (word in listOf("~nec", "https://x.test/plan", "x.test/plan", long, "Nec", "the plan")) assertEquals(listOf("1"), db.find(word), word)
         } finally {
             io.nisfeb.talon.ui.ShipNames.setResolver(generation) { names(it) }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 
@@ -96,7 +96,7 @@ class MessageSearchTextTest {
             started(db) { while (db.find("https://x.test/plan") != listOf("1")) kotlinx.coroutines.delay(20) }
             assertEquals(listOf("2"), db.find("plain"), "a row with no link or mention keeps what it had")
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
         storedAsBefore("1", "the plan")
         db = db()
@@ -104,7 +104,7 @@ class MessageSearchTextTest {
             started(db) { kotlinx.coroutines.delay(500) }
             assertEquals(emptyList(), db.find("https://x.test/plan"), "once: the second start leaves it")
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 
@@ -128,7 +128,7 @@ class MessageSearchTextTest {
             assertEquals(emptyList(), db.find("ship"))
             assertEquals(listOf("1"), db.find("tomorrow"))
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
         }
     }
 }

@@ -125,6 +125,15 @@ object IosLocationWatch {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, wait * 1_000_000), dispatch_get_main_queue()) { recheck() }
     }
 
+    /** One fix now, sent whatever the minute's rate says: a share starting has no move to wait for. */
+    fun sendNow() = onMain {
+        if (!sharing()) return@onMain
+        askedNow = true
+        manager().requestLocation()
+    }
+
+    private var askedNow = false
+
     private fun recheck() {
         if (liveUntil() != null) return
         scope.launch {
@@ -134,11 +143,16 @@ object IosLocationWatch {
     }
 
     private fun take(loc: CLLocation) {
-        val now = nowMs()
-        if (!fixDue(lastSentMs, now, fast = liveUntil() != null)) return
-        lastSentMs = now
+        val nowMs = nowMs()
+        val asked = askedNow
+        askedNow = false
+        if (!asked && !fixDue(lastSentMs, nowMs, fast = liveUntil() != null)) return
+        lastSentMs = nowMs
         val (lat, lon) = loc.coordinate.useContents { latitude to longitude }
-        val fix = LocationFix(lat, lon, loc.horizontalAccuracy.takeIf { it >= 0 } ?: MAX_MATCH_M, (loc.timestamp.timeIntervalSince1970 * 1000).toLong())
+        // Asked for now, it is where the owner is now: iOS may hand back
+        // a kept fix under its old time, which the ship reads as old.
+        val at = (loc.timestamp.timeIntervalSince1970 * 1000).toLong().let { if (asked && !io.nisfeb.talon.ui.freshFix(it, nowMs)) nowMs else it }
+        val fix = LocationFix(lat, lon, loc.horizontalAccuracy.takeIf { it >= 0 } ?: MAX_MATCH_M, at)
         // A wake gives the app seconds; a background task asks for the time the send takes.
         val app = UIApplication.sharedApplication
         var task = UIBackgroundTaskInvalid

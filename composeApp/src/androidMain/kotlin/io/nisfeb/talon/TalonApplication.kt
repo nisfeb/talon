@@ -452,6 +452,10 @@ class TalonApplication : Application() {
      * and its notices are this repo's own, since a dying repo still hears
      * for a moment after a switch.
      */
+    /** Who can reach the owner, and when, read as each alert comes. The first ship is built before the settings are. */
+    fun reach(): io.nisfeb.talon.ui.ReachSettings =
+        if (::uiSettings.isInitialized) uiSettings.reach.value else io.nisfeb.talon.ui.ReachSettings()
+
     private fun listenForAlerts(ship: String, shipRepo: TlonChatRepo, shipDb: AppDatabase) {
         val notices = io.nisfeb.talon.notify.NoticeRepo(shipDb.notices(), appScope)
         suspend fun names() = runCatching { kotlinx.coroutines.withTimeoutOrNull(5_000) { shipDb.contactMapNow() } }.getOrNull()
@@ -461,6 +465,7 @@ class TalonApplication : Application() {
                 // On screen is the chat open in front, for the ship signed in now.
                 val onScreen = ship == _activeShip.value && m.whom in io.nisfeb.talon.notify.ShownConversation.keys
                 if (!shipDb.messageAlerts(m, replyToUs, heard, ship, onScreen)) return@launch
+                if (!io.nisfeb.talon.ui.messageReaches(reach(), m.author, io.nisfeb.talon.ui.localMinuteOfDay())) return@launch
                 val names = names()
                 val preview = io.nisfeb.talon.urbit.StoryCache.previewFor(m).replace('\n', ' ').take(160)
                 Notifications.showMessage(
@@ -483,6 +488,8 @@ class TalonApplication : Application() {
                     "dm:$from", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "dm-request",
                     name, "wants to message you", "dm:$from",
                 )
+                // Held, not dropped: it still waits under Requests, and in the notices.
+                if (!io.nisfeb.talon.ui.requestReaches(reach(), from, from in shipRepo.bookContacts.value, io.nisfeb.talon.ui.localMinuteOfDay())) return@launch
                 Notifications.showMessage(
                     context = this@TalonApplication, whom = from, forShip = ship, postId = from, parentId = null,
                     title = name, body = "wants to message you", sentMs = System.currentTimeMillis(),
@@ -499,6 +506,8 @@ class TalonApplication : Application() {
                     "invite:${invite.flag}", io.nisfeb.talon.notify.NoticeRepo.DOMAIN_CHAT, "group-invite",
                     title, "invited you to a group$from", "invite:${invite.flag}",
                 )
+                // Quiet hours hold an invite too, but a favourite's; it still waits under Invites.
+                if (!io.nisfeb.talon.ui.messageReaches(reach(), invite.inviter.orEmpty(), io.nisfeb.talon.ui.localMinuteOfDay())) return@launch
                 Notifications.showMessage(
                     context = this@TalonApplication, whom = "invite:${invite.flag}", forShip = ship, postId = null, parentId = null,
                     title = title, body = "invited you to a group$from", sentMs = System.currentTimeMillis(),

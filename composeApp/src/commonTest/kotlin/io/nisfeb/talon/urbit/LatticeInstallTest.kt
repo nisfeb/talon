@@ -142,7 +142,12 @@ class LatticeInstallTest {
     }
 
     /** A ship's Grubbery, with or without its shell, for [LatticeInstall.grubbery]. */
-    private class Shell(var here: Boolean, var synced: Boolean = false, var pendingAsks: Boolean = false) {
+    private class Shell(
+        var here: Boolean,
+        var synced: Boolean = false,
+        var pendingAsks: Boolean = false,
+        var stock: String = """[{"name":"lattice","setup":"boot"},{"name":"auspex","setup":"boot"},{"name":"hatchery","setup":"offer"}]""",
+    ) {
         val posts = mutableListOf<String>()
         val cookies = mutableListOf<String?>()
         val http = HttpClient(MockEngine { req ->
@@ -150,9 +155,9 @@ class LatticeInstallTest {
             if (req.method == io.ktor.http.HttpMethod.Post) { posts += path; cookies += req.headers["Cookie"] }
             when {
                 !here -> respond("", HttpStatusCode.NotFound)
-                path.endsWith("/desks/sync-defaults") -> { synced = true; respond("syncing") }
+                path.endsWith("/desks/sync") || path.endsWith("/desks/add") -> { synced = true; respond("syncing") }
                 path.endsWith("/desks/stock") -> respond(
-                    """[{"name":"lattice","synced":$synced},{"name":"auspex","synced":$synced}]""",
+                    stock.replace("\"setup\"", "\"synced\":$synced,\"setup\""),
                     headers = io.ktor.http.headersOf("Content-Type", "application/json"),
                 )
                 path.endsWith("/asks.json") -> respond(if (pendingAsks) """[{"app":"/apps/x","poke":[{"road":"/sys/eyre/"}],"peek":[],"make":[]}]""" else "[]")
@@ -171,8 +176,8 @@ class LatticeInstallTest {
         val install = LatticeInstall.grubbery(shell.http, { "https://ship" }, cookie = { "session=placeholder" }, answers = { shell.synced }) { _, _, _ -> poked = true; true }
         assertTrue(install().isSuccess)
         assertEquals(false, poked, "kiln was not asked for grubbery")
-        assertEquals(listOf("/apps/grubbery/desks/sync-defaults"), shell.posts)
-        assertEquals(listOf<String?>("session=placeholder"), shell.cookies, "the shell is asked as its owner")
+        assertEquals(listOf("/apps/grubbery/desks/sync", "/apps/grubbery/desks/sync"), shell.posts, "lattice and auspex, by name")
+        assertEquals(listOf<String?>("session=placeholder", "session=placeholder"), shell.cookies, "the shell is asked as its owner")
     }
 
     @Test
@@ -187,7 +192,7 @@ class LatticeInstallTest {
         assertTrue(install().isSuccess)
         assertEquals("kiln-install", asked?.second)
         assertEquals(LatticeInstall.DESK, (asked?.third as JsonObject)["desk"]?.jsonPrimitive?.content)
-        assertEquals(listOf("/apps/grubbery/desks/sync-defaults"), shell.posts)
+        assertEquals(listOf("/apps/grubbery/desks/sync", "/apps/grubbery/desks/sync"), shell.posts)
     }
 
     // A fetched desk answers nothing until the owner approves what it
@@ -237,5 +242,22 @@ class LatticeInstallTest {
         })
         LatticeInstall.addDesk(http, "https://ship", "furum", cookie = "session=x").getOrThrow()
         assertEquals(listOf("POST /apps/grubbery/desks/add session=x"), sent)
+    }
+
+    // Install all brought every desk the shell offers, twenty apps nobody
+    // asked for: only the defaults are asked for, by name.
+    @Test
+    fun `an offered desk is never installed, and nothing asks for all`() = runTest {
+        val shell = Shell(here = true)
+        assertTrue(LatticeInstall.syncStock(shell.http, "https://ship", null).isSuccess)
+        assertTrue(shell.posts.none { "sync-defaults" in it })
+        assertEquals(2, shell.posts.size, "lattice and auspex, not the hatchery")
+    }
+
+    @Test
+    fun `a shell whose list has no lattice gets it from the publisher`() = runTest {
+        val shell = Shell(here = true, stock = """[{"name":"hatchery","setup":"offer"}]""")
+        assertTrue(LatticeInstall.syncStock(shell.http, "https://ship", null).isSuccess)
+        assertEquals(listOf("/apps/grubbery/desks/add"), shell.posts)
     }
 }

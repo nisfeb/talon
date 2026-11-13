@@ -107,7 +107,7 @@ class VideoFrameChurnTest {
     // redraw counter 0 over 0. A sparse sender stayed black that long.
     @OptIn(androidx.compose.ui.test.ExperimentalTestApi::class)
     @Test
-    fun `a tile draws its first frame without waiting for a second`() = androidx.compose.ui.test.runComposeUiTest {
+    fun `a tile draws its first frame without waiting for a second`() = androidx.compose.ui.test.v2.runComposeUiTest {
         // The silent audio module: CI has no sound devices, and the default one threw there.
         val audio = dev.onvoid.webrtc.media.audio.AudioDeviceModule(dev.onvoid.webrtc.media.audio.AudioLayer.kDummyAudio)
         val factory = dev.onvoid.webrtc.PeerConnectionFactory(audio)

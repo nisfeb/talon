@@ -42,11 +42,15 @@ import kotlinx.serialization.json.JsonObject
  * by grubbery's own rule on its permits page: an app is pending when it
  * has no approval, or when what it asks for now (its poke, peek and make
  * roads) is not what was approved. [asks] is `asks.json`, [approved] is
- * `approved.json`.
+ * `approved.json`. A road naming the shell by its old spelling,
+ * /apps/shell.shell, is the same road at /apps/shell, as the permits
+ * page reads it: approvals from before the shell moved still spell it so.
  */
 internal fun pendingPermitApps(asks: JsonArray, approved: JsonObject): List<String> {
+    val oldShell = Regex("^/apps/shell\\.shell(?=/|$)")
     fun roads(e: JsonElement?): List<String> = (e as? JsonArray).orEmpty()
-        .map { (it as? JsonObject)?.get("road").asText() ?: it.asText().orEmpty() }.sorted()
+        .map { (it as? JsonObject)?.get("road").asText() ?: it.asText().orEmpty() }
+        .map { oldShell.replace(it, "/apps/shell") }.sorted()
     return asks.mapNotNull { a ->
         val ask = a as? JsonObject ?: return@mapNotNull null
         val app = ask["app"].asText() ?: return@mapNotNull null

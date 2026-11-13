@@ -5,7 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -127,7 +127,7 @@ class MailListTest {
         repo.attach("https://ship.example")
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Install Grubbery").fetchSemanticsNodes().isNotEmpty() }
         onNodeWithText("Install Grubbery").performClick()
-        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Your ship did not answer", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Your Groundwire node did not answer", substring = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(onAllNodesWithText("Connection refused", substring = true).fetchSemanticsNodes().isEmpty())
     }
 
@@ -146,7 +146,7 @@ class MailListTest {
         repo.attach("https://ship.example")
         waitUntil(timeoutMillis = 5_000) {
             runCatching {
-                onNodeWithText("Mail runs in Grubbery, which this ship does not have yet.")
+                onNodeWithText("Mail runs in Grubbery, which this node does not have yet.")
                     .assertIsDisplayed()
                 true
             }.getOrDefault(false)

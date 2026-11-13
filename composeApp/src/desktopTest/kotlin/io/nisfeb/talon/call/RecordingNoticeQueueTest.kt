@@ -50,7 +50,7 @@ class RecordingNoticeQueueTest {
     @AfterTest
     fun close() {
         runBlocking { repo.stopAndJoinForTest() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         dir.deleteRecursively()
     }
 

@@ -110,7 +110,7 @@ enum class LateMove(val label: String, val what: String) { DONE("Done", "Done"),
 
 /** Why [what] on an action did not go through, in a line: on the Actions page, and in place of the push it was tapped on. */
 fun markProblemLine(what: String, e: Throwable): String = "$what did not go through: " + when (e) {
-    is OrreryError.Unreachable -> "your ship did not answer. Try it again."
+    is OrreryError.Unreachable -> "your Groundwire node did not answer. Try it again."
     is OrreryError.Refused -> (io.nisfeb.talon.util.readableReason(e.reason) ?: "Orrery gave no reason") + "."
     else -> (io.nisfeb.talon.util.readableReason(e.message) ?: "something went wrong") + "."
 }
@@ -127,7 +127,7 @@ suspend fun OrreryApi.lateMove(id: String, move: LateMove): String? = try {
         LateMove.SNOOZE -> snooze(null, id, SNOOZE_MINUTES)
         LateMove.DONE -> {
             val a = actions(null).firstOrNull { it.id == id }
-            if (a != null && a.shipCarriesOut) return "Open Talon to answer this one: the ship carries it out."
+            if (a != null && a.shipCarriesOut) return "Open Groundwire to answer this one: your node carries it out."
             if (a != null) finish(null, id, proposed = a.status == "proposed")
         }
     }
@@ -196,7 +196,7 @@ const val FAILURES_SHOWN_MS = 7L * 24 * 60 * 60 * 1000
 fun failureNotification(a: OrreryAction) = ActionNotification(
     "failed:${a.id}",
     "Did not go through: ${a.title.ifBlank { a.kind }}",
-    a.note.ifBlank { "The ship gave no reason." },
+    a.note.ifBlank { "Your Groundwire node gave no reason." },
 )
 
 /**

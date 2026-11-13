@@ -118,12 +118,12 @@ internal fun uploadFailureLine(memex: Throwable?, storage: Throwable?): String {
     val own = when {
         storage == null || storage.message.orEmpty().startsWith("no %storage") -> null
         status(storage) == 401 || status(storage) == 403 ->
-            "your ship's storage turned down its keys (see Storage in Landscape's settings)"
-        io.nisfeb.talon.util.isTransientNetworkError(storage) -> "your ship's storage didn't answer"
-        else -> "your ship's storage couldn't take it"
+            "your Groundwire node's storage turned down its keys (see Storage in Landscape's settings)"
+        io.nisfeb.talon.util.isTransientNetworkError(storage) -> "your Groundwire node's storage didn't answer"
+        else -> "your Groundwire node's storage couldn't take it"
     }
     val why = listOfNotNull(hosting, own)
-    return if (why.isEmpty()) "The upload didn't go through: this ship has no image storage set up."
+    return if (why.isEmpty()) "The upload didn't go through: this Groundwire node has no image storage set up."
     else "The upload didn't go through: ${why.joinToString(", and ")}."
 }
 

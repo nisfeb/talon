@@ -8,7 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.sun.net.httpserver.HttpServer
@@ -305,7 +305,7 @@ class AssistantScreenTest {
             stall.countDown()
             runBlocking { sessionScope.coroutineContext.job.cancelAndJoin() }
             server.stop(0)
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -396,7 +396,12 @@ class AssistantScreenTest {
         ask("and the next one?")
         waitUntil(timeoutMillis = 10_000) { shows("It is on Thursday now.") }
         val last = asked.last()
-        assertTrue("when is the book club?" !in last, "a new conversation carries none of the old: ${last.take(400)}")
+        // Where the old words sat, if they did: once in ten CI runs they
+        // came back, and the first 400 characters (the tools) said nothing.
+        val at = last.indexOf("when is the book club?")
+        assertTrue(at < 0, "a new conversation carries none of the old: request ${asked.size} of ${asked.size}, around it: " +
+            last.substring(maxOf(0, at - 300), minOf(last.length, at + 200)) +
+            " | each request's last words: " + asked.map { it.takeLast(120) })
     }
 
     // ─── what it does, and what it had said ───────────────────────
@@ -692,9 +697,9 @@ class AssistantScreenTest {
     fun `a change the ship never answers is said to be unknown`() = assistant(withOrrery = true) {
         bodies[jax] = mutableListOf(jaxNeeds("park at JAX"))
         observeDown = true
-        answer = "Your ship did not answer."
+        answer = "Your Groundwire node did not answer."
         changeNeeds()
-        waitUntil(timeoutMillis = 15_000) { shows("Your ship did not answer.") }
+        waitUntil(timeoutMillis = 15_000) { shows("Your Groundwire node did not answer.") }
         assertTrue("may or may not have taken it" in toolSaid(), toolSaid())
     }
 

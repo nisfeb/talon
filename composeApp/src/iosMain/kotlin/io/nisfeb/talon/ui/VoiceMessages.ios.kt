@@ -196,7 +196,7 @@ actual fun VoiceRecordButton(
                         // Android says this with a Toast; silence here
                         // reads as a dead button.
                         !granted -> showVoiceAlert(
-                            "Talon needs microphone access to record a voice message. You can turn it on in Settings.",
+                            "Groundwire needs microphone access to record a voice message. You can turn it on in Settings.",
                         )
                         recorder.start() -> recording = true
                         else -> showVoiceAlert("Couldn't start the recorder.")

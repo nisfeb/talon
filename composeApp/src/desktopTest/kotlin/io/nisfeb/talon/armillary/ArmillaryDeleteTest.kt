@@ -10,7 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -177,7 +177,7 @@ class ArmillaryDeleteTest {
     fun `the warning says what goes, what stops and what is lost`() {
         val a = accountOf(kotlinx.serialization.json.Json.parseToJsonElement(funded) as kotlinx.serialization.json.JsonObject)
         assertEquals(
-            "~wex deletes everything it holds for your ship: the account, its ledger, its checkouts and its keys. " +
+            "~wex deletes everything it holds for your Groundwire node: the account, its ledger, its checkouts and its keys. " +
                 "Your subscription stops now. The $12.35 left on it is lost. " +
                 "Stripe and BTCPay Server keep their own records of your payments. This cannot be undone.",
             deleteAccountWarning(a),

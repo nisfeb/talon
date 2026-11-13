@@ -259,9 +259,13 @@ class Loops(
             }.getOrDefault(LatticeMind.NONE)
         }
 
-        /** [memory] as far as it has got: a slow ship's lattice is not waited for past a spoken question's wait. */
+        /**
+         * [memory] as far as it has got: a slow ship's lattice is not waited
+         * for past a spoken question's wait. Spoken ([LatticeMind.spoken]):
+         * the voice skill index, not the whole one.
+         */
         private suspend fun recalled(): LatticeMind =
-            kotlinx.coroutines.withTimeoutOrNull(LatticeMind.SPOKEN_WAIT_MS) { memory.await() } ?: LatticeMind.NONE
+            (kotlinx.coroutines.withTimeoutOrNull(LatticeMind.SPOKEN_WAIT_MS) { memory.await() } ?: LatticeMind.NONE).spoken()
 
         private val contacts = run.async {
             val db = getDb()

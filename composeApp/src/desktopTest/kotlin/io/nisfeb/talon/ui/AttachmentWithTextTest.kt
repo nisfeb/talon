@@ -6,7 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
@@ -72,6 +72,7 @@ class AttachmentWithTextTest {
             .setDriver(BundledSQLiteDriver())
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
+        val repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http, base = it.shipUrl) } }
         try {
             runComposeUiTest {
                 lateinit var state: ComposerState
@@ -81,7 +82,7 @@ class AttachmentWithTextTest {
                         state = rememberComposerState("~zod", drafts)
                         ChatComposer(
                             state = state, db = db,
-                            repo = TlonChatRepo(db).also { r -> ship?.let { r.attachForTest(it.channel, "~zod", http = it.http, base = it.shipUrl) } },
+                            repo = repo,
                             http = createAppHttpClient(),
                             drafts = drafts, whom = "~zod", contactMap = ContactMap.EMPTY, allShips = emptyList(),
                             canSend = true, hideComposerButtons = true, focusOnOpen = false, strategy = strategy,
@@ -99,7 +100,7 @@ class AttachmentWithTextTest {
                 block(state)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -216,12 +217,12 @@ class AttachmentWithTextTest {
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
         val events = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { ship.channel.events().collect {} }
+        val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
         try {
             runComposeUiTest {
                 var shown by androidx.compose.runtime.mutableStateOf(true)
                 lateinit var state: ComposerState
                 val drafts = InMemoryDraftStore()
-                val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
                 setContent {
                     TalonTheme(darkTheme = false) {
                         if (shown) {
@@ -251,7 +252,7 @@ class AttachmentWithTextTest {
             }
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -279,8 +280,8 @@ class AttachmentWithTextTest {
         // The screen's scope, like uploadOne's callers use. Cancelled when the
         // user leaves the chat.
         val screen = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
         try {
-            val repo = TlonChatRepo(db).also { it.attachForTest(ship.channel, "~zod", http = ship.http, base = ship.shipUrl) }
             val file = DroppedFile("cat.png", "image/png", byteArrayOf(1, 2, 3, 4))
             screen.launch { uploadDroppedFile(file, repo, strategy) }
             // Let the upload reach the slow PUT, then leave the chat.
@@ -293,7 +294,7 @@ class AttachmentWithTextTest {
         } finally {
             screen.coroutineContext[kotlinx.coroutines.Job]?.cancel()
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }

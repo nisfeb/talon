@@ -368,7 +368,7 @@ class AuspexApi(
  */
 internal fun bodyAsReason(text: String, max: Int): String = when {
     text.isBlank() -> "no reason given"
-    text.trimStart().startsWith("<") -> "the ship answered with an error page"
+    text.trimStart().startsWith("<") -> "the node answered with an error page"
     else -> text.take(max)
 }
 
@@ -379,16 +379,16 @@ sealed class AuspexError(message: String, cause: Throwable? = null) : Exception(
 
     /** The ship answered and the answer was unreadable. It did receive
      *  the request, which is the part worth reporting. */
-    class Garbled(cause: Throwable) : AuspexError("unreadable answer from the ship", cause)
+    class Garbled(cause: Throwable) : AuspexError("unreadable answer from the node", cause)
 
     /** Nothing came back at all; [down] when the web server in front of the ship said it is not there. */
-    class Unreachable(cause: Throwable, val down: Boolean = false) : AuspexError(if (down) "the ship is not answering" else "no answer from the ship", cause)
+    class Unreachable(cause: Throwable, val down: Boolean = false) : AuspexError(if (down) "the node is not answering" else "no answer from your Groundwire node", cause)
 
     /** What this says to the person waiting on it. */
     fun said(): String = when (this) {
         is Refused -> reason
-        is Garbled -> "The ship answered something we could not read."
-        is Unreachable -> if (down) "Your ship isn't answering. It may be restarting." else "No answer from the ship."
+        is Garbled -> "Your Groundwire node answered something we could not read."
+        is Unreachable -> if (down) "Your Groundwire node isn't answering. It may be restarting." else "No answer from the node."
     }
 }
 

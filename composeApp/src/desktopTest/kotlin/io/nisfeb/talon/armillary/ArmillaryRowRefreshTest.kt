@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -39,6 +40,9 @@ class ArmillaryRowRefreshTest {
     @Volatile private var noKey = false
     /** The vendor the ship buys from; blank for one that buys from none, which a device does not adopt. */
     @Volatile private var vendor = "~nisfeb"
+    /** Holds the next inference read, which then answers "no key": a read sent before a key was taken, answered after it. */
+    @Volatile private var staleGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+    private val heldRead = java.util.concurrent.atomic.AtomicBoolean(false)
     /** Checks of the ship that answer nginx's page before armillary answers. */
     private val downFor = AtomicInteger(0)
     private val inferenceReads = AtomicInteger()
@@ -52,6 +56,10 @@ class ArmillaryRowRefreshTest {
         when {
             path.endsWith("/apps/armillary/api/account") && downFor.getAndDecrement() > 0 ->
                 respond("<html><body>502 Bad Gateway</body></html>", HttpStatusCode.BadGateway)
+            path.endsWith("/apps/armillary/api/inference") && staleGate != null && heldRead.compareAndSet(false, true) -> {
+                staleGate!!.await()
+                respond("""{"error":"no key yet"}""", HttpStatusCode.NotFound, json)
+            }
             path.endsWith("/apps/armillary/api/inference") -> {
                 inferenceReads.incrementAndGet()
                 if (failing) respond("", HttpStatusCode.InternalServerError)
@@ -167,6 +175,24 @@ class ArmillaryRowRefreshTest {
         assertEquals("lease.key", ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.apiKey, "a key read again goes back on")
     }
 
+    // A refresh's read, sent before this device took its key and answered
+    // "no key" after it, took the new key off the row, and nothing asked
+    // again: the device sat unkeyed (CI, 2026-11-07).
+    @Test
+    fun `a no-key answer to a read sent before a key was taken leaves that key`() = rig(everyMs = 3_600_000) { repo, ai ->
+        kotlinx.coroutines.coroutineScope {
+            val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+            staleGate = gate
+            val reading = async { repo.refresh() }
+            withTimeout(5_000) { while (!heldRead.get()) delay(10) }
+            repo.readInference().getOrThrow()
+            gate.complete(Unit)
+            reading.await()
+        }
+        assertEquals("lease.key", ai.state.value.savedProfile!!.provider(ARMILLARY_PROVIDER)!!.apiKey)
+        assertTrue(repo.inference.value != null, "the card still says Connected")
+    }
+
     // A 502 while the ship restarted left the card "Checking your ship"
     // all session, and nothing adopted the ship's account.
     @Test
@@ -207,8 +233,8 @@ class ArmillaryRowRefreshTest {
 
     @Test
     fun `a failed check is said plainly, and that it is asked again`() {
-        assertEquals("Your ship did not answer. Talon asks again by itself.", checkProblemLine(ArmillaryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))))
-        assertEquals("Armillary on your ship could not answer: busy. Talon asks again by itself.", checkProblemLine(ArmillaryError.Refused(500, "busy")))
+        assertEquals("Your Groundwire node did not answer. Groundwire asks again by itself.", checkProblemLine(ArmillaryError.Unreachable(io.nisfeb.talon.orrery.ProxyAnswered(502))))
+        assertEquals("Armillary on your Groundwire node could not answer: busy. Groundwire asks again by itself.", checkProblemLine(ArmillaryError.Refused(500, "busy")))
     }
 
     @Test

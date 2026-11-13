@@ -174,8 +174,8 @@ class OrreryViewStore(
  * and an uninstalled Orrery among them.
  */
 fun readProblemLine(e: Throwable): String = when {
-    e is OrreryError.Unreachable -> "Your ship did not answer"
-    e is OrreryError.Refused && e.status == 404 -> "Orrery is not on your ship now"
+    e is OrreryError.Unreachable -> "Your Groundwire node did not answer"
+    e is OrreryError.Refused && e.status == 404 -> "Orrery is not on your Groundwire node now"
     isKeyRefused(e) -> "Orrery no longer takes this device's key"
     e is OrreryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)?.let { "Orrery could not be read: $it" } ?: "Orrery could not be read"
     e is OrreryError.Garbled -> "Orrery's answer could not be read"

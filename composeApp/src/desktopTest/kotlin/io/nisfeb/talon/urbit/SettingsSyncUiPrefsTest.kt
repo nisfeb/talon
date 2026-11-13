@@ -25,6 +25,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -46,7 +47,7 @@ class SettingsSyncUiPrefsTest {
     @AfterTest
     fun close() {
         runBlocking { watchers.coroutineContext.job.cancelAndJoin() }
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
     }
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
@@ -105,6 +106,92 @@ class SettingsSyncUiPrefsTest {
         ui.setPowerFeaturesEnabled(ui.powerFeaturesEnabled.value)
         delay(300)
         assertEquals(sent, pushed("power-features").size, "the same value again is not a change")
+    }
+
+    // Bubbles or rows is a taste, not a screen size, so it travels. The
+    // body is %settings' own: the value a cord of JSON, as Tlon writes it.
+    @Test
+    fun `rows chosen here go up as the ship's own body`() = live {
+        watching()
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"chat-bubbles","value":"{\"enabled\":false}"}}""",
+            pushed("chat-bubbles").single(),
+        )
+    }
+
+    // Who can reach the owner travels (2026-11-08): the same favourites and
+    // quiet hours on every device, and the relay reads it for an iPhone.
+    @Test
+    fun `who can reach you goes up whole, and from another device is taken, not sent back`() = live {
+        watching()
+        ui.setReach(io.nisfeb.talon.ui.ReachSettings(
+            whoCanMessage = io.nisfeb.talon.ui.WhoCanMessage.Added,
+            favourites = setOf("~nec"),
+            quiet = io.nisfeb.talon.ui.QuietHours(on = true, fromMin = 1320, toMin = 420, zone = "America/New_York", offsetMin = -300),
+        ))
+        settled { pushed("reach").isNotEmpty() }
+        assertEquals(
+            """{"put-entry":{"desk":"talon","bucket-key":"ui-prefs","entry-key":"reach","value":"{\"whoCanMessage\":\"Added\",\"favourites\":[\"~nec\"],\"quiet\":{\"on\":true,\"fromMin\":1320,\"toMin\":420,\"zone\":\"America/New_York\",\"offsetMin\":-300}}"}}""",
+            pushed("reach").single(),
+        )
+        arrives("reach", """{"whoCanMessage":"Anyone","favourites":["~wes"],"quiet":{"on":false,"fromMin":1320,"toMin":420,"zone":""}}""")
+        settled { ui.reach.value.favourites == setOf("~wes") }
+        assertEquals(io.nisfeb.talon.ui.WhoCanMessage.Anyone, ui.reach.value.whoCanMessage)
+        arrives("reach", """{"whoCanMessage":"Nobody"}""")
+        delay(300)
+        assertEquals(setOf("~wes"), ui.reach.value.favourites, "what this build cannot read changes nothing")
+        assertEquals(1, pushed("reach").size, "applying is not an edit")
+    }
+
+    // Groups had a List or Cards choice that travelled, until 2026-11-08.
+    // An older device still sends it: it is let be, and never sent.
+    @Test
+    fun `an older device's List or Cards choice for groups changes nothing and is not sent back`() = live {
+        watching()
+        arrives("group-cards", """{"enabled":false}""")
+        delay(300)
+        assertTrue(pushed("group-cards").isEmpty(), "${ship.pokesTo("settings")}")
+    }
+
+    @Test
+    fun `rows chosen on another device are taken here and not sent back`() = live {
+        watching()
+        arrives("chat-bubbles", """{"enabled":false}""")
+        settled { !ui.chatBubbles.value }
+        arrives("chat-bubbles", """{"enabled":"yes"}""")
+        delay(300)
+        assertFalse(ui.chatBubbles.value, "nonsense changes nothing")
+        assertTrue(pushed("chat-bubbles").isEmpty(), "applying is not an edit: ${pushed("chat-bubbles")}")
+    }
+
+    // Recent searches are this device's alone (sneagan, 2026-11-05).
+    @Test
+    fun `recent searches never go to the ship`() = live {
+        watching()
+        ui.setRecentSearches(listOf("from:~nec lunch"))
+        // A change made after is heard going up, so the searches had their chance.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "lunch" in it }, "$sent")
+    }
+
+    // The picture behind the bubbles is this device's: it never goes up,
+    // and the colour 1.8.40-rc2 sent up is no setting any more.
+    @Test
+    fun `the background picture never goes to the ship, and an old background colour changes nothing`() = live {
+        watching()
+        ui.setChatBackgroundImage("/kept/a.img")
+        // A change made after is heard going up, so the picture had its chance.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        val sent = ship.pokesTo("settings").map { it.json.toString() } + ship.requests
+        assertTrue(sent.none { "kept/a.img" in it || "chat-background" in it }, "$sent")
+        arrives("chat-background", """{"value":"#123456"}""")
+        delay(300)
+        assertEquals("/kept/a.img", ui.chatBackgroundImage.value)
     }
 
     // ─── fonts ────────────────────────────────────────────────────

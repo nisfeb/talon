@@ -19,7 +19,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.call.CallController
@@ -106,7 +106,7 @@ class GroupAdminScreenTest {
         } finally {
             calls?.stop()
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -140,7 +140,7 @@ class GroupAdminScreenTest {
         writers?.let { ship.scries["channels/v5/$nest/perm"] = """{"writers":$it,"group":"$flag"}""" }
         onNodeWithText("Settings").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Who can post") }
-        waitUntil(timeoutMillis = 5_000) { !shows("Asking your ship…") }
+        waitUntil(timeoutMillis = 5_000) { !shows("Asking your Groundwire node…") }
     }
 
     private fun ComposeUiTest.toggle(label: String) = onNode(isToggleable() and hasText(label))
@@ -270,7 +270,7 @@ class GroupAdminScreenTest {
         ship.refuse = { if (it.app == "channels") "not an admin" else null }
         openGeneral(ship)
         toggle("Everyone in the group can post").performClick()
-        waitUntil(timeoutMillis = 5_000) { says("Your ship did not take it") }
+        waitUntil(timeoutMillis = 5_000) { says("Your Groundwire node did not take it") }
     }
 
     @Test
@@ -297,7 +297,7 @@ class GroupAdminScreenTest {
             )
         } finally {
             events.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
@@ -430,7 +430,7 @@ class GroupAdminScreenTest {
 
     @Test
     fun `an invite goes to the ship typed`() = admin { ship ->
-        onNode(hasSetTextAction() and hasText("~ship, or a word name")).performTextInput("~bus")
+        onNode(hasSetTextAction() and hasText("~address, or a word name")).performTextInput("~bus")
         val invite = pressFor(ship, "Invite", n = 1)
         assertTrue("~bus" in invite, invite)
     }

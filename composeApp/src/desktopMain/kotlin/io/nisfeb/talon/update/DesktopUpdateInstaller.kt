@@ -97,9 +97,9 @@ class DesktopUpdateInstaller(
     private val flavor = desktopUpdateFlavor(appImagePath, osName)
 
     override val readyHint: String = when {
-        flavor == DesktopUpdateFlavor.AppImage -> "Verified — Talon will restart into it."
+        flavor == DesktopUpdateFlavor.AppImage -> "Verified — Groundwire will restart into it."
         flavor == DesktopUpdateFlavor.Msi && appPath != null ->
-            "Verified — Talon will close, update, and reopen."
+            "Verified — Groundwire will close, update, and reopen."
         flavor == DesktopUpdateFlavor.Deb || flavor == DesktopUpdateFlavor.Dmg ||
             flavor == DesktopUpdateFlavor.Msi -> "Verified — opens the installer."
         // Never reaches Ready: with no flavor, download() falls back

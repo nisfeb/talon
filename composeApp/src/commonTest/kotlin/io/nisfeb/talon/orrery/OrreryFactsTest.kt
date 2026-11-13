@@ -47,6 +47,20 @@ class OrreryFactsTest {
         assertEquals(listOf(body), teachNames(body, null))
     }
 
+    // Orrery 125 refuses a key's batch whole for an alias it reads as a
+    // ship (+ship-alias: a ~ first, once trimmed), "not in scope: aliases".
+    @Test
+    fun `no name the ship reads as a ship goes up, and none is taught`() {
+        val c = ContactEntity("~bus", null, null, null)
+        val body = personBody(c, "person/bus", handle = "~bus", longHandle = " ~bus-long")
+        assertEquals("""{"bodies":[{"id":"person/bus","name":"~bus"}],"observations":[]}""", batches(Facts(bodies = listOf(body))).single().toString())
+        val named = OBody("person/bus", "Buster", listOf("Buster", "~bus", " ~bus"))
+        assertEquals("""{"id":"person/bus","name":"Buster","aliases":["Buster"]}""", named.toJson().toString())
+        // The ship has every other name: the ship's own name is no reason to send.
+        assertTrue(teachNames(named, setOf("Buster")).isEmpty())
+        assertTrue(shipAlias(" ~zod") && shipAlias("~zod") && !shipAlias("zod~") && !shipAlias(""))
+    }
+
     @Test
     fun `a published call is a situation with its speakers and a pointer to the words`() {
         val f = callFacts("urb://~zod/lattice/calls/1", "Standup", setOf(me, "~bus", "~nec"), me, noon, nameFor = { if (it == "~bus") "Bus" else it })

@@ -91,7 +91,7 @@ class OrreryFlightsTest {
         val old = OrreryToolsTest.Tap().apply { watchesDoc = Result.failure(OrreryError.Refused(404, "not found")) }
         assertEquals("This orrery has no flight watches: it is older than version 105.", ask(old))
         val down = OrreryToolsTest.Tap().apply { watchesDoc = Result.failure(OrreryError.Unreachable(RuntimeException("reset"))) }
-        assertEquals("Could not read orrery's flights: no answer from the ship", ask(down))
+        assertEquals("Could not read orrery's flights: no answer from your Groundwire node", ask(down))
     }
 
     @Test

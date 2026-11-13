@@ -112,7 +112,7 @@ class CallForegroundService : Service() {
         val builder = NotificationCompat.Builder(this, Notifications.CHANNEL_CALL_ONGOING)
             .setSmallIcon(android.R.drawable.stat_sys_speakerphone)
             .setContentTitle(title)
-            .setContentText(if (muted) "Muted · tap to return to Talon" else "Tap to return to Talon")
+            .setContentText(if (muted) "Muted · tap to return to Groundwire" else "Tap to return to Groundwire")
             .setContentIntent(pending)
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

@@ -220,10 +220,14 @@ internal fun StatusRow(c: ContactEntity, onClick: () -> Unit) {
                 }
             }
             c.status?.let {
+                // Plain text in the quiet colour, two lines at most: in the
+                // accent, every row's status shouted over its name.
                 Text(
                     text = linkifyStatus(it, io.nisfeb.talon.ui.theme.LocalLinkColor.current),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
         }

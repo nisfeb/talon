@@ -15,7 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -109,7 +109,7 @@ class CalendarsDialogTest {
     fun `a calendar opened is shared, and a share revoked after asking`() = calendars {
         openRow("Garden")
         waitUntil(timeoutMillis = 5_000) { shows("~bus · read only") }
-        onNode(hasSetTextAction() and hasText("Share with a ship")).performScrollTo().performTextInput("~ridlur-figbud")
+        onNode(hasSetTextAction() and hasText("Share with someone")).performScrollTo().performTextInput("~ridlur-figbud")
         onNodeWithText("Read and edit").performClick()
         onNodeWithText("Share").performClick()
         val share = wrote("/share/share")

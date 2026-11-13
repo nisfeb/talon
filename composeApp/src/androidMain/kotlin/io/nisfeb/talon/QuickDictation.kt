@@ -272,7 +272,7 @@ class DictationService : Service() {
                 if (!foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE, "Listening…")) {
                     listening = already
                     // The card waits on this run; there will be none.
-                    if (!already) QuickDictation.show(QuickDictation.Stage.Said("Talon could not start listening."))
+                    if (!already) QuickDictation.show(QuickDictation.Stage.Said("Groundwire could not start listening."))
                     return stopIfIdle()
                 }
                 // Waking the voice now: its engine takes a moment to start.
@@ -285,7 +285,7 @@ class DictationService : Service() {
                 if (!foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE, "Talking with $ARCHIE…")) {
                     listening = already
                     QuickDictation.talking(false)
-                    if (!already) QuickDictation.show(QuickDictation.Stage.Said("Talon could not start listening."))
+                    if (!already) QuickDictation.show(QuickDictation.Stage.Said("Groundwire could not start listening."))
                     return stopIfIdle()
                 }
                 if (QuickDictation.speaks(this) && voice == null) voice = Voice(this)
@@ -381,7 +381,7 @@ class DictationService : Service() {
             }
             when {
                 heard == null -> QuickDictation.show(QuickDictation.Stage.Idle) // cancelled
-                !heard.second -> tell("Nothing heard", "Talon did not hear anything to act on.")
+                !heard.second -> tell("Nothing heard", "Groundwire did not hear anything to act on.")
                 else -> {
                     update("Working on your dictation…")
                     val wav = WavFile.encode(heard.first, DictationRun.RATE)
@@ -567,7 +567,7 @@ class DictationService : Service() {
      */
     private fun record(gate: EndOfSpeech, level: Boolean = true): Pair<ByteArray, Boolean>? {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            error("Talon needs the microphone to hear a dictation.")
+            error("Groundwire needs the microphone to hear a dictation.")
         }
         val frame = ByteArray(DictationRun.RATE / 10 * 2) // 100 ms
         val min = AudioRecord.getMinBufferSize(DictationRun.RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -848,7 +848,7 @@ class DictationService : Service() {
     private suspend fun decideLate(ids: List<String>, approve: Boolean) {
         // A dictation's own send, from a run that has ended: it was not sent.
         if (ids.isEmpty()) return tell("Dictation", "Not sent: that dictation had ended. Say it again to send it.")
-        val prep = prepare() ?: return tell("Dictation", "Talon could not reach orrery to answer. It waits under Actions.")
+        val prep = prepare() ?: return tell("Dictation", "Groundwire could not reach orrery to answer. It waits under Actions.")
         try {
             prep.orrery { orrery ->
                 if (orrery == null) return@orrery tell("Dictation", "Orrery is off. It waits under Actions.")
@@ -870,7 +870,7 @@ class DictationService : Service() {
             }
             DictationOutcome.NothingHeard -> {
                 kept.delete()
-                tell("Nothing heard", "Talon could not make out any words.")
+                tell("Nothing heard", "Groundwire could not make out any words.")
             }
             is DictationOutcome.NeedsSetup -> tell("Dictation not sent", outcome.what + " It is kept to try again.", retry = kept)
             is DictationOutcome.TranscribeFailed -> tell(

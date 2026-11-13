@@ -17,7 +17,7 @@ fun main() {
     })
     println("Sending native notification…")
     n.notify(
-        "Talon",
+        "Groundwire",
         "Native notification test — if this is rendered by your DE's notification daemon, the new path works.",
     )
     Thread.sleep(2500)

@@ -28,7 +28,7 @@ class AssistantHistoryDaoTest {
 
     @AfterTest
     fun tearDown() {
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         tmpDir.deleteRecursively()
     }
 

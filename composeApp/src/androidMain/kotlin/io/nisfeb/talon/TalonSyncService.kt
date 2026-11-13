@@ -98,7 +98,7 @@ class TalonSyncService : Service() {
                 ?.takeIf { runCatching { app.repo.signedOut.value }.getOrDefault(false) }
             return NotificationCompat.Builder(context, Notifications.CHANNEL_SYNC)
                 .setSmallIcon(R.drawable.ic_stat_talon)
-                .setContentTitle("Talon")
+                .setContentTitle("Groundwire")
                 // Unconditionally true: the service only pins the process —
                 // the SSE channel can be down while this row is showing, so
                 // it must not claim "Connected".

@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -101,7 +101,7 @@ class SignVerifyDialogTest {
     @Test
     fun `a ship that is down is not a bad signature`() = dialog(lattice(down = true)) {
         check(signed.armor(), "the words")
-        showing("Your ship is down or out of reach.")
+        showing("Your Groundwire node is down or out of reach.")
         assertTrue(!shows("No:") && !shows("<html>"))
     }
 
@@ -109,7 +109,7 @@ class SignVerifyDialogTest {
     fun `a ship that is down did not refuse to sign`() = dialog(lattice(down = true)) {
         onNode(hasSetTextAction() and hasText("Something to sign")).performTextInput("the words")
         onNodeWithText("Sign the text").performClick()
-        showing("Your ship is down or out of reach.")
+        showing("Your Groundwire node is down or out of reach.")
         assertTrue(!shows("refused") && !shows("<html>"))
     }
 

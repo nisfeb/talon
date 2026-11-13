@@ -1,5 +1,6 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.foundation.horizontalScroll
 import kotlinx.datetime.number
 import io.nisfeb.talon.util.createTempFileUri
 import io.nisfeb.talon.util.formatDecimals
@@ -39,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import io.nisfeb.talon.data.MessageEntity
 import io.nisfeb.talon.urbit.StoryCache
@@ -95,6 +97,14 @@ val LocalCiteResolver = compositionLocalOf<CiteResolver?> { null }
  * wherever it is rendered — chat, thread, notebook post, gallery. The
  * default no-op keeps previews and tests renderable without a shell.
  */
+/**
+ * Inside a DM request: a stranger's pictures, link previews and media are
+ * not fetched, so nothing of theirs loads on this device, and tells their
+ * server it was seen, before the owner accepts (2026-11-08). Provided by
+ * the chat screen for a request.
+ */
+val LocalGuardedContent = staticCompositionLocalOf { false }
+
 val LocalCitationOpen = compositionLocalOf<(StoryPart.Citation) -> Unit> { {} }
 
 /** Names a channel nest the way the lists do ("Group · Channel"). Null
@@ -359,7 +369,9 @@ fun StoryRenderer(
 
                 // An image block whose src is a video or a sound is not
                 // an image: it plays below with the rest of the media.
-                is StoryPart.Image -> if (classifyMediaUrl(part.src) == null) {
+                is StoryPart.Image -> if (LocalGuardedContent.current) {
+                    GuardedPicture()
+                } else if (classifyMediaUrl(part.src) == null) {
                     // Both dims must be positive: width comes off the
                     // wire unclamped, and aspectRatio() throws on <= 0
                     // — a remote message with width: 0 would crash the
@@ -396,14 +408,26 @@ fun StoryRenderer(
                     )
                 }
 
+                // A code block reads as one: its own panel with an edge (on
+                // the dark theme the panel alone was the chat's colour, so
+                // code looked like loose monospace lines), and long lines
+                // scroll sideways instead of wrapping.
+                // Where a swipe across a message replies (touch), the lines
+                // wrap: a sideways scroll there took the swipe first.
                 is StoryPart.Code -> Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(8.dp),
+                    // outlineVariant was the panel's own colour on the dark theme.
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
                 ) {
+                    val scrolls = !io.nisfeb.talon.ui.isTouchSwipeNavSupported
                     Text(
                         part.code,
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        softWrap = !scrolls,
+                        modifier = Modifier
+                            .then(if (scrolls) Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                     )
                 }
 
@@ -426,7 +450,7 @@ fun StoryRenderer(
                     }
                 }
 
-                is StoryPart.LinkPreview -> InlineLinkPreview(preview = part) {
+                is StoryPart.LinkPreview -> if (!LocalGuardedContent.current) InlineLinkPreview(preview = part) {
                     onLinkTap(part.url)
                 }
 
@@ -441,6 +465,9 @@ fun StoryRenderer(
                     startEpochMs = part.startEpochMs,
                     endEpochMs = part.endEpochMs,
                     title = part.title,
+                    reactions = reactions,
+                    ourPatp = ourPatp,
+                    onReply = onPollVote,
                 )
 
                 is StoryPart.PollWidget -> PollWidgetBlock(
@@ -471,7 +498,7 @@ fun StoryRenderer(
         // upstream state change a row reads) re-does the walk for
         // every visible row.
         val media = remember(parts) { mediaInStory(parts) }
-        media.forEach { (url, kind) ->
+        if (!LocalGuardedContent.current) media.forEach { (url, kind) ->
             if (inlinePlayer != null) {
                 inlinePlayer(url, kind)
             } else {
@@ -571,6 +598,20 @@ internal fun FallbackInlineMediaRow(url: String, kind: MediaKind) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
+}
+
+/** Where a request's picture would be: said, not fetched ([LocalGuardedContent]). */
+@Composable
+private fun GuardedPicture() {
+    Text(
+        "Picture hidden until you accept",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    )
 }
 
 @Composable
@@ -872,15 +913,24 @@ private fun CalWidgetBlock(
     startEpochMs: Long,
     endEpochMs: Long,
     title: String,
+    reactions: List<io.nisfeb.talon.data.ReactionEntity> = emptyList(),
+    ourPatp: String? = null,
+    /** A reply tapped, as its reaction: the host toggles or replaces it, as a poll's vote. Null where nobody can react. */
+    onReply: ((emoji: String) -> Unit)? = null,
 ) {
     val summary = remember(startEpochMs, endEpochMs) { formatCalSummary(startEpochMs, endEpochMs) }
-    // Why an add did not go, from the calendar: "Not added" alone left the owner guessing.
-    var why by remember { mutableStateOf<String?>(null) }
+    val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
+    // How this card's add to the ship's calendar stands, kept by the repo.
+    val cardAdd = shipCalendar?.let { cal ->
+        val key = remember(title, startEpochMs, endEpochMs) { cal.cardKey(title, startEpochMs, endEpochMs) }
+        cal.cardAdds.collectAsState().value[key]
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth(),
     ) {
+        Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -899,18 +949,24 @@ private fun CalWidgetBlock(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                // Why an add did not go, from the calendar: "Not added" alone left the owner guessing.
+                (cardAdd as? io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded)?.let {
+                    Text(it.why, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
             }
             val uriHandlerCal = androidx.compose.ui.platform.LocalUriHandler.current
             val calendarLauncher = LocalCalendarLauncher.current
-            val shipCalendar = io.nisfeb.talon.calendar.LocalCalendarRepo.current
             val shipCalendars = shipCalendar?.calendars?.collectAsState()?.value.orEmpty()
-            val addScope = androidx.compose.runtime.rememberCoroutineScope()
             var menuOpen by remember { mutableStateOf(false) }
-            var added by remember { mutableStateOf<String?>(null) }
-            // A successful add disarms the button — left armed, every
+            // An add on its way or done disarms the button: armed, every
             // further tap wrote another copy of the event.
-            var addedDone by remember { mutableStateOf(false) }
+            val added = when (cardAdd) {
+                null -> null
+                io.nisfeb.talon.calendar.CalendarRepo.CardAdd.Adding -> "Adding…"
+                is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.Added -> "Added to ${cardAdd.calendar}"
+                is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded -> "Not added"
+            }
+            val armed = cardAdd == null || cardAdd is io.nisfeb.talon.calendar.CalendarRepo.CardAdd.NotAdded
             fun toAnotherApp() = runCatching {
                 // Android: Intent.ACTION_INSERT pops the system
                 // create-event sheet pre-filled. Desktop / unset:
@@ -929,7 +985,7 @@ private fun CalWidgetBlock(
                     onClick = {
                         if (shipCalendar != null && shipCalendars.isNotEmpty()) menuOpen = true else toAnotherApp()
                     },
-                    enabled = !addedDone,
+                    enabled = armed,
                 ) { Text(added ?: "Add") }
                 androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     shipCalendar?.writable().orEmpty().forEach { c ->
@@ -937,23 +993,41 @@ private fun CalWidgetBlock(
                             text = { Text(c.name.ifBlank { c.id }) },
                             onClick = {
                                 menuOpen = false
-                                added = "Adding…"
-                                why = null
-                                addScope.launch {
-                                    val cal = shipCalendar!!
-                                    // This add's own reason, never another write's.
-                                    val whyNot = cal.addSharedWhyNot(c.id, title, startEpochMs, endEpochMs)
-                                    addedDone = whyNot == null
-                                    added = if (whyNot == null) "Added to ${c.name.ifBlank { c.id }}" else "Not added"
-                                    // Said here, and so not again on the calendar.
-                                    if (whyNot != null) { why = whyNot; cal.heard(whyNot) }
-                                }
+                                // The repo's, so it finishes and is remembered with this card scrolled away.
+                                shipCalendar?.addFromCard(c.id, c.name.ifBlank { c.id }, title, startEpochMs, endEpochMs)
                             },
                         )
                     }
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Another calendar app…") }, onClick = { menuOpen = false; toAnotherApp() })
                 }
             }
+        }
+        if (onReply != null || reactions.any { eventReplyOf(it.emoji) != null }) EventReplies(reactions, ourPatp, onReply)
+        }
+    }
+}
+
+/**
+ * Going, Maybe or Can't go on an event card: each a reaction on the
+ * card's message, as a poll's votes are, so they sync with no new state
+ * and show to someone on Tlon's client as the reactions they are.
+ */
+@Composable
+private fun EventReplies(reactions: List<io.nisfeb.talon.data.ReactionEntity>, ourPatp: String?, onReply: ((emoji: String) -> Unit)?) {
+    val counts = remember(reactions) { eventReplyCounts(reactions.map { it.emoji }) }
+    val mine = remember(reactions, ourPatp) { ourPatp?.let { us -> eventReplyOf(reactions.firstOrNull { it.author == us }?.emoji) } }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        for (reply in EventReply.entries) {
+            val n = counts[reply] ?: 0
+            androidx.compose.material3.FilterChip(
+                selected = reply == mine,
+                enabled = onReply != null,
+                onClick = { onReply?.invoke(reply.emoji) },
+                label = { Text(if (n > 0) "${reply.emoji} ${reply.label} · $n" else "${reply.emoji} ${reply.label}") },
+            )
         }
     }
 }

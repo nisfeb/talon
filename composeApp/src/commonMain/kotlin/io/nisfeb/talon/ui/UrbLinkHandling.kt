@@ -101,7 +101,7 @@ fun ShipAppInstallDialog(
             Text(
                 error
                     ?: if (installing) {
-                        "Installing $app on your ship… this can take a " +
+                        "Installing $app on your Groundwire node… this can take a " +
                             "moment while the software arrives over the network."
                     } else {
                         pitch

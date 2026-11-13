@@ -297,7 +297,7 @@ class OrreryApiTest {
     }
 
     // nginx's page for a ship that is down or restarting was read as the
-    // ship refusing, with "the ship answered with an error page" as why.
+    // ship refusing, with "the node answered with an error page" as why.
     @Test
     fun `a proxy's page for a ship that is down is no answer, never a refusal`() = runTest {
         val page = "<html><body><h1>502 Bad Gateway</h1></body></html>"
@@ -319,7 +319,7 @@ class OrreryApiTest {
 
     // ---- reads by scry (grubbery's file scry, as ricsul answered it on 2026-10-06) ----
 
-    private val scryRoot = "https://ship/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+    private val scryRoot = "https://ship/~/scry/grubbery/peek/file/apps/shell/desks/orrery.desk/desk/data/orrery.orrery_app"
     private val leaveLast = """{"quiet":[],"next":null,"alerted":["activity/x@1"],"at":"2026-10-06T03:54:51Z","notes":[]}"""
 
     /** A ship that answers each path as [routes] says, and remembers what was asked. */

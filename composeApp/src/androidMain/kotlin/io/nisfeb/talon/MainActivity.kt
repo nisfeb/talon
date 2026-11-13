@@ -130,7 +130,20 @@ class MainActivity : ComponentActivity() {
             }
             // The owner's theme: light or dark, accent, a theme of their own, font.
             io.nisfeb.talon.ui.theme.TalonAppTheme(app) {
-                CompositionLocalProvider(LocalImageDownloader provides imageDownloader) {
+                CompositionLocalProvider(
+                    LocalImageDownloader provides imageDownloader,
+                    // The system share sheet, for inviting a friend.
+                    io.nisfeb.talon.ui.LocalTextSharer provides io.nisfeb.talon.ui.TextSharer { text, subject ->
+                        runCatching {
+                            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
+                            }
+                            startActivity(android.content.Intent.createChooser(send, subject))
+                        }.isSuccess
+                    },
+                ) {
                     TalonApp(
                         initialForShip = forShip,
                         initialOpenWhom = whom,

@@ -250,10 +250,10 @@ class OrreryApi(
             .getOrElse { e ->
                 val refused = e as? OrreryError.Refused
                 return Instructed(note = when (refused?.status) {
-                    503 -> "Orrery has no model key on your ship, so nothing read that. Set one for its generator under Orrery in Settings."
+                    503 -> "Orrery has no model key on your Groundwire node, so nothing read that. Set one for its generator under Assistant in Settings."
                     429 -> "Orrery has made all of today's model calls. Try again tomorrow."
                     502 -> "Orrery's model did not answer: ${refused.reason}"
-                    else -> refused?.reason ?: e.message ?: "The ship did not answer."
+                    else -> refused?.reason ?: e.message ?: "Your Groundwire node did not answer."
                 })
             }
         val o = reading { Json.parseToJsonElement(said).jsonObject }
@@ -472,13 +472,13 @@ class OrreryApi(
                 request(owner, HttpMethod.Post, "/api/actions/$id/refine", body.toString(), refineTimeout)
             }
         }.getOrElse { e ->
-            val why = (e as? OrreryError.Refused)?.reason ?: e.message ?: "The ship did not answer."
+            val why = (e as? OrreryError.Refused)?.reason ?: e.message ?: "Your Groundwire node did not answer."
             return Refined(null, emptyList(), why)
         }
         val o = reading { Json.parseToJsonElement(said).jsonObject }
         val note = o["note"]?.jsonPrimitive?.contentOrNull.orEmpty()
         if (o["ok"]?.jsonPrimitive?.contentOrNull == "false" || o["ok"]?.toString() == "false") {
-            return Refined(null, emptyList(), note.ifBlank { "The ship would not take that." })
+            return Refined(null, emptyList(), note.ifBlank { "Your Groundwire node would not take that." })
         }
         return Refined(
             action = (o["action"] as? JsonObject)?.let { actionOf(it) },
@@ -586,6 +586,12 @@ class OrreryApi(
         return reading { Json.parseToJsonElement(text).jsonObject }
     }
 
+    /** Whether the ship holds a Mapbox token (GET /api/travel's token_set, never the token): what works out a check-in's time (orrery 143). */
+    suspend fun mapboxSet(): Boolean {
+        val text = request(owner, HttpMethod.Get, "/api/travel")
+        return reading { Json.parseToJsonElement(text).jsonObject["token_set"]?.jsonPrimitive?.booleanOrNull == true }
+    }
+
     /** What the leave pass did last, with its plan for the next appointment: the owner's only. */
     suspend fun travelLast(): JsonObject {
         val text = request(owner, HttpMethod.Get, "/api/travel/last")
@@ -617,8 +623,8 @@ class OrreryApi(
     }
 
     /** Share where the owner is with [ship]: the owner's only. See [shareBody] for the wire. */
-    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean) {
-        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact))
+    suspend fun shareLocation(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false) {
+        request(owner, HttpMethod.Post, "/api/location/share", shareBody(ship, length, exact, byMs, autoBy))
     }
 
     /** Take a share from a ship orrery did not know (orrery 137): it makes them a person here. */
@@ -837,7 +843,7 @@ class OrreryApi(
 
         const val APP_PATH = "/apps/orrery"
         /** Orrery's data directory as grubbery's shell installs it, under eyre's scry of grubbery's files. */
-        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell/desks/orrery.desk/desk/data/orrery.orrery_app"
         private const val SCRY_FAILED = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403
@@ -998,8 +1004,8 @@ internal suspend fun proxyAnswered(resp: HttpResponse): ProxyAnswered? {
 
 sealed class OrreryError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Refused(val status: Int, val reason: String) : OrreryError("HTTP $status: $reason")
-    class Unreachable(cause: Throwable) : OrreryError("no answer from the ship", cause)
-    class Garbled(cause: Throwable) : OrreryError("the ship's answer could not be read", cause)
+    class Unreachable(cause: Throwable) : OrreryError("no answer from your Groundwire node", cause)
+    class Garbled(cause: Throwable) : OrreryError("your Groundwire node's answer could not be read", cause)
 }
 
 private fun names(a: kotlinx.serialization.json.JsonElement?): List<String> =

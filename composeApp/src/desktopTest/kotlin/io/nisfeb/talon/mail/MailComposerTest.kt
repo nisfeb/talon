@@ -9,7 +9,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -168,7 +168,7 @@ class MailComposerTest {
         }
         onNodeWithText("To").performTextInput("~zod nonsense")
         onNodeWithText("Add recipient").performClick()
-        onNodeWithText("Not a ship: nonsense").assertIsDisplayed()
+        onNodeWithText("Not an address: nonsense").assertIsDisplayed()
         // The good one still landed.
         onNodeWithText("~zod").assertIsDisplayed()
     }
@@ -530,14 +530,14 @@ class MailComposerTest {
     fun `the mail cap is the ship's, and a file not stored says why in words`() {
         assertEquals(16_777_216, AuspexApi.MAX_BLOB_BYTES, "auspex 16's own limit for one file")
         val noStorage = io.nisfeb.talon.urbit.UploadFailed(
-            "The upload didn't go through: this ship has no image storage set up.", IllegalStateException("no memex token"),
+            "The upload didn't go through: this Groundwire node has no image storage set up.", IllegalStateException("no memex token"),
         )
         assertEquals(
-            "big.mov was not stored. The upload didn't go through: this ship has no image storage set up. A ship stores files once storage is set up in Landscape.",
+            "big.mov was not stored. The upload didn't go through: this Groundwire node has no image storage set up. A node stores files once storage is set up in Landscape.",
             io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", noStorage),
         )
         val keys = io.nisfeb.talon.urbit.UploadFailed(
-            "The upload didn't go through: your ship's storage turned down its keys (see Storage in Landscape's settings).", IllegalStateException("S3 PUT failed: HTTP 403 <Error>"),
+            "The upload didn't go through: your Groundwire node's storage turned down its keys (see Storage in Landscape's settings).", IllegalStateException("S3 PUT failed: HTTP 403 <Error>"),
         )
         assertTrue("set up in Landscape" !in io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", keys), "the hint only where it is the reason")
         val down = io.nisfeb.talon.ui.screens.storeFailedLine("big.mov", IllegalStateException("not connected"))

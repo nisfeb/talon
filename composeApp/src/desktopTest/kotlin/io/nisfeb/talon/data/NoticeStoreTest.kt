@@ -36,7 +36,7 @@ class NoticeStoreTest {
             val d = db.notices()
             d.put(n("a", ts = 100)); d.put(n("b", ts = 300)); d.put(n("c", ts = 200))
             assertEquals(listOf("b", "c", "a"), d.stream().first().map { it.id })
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -50,7 +50,7 @@ class NoticeStoreTest {
             assertEquals(1, d.unreadCount().first())
             d.markAllRead(null)
             assertEquals(0, d.unreadCount().first())
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -61,7 +61,7 @@ class NoticeStoreTest {
             d.put(n("a", domain = "assistant")); d.put(n("b", domain = "account"))
             d.markAllRead("assistant")
             assertEquals(1, d.unreadCount().first(), "the account notice is still unread")
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -71,7 +71,7 @@ class NoticeStoreTest {
             val d = db.notices()
             d.put(n("a", domain = "assistant")); d.put(n("b", domain = "assistant")); d.put(n("c", domain = "account"))
             assertEquals(setOf("assistant", "account"), d.domains().first().toSet())
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -82,7 +82,7 @@ class NoticeStoreTest {
             for (i in 1..5) d.put(n("n$i", ts = i.toLong()))
             d.pruneBeyond(3)
             assertEquals(listOf("n5", "n4", "n3"), d.stream().first().map { it.id })
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -93,7 +93,7 @@ class NoticeStoreTest {
             d.put(n("old", ts = 1)); d.put(n("new", ts = 1_000_000))
             d.pruneOlderThan(500_000)
             assertEquals(listOf("new"), d.stream().first().map { it.id })
-        } finally { db.close(); dir.deleteRecursively() }
+        } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test
@@ -109,7 +109,7 @@ class NoticeStoreTest {
             repo.record("new", "assistant", "k", "t", "b", "tgt")
             await { db.notices().stream().first().map { it.id } == listOf("new") }
             assertEquals(listOf("new"), db.notices().stream().first().map { it.id }, "the age-stale old notice was pruned")
-        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel(); db.close(); dir.deleteRecursively() }
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel(); io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     // The migration must recreate a table Room accepts, or the fallback wipes
@@ -134,7 +134,7 @@ class NoticeStoreTest {
             try {
                 db.notices().put(n("y"))
                 assertEquals(listOf("y"), db.notices().stream().first().map { it.id })
-            } finally { db.close() }
+            } finally { io.nisfeb.talon.urbit.closeAfter(db) }
         } finally { dir.deleteRecursively() }
     }
 

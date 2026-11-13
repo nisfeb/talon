@@ -11,6 +11,7 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
+import io.nisfeb.talon.util.runSuspendCatching
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -92,7 +93,7 @@ object LatticeInstall {
             // channel that is not up and a session that has gone. The
             // old wording blamed the ship for both.
             return Result.failure(
-                IllegalStateException("Your ship did not take the install. It may be offline, or signed out here."),
+                IllegalStateException("Your Groundwire node did not take the install. It may be offline, or signed out here."),
             )
         }
         val deadline = nowMs() + timeoutMs
@@ -130,7 +131,7 @@ object LatticeInstall {
         }
         return {
             val url = shipUrl()
-            if (url == null) Result.failure(IllegalStateException("Not signed in to a ship."))
+            if (url == null) Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
             else installAndWait(
                 http, url, poke, desk = desk,
                 installed = { installed?.invoke(url) ?: isInstalled(http, url) },
@@ -162,10 +163,10 @@ object LatticeInstall {
         publisher: String = PUBLISHER,
         /** For a client without the session's cookie store, as the link host's is. */
         cookie: String? = null,
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = runSuspendCatching {
         val body = buildJsonObject {
             put("name", name)
-            put("code", "$publisher/apps/shell.shell/desks/$name.desk/desk/code")
+            put("code", "$publisher/apps/shell/desks/$name.desk/desk/code")
         }
         val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/add") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
@@ -175,8 +176,8 @@ object LatticeInstall {
         if (!resp.status.isSuccess()) {
             error(
                 when (resp.status.value) {
-                    403 -> "Your ship did not accept that; sign in to it again."
-                    404 -> "The Grubbery shell is not answering on this ship."
+                    403 -> "Your Groundwire node did not accept that; sign in to it again."
+                    404 -> "The Grubbery shell is not answering on this node."
                     // The web server in front of a ship that is down: not a refusal.
                     in 502..504 -> SHIP_DOWN
                     else -> "The shell would not add $name (HTTP ${resp.status.value})."
@@ -207,9 +208,9 @@ object LatticeInstall {
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
         if (url == null) {
-            Result.failure(IllegalStateException("Not signed in to a ship."))
+            Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
         } else {
-            runCatching {
+            runSuspendCatching {
                 // The shell has to be there before it can be asked for
                 // anything. Where it already is, this costs one probe.
                 if (installedOrUnknown(http, url) == false) {
@@ -219,11 +220,11 @@ object LatticeInstall {
                 val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
                 while (io.nisfeb.talon.util.nowMs() < deadline) {
                     kotlinx.coroutines.delay(POLL_MS)
-                    if (answers(url)) return@runCatching
+                    if (answers(url)) return@runSuspendCatching
                 }
                 error(
                     "$name was asked for and has not answered yet. The shell syncs it over the network, " +
-                        "and it asks you to approve what it reaches: open /apps/$name on your ship.",
+                        "and it asks you to approve what it reaches: open /apps/$name on your node.",
                 )
             }
         }
@@ -238,7 +239,7 @@ object LatticeInstall {
      * lattice is one of the shell's stock desks, and a ship can have the
      * shell and not yet the desk.
      */
-    suspend fun hasShell(http: HttpClient, shipUrl: String, cookie: String? = null): Boolean = runCatching {
+    suspend fun hasShell(http: HttpClient, shipUrl: String, cookie: String? = null): Boolean = runSuspendCatching {
         val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
@@ -246,27 +247,59 @@ object LatticeInstall {
             (resp.status.isSuccess() && resp.contentType()?.match(ContentType.Application.Json) == true)
     }.getOrDefault(false)
 
-    /** Ask the shell to fetch its stock desks (lattice, mail, the calendar) from their repositories. Idempotent. */
-    suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runCatching {
-        val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/sync-defaults") {
+    /**
+     * Ask the shell for its default apps, one at a time by name: each stock
+     * entry it boots with ("setup":"boot") that is not installed yet. Never
+     * Install all (/desks/sync-defaults), which also brings every desk the
+     * shell only offers. A shell whose list has no lattice gets lattice
+     * from [PUBLISHER] directly. Idempotent.
+     */
+    suspend fun syncStock(http: HttpClient, shipUrl: String, cookie: String?): Result<Unit> = runSuspendCatching {
+        val base = shipUrl.trimEnd('/')
+        val stock = http.get("$base/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
+        refuse(stock)
+        val entries = (runCatching { Json.parseToJsonElement(stock.bodyAsText()) }.getOrNull() as? JsonArray)
+            .orEmpty().mapNotNull { it as? JsonObject }
+        if (entries.none { it["name"]?.jsonPrimitive?.content == "lattice" }) {
+            addDesk(http, base, "lattice", cookie = cookie).getOrThrow()
+        }
+        entries.filter { isDefault(it) && it["synced"]?.jsonPrimitive?.booleanOrNull != true }
+            .mapNotNull { it["name"]?.jsonPrimitive?.content }
+            .forEach { name ->
+                refuse(
+                    http.post("$base/apps/grubbery/desks/sync") {
+                        cookie?.let { header(HttpHeaders.Cookie, it) }
+                        contentType(ContentType.Application.Json)
+                        setBody(buildJsonObject { put("name", name) }.toString())
+                    },
+                )
+            }
+    }
+
+    /** A stock entry the shell boots with. A shell too old to say which is all defaults. */
+    private fun isDefault(entry: JsonObject): Boolean =
+        entry["setup"]?.jsonPrimitive?.content.let { it == null || it == "boot" }
+
+    private fun refuse(resp: HttpResponse) {
         if (!resp.status.isSuccess()) {
             error(
-                if (resp.status.value == 401 || resp.status.value == 403) "Your ship did not accept that; sign in to it again."
+                if (resp.status.value == 401 || resp.status.value == 403) "Your Groundwire node did not accept that; sign in to it again."
                 else if (resp.status.value in 502..504) SHIP_DOWN
                 else "Grubbery would not fetch its apps (HTTP ${resp.status.value}).",
             )
         }
     }
 
-    /** Whether the shell says every stock desk has been fetched; null where it did not say. */
-    suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runCatching {
+    /** Whether the shell says every default stock desk has been fetched; null where it did not say. */
+    suspend fun stockSynced(http: HttpClient, shipUrl: String, cookie: String?): Boolean? = runSuspendCatching {
         val resp = http.get("${shipUrl.trimEnd('/')}/apps/grubbery/desks/stock") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
         }
         val arr = (if (resp.status.isSuccess()) Json.parseToJsonElement(resp.bodyAsText()) else null) as? JsonArray
-        arr?.all { (it as? JsonObject)?.get("synced")?.jsonPrimitive?.booleanOrNull == true }
+        arr?.mapNotNull { it as? JsonObject }?.filter(::isDefault)
+            ?.all { it["synced"]?.jsonPrimitive?.booleanOrNull == true }
     }.getOrNull()
 
     /**
@@ -293,10 +326,10 @@ object LatticeInstall {
     ): suspend () -> Result<Unit> = {
         val url = shipUrl()
         if (url == null) {
-            Result.failure(IllegalStateException("Not signed in to a ship."))
+            Result.failure(IllegalStateException("Not signed in to a Groundwire node."))
         } else {
-            runCatching {
-                if (answers(url)) return@runCatching
+            runSuspendCatching {
+                if (answers(url)) return@runSuspendCatching
                 if (!hasShell(http, url, cookie())) {
                     installAndWait(http, url, poke, timeoutMs, installed = { hasShell(http, url, cookie()) }).getOrThrow()
                 }
@@ -304,7 +337,7 @@ object LatticeInstall {
                 val deadline = io.nisfeb.talon.util.nowMs() + timeoutMs
                 while (io.nisfeb.talon.util.nowMs() < deadline) {
                     kotlinx.coroutines.delay(POLL_MS)
-                    if (answers(url)) return@runCatching
+                    if (answers(url)) return@runSuspendCatching
                     if (stockSynced(http, url, cookie()) == true &&
                         io.nisfeb.talon.ui.fetchPendingPermits(http, url, cookie()).orEmpty().isNotEmpty()
                     ) {
@@ -318,10 +351,10 @@ object LatticeInstall {
 
     /** What an install ends on while the fetched apps wait for the owner's approval. */
     const val APPROVE_APPS =
-        "Grubbery has its apps now. Approve what they reach on your ship's permits page, and they will open."
+        "Grubbery has its apps now. Approve what they reach on your Groundwire node's permits page, and they will open."
 
     /** A proxy's 502 to 504, said as what it is. */
-    internal const val SHIP_DOWN = "Your ship is down or out of reach. Try again when it's back."
+    internal const val SHIP_DOWN = "Your Groundwire node is down or out of reach. Try again when it's back."
 
     private const val POLL_MS = 3_000L
 

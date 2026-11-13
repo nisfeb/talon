@@ -21,13 +21,13 @@ internal object IosLateMoves {
         val http = createAppHttpClient()
         return try {
             val session = UrbitSession(http, createSessionStore())
-            session.tryRestore(ship?.takeIf { it.isNotBlank() }) ?: return "Sign in to Talon to answer this one."
-            val url = session.baseUrl ?: return "Sign in to Talon to answer this one."
+            session.tryRestore(ship?.takeIf { it.isNotBlank() }) ?: return "Sign in to Groundwire to answer this one."
+            val url = session.baseUrl ?: return "Sign in to Groundwire to answer this one."
             OrreryApi(session.http, session.http, url).lateMove(id, m)
         } finally {
             http.close()
         }
     }
 
-    private const val OPEN_TALON = "Open Talon to answer this one."
+    private const val OPEN_TALON = "Open Groundwire to answer this one."
 }

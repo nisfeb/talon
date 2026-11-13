@@ -61,7 +61,7 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     ),
     SlashCommandSpec(
         name = "invite",
-        synopsis = "/invite <group> [~ship]",
+        synopsis = "/invite <group> [~address]",
         description = "Invite someone to one of your groups; in a DM, the other person",
     ),
     SlashCommandSpec(
@@ -91,8 +91,8 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     ),
     SlashCommandSpec(
         name = "pet",
-        synopsis = "/pet ~ship <name>",
-        description = "Set a local-only pet name for a ship (private to you)",
+        synopsis = "/pet ~address <name>",
+        description = "Set a local-only pet name for someone (private to you)",
     ),
     SlashCommandSpec(
         name = "poll",
@@ -331,11 +331,11 @@ private suspend fun runPet(
     toast: (String) -> Unit,
 ): CommandResult {
     if (args.size < 2) {
-        return CommandResult.Error("/pet: usage is \"/pet ~ship <name>\"")
+        return CommandResult.Error("/pet: usage is \"/pet ~address <name>\"")
     }
     val ship = args[0].trim()
     if (!Regex("^~[a-z-]+$").matches(ship)) {
-        return CommandResult.Error("/pet: \"$ship\" isn't a ship patp")
+        return CommandResult.Error("/pet: \"$ship\" isn't an address")
     }
     val name = args.drop(1).joinToString(" ").trim()
     if (name.isEmpty()) return CommandResult.Error("/pet: give a pet name")

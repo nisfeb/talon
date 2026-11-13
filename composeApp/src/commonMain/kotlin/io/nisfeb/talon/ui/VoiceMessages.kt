@@ -40,4 +40,4 @@ expect fun rememberQrScanLauncher(prompt: String, onResult: (String?) -> Unit): 
 /** The scanner on a login QR; the payload is null when nothing was read. */
 @Composable
 fun rememberQrLoginScanLauncher(onResult: (TalonLoginUri.Payload?) -> Unit): (() -> Unit)? =
-    rememberQrScanLauncher("Point the camera at a Talon login QR") { raw -> onResult(raw?.let(TalonLoginUri::decode)) }
+    rememberQrScanLauncher("Point the camera at a Groundwire Login QR") { raw -> onResult(raw?.let(TalonLoginUri::decode)) }

@@ -4,6 +4,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
@@ -12,7 +15,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.graphics.asComposeCanvas
@@ -26,6 +29,8 @@ import androidx.compose.ui.semantics.SemanticsOwner
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.IntSize
+import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.toByteArray
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.text.TextLayoutResult
 import io.nisfeb.talon.data.MessageEntity
@@ -36,6 +41,7 @@ import io.nisfeb.talon.urbit.Story
 import io.nisfeb.talon.urbit.StoryPart
 import io.nisfeb.talon.urbit.URL_TAG
 import io.nisfeb.talon.urbit.chatTextToStory
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,6 +64,7 @@ class StoryRendererTest {
         parts: List<StoryPart>,
         reactions: List<ReactionEntity> = emptyList(),
         cite: CiteResolver? = null,
+        calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -68,6 +75,7 @@ class StoryRendererTest {
                 LocalCitationOpen provides { c -> did += "cite ${c.openTarget}" },
                 LocalPlaceName provides { nest -> if (nest == "chat/~bus/general") "Garden · General" else null },
                 LocalDisplayName provides { ship -> if (ship == "~bus") "Bus" else ship },
+                io.nisfeb.talon.calendar.LocalCalendarRepo provides calendar,
             ) {
                 TalonTheme(darkTheme = false) {
                     StoryRenderer(
@@ -127,6 +135,80 @@ class StoryRendererTest {
             assertTrue(shows("📅 Standup"))
             onNodeWithText("Add").performClick()
             assertEquals(listOf("calendar $start $end Standup"), did)
+        }
+    }
+
+    // sneagan, 2026-11-09: replies on an event card, as reactions on its message.
+    @Test
+    fun `an event card takes Going, Maybe and Can't go, counts them, and marks our own`() {
+        val start = 1_790_000_000_000L
+        val end = start + 30 * 60_000
+        val said = listOf(ReactionEntity("~bus", "1", "~nec", "✅"), ReactionEntity("~bus", "1", "~wes", "✅"), ReactionEntity("~bus", "1", "~zod", "🤔"), ReactionEntity("~bus", "1", "~bus", "👍"))
+        render(parts("📅 Standup\n${formatCalSummary(start, end)}\n${encodeCalTag(start, end, "Standup")}"), reactions = said) {
+            assertTrue(shows("✅ Going · 2") && shows("🤔 Maybe · 1") && shows("❌ Can't go"), "a thumbs up is no reply")
+            onNodeWithText("🤔 Maybe · 1").assertIsSelected()
+            onNodeWithText("✅ Going · 2").assertIsNotSelected()
+            onNodeWithText("✅ Going · 2").performClick()
+            assertEquals(listOf("vote ✅"), did)
+        }
+    }
+
+    // Armed while its add was on its way, the card's Add opened the menu
+    // again, and a second pick wrote a second copy to the ship.
+    @Test
+    fun `an event card is added to the ship's calendar once`() {
+        val start = 1_790_000_000_000L
+        val end = start + 30 * 60_000
+        val takes = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val writes = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = io.ktor.client.HttpClient(io.ktor.client.engine.mock.MockEngine { req ->
+            val path = req.url.encodedPath
+            fun json(body: String) = respond(body, io.ktor.http.HttpStatusCode.OK, io.ktor.http.headersOf("Content-Type", "application/json"))
+            when {
+                path.startsWith("/grubbery/api/poke/") -> {
+                    writes += req.body.toByteArray().decodeToString()
+                    takes.await()
+                    json("")
+                }
+                path.endsWith("/calendars.json") -> json("""[{"id":"default","name":"Personal","kind":"local"}]""")
+                path.endsWith("/config.json") -> json("""{"title":"Calendar","zone":"UTC","ball":"abc123"}""")
+                path.endsWith("/share/shares.json") -> json("""{"shares":{},"offers":{},"accepted":{}}""")
+                path.endsWith("/window.json") -> json("""{"rows":[]}""")
+                path.endsWith("/invites.json") -> respond("", io.ktor.http.HttpStatusCode.NotFound)
+                else -> json("[]")
+            }
+        })
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val repo = io.nisfeb.talon.calendar.CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
+        kotlinx.coroutines.runBlocking { repo.refresh(); repo.refreshAll() }
+        try {
+            render(parts("📅 Standup\n${formatCalSummary(start, end)}\n${encodeCalTag(start, end, "Standup")}"), calendar = repo) {
+                onNodeWithText("Add").performClick()
+                waitUntil(timeoutMillis = 5_000) { shows("Personal") }
+                onNodeWithText("Personal").performClick()
+                waitUntil(timeoutMillis = 5_000) { shows("Adding…") && writes.isNotEmpty() }
+                // A second go while the first is on its way.
+                onNodeWithText("Adding…").performClick()
+                waitForIdle()
+                if (shows("Personal")) onNodeWithText("Personal").performClick()
+                waitForIdle()
+                Thread.sleep(300)
+                assertEquals(1, writes.count { "add-event" in it }, "the event went to the ship twice")
+            }
+            // Scrolled away mid-add and back: the row is composed anew.
+            // With the add's state its own it came back armed, reading
+            // "Adding…", and a tap wrote a second copy (review of #99).
+            render(parts("📅 Standup\n${formatCalSummary(start, end)}\n${encodeCalTag(start, end, "Standup")}"), calendar = repo) {
+                waitUntil(timeoutMillis = 5_000) { shows("Adding…") }
+                onNodeWithText("Adding…").assertIsNotEnabled()
+                onNodeWithText("Adding…").performClick()
+                waitForIdle()
+                assertTrue(!shows("Personal"), "no menu to pick from again")
+                assertEquals(1, writes.count { "add-event" in it })
+                takes.complete(Unit)
+            }
+        } finally {
+            scope.cancel()
         }
     }
 

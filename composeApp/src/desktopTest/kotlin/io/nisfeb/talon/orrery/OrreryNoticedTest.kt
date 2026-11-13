@@ -26,7 +26,7 @@ class OrreryNoticedTest {
     }
 
     @AfterTest
-    fun tearDown() { db.close(); tmp.deleteRecursively() }
+    fun tearDown() { io.nisfeb.talon.urbit.closeAfter(db); tmp.deleteRecursively() }
 
     private fun row(id: String, attr: String = "location", state: String = "pending") = OrreryNoticedEntity(
         id = id, ship = "~zod", subject = "person/bus", attr = attr, valueJson = "\"the shop\"", atMs = 1, untilMs = null, conf = 70,

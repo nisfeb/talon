@@ -68,6 +68,12 @@ class LiveLocationTest {
         assertEquals("""{"ship":"~bus","hours":1,"precision":"exact"}""", shareBody("~bus", ShareLength.Hour, exact = true))
         assertEquals("""{"ship":"~bus","hours":8,"precision":"area"}""", shareBody("~bus", ShareLength.EightHours, exact = false))
         assertEquals("""{"ship":"~bus","home":true,"precision":"area"}""", shareBody("~bus", ShareLength.Home, exact = false))
+        // A check-in (orrery 142): with until home only, to the second, as de-iso reads it.
+        assertEquals("""{"ship":"~bus","home":true,"precision":"area","by":"${iso(now)}"}""", shareBody("~bus", ShareLength.Home, exact = false, byMs = now + 345))
+        assertEquals("""{"ship":"~bus","hours":1,"precision":"area"}""", shareBody("~bus", ShareLength.Hour, exact = false, byMs = now), "no check-in on a share for hours")
+        // Worked out by the ship from the drive home (orrery 143), and only until home.
+        assertEquals("""{"ship":"~bus","home":true,"precision":"exact","by":"auto"}""", shareBody("~bus", ShareLength.Home, exact = true, byMs = now, autoBy = true))
+        assertEquals("""{"ship":"~bus","hours":8,"precision":"area"}""", shareBody("~bus", ShareLength.EightHours, exact = false, autoBy = true))
     }
 
     // The phone's fast listening (Android's LiveShares) follows this.
@@ -93,6 +99,28 @@ class LiveLocationTest {
         assertEquals("Updated 3m ago · until $clock · area only", inboundDetail(inbound.copy(untilMs = now + h), now))
         assertEquals("until you're home · exact", outboundDetail(OutShare("~bus", null, home = true, exact = true)))
         assertEquals("until $clock · area only", outboundDetail(OutShare("~bus", now + h, home = false, exact = false)))
+        // A check-in: ours says by when; theirs, late, says so first.
+        assertEquals("until you're home · check in by $clock · exact", outboundDetail(OutShare("~bus", null, home = true, exact = true, byMs = now + h)))
+        assertEquals("Not home yet, meant to be by $clock · Updated 3m ago · until they're home · area only", inboundDetail(inbound.copy(lateByMs = now + h), now))
+    }
+
+    @Test
+    fun `a check-in's time and lateness are read from the file`() {
+        val s = locationShares(doc("""{"out":[{"ship":"~bus","until":null,"home":true,"exact":false,"since":"${iso(now)}","by":"${iso(now + h)}","told":false}],
+            "in":{"~nec":{"name":"Nec","lat":"1","lon":"2","at":"${iso(now)}","until":null,"home":true,"late":"${iso(now - h)}"}}}"""), now)
+        assertEquals(now + h, s.outTo("~bus")?.byMs)
+        assertEquals(now - h, s.from("~nec")?.lateByMs)
+        val plain = locationShares(doc("""{"out":[{"ship":"~bus","until":null,"home":true,"exact":false,"since":"${iso(now)}"}],"in":{}}"""), now)
+        assertNull(plain.outTo("~bus")?.byMs, "a share from before orrery 142")
+    }
+
+    @Test
+    fun `a check-in's time is the next one, today's or tomorrow's once it has gone`() {
+        val utc = kotlinx.datetime.TimeZone.UTC
+        // 1_790_000_000_000 is 2026-09-21 13:33:20 UTC.
+        assertEquals(kotlin.time.Instant.parse("2026-09-21T22:00:00Z").toEpochMilliseconds(), nextAtMinute(22 * 60, now, utc))
+        assertEquals(kotlin.time.Instant.parse("2026-09-22T07:00:00Z").toEpochMilliseconds(), nextAtMinute(7 * 60, now, utc))
+        assertEquals(kotlin.time.Instant.parse("2026-09-22T13:33:00Z").toEpochMilliseconds(), nextAtMinute(13 * 60 + 33, now, utc), "the minute already begun is gone")
     }
 
     @Test
@@ -101,9 +129,9 @@ class LiveLocationTest {
             "Couldn't share: home: this ship does not know where home is; give hours too",
             shareProblem("share", OrreryError.Refused(400, "home: this ship does not know where home is; give hours too")),
         )
-        assertEquals("Couldn't stop: the ship said no (500)", shareProblem("stop", OrreryError.Refused(500, "")))
-        assertEquals("Couldn't share: your ship didn't answer. Try again.", shareProblem("share", OrreryError.Unreachable(RuntimeException("java.net.ConnectException: refused"))))
-        assertEquals("Couldn't share. Try again.", shareProblem("share", IllegalStateException("Not attached to a ship.")))
+        assertEquals("Couldn't stop: the node said no (500)", shareProblem("stop", OrreryError.Refused(500, "")))
+        assertEquals("Couldn't share: your Groundwire node didn't answer. Try again.", shareProblem("share", OrreryError.Unreachable(RuntimeException("java.net.ConnectException: refused"))))
+        assertEquals("Couldn't share. Try again.", shareProblem("share", IllegalStateException("Not attached to a Groundwire node.")))
     }
 
     // Orrery 137: a share from a ship it does not know waits as an ask.

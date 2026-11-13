@@ -28,6 +28,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -55,6 +59,8 @@ class UrbitChannel internal constructor(
     private val http: HttpClient,
     private val baseUrl: String,
     private val ship: String,
+    /** How long a PUT between streams waits for the next one ([awaitStream]). */
+    private val streamAnswerWaitMs: Long = STREAM_ANSWER_WAIT_MS,
 ) {
     private val channelId = "${nowMs()}-${Random.nextLong().toString(16).take(8)}"
     private val channelUrl: String = "${baseUrl.trimEnd('/')}/~/channel/$channelId"
@@ -103,13 +109,22 @@ class UrbitChannel internal constructor(
         if (id > appliedId) appliedId = id
     }
 
+    private val goneNow = MutableStateFlow(false)
+
     /**
      * The ship no longer has this channel (eyre answered 404), or it was
      * retired or deleted here: a stream cannot be opened on it again.
      */
+    var gone: Boolean
+        get() = goneNow.value
+        private set(value) { goneNow.value = value }
+
+    /** Streams on this channel eyre has answered that are still open. */
+    private val openStreams = MutableStateFlow(0)
+
+    /** A stream on this channel was answered once: eyre holds it, or did. */
     @Volatile
-    var gone: Boolean = false
-        private set
+    private var streamedOnce = false
 
     /** Never resume this channel: a subscription on it was dropped, or it is being given up. */
     fun retire() {
@@ -173,54 +188,62 @@ class UrbitChannel internal constructor(
                 // ready; parsing frames ourselves keeps this in commonMain
                 // for every platform.
                 val resumeAfter = appliedId
-                http.prepareGet(channelUrl) {
-                    header(HttpHeaders.Accept, "text/event-stream")
-                    header(HttpHeaders.CacheControl, "no-cache")
-                    header(HttpHeaders.AcceptEncoding, "identity")
-                    // Eyre acks every event up to this one and replays the rest.
-                    if (resumeAfter >= 0) header(HttpHeaders.LastEventID, resumeAfter.toString())
-                }.execute { resp ->
-                    if (resp.status.value == 404) {
-                        gone = true
-                        throw ChannelGone()
-                    }
-                    if (resp.status.value == 403) forbidden()
-                    if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
-                    lastStreamMs = nowMs()
-                    val body = resp.bodyAsChannel()
-                    var id: Long? = null
-                    val data = StringBuilder()
-                    while (true) {
-                        val line = body.readUTF8Line() ?: break
-                        // Any line at all means the stream is alive, and on
-                        // an idle ship the only lines are eyre's `:`
-                        // heartbeats (~every 25s). Recording them is what
-                        // separates "nothing is happening" from "the socket
-                        // is dead" — see [streamIdleMs].
+                var counted = false
+                try {
+                    http.prepareGet(channelUrl) {
+                        header(HttpHeaders.Accept, "text/event-stream")
+                        header(HttpHeaders.CacheControl, "no-cache")
+                        header(HttpHeaders.AcceptEncoding, "identity")
+                        // Eyre acks every event up to this one and replays the rest.
+                        if (resumeAfter >= 0) header(HttpHeaders.LastEventID, resumeAfter.toString())
+                    }.execute { resp ->
+                        if (resp.status.value == 404) {
+                            gone = true
+                            throw ChannelGone()
+                        }
+                        if (resp.status.value == 403) forbidden()
+                        if (!resp.status.isSuccess()) error("channel SSE: HTTP ${resp.status.value}")
                         lastStreamMs = nowMs()
-                        when {
-                            // Blank line terminates a frame — dispatch it.
-                            line.isEmpty() -> {
-                                if (data.isNotEmpty()) {
-                                    val element = runCatching { json.parseToJsonElement(data.toString()) }.getOrNull()
-                                    // inbox is UNLIMITED so trySend only fails
-                                    // after close, when the flow is shutting down.
-                                    // Eyre may replay events already handled here;
-                                    // its own note says the client must skip them.
-                                    val replayed = id != null && id <= appliedId
-                                    if (element != null && !replayed) inbox.trySend(UrbitEvent(id, element))
+                        streamedOnce = true
+                        counted = true
+                        openStreams.update { it + 1 }
+                        val body = resp.bodyAsChannel()
+                        var id: Long? = null
+                        val data = StringBuilder()
+                        while (true) {
+                            val line = body.readUTF8Line() ?: break
+                            // Any line at all means the stream is alive, and on
+                            // an idle ship the only lines are eyre's `:`
+                            // heartbeats (~every 25s). Recording them is what
+                            // separates "nothing is happening" from "the socket
+                            // is dead" — see [streamIdleMs].
+                            lastStreamMs = nowMs()
+                            when {
+                                // Blank line terminates a frame — dispatch it.
+                                line.isEmpty() -> {
+                                    if (data.isNotEmpty()) {
+                                        val element = runCatching { json.parseToJsonElement(data.toString()) }.getOrNull()
+                                        // inbox is UNLIMITED so trySend only fails
+                                        // after close, when the flow is shutting down.
+                                        // Eyre may replay events already handled here;
+                                        // its own note says the client must skip them.
+                                        val replayed = id != null && id <= appliedId
+                                        if (element != null && !replayed) inbox.trySend(UrbitEvent(id, element))
+                                    }
+                                    id = null
+                                    data.setLength(0)
                                 }
-                                id = null
-                                data.setLength(0)
-                            }
-                            line.startsWith(":") -> {} // heartbeat / comment
-                            line.startsWith("id:") -> id = line.removePrefix("id:").trim().toLongOrNull()
-                            line.startsWith("data:") -> {
-                                if (data.isNotEmpty()) data.append('\n')
-                                data.append(line.removePrefix("data:").removePrefix(" "))
+                                line.startsWith(":") -> {} // heartbeat / comment
+                                line.startsWith("id:") -> id = line.removePrefix("id:").trim().toLongOrNull()
+                                line.startsWith("data:") -> {
+                                    if (data.isNotEmpty()) data.append('\n')
+                                    data.append(line.removePrefix("data:").removePrefix(" "))
+                                }
                             }
                         }
                     }
+                } finally {
+                    if (counted) openStreams.update { it - 1 }
                 }
                 inbox.close()
             } catch (t: Throwable) {
@@ -407,7 +430,8 @@ class UrbitChannel internal constructor(
             put("id", nextRequestId())
             put("action", "delete")
         }
-        put(buildJsonArray { add(msg) })
+        // Not held: on a channel eyre reaped, a delete makes it and ends it.
+        put(buildJsonArray { add(msg) }, hold = false)
     }
 
     /**
@@ -502,8 +526,29 @@ class UrbitChannel internal constructor(
         }.getOrNull(),
     )
 
+    /**
+     * A PUT between streams waits, a while, for the next stream on this
+     * channel to be answered. Eyre makes a channel on any PUT to one it
+     * does not hold, empty: a PUT that beat the resume's GET to a channel
+     * it had reaped made it again, the GET then found it, and the chat
+     * heard nothing, with nothing to say so (2026-11-07). Answered, the
+     * PUT goes; told the channel is gone, it fails as gone, and a send is
+     * queued for the next channel; with no stream asked for within
+     * [streamAnswerWaitMs], it goes as it always did. Before the first
+     * stream there is nothing to wait for: eyre makes the channel on its
+     * first PUT.
+     */
+    private suspend fun awaitStream() {
+        if (!streamedOnce || openStreams.value > 0) return
+        withTimeoutOrNull(streamAnswerWaitMs) {
+            combine(openStreams, goneNow) { open, isGone -> open > 0 || isGone }.first { it }
+        }
+        if (openStreams.value == 0 && gone) throw ChannelGone(forbidden = refused)
+    }
+
     /** PUT a batch of channel actions. Runs on the IO dispatcher. */
-    private suspend fun put(messages: JsonArray) = withContext(ioDispatcher) {
+    private suspend fun put(messages: JsonArray, hold: Boolean = true) = withContext(ioDispatcher) {
+        if (hold) awaitStream()
         val resp = http.put(channelUrl) {
             contentType(ContentType.Application.Json)
             setBody(messages.toString())
@@ -525,6 +570,13 @@ class UrbitChannel internal constructor(
          * with no live event stream isn't held up for long.
          */
         private const val POKE_ACK_TIMEOUT_MS = 15_000L
+
+        /**
+         * How long a PUT between streams waits for the next ([awaitStream]):
+         * past the reconnect after a stream ends (one to three seconds), short
+         * of keeping a send waiting when no stream is coming at all.
+         */
+        const val STREAM_ANSWER_WAIT_MS = 5_000L
     }
 }
 

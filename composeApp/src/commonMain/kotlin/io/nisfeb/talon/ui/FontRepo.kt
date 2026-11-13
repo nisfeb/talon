@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** The ship answered that it has no grubbery to keep files in. */
-class NoGrubbery : Exception("Your ship has no grubbery to keep fonts in.")
+class NoGrubbery : Exception("Your Groundwire node has no grubbery to keep fonts in.")
 
 /**
  * The owner's fonts on their ship, in grubbery's file store under
@@ -37,7 +37,7 @@ class FontShip(
     private val cookie: () -> String?,
 ) {
     private suspend fun send(method: HttpMethod, path: String, body: ByteArray? = null): Pair<Int, ByteArray> {
-        val base = shipUrl()?.trimEnd('/') ?: error("Not signed in to a ship.")
+        val base = shipUrl()?.trimEnd('/') ?: error("Not signed in to a Groundwire node.")
         val resp = http.request("$base/grubbery/api/$path") {
             this.method = method
             cookie()?.let { header(HttpHeaders.Cookie, it) }
@@ -55,13 +55,13 @@ class FontShip(
             for (dir in listOf("talon", "talon/fonts")) {
                 val (status, _) = send(HttpMethod.Put, "dir/$dir")
                 if (status == 404) throw NoGrubbery()
-                check(status in 200..299 || status == 409) { "The ship would not make a place for fonts." }
+                check(status in 200..299 || status == 409) { "Your Groundwire node would not make a place for fonts." }
             }
             placeMade = true
         }
         val (status, _) = send(HttpMethod.Put, "file/talon/fonts/$name", bytes)
         if (status == 404) throw NoGrubbery()
-        check(status in 200..299 || status == 409) { "The ship would not keep the font." }
+        check(status in 200..299 || status == 409) { "Your Groundwire node would not keep the font." }
     }
 
     /**
@@ -72,7 +72,7 @@ class FontShip(
     suspend fun names(): Set<String> {
         val (status, bytes) = send(HttpMethod.Get, "kids/talon/fonts")
         if (status == 404) throw NoGrubbery()
-        check(status in 200..299) { "The ship would not list its fonts." }
+        check(status in 200..299) { "Your Groundwire node would not list its fonts." }
         val files = kotlinx.serialization.json.Json.parseToJsonElement(bytes.decodeToString())
             .let { it as? kotlinx.serialization.json.JsonObject }?.get("files") as? kotlinx.serialization.json.JsonArray
         return files.orEmpty().mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.toSet()
@@ -82,13 +82,13 @@ class FontShip(
     suspend fun get(name: String): ByteArray? {
         val (status, bytes) = send(HttpMethod.Get, "file/talon/fonts/$name")
         if (status == 404) return null
-        check(status in 200..299) { "The ship would not give the font." }
+        check(status in 200..299) { "Your Groundwire node would not give the font." }
         return bytes
     }
 
     suspend fun delete(name: String) {
         val (status, _) = send(HttpMethod.Delete, "file/talon/fonts/$name")
-        check(status in 200..299 || status == 404) { "The ship would not remove the font." }
+        check(status in 200..299 || status == 404) { "Your Groundwire node would not remove the font." }
     }
 }
 
@@ -134,7 +134,7 @@ class FontRepo(
                     if (it is NoGrubbery) "${info.family} is installed on this device only: ${it.message}"
                     else "${info.family} is installed here; it was not shared yet" +
                         (io.nisfeb.talon.util.readableReason(it.message)?.let { r -> " ($r)" } ?: "") +
-                        ". It is tried again next time Talon starts."
+                        ". It is tried again next time Groundwire starts."
                 },
             )
         }
@@ -178,7 +178,7 @@ class FontRepo(
         }
         takeUp(onShip - s.fonts.map { it.shipFile }.toSet(), s)
         _status.value = if (missing == 0) null
-        else "$missing font file${if (missing == 1) "" else "s"} could not be fetched from your ship yet; text uses the system font until ${if (missing == 1) "it arrives" else "they arrive"}."
+        else "$missing font file${if (missing == 1) "" else "s"} could not be fetched from your Groundwire node yet; text uses the system font until ${if (missing == 1) "it arrives" else "they arrive"}."
         io.nisfeb.talon.util.Log.i("FontRepo", "fonts: ${s.fonts.size} listed, ${s.fonts.size - missing} here, $missing missing")
         // A ship without grubbery will never have them: nothing to wait for,
         // where keepInLine asked it every ten minutes for as long as Talon ran.

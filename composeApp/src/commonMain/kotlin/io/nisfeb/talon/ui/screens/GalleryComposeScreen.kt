@@ -282,7 +282,7 @@ fun GalleryComposeScreen(
                         modifier = Modifier.fillMaxWidth().focusRequester(fieldFocus),
                     )
                     Text(
-                        "Talon fetches the page's title and preview when you post.",
+                        "Groundwire fetches the page's title and preview when you post.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

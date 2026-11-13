@@ -114,11 +114,11 @@ class CalendarMeetingsTest {
 
     @Test fun `a ship name, an email, and emails only on Google, as the page checks them`() {
         val plain = meta("""{"name":"Tea"}""")
-        assertEquals("Not a ship name: ~Nec", guestsProblem(plain, "~Nec", google = true))
-        assertEquals("Not a ship name: ~ne", guestsProblem(plain, "~ne", google = true))
+        assertEquals("Not an address: ~Nec", guestsProblem(plain, "~Nec", google = true))
+        assertEquals("Not an address: ~ne", guestsProblem(plain, "~ne", google = true))
         assertNull(guestsProblem(plain, "~sampel-palnet, ~nec, ~dabnev-nisseb--nidsut-tomdun", google = false), "ships work on any calendar")
-        assertEquals("Not an email or a ship: bob", guestsProblem(plain, "bob", google = true))
-        assertEquals("Not an email or a ship: bo@example", guestsProblem(plain, "bo@example", google = true))
+        assertEquals("Not an email or an address: bob", guestsProblem(plain, "bob", google = true))
+        assertEquals("Not an email or an address: bo@example", guestsProblem(plain, "bo@example", google = true))
         assertEquals("Email guests need a calendar linked to Google", guestsProblem(plain, "bo@example.com", google = false))
         assertNull(guestsProblem(plain, "bo@example.com", google = true))
     }

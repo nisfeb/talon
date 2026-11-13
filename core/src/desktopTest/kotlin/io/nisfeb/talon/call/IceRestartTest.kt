@@ -68,6 +68,49 @@ class IceRestartTest {
     }
 
     @Test
+    fun `a call whose path fails and never comes back gives up`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val eng = ScriptedCallEngine(restart = restartDesc)
+        val c = CallController(h.session, CallEngineProvider { eng }, restartGiveUpMs = 400)
+        try {
+            val id = placedAndLive(h, c, eng)
+            // The peer's app is killed: nobody answers the restart offer.
+            eng.stateFlow.value = MediaState.Failed
+            withTimeout(5_000) { while (offersFor(h, id) < 2) delay(10) }
+            val end = withTimeout(5_000) { c.state.first { it is CallUiState.Ended } }
+            assertEquals("connection failed", (end as CallUiState.Ended).reason)
+        } finally {
+            c.stop()
+        }
+    }
+
+    @Test
+    fun `the callee gives up on a lost path too`() = runBlocking<Unit> {
+        val h = TrunkHarness()
+        val eng = ScriptedCallEngine(restart = restartDesc)
+        val c = CallController(h.session, CallEngineProvider { eng }, restartGiveUpMs = 400)
+        try {
+            c.start()
+            h.awaitConnected()
+            withTimeout(10_000) { c.policy.first { it != null } }
+            h.emitFact("""{"recv":{"from":"~zod","sig":{"ring":{"id":"r1"}}}}""")
+            withTimeout(10_000) { c.state.first { it is CallUiState.Incoming } }
+            c.accept()
+            h.emitFact(offer("r1"))
+            h.awaitPut { TrunkHarness.sigIdIn(it, "accept") == "r1" }
+            eng.stateFlow.value = MediaState.Live
+            withTimeout(10_000) { c.state.first { (it as? CallUiState.Active)?.media == MediaState.Live } }
+            // Only the caller restarts; this side waits, then lets go.
+            eng.stateFlow.value = MediaState.Failed
+            val end = withTimeout(5_000) { c.state.first { it is CallUiState.Ended } }
+            assertEquals("connection failed", (end as CallUiState.Ended).reason)
+            assertEquals(0, offersFor(h, "r1"), "the callee sent a restart offer")
+        } finally {
+            c.stop()
+        }
+    }
+
+    @Test
     fun `the side that adopted the other ring in glare does not restart`() = runBlocking<Unit> {
         val h = TrunkHarness() // ~nec, below ~zod: ours is the call given up
         val eng = ScriptedCallEngine(restart = restartDesc)

@@ -326,6 +326,14 @@ class ShipConnection(
             db.setLastEventId(shipRowId, deviceId, postId)
             return
         }
+        // The owner's quiet hours, in their zone: only a favourite's
+        // pushes. An iPhone cannot hold a push itself.
+        val author = postId.substringBefore('/').takeIf { it.startsWith("~") }
+        if (!reachAllows(reach, author, nowMs)) {
+            log.info("quiet hours whom=$whom post=$postId")
+            db.setLastEventId(shipRowId, deviceId, postId)
+            return
+        }
 
         val dev = db.deviceFor(deviceId) ?: run {
             log.warn("device $deviceId has no push endpoint; skipping")
@@ -407,6 +415,9 @@ class ShipConnection(
     @Volatile private var notifyPrefs: Map<String, String> = emptyMap()
     @Volatile private var notifyPrefsAtMs = 0L
 
+    /** Who can reach the owner, from the same scry as [notifyPrefs]; read as levels are. */
+    @Volatile private var reach: RelayReach? = null
+
     private fun notifyLevels(): Map<String, String> {
         val now = System.currentTimeMillis()
         if (now - notifyPrefsAtMs > NOTIFY_PREFS_TTL_MS) {
@@ -426,7 +437,9 @@ class ShipConnection(
             .build()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) error("HTTP ${resp.code}")
-            return notifyLevels(Json.parseToJsonElement(resp.body.string()).jsonObject)
+            val settings = Json.parseToJsonElement(resp.body.string()).jsonObject
+            reach = reachOf(settings)
+            return notifyLevels(settings)
         }
     }
 
@@ -571,6 +584,46 @@ internal fun notifyLevels(settings: JsonObject): Map<String, String> {
             ?: (v as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
         (obj?.get("level") as? JsonPrimitive)?.contentOrNull?.let { whom to it }
     }.toMap()
+}
+
+/**
+ * Who can reach the owner: Talon's ReachSettings, the "reach" entry of
+ * %settings' talon ui-prefs, a string of JSON as %settings keeps it
+ * (2026-11-08). Only what a push needs: the favourites and quiet hours.
+ */
+internal data class RelayReach(val favourites: Set<String>, val quietOn: Boolean, val fromMin: Int, val toMin: Int, val zone: String)
+
+internal fun reachOf(settings: JsonObject): RelayReach? {
+    val desk = settings["desk"] as? JsonObject ?: settings
+    val v = (desk["ui-prefs"] as? JsonObject)?.get("reach") ?: return null
+    val obj = v as? JsonObject
+        ?: (v as? JsonPrimitive)?.contentOrNull?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+        ?: return null
+    val quiet = obj["quiet"] as? JsonObject
+    fun int(k: String, d: Int) = (quiet?.get(k) as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: d
+    return RelayReach(
+        favourites = (obj["favourites"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.toSet().orEmpty(),
+        quietOn = (quiet?.get("on") as? JsonPrimitive)?.booleanOrNull == true,
+        fromMin = int("fromMin", 22 * 60),
+        toMin = int("toMin", 7 * 60),
+        zone = (quiet?.get("zone") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+    )
+}
+
+/**
+ * Whether a post by [author] pushes at [nowMs]: in the owner's quiet hours,
+ * read in their zone, only a favourite's. As Talon's quietAt and
+ * messageReaches decide on the device. A zone it cannot read holds nothing:
+ * better a push at night than none all day.
+ */
+internal fun reachAllows(r: RelayReach?, author: String?, nowMs: Long): Boolean {
+    if (r == null || !r.quietOn || r.fromMin == r.toMin) return true
+    if (author != null && author in r.favourites) return true
+    val zone = runCatching { java.time.ZoneId.of(r.zone) }.getOrNull() ?: return true
+    val t = java.time.Instant.ofEpochMilli(nowMs).atZone(zone)
+    val m = t.hour * 60 + t.minute
+    val quiet = if (r.fromMin < r.toMin) m >= r.fromMin && m < r.toMin else m >= r.fromMin || m < r.toMin
+    return !quiet
 }
 
 /**

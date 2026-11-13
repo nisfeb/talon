@@ -7,7 +7,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.ui.screens.ShipSwitcherDrawer
 import io.nisfeb.talon.ui.theme.TalonTheme
 import java.util.concurrent.CopyOnWriteArrayList
@@ -45,7 +45,7 @@ class ShipSwitcherDrawerTest {
     fun `a ship is picked by the name it goes by, and another is added`() = drawer {
         assertTrue(shows("Work") && shows("~mitlyn-ditrel"), "a nickname, with the ship under it")
         onNodeWithText("Work").performClick()
-        onNodeWithText("Add ship").performClick()
+        onNodeWithText("Add node").performClick()
         waitForIdle()
         assertEquals(listOf("pick ~mitlyn-ditrel", "add"), did.toList())
     }
@@ -58,7 +58,7 @@ class ShipSwitcherDrawerTest {
         onNodeWithContentDescription("What to do with ~zod").performClick()
         onNodeWithText("Sign out and delete data").performClick()
         waitForIdle()
-        assertTrue(shows("Delete ~zod's data?") && shows("Nothing on the ship itself is touched"))
+        assertTrue(shows("Delete ~zod's data?") && shows("Nothing on the Groundwire node itself is touched"))
         onNodeWithText("Cancel").performClick()
         waitForIdle()
         assertEquals(listOf("out ~zod"), did.toList(), "cancelled deletes nothing")

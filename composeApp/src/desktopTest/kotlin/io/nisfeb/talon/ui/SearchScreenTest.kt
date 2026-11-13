@@ -5,13 +5,17 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.runtime.mutableStateOf
 import io.nisfeb.talon.ui.screens.SearchDraft
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.ai.IndexProgress
@@ -65,7 +69,7 @@ class SearchScreenTest {
     }
 
     @AfterTest
-    fun close() { SearchDraft.query = ""; db.close() }
+    fun close() { SearchDraft.query = ""; SearchDraft.fromBar = false; io.nisfeb.talon.urbit.closeAfter(db) }
 
     private val ui = InMemoryUiSettings()
     private val opened = mutableListOf<String>()
@@ -85,8 +89,11 @@ class SearchScreenTest {
      *  it off, as Android's chat does when it covers Search. */
     private val shown = mutableStateOf(true)
 
-    private fun search(embedder: SearchEmbedderClient? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
+    private fun search(embedder: SearchEmbedderClient? = null, fromBar: String? = null, block: ComposeUiTest.() -> Unit) = runComposeUiTest {
         SearchDraft.query = ""
+        SearchDraft.fromBar = false
+        // The list's search bar hands over its first letters this way.
+        fromBar?.let { SearchDraft.query = it; SearchDraft.fromBar = true }
         // A pass is run at most every ten minutes, process-wide: each test is a fresh start.
         io.nisfeb.talon.ui.screens.lastSearchPassMs = Long.MIN_VALUE / 2
         setContent {
@@ -96,7 +103,7 @@ class SearchScreenTest {
                     onOpenConversation = { opened += "dm $it" },
                     onOpenMessage = { whom, id, parent -> opened += "msg $whom $id $parent"; shown.value = false },
                     onOpenGroup = { opened += "group $it" },
-                    onBack = {},
+                    onBack = { opened += "back" },
                     embedder = embedder,
                 )
             }
@@ -136,10 +143,17 @@ class SearchScreenTest {
         type("lunch", "lunch at noon")
         // The group and the person land on their own: clicked before they
         // were there, the test failed on a slow machine.
-        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("Lunch Club") }
+        // The person's own row: "Lunch Club" is in a message's byline too.
+        waitUntil(timeoutMillis = 5_000) { shows("Lunch Crew") && shows("to start a DM") }
+        // Each one opened keeps the search it came from.
         onNodeWithText("Lunch Crew").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a group")
+        ui.setRecentSearches(emptyList())
         onNodeWithText("Lunch Club").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a person")
+        ui.setRecentSearches(emptyList())
         onNodeWithText("lunch at noon").performClick()
+        assertEquals(listOf("lunch"), ui.recentSearches.value, "a message")
         assertEquals(listOf("group ~bus/crew", "dm ~nec", "msg ~bus 1 null"), opened)
     }
 
@@ -152,6 +166,30 @@ class SearchScreenTest {
         waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("lunch plans tomorrow") }
         onNode(hasSetTextAction()).assertTextContains("lunch")
         assertEquals("", SearchDraft.query, "taken once: the next Search starts empty")
+    }
+
+    // Android keeps Search open under a result and brings its query back:
+    // emptying that query is starting another, not leaving (review,
+    // 2026-11-05). Emptying what the list's bar typed is leaving.
+    @Test
+    fun `a query brought back from a result is cleared to type another, and Search stays`() = search {
+        type("lunch", "lunch plans tomorrow")
+        onNodeWithText("lunch plans tomorrow").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") }
+        onNode(hasSetTextAction()).performTextClearance()
+        waitForIdle()
+        assertTrue("back" !in opened, "still searching: $opened")
+    }
+
+    @Test
+    fun `opened from the list's bar with a letter, the cursor follows it, and emptying it gives the list back`() = search(fromBar = "l") {
+        onNode(hasSetTextAction()).performTextInput("unch")
+        waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") }
+        onNode(hasSetTextAction()).assertTextContains("lunch")
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { "back" in opened }
     }
 
     @Test
@@ -176,6 +214,50 @@ class SearchScreenTest {
 
         type("lunch since:1w", "since ")
         waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && !shows("lunch plans tomorrow") }
+    }
+
+    // The last five searches, kept on this device, so a long one with
+    // operators is run again without typing it (sneagan, 2026-11-05).
+    @Test
+    fun `a search a result was opened from is kept, and runs again from the empty field`() = search {
+        type("lunch from:~nec", "lunch plans tomorrow")
+        waitUntil(timeoutMillis = 5_000) { !shows("lunch at noon") }
+        onNodeWithText("lunch plans tomorrow").performClick()
+        assertEquals(listOf("lunch from:~nec"), ui.recentSearches.value)
+        shown.value = true
+        waitUntil(timeoutMillis = 5_000) { shows("lunch plans tomorrow") }
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("RECENT SEARCHES") }
+        onNodeWithText("lunch from:~nec").performClick()
+        onNode(hasSetTextAction()).assertTextContains("lunch from:~nec")
+        waitUntil(timeoutMillis = 5_000) { shows("from ~nec") && shows("lunch plans tomorrow") }
+        assertTrue(!shows("lunch at noon"), "run again whole, operators and all")
+    }
+
+    @Test
+    fun `Enter keeps a search, newest first, and the cross takes one off`() = search {
+        type("lunch", "lunch at noon")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        type("dinner", "dinner later")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        assertEquals(listOf("dinner", "lunch"), ui.recentSearches.value)
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("RECENT SEARCHES") }
+        assertTrue(top("dinner") < top("lunch"))
+        onNodeWithContentDescription("Remove dinner from recent searches").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shows("dinner") }
+        assertEquals(listOf("lunch"), ui.recentSearches.value)
+        onNodeWithContentDescription("Remove lunch from recent searches").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Type at least two characters.") }
+    }
+
+    @Test
+    fun `typing alone keeps nothing`() = search {
+        type("lunch", "lunch at noon")
+        type("dinner", "dinner later")
+        onNode(hasSetTextAction()).performTextClearance()
+        waitUntil(timeoutMillis = 5_000) { shows("Type at least two characters.") }
+        assertEquals(emptyList(), ui.recentSearches.value)
     }
 
     @Test
@@ -213,6 +295,42 @@ class SearchScreenTest {
             embedder.meaning = listOf(dinner, noon)
             embedder.progress.value = IndexProgress(running = false, indexed = 4, total = 4)
             waitUntil(timeoutMillis = 5_000) { shows("lunch at noon") && shows("4 messages indexed") }
+        }
+    }
+
+    /** An embedder whose search for [slow] blocks a thread until [go], as the desktop one's model does. */
+    private class SlowEmbedder(private val slow: String, private val quick: List<MessageEntity>) : SearchEmbedderClient {
+        val go = java.util.concurrent.CountDownLatch(1)
+        val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
+        override val progress = MutableStateFlow(IndexProgress(indexed = 3, total = 3))
+        override suspend fun start() {}
+        override suspend fun semanticSearch(query: String): List<MessageEntity> {
+            asked += query
+            if (query != slow) return quick
+            // Not cancellable while it runs: withContext only says so on the way out.
+            return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { go.await(); emptyList() }
+        }
+        override suspend fun keywordSearch(terms: List<String>) = emptyList<MessageEntity>()
+        override suspend fun embed(text: String): FloatArray? = null
+        override suspend fun computeHighlights() = emptyList<MessageEntity>()
+    }
+
+    // A search the next keystroke cut off was caught as a failure when its
+    // model came back, and wrote no results over the newer search's.
+    @Test
+    fun `a smart search cut off by typing does not wipe the newer one's results`() {
+        ui.setSmartSearchPreferred(true)
+        val embedder = SlowEmbedder(slow = "evening", quick = listOf(dinner))
+        search(embedder) {
+            onNode(hasSetTextAction()).performTextInput("evening")
+            waitUntil(timeoutMillis = 5_000) { "evening" in embedder.asked }
+            onNode(hasSetTextAction()).performTextInput(" meal")
+            waitUntil(timeoutMillis = 5_000) { shows("dinner later") }
+            embedder.go.countDown()
+            Thread.sleep(500)
+            waitForIdle()
+            assertTrue(shows("dinner later"), "the cut-off search wiped the results")
+            assertTrue(!shows("Searching"), "and left the spinner up")
         }
     }
 

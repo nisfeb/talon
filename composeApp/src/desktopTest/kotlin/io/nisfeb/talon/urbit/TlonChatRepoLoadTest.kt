@@ -32,7 +32,7 @@ class TlonChatRepoLoadTest {
     private val nest = "chat/~bus/general"
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = closeAfter(db, repo)
 
     /** A real channel post with a reply and reactions, as a ship sent it. */
     private val post = javaClass.getResource("/fixtures/channels/post-with-reply-and-reacts.json")!!.readText()

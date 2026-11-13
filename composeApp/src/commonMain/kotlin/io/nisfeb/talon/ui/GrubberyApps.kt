@@ -23,6 +23,9 @@ enum class AppState {
 
     /** Not asked yet, or asked and the ship did not answer. */
     UNKNOWN,
+
+    /** Turned off in Talon, so not asked. */
+    OFF,
 }
 
 /** Which desk an install would fetch, and from whom. */
@@ -58,12 +61,12 @@ data class AppRow(
 
 /** Mail is a stock desk of the Grubbery shell, so it can be missing two ways; one install fixes both. */
 fun mailRow(availability: MailAvailability, error: String?): AppRow = when (availability) {
-    MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this ship.", null, error)
+    MailAvailability.PRESENT -> AppRow("Mail", AppState.WORKING, "Answering on this node.", null, error)
     MailAvailability.NO_GRUBBERY ->
-        AppRow("Mail", AppState.MISSING, "Mail runs in Grubbery, which this ship does not have. Talon can add both.", AppInstall.GRUBBERY, error)
+        AppRow("Mail", AppState.MISSING, "Mail runs in Grubbery, which this node does not have. Groundwire can add both.", AppInstall.GRUBBERY, error)
     MailAvailability.NOT_FETCHED ->
-        AppRow("Mail", AppState.MISSING, "Grubbery is here, but not its Mail yet. Talon can fetch it.", AppInstall.GRUBBERY, error)
-    MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+        AppRow("Mail", AppState.MISSING, "Grubbery is here, but not its Mail yet. Groundwire can fetch it.", AppInstall.GRUBBERY, error)
+    MailAvailability.SIGNED_OUT -> AppRow("Mail", AppState.SIGNED_OUT, "Signed out of your Groundwire node.", null, error)
     MailAvailability.UNKNOWN -> AppRow("Mail", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
@@ -73,11 +76,11 @@ fun mailRow(availability: MailAvailability, error: String?): AppRow = when (avai
  * install does what either needs, so there is nothing to tell apart.
  */
 fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = when (availability) {
-    CalendarAvailability.PRESENT -> AppRow("Calendar", AppState.WORKING, "Answering on this ship.", null, error)
-    CalendarAvailability.SIGNED_OUT -> AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+    CalendarAvailability.PRESENT -> AppRow("Calendar", AppState.WORKING, "Answering on this node.", null, error)
+    CalendarAvailability.SIGNED_OUT -> AppRow("Calendar", AppState.SIGNED_OUT, "Signed out of your Groundwire node.", null, error)
     CalendarAvailability.UNKNOWN -> AppRow("Calendar", AppState.UNKNOWN, "Not asked yet.", null, error)
     CalendarAvailability.ABSENT ->
-        AppRow("Calendar", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
+        AppRow("Calendar", AppState.MISSING, "Not on this node yet. Groundwire can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
 }
 
 /**
@@ -85,8 +88,8 @@ fun calendarRow(availability: CalendarAvailability, error: String?): AppRow = wh
  * subscribed: null is "not asked yet", which is not the same as absent.
  */
 fun latticeRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
-    true -> AppRow("Lattice", AppState.WORKING, "Answering on this ship.", null, error)
-    false -> AppRow("Lattice", AppState.MISSING, "Not on this ship yet. Talon can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
+    true -> AppRow("Lattice", AppState.WORKING, "Answering on this node.", null, error)
+    false -> AppRow("Lattice", AppState.MISSING, "Not on this node yet. Groundwire can fetch it with Grubbery.", AppInstall.GRUBBERY, error)
     null -> AppRow("Lattice", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
@@ -95,8 +98,8 @@ fun latticeRow(installed: Boolean?, error: String? = null): AppRow = when (insta
  * itself runs on: without it there are no groups, channels or DMs.
  */
 fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (installed) {
-    true -> AppRow("Groups", AppState.WORKING, "Answering on this ship.", null, error)
-    false -> AppRow("Groups", AppState.MISSING, "Chat runs on Groups, which this ship does not have.", AppInstall.GROUPS, error)
+    true -> AppRow("Groups", AppState.WORKING, "Answering on this node.", null, error)
+    false -> AppRow("Groups", AppState.MISSING, "Chat runs on Groups, which this node does not have.", AppInstall.GROUPS, error)
     null -> AppRow("Groups", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 
@@ -107,22 +110,26 @@ fun groupsRow(installed: Boolean?, error: String? = null): AppRow = when (instal
  * the desk and asks the owner to approve what it reaches.
  */
 fun orreryRow(availability: io.nisfeb.talon.orrery.OrreryAvailability, error: String? = null): AppRow = when (availability) {
-    io.nisfeb.talon.orrery.OrreryAvailability.PRESENT -> AppRow("Orrery", AppState.WORKING, "Answering on this ship.", null, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.PRESENT -> AppRow("Orrery", AppState.WORKING, "Answering on this node.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.MISSING ->
-        AppRow("Orrery", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ORRERY, error)
-    io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+        AppRow("Orrery", AppState.MISSING, "Not on this node. Groundwire can add it to your Grubbery shell.", AppInstall.ORRERY, error)
+    io.nisfeb.talon.orrery.OrreryAvailability.SIGNED_OUT -> AppRow("Orrery", AppState.SIGNED_OUT, "Signed out of your Groundwire node.", null, error)
     io.nisfeb.talon.orrery.OrreryAvailability.UNKNOWN -> AppRow("Orrery", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
+
+/** Orrery while the assistant's switch is off: nothing has asked the ship, so say where it is turned on. */
+fun orreryOffRow(): AppRow =
+    AppRow("Orrery", AppState.OFF, "Turn on Groundwire Assistant in Settings, under Assistant, to use it.", null)
 
 /**
  * Armillary is its own desk app from the same publisher, added to the
  * shell the same way orrery is.
  */
 fun armillaryRow(availability: io.nisfeb.talon.armillary.ArmillaryAvailability, error: String? = null): AppRow = when (availability) {
-    io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT -> AppRow("Armillary", AppState.WORKING, "Answering on this ship.", null, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.PRESENT -> AppRow("Armillary", AppState.WORKING, "Answering on this node.", null, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.MISSING ->
-        AppRow("Armillary", AppState.MISSING, "Not on this ship. Talon can add it to your Grubbery shell.", AppInstall.ARMILLARY, error)
-    io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT -> AppRow("Armillary", AppState.SIGNED_OUT, "Signed out of the ship.", null, error)
+        AppRow("Armillary", AppState.MISSING, "Not on this node. Groundwire can add it to your Grubbery shell.", AppInstall.ARMILLARY, error)
+    io.nisfeb.talon.armillary.ArmillaryAvailability.SIGNED_OUT -> AppRow("Armillary", AppState.SIGNED_OUT, "Signed out of your Groundwire node.", null, error)
     io.nisfeb.talon.armillary.ArmillaryAvailability.UNKNOWN -> AppRow("Armillary", AppState.UNKNOWN, "Not asked yet.", null, error)
 }
 

@@ -12,7 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
@@ -78,7 +78,7 @@ class LocalShipSectionTest {
                 }
             }
         }
-        waitUntil(timeoutMillis = 5_000) { shows("Local ship (beta)") }
+        waitUntil(timeoutMillis = 5_000) { shows("Local node (beta)") }
         block()
     }
 
@@ -91,11 +91,11 @@ class LocalShipSectionTest {
     fun `a running comet says what and where it is, is copied, and stops`() = section(FakeComet(running)) {
         assertTrue(shows("Running") && shows("/home/me/.talon/comet") && shows("vere 3.4"))
         waitUntil(timeoutMillis = 5_000) { shows("(5 MB)") }
-        tap("Copy ship name")
+        tap("Copy address")
         tap("Stop")
         waitUntil(timeoutMillis = 5_000) { shows("Start") }
         assertEquals(listOf("copied $comet", "stop"), did.toList())
-        assertTrue(shows("The ship is not running."))
+        assertTrue(shows("Your Groundwire node is not running."))
     }
 
     @Test
@@ -158,16 +158,16 @@ class LocalShipSectionTest {
     fun `a busy ship says so, and a line sent waits until it is taken and answered`() {
         val ship = FakeComet(running).apply { busy.value = true; takes = false }
         section(ship) {
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship is busy and will answer when it's done") }
-            assertTrue(shows("A new ship spends its first several minutes installing updates."))
+            waitUntil(timeoutMillis = 5_000) { shows("Your node is busy and will answer when it's done") }
+            assertTrue(shows("A new node spends its first several minutes installing updates."))
             onNode(hasSetTextAction()).performScrollTo().performTextInput("(add 2 2)")
             tap("Send")
-            waitUntil(timeoutMillis = 5_000) { shows("Your ship is busy and will take \"(add 2 2)\" when it's done") }
+            waitUntil(timeoutMillis = 5_000) { shows("Your node is busy and will take \"(add 2 2)\" when it's done") }
             assertEquals(listOf("send (add 2 2)"), did.toList())
             // Done: dojo takes the line, prints it back and answers.
             ship.terminal.value += "~$comet:dojo> (add 2 2)\n> (add 2 2)\n4\n"
             ship.busy.value = false
-            waitUntil(timeoutMillis = 5_000) { !shows("Your ship is busy") && !shows("Sent:") }
+            waitUntil(timeoutMillis = 5_000) { !shows("Your node is busy") && !shows("Sent:") }
             assertTrue(shows("4"))
         }
     }
@@ -178,15 +178,15 @@ class LocalShipSectionTest {
         tap("Send")
         waitUntil(timeoutMillis = 5_000) { shows("dojo> (add 2 2)") }
         waitUntil(timeoutMillis = 5_000) { !shows("Sent:") }
-        assertTrue(!shows("Your ship is busy"))
+        assertTrue(!shows("Your node is busy"))
     }
 
     @Test
     fun `a stopped ship is not called busy`() {
         val ship = FakeComet(LocalShipState.Stopped).apply { busy.value = true }
         section(ship) {
-            assertTrue(shows("The ship is not running."))
-            assertTrue(!shows("Your ship is busy"))
+            assertTrue(shows("Your Groundwire node is not running."))
+            assertTrue(!shows("Your node is busy"))
         }
     }
 }

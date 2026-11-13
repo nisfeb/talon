@@ -28,14 +28,14 @@ There are two exceptions, both optional:
 
 ## If your notifications go through our relay
 
-A phone can only be woken for a notification by a server, so push notifications that arrive while Talon is closed go through a relay. On iPhone this is how every notification arrives; on Android, Talon can also keep its own connection instead. Talon uses the relay we run unless you point it at one you run yourself, under Settings, Notification health, Endpoint.
+A phone can only be woken for a notification by a server, so push notifications that arrive while Talon is closed go through a relay. On iPhone this is how every notification arrives; on Android, Talon can also keep its own connection instead. Talon uses the relay we run unless you point it at one you run yourself, under Settings, Notifications, Background delivery, Endpoint.
 
 How it works depends on your ship:
 
 - **Your ship sends the notifications** (when it runs a version of %trunk with push support). Your ship keeps your phone's registration and decides what notifies you. On iPhone, each notification passes through the relay's gateway to Apple's push service. The relay keeps your phone's push token, under a random handle your ship knows, and the unread count for the app icon badge. No sign-in code or session leaves your ship.
 - **The relay watches your ship** (for ships without that support). When you turn notifications on, Talon sends the relay your ship's address and your sign-in code (+code), once, over TLS. The relay uses the code to sign in to your ship and keeps only the resulting session cookie, encrypted at rest; it never stores the code. It stays connected to your ship, applies the notification levels you set in Talon, and sends a notification when something should reach you. It keeps your ship's name and address, your phone's push token, and its place in your ship's activity.
 
-Either way, a notification carries the sender and a one-line preview of the message, so your phone can show it, and it is handed on to Apple's push service (iPhone) or your UnifiedPush distributor (Android) without being stored. When the relay watches your ship, Unregister under Settings, Notification health deletes your phone's registration and the stored session.
+Either way, a notification carries the sender and a one-line preview of the message, so your phone can show it, and it is handed on to Apple's push service (iPhone) or your UnifiedPush distributor (Android) without being stored. When the relay watches your ship, Unregister under Settings, Notifications, Background delivery deletes your phone's registration and the stored session.
 
 ## If you buy AI credit from ~nisfeb
 

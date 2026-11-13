@@ -149,7 +149,7 @@ fun ContactsScreen(
                 OutlinedTextField(
                     value = newPatp,
                     onValueChange = { newPatp = it },
-                    placeholder = { Text("~patp, or a word name") },
+                    placeholder = { Text("~address, or a word name") },
                     // A twelve-word name fits without scrolling inside the box.
                     singleLine = false,
                     maxLines = 6,
@@ -198,7 +198,7 @@ fun ContactsScreen(
 
         when {
             bookContacts.isEmpty() -> Text(
-                "No contacts yet. Add someone by ~patp above, or ${io.nisfeb.talon.ui.tapWord.lowercase()} " +
+                "No contacts yet. Add someone by address above, or ${io.nisfeb.talon.ui.tapWord.lowercase()} " +
                     "\"Add to contacts\" on a profile.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

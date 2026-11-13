@@ -125,7 +125,7 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
 
         val note = buildString {
             if (pmList.isEmpty()) {
-                append("PackageManager returned 0 — Talon's <queries> block ")
+                append("PackageManager returned 0 — Groundwire's <queries> block ")
                 append("doesn't match any installed receiver, OR no app is ")
                 append("registering as a distributor right now.")
             } else if (connectorList.isEmpty() && pmList.isNotEmpty()) {
@@ -135,7 +135,7 @@ class UnifiedPushTokenProvider(private val context: Context) : PushTokenProvider
                 append("ntfy / NextPush; the receivers above are private to ")
                 append("their owner apps.")
             } else if (connectorList.size > 1) {
-                append("Multiple distributors visible. Talon will pick the ")
+                append("Multiple distributors visible. Groundwire will pick the ")
                 append("first one the connector returns; uninstall the ones ")
                 append("you don't want.")
             }

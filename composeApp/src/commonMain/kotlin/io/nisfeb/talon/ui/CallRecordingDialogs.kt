@@ -37,7 +37,7 @@ fun RecordConsentDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     /** What recording does and who is told: the room by its badge, a 1:1 call's peer in the chat. */
-    text: String = "Recording captures everyone's audio. Talon sends it to " +
+    text: String = "Recording captures everyone's audio. Groundwire sends it to " +
         "Armillary's speech model to make a transcript, and " +
         "everyone on the line sees a recording badge while it's on.",
 ) {
@@ -125,7 +125,7 @@ fun RecordingResultDialog(
                     Text(
                         "Publishing sends each speaker's audio to Armillary's " +
                             "transcription model and puts the transcript on " +
-                            "your ship, where anyone who can read your Lattice " +
+                            "your Groundwire node, where anyone who can read your Lattice " +
                             "namespace can see it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -231,7 +231,7 @@ fun RecordingResultDialog(
                                 }
                                 if (paths.isNotEmpty()) {
                                     val manifest = buildString {
-                                        append("Talon party line recording, one file per speaker.\n")
+                                        append("Groundwire party line recording, one file per speaker.\n")
                                         append("Every file starts at the same instant, so transcribe each and merge by timestamp.\n\n")
                                         files.keys.forEach { ship ->
                                             append("party-line-$stamp-${ship.trimStart('~')}.wav  ")

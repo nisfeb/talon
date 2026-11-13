@@ -49,6 +49,25 @@ suspend fun fetchLastKnownLocation(ctx: Context): Location? {
 
 private const val FIX_TIMEOUT_MS = 20_000L
 
+/**
+ * Where the phone is now, dated now: the last fix when it is fresh, else
+ * a new one, else the last one again. The phone is listening for moves,
+ * so a last fix it has not replaced is still where it is, and dated as
+ * it was taken the ship read it as old and sent a share nothing.
+ */
+suspend fun fetchCurrentLocation(ctx: Context): Location? {
+    val last = fetchLastKnownLocation(ctx) ?: return null
+    val now = System.currentTimeMillis()
+    if (freshFix(last.time, now)) return last
+    val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+    val fresh = try {
+        lm?.let { kotlinx.coroutines.withTimeoutOrNull(FIX_TIMEOUT_MS) { requestSingleUpdate(it) } }
+    } catch (_: SecurityException) {
+        null
+    }
+    return fresh ?: Location(last).apply { time = System.currentTimeMillis() }
+}
+
 private suspend fun requestSingleUpdate(lm: LocationManager): Location? =
     suspendCancellableCoroutine { cont ->
         val providers = lm.getProviders(true)

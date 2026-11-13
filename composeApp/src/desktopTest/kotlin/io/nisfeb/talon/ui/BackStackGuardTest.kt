@@ -90,4 +90,30 @@ class BackStackGuardTest {
             }
         }
     }
+
+    // The same rule for a notebook or gallery post and its compose:
+    // Android registered them before the chat's handler, so back from a
+    // post closed the whole channel.
+    @Test
+    fun `back from a notebook or gallery post closes the post, not the channel`() {
+        val shells = mapOf(
+            "TalonApp" to (read("composeApp/src/androidMain/kotlin/io/nisfeb/talon/ui/TalonApp.kt") to
+                "PlatformBackHandler(enabled = openThread == null && openWhom != null"),
+            "App" to (read("composeApp/src/commonMain/kotlin/io/nisfeb/talon/compose/App.kt") to
+                "PlatformBackHandler(enabled = openChat != null && openThreadParent == null)"),
+        )
+        for ((shell, pair) in shells) {
+            val (source, chat) = pair
+            val c = source.indexOf(chat)
+            assertTrue(c >= 0, "$shell: the chat's back handler is missing")
+            for (post in listOf("openNotebookPostId != null", "notebookComposeOpen", "openGalleryPostId != null", "galleryComposeOpen")) {
+                val at = Regex("""PlatformBackHandler\(\s*enabled = """ + Regex.escape(post)).find(source)?.range?.first ?: -1
+                assertTrue(at >= 0, "$shell: no back handler for $post")
+                assertTrue(at > c, "$shell: the handler for $post is registered before the chat's, so back closes the channel")
+            }
+            // Compose is drawn over the post, so the post's handler waits while it is open.
+            assertTrue("enabled = openNotebookPostId != null && !notebookComposeOpen" in source, shell)
+            assertTrue("enabled = openGalleryPostId != null && !galleryComposeOpen" in source, shell)
+        }
+    }
 }

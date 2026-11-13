@@ -36,7 +36,8 @@ fun Avatar(
     onClick: (() -> Unit)? = null,
     colorHex: String? = null,
 ) {
-    val isHttp = url?.let { it.startsWith("http://") || it.startsWith("https://") } == true
+    // A request's pictures are not fetched ([LocalGuardedContent]): the monogram.
+    val isHttp = !LocalGuardedContent.current && url?.let { it.startsWith("http://") || it.startsWith("https://") } == true
     // A bare @p is a ship the caller had no name for: draw the name the
     // reader sees for it everywhere else, so a ship's tile is one tile.
     // A comet was "RI" (its words) in a chat and "LM" (its @p) on its

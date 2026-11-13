@@ -45,21 +45,21 @@ fun NotificationSetupDialog(
                 val done = on
                 if (done != null) {
                     Text(
-                        if (done.alerts) "Talon will tell you when something arrives, with the app closed."
-                        else "Calls will ring, but messages won't alert until you allow notifications for Talon in iOS Settings.",
+                        if (done.alerts) "Groundwire will tell you when something arrives, with the app closed."
+                        else "Calls will ring, but messages won't alert until you allow notifications for Groundwire in iOS Settings.",
                     )
                 } else {
                     Text(
-                        "With the app closed, an ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your ship on its own. Talon's relay watches " +
-                            "your ship and sends this ${io.nisfeb.talon.ui.iosDeviceName} a notification when something arrives. It signs in to your " +
-                            "ship once with your +code, keeps an encrypted session, and forgets the code.",
+                        "With the app closed, an ${io.nisfeb.talon.ui.iosDeviceName} hears nothing from your Groundwire node on its own. Groundwire's relay watches " +
+                            "your node and sends this ${io.nisfeb.talon.ui.iosDeviceName} a notification when something arrives. It signs in to your " +
+                            "node once with your access code (+code), keeps an encrypted session, and forgets the code.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (code == null) {
                         OutlinedTextField(
                             value = typed,
                             onValueChange = { typed = it },
-                            label = { Text("+code") },
+                            label = { Text("Access code") },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),

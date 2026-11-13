@@ -13,7 +13,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.CallEngine
 import io.nisfeb.talon.call.CallEngineProvider
@@ -102,7 +102,7 @@ class CallOverlayTest {
         assertTrue(shows("Bus"), "named as the app names them")
         onNodeWithContentDescription("Decline").performClick() // the word under it is a label
         assertEquals("c1", sent("reject"))
-        showing("Bus — declined")
+        showing("Call with Bus ended: declined")
         assertTrue(!shows("Incoming call"))
     }
 
@@ -145,18 +145,18 @@ class CallOverlayTest {
     @Test
     fun `a placed call rings out until cancelled`() = overlay { calls ->
         calls.placeCall("~bus")
-        showing("Calling…")
+        showing("Calling")
         val id = sent("ring")
         onNodeWithContentDescription("Cancel").performClick()
         assertEquals(id, sent("hangup"))
-        waitUntil(timeoutMillis = 10_000) { !shows("Calling…") }
+        waitUntil(timeoutMillis = 10_000) { !shows("Calling") }
     }
 
     @Test
     fun `an old calling app is offered an update, and Not now leaves it`() {
         ship.scries["trunk/version"] = """{"wire":5}"""
         overlay {
-            showing("Your ship's calling app is out of date")
+            showing("Your Groundwire node's calling app is out of date")
             onNodeWithText("Not now").performClick()
             waitUntil(timeoutMillis = 5_000) { !shows("out of date") }
             assertTrue(ship.pokesTo("hood").isEmpty(), "nothing installed")

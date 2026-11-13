@@ -12,7 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -56,7 +56,7 @@ class ContactsAndStatusTest {
     }
 
     @AfterTest
-    fun close() { db.close(); tmp.deleteRecursively() }
+    fun close() { io.nisfeb.talon.urbit.closeAfter(db); tmp.deleteRecursively() }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
@@ -88,13 +88,13 @@ class ContactsAndStatusTest {
 
     @Test
     fun `a ship already in the book, or words that are not a ship, cannot be added`() = book {
-        onNode(hasSetTextAction() and hasText("~patp, or a word name")).performTextInput("~mitlyn-ditrel")
+        onNode(hasSetTextAction() and hasText("~address, or a word name")).performTextInput("~mitlyn-ditrel")
         onNodeWithText("Add").assertIsNotEnabled()
     }
 
     @Test
     fun `a new ship goes in with its nickname`() = book {
-        onNode(hasSetTextAction() and hasText("~patp, or a word name")).performTextInput("sampel-palnet")
+        onNode(hasSetTextAction() and hasText("~address, or a word name")).performTextInput("sampel-palnet")
         onNode(hasSetTextAction() and hasText("nickname")).performTextInput("Sam")
         onNodeWithText("Add").assertIsEnabled().performClick()
         assertEquals(listOf("add ~sampel-palnet Sam"), did)

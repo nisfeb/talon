@@ -85,7 +85,7 @@ screenshots are exactly 1320x2868, which Apple accepts as-is. Take
 4–6: chat list, a channel with threads/reactions, a DM with an image,
 settings/themes. Then upload:
 
-The renderer is committed: `./gradlew :composeApp:desktopTest --tests
+The renderer is committed: `TALON_STORE_SHOTS=1 ./gradlew :composeApp:desktopTest --tests
 '*StoreScreenshots*'` writes five 1320x2868 PNGs to
 `composeApp/build/store-screenshots/` (headless, staged demo data,
 never a real ship). Upload takes `images: [{filename, data: base64}]`

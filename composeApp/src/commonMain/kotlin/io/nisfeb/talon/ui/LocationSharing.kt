@@ -24,8 +24,35 @@ interface LocationSharing {
     /** Ask for what hearing moves in the background needs, then listen. False when it was refused. */
     suspend fun start(): Boolean
 
+    /**
+     * Send where the owner is now, with no move to wait for. A share
+     * that starts needs it: the phone otherwise speaks only after a
+     * move, and the ship sends a peer nothing until it has a fix from
+     * the last half hour.
+     */
+    fun sendNow() = Unit
+
     fun stop()
 }
+
+/**
+ * What a share needs of the phone before it starts: the switch on, its
+ * prompts with it, and where the owner is now sent, every time. False
+ * when location access was refused. A second share from a phone that
+ * had not moved sent nothing (2026-11-10): the fix went only with the
+ * switch turning on, and it was on already.
+ */
+suspend fun readyToShare(sending: LocationSharing?): Boolean {
+    if (sending == null) return true
+    if (!sending.on.value) return sending.start()
+    sending.sendNow()
+    return true
+}
+
+/** How old a fix may be and still be sent as where the owner is now. */
+const val FRESH_FIX_MS = 2 * 60_000L
+
+fun freshFix(atMs: Long, nowMs: Long): Boolean = nowMs - atMs < FRESH_FIX_MS
 
 /** The platform's, or null where [isLocationSharingSupported] is false. */
 @Composable

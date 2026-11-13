@@ -40,8 +40,9 @@ expect fun Modifier.keepEdgeGesture(): Modifier
 fun Modifier.combinedClickableWithSecondary(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
 ): Modifier {
-    val base = this.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    val base = this.combinedClickable(onClickLabel = onClickLabel, onClick = onClick, onLongClick = onLongClick)
     return if (onLongClick != null) base.onSecondaryClick(onLongClick) else base
 }
 

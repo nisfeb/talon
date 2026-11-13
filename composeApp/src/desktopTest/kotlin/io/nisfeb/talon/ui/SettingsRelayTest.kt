@@ -10,7 +10,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -66,7 +66,7 @@ class SettingsRelayTest {
             }
         }
         onAllNodesWithText("Notifications")[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Push relay") }
+        waitUntil(timeoutMillis = 5_000) { shows("Background delivery") }
         block()
     }
 
@@ -75,7 +75,7 @@ class SettingsRelayTest {
     private fun ComposeUiTest.register(code: String) {
         onNodeWithText("Register this device").performScrollTo().performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Register with relay") }
-        onNode(hasSetTextAction() and hasText("+code")).performTextInput(code)
+        onNode(hasSetTextAction() and hasText("Access code")).performTextInput(code)
         onAllNodesWithText("Register").let { it[it.fetchSemanticsNodes().size - 1] }.performClick()
     }
 
@@ -111,7 +111,7 @@ class SettingsRelayTest {
     @Test
     fun `a refused registration says what to check, and keeps nothing`() = panel(client = relay(ok = false)) {
         register("wrong")
-        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your ship.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The relay could not sign in to your Groundwire node.") }
         assertEquals("", relaySettings.deviceIdFor("~zod"))
     }
 
@@ -137,7 +137,7 @@ class SettingsRelayTest {
     @Test
     fun `the relay's address is saved as typed`() = panel {
         onNode(hasSetTextAction() and hasText("Endpoint")).performScrollTo().performTextReplacement("https://relay.example/v2")
-        onNodeWithText("Save endpoint").performClick()
+        onNodeWithText("Save endpoint").performScrollTo().performClick()
         assertEquals("https://relay.example/v2", relaySettings.endpoint.value)
     }
 
@@ -151,13 +151,15 @@ class SettingsRelayTest {
         relaySettings.setTrunkDeviceIdFor("~zod", "t-1")
         panel(shipPoke = { pokes += it.toString() }) {
             assertTrue(shows("Notifications come from ~zod"))
-            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().boundsInRoot.top
-            val relay = onNodeWithText("Push relay").fetchSemanticsNode().boundsInRoot.top
+            // Unclipped: below the fold, both clip to the window's edge
+            // and read as one height.
+            val row = onNodeWithText("Notifications come from ~zod").fetchSemanticsNode().positionInRoot.y
+            val relay = onNodeWithText("Background delivery").fetchSemanticsNode().positionInRoot.y
             assertTrue(row < relay, "above the relay panel, not inside it")
-            onNodeWithText("Use the relay").performClick()
-            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Talon relay") }
+            onNodeWithText("Use the relay").performScrollTo().performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Notifications come from the Groundwire relay") }
             assertEquals(listOf("""{"push-unregister":"t-1"}"""), pokes.toList())
-            assertTrue(shows("Use my ship"))
+            assertTrue(shows("Use my node"))
         }
     }
 

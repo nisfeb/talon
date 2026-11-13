@@ -55,7 +55,7 @@ class NotesRepoTest {
     }
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun live(body: suspend CoroutineScope.() -> Unit) = runBlocking<Unit> {
         val events = ship.channel.events().launchIn(this)
@@ -255,7 +255,7 @@ class NotesRepoTest {
         ship.answerApi = { _, _, _ -> throw java.io.IOException("Connection refused") }
         ship.loseScry = { kotlinx.io.IOException("The network connection was lost.") }
         val said = notes.updateNote(book, 11, "not saved", expectedRevision = 3)
-        assertEquals("Your ship is slow, so it didn't go through. Try again when it's back.", said)
+        assertEquals("Your Groundwire node is slow, so it didn't go through. Try again when it's back.", said)
         val row = db.notes().note(book.flagString, 11)
         assertEquals("Simmer **long**.", row?.bodyMd, "the host's copy, not the edit")
         assertEquals(false, row?.pending)
@@ -271,7 +271,7 @@ class NotesRepoTest {
         })
         val down = NotesRepo(db, CoroutineScope(SupervisorJob()))
             .apply { attach(UrbitSession(proxy, ship.session).apply { tryRestore("~zod") }.openChannel()) }
-        val slow = "Your ship is slow, so it didn't go through. Try again when it's back."
+        val slow = "Your Groundwire node is slow, so it didn't go through. Try again when it's back."
         assertEquals(slow, down.updateNote(book, 11, "not saved", expectedRevision = 3))
         assertEquals(slow, down.createNote(book, 9, "Laksa", ""))
         assertEquals("Simmer **long**.", db.notes().note(book.flagString, 11)?.bodyMd, "the host's copy, not the edit")

@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -135,7 +135,7 @@ class MailThreadActionsTest {
 
     @Test
     fun `a thread gone from the ship, or in no form this build reads, says so`() {
-        pane(body = null, ready = "This thread is no longer on the ship.") {}
+        pane(body = null, ready = "This thread is no longer on your Groundwire node.") {}
         pane(
             body = """{"id":"0vt","messages":[],"participants":["~zod","~nec"],"last":10,"unreadable":2,"archived":false,"labels":[]}""",
             ready = "Every copy of this thread is in a form this build cannot read.",

@@ -37,6 +37,21 @@ fun pollTallies(reactions: List<String>, options: Int): IntArray = IntArray(opti
     }
 }
 
+/** A reply to an event card, kept as a reaction on the card's message. */
+enum class EventReply(val emoji: String, val label: String) {
+    Going("✅", "Going"),
+    Maybe("🤔", "Maybe"),
+    No("❌", "Can't go"),
+}
+
+/** Which reply [emoji] is, or null: compared normalized, as reactions are stored. */
+fun eventReplyOf(emoji: String?): EventReply? =
+    emoji?.let { e -> ReactionPalette.normalize(e).let { n -> EventReply.entries.firstOrNull { ReactionPalette.normalize(it.emoji) == n } } }
+
+/** How many gave each reply, from a card's reactions. */
+fun eventReplyCounts(reactions: List<String>): Map<EventReply, Int> =
+    reactions.mapNotNull(::eventReplyOf).groupingBy { it }.eachCount()
+
 sealed interface PollParseResult {
     data class Ok(val poll: Poll) : PollParseResult
     data class Err(val error: String) : PollParseResult

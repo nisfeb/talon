@@ -113,8 +113,8 @@ class TrunkFixtureTest {
             println("Open that channel in Talon on both ships; the party-line")
             println("icon appears in its header.")
 
-            runCatching { dbA.close() }
-            runCatching { dbB.close() }
+            runCatching { io.nisfeb.talon.urbit.closeAfter(dbA, repoA) }
+            runCatching { io.nisfeb.talon.urbit.closeAfter(dbB, repoB) }
         }
     }
 }

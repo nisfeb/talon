@@ -143,7 +143,7 @@ fun NotebookListScreen(
             ) { CircularProgressIndicator() }
 
             posts.isEmpty() -> Text(
-                if (unread) "Your ship did not send these posts. Open the channel again to retry."
+                if (unread) "Your Groundwire node did not send these posts. Open the channel again to retry."
                 else "No posts yet. ${io.nisfeb.talon.ui.tapWord} the edit icon to write one.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

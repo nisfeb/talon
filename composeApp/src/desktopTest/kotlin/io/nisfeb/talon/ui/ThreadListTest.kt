@@ -1,7 +1,13 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -11,12 +17,14 @@ import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -53,6 +61,9 @@ class ThreadListTest {
         parentId: String = parent,
         seed: suspend AppDatabase.() -> Unit = {},
         prepare: FakeShip.() -> Unit = {},
+        look: ChatLook = ChatLook(),
+        /** A phone's way into a reply's menu: a tap on it, opening at the finger. */
+        touch: Boolean = false,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-thread-").toFile()
@@ -63,6 +74,10 @@ class ThreadListTest {
         val stream = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         ship.channel.events().launchIn(stream)
         runBlocking { db.seed() }
+        // The contact map starts from the last one any screen built, which
+        // another test in this JVM may have left; the app forgets it too
+        // on a change of ship.
+        io.nisfeb.talon.ui.LastContactMap.forget()
         try {
             runComposeUiTest {
                 setContent {
@@ -71,6 +86,12 @@ class ThreadListTest {
                             override fun getText(): androidx.compose.ui.text.AnnotatedString? = null
                             override fun setText(annotatedString: androidx.compose.ui.text.AnnotatedString) { copied += annotatedString.text }
                         },
+                        // What the shells provide from the bubbles setting.
+                        LocalChatLook provides look,
+                        io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
+                        // The shell's profile sheet, and lattice's answer for an urb:// card.
+                        LocalOpenProfile provides { ship: String -> profiles += ship },
+                        LocalUrbFetcher provides { url: String -> kotlinx.coroutines.flow.flowOf(io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl(url, "A page title", "its first lines")) },
                     ) {
                     TalonTheme(darkTheme = false) {
                         ThreadList(
@@ -86,12 +107,13 @@ class ThreadListTest {
             }
         } finally {
             stream.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db, repo)
             tmp.deleteRecursively()
         }
     }
 
     private val copied = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val profiles = java.util.concurrent.CopyOnWriteArrayList<String>()
 
     private fun msg(id: String, author: String, text: String, sent: Long, parentId: String? = null, status: String? = null) =
         MessageEntity("~bus", id, author, sent, """[{"inline":["$text"]}]""", "/chat", parentId = parentId, status = status)
@@ -108,6 +130,81 @@ class ThreadListTest {
                 .filter { "Text = " in it || "ScrollAxisRange" in it }.joinToString(" | ") { it.trim() }
             error("never showed \"$text\"; the screen showed: $screen")
         }
+    }
+
+    // sneagan, 2026-11-05: "threaded messages are always rows instead of
+    // respecting the bubble setting".
+    private val replies: suspend AppDatabase.() -> Unit = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~nec/170141184507", "~nec", "their answer", 2_000, parentId = parent))
+        messages().upsert(msg("~zod/170141184508", "~zod", "my answer", 3_000, parentId = parent))
+    }
+
+    private fun ComposeUiTest.left(text: String) = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.left
+
+    @Test
+    fun `in bubbles a thread puts ours on the right, as a chat does`() = thread(seed = replies, look = ChatLook(bubbles = true)) { _, _ ->
+        shows("my answer")
+        assertTrue(left("my answer") > left("their answer") + 200f, "ours on the right")
+        assertTrue(onAllNodesWithText("~nec", substring = true).fetchSemanticsNodes().isNotEmpty(), "theirs named")
+    }
+
+    // sneagan, 2026-11-06: the picture behind the chat's bubbles is behind
+    // a thread's too, below its last reply where nothing else is.
+    @Test
+    fun `in bubbles a thread sits on the owner's picture`() {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        thread(seed = replies, look = ChatLook(bubbles = true, image = okio.Path.Companion.run { f.absolutePath.toPath() })) { _, _ ->
+            shows("my answer")
+            fun belowEveryReply(): androidx.compose.ui.graphics.Color {
+                val list = onNode(androidx.compose.ui.test.hasScrollToIndexAction()).fetchSemanticsNode().boundsInRoot
+                return onRoot().captureToImage().toPixelMap()[list.center.x.toInt(), (list.bottom - 4f).toInt()]
+            }
+            waitUntil(timeoutMillis = 5_000) { belowEveryReply() == androidx.compose.ui.graphics.Color.Red }
+            // Under the composer too, which has no bar of its own.
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            assertEquals(androidx.compose.ui.graphics.Color.Red, onRoot().captureToImage().toPixelMap()[2, (root.bottom - 3).toInt()])
+        }
+    }
+
+    /** The pixel three quarters across [text]'s row, past a bubble on the left and clear of the scrollbar. */
+    private fun ComposeUiTest.besideRow(text: String): androidx.compose.ui.graphics.Color {
+        waitForIdle()
+        val y = onNodeWithText(text).fetchSemanticsNode().boundsInRoot.center.y.toInt()
+        val right = onRoot().fetchSemanticsNode().boundsInRoot.right
+        return onRoot().captureToImage().toPixelMap()[(right * 0.75f).toInt(), y]
+    }
+
+    // sneagan, 2026-11-07: "in the thread view the parent message that
+    // starts the thread has a square background peeking out from behind
+    // the chat bubble".
+    @Test
+    fun `in bubbles the thread's first message sits on the picture, with no square behind its bubble`() {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color.RED; fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        thread(seed = replies, look = ChatLook(bubbles = true, image = okio.Path.Companion.run { f.absolutePath.toPath() })) { _, _ ->
+            shows("their answer")
+            waitUntil(timeoutMillis = 5_000) { besideRow("their answer") == androidx.compose.ui.graphics.Color.Red }
+            assertEquals(androidx.compose.ui.graphics.Color.Red, besideRow("the question"))
+        }
+    }
+
+    @Test
+    fun `in rows the thread's first message still stands out from its replies`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
+        shows("their answer")
+        assertTrue(besideRow("the question") != besideRow("their answer"), "the first message is tinted")
+    }
+
+    @Test
+    fun `in rows a thread puts every message on the left under its byline`() = thread(seed = replies, look = ChatLook(bubbles = false)) { _, _ ->
+        shows("my answer")
+        assertEquals(left("their answer"), left("my answer"))
+        assertTrue(onAllNodesWithText("~zod", substring = true).fetchSemanticsNodes().isNotEmpty(), "ours under its byline")
     }
 
     @Test
@@ -231,6 +328,79 @@ class ThreadListTest {
         waitUntil(timeoutMillis = 5_000) { ship.pokesTo("chat").size == 2 }
     }
 
+    // sneagan, 2026-11-07: the reactions were far from the tap, and the
+    // menu too full for bigger buttons.
+    @Test
+    fun `on a phone a reply's menu opens at the finger, the copies a level down`() = thread(touch = true, whom = nest, parentId = "170141184506", seed = {
+        messages().upsert(post("170141184506", "~bus", "the question", 1_000))
+        messages().upsert(post("170141184507", "~zod", "my answer", 2_000, parentId = "170141184506"))
+    }) { ship, _ ->
+        // A real pointer, tried again where the words are now if it opened
+        // nothing: a list still settling moves them (DmChatScreenTest.tapOpen).
+        fun open(): androidx.compose.ui.geometry.Offset {
+            shows("my answer")
+            repeat(3) {
+                waitForIdle()
+                val at = onNodeWithText("my answer").fetchSemanticsNode().boundsInWindow.center
+                onNodeWithText("my answer").performTouchInput { click(center) }
+                if (runCatching { waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Copy").fetchSemanticsNodes().isNotEmpty() } }.isSuccess) return at
+            }
+            error("tapping the reply opened no menu")
+        }
+        fun shown(text: String) = onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+        val at = open()
+        val thumbs = onNodeWithText("👍").fetchSemanticsNode().boundsInWindow
+        val near = with(density) { 32.dp.toPx() }
+        assertTrue(minOf(kotlin.math.abs(thumbs.top - at.y), kotlin.math.abs(thumbs.bottom - at.y)) < near, "the reactions beside the finger: ${thumbs.top}..${thumbs.bottom} at ${at.y}")
+        assertTrue(shown("Edit") && shown("Delete") && !shown("Copy text"), "edit and delete at the top, the copies under Copy")
+        onNodeWithText("Copy").performClick()
+        shows("Copy as Markdown")
+        onNodeWithText("Copy text").performClick()
+        waitUntil(timeoutMillis = 5_000) { !shown("Copy text") }
+        assertEquals(listOf("my answer"), copied.toList())
+
+        open()
+        onAllNodesWithText("👍")[0].performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.pokesTo("channels").isNotEmpty() }
+        val react = ship.pokesTo("channels").single().json.toString()
+        assertTrue("react" in react && "170.141.184.507" in react, react)
+    }
+
+    // The chat named who reacted on hover and the thread did not
+    // (reported on 1.8.39 desktop): the thread kept its own copy of the chip.
+    @Test
+    fun `hovering a reaction in a thread names who reacted, as in the chat`() = thread(seed = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        messages().upsert(msg("~bus/170141184507", "~bus", "an answer", 2_000, parentId = parent))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~zod", "🔥"))
+        reactions().upsert(io.nisfeb.talon.data.ReactionEntity("~bus", "~bus/170141184507", "~nec", "🔥"))
+    }) { _, _ ->
+        shows("an answer")
+        val chip = onNodeWithText("🔥", substring = true)
+        assertTrue(onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isEmpty(), "no names until hovered")
+        chip.performMouseInput { moveTo(center) }
+        mainClock.advanceTimeBy(800)
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("You and ", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        chip.performMouseInput { exit() }
+    }
+
+    // The thread lacked what the chat's row has: the poster's picture,
+    // opening their profile, and a card for a link (sneagan, 2026-11-10:
+    // "these should be at parity").
+    @Test
+    fun `a reply shows its poster's picture, which opens the profile, and its link's card`() = thread(seed = {
+        messages().upsert(msg(parent, "~bus", "the question", 1_000))
+        // A ship no other test names, so its picture's letters are its own
+        // (LN), whatever contact maps ran before this one.
+        messages().upsert(msg("~lagrev-nocfep/170141184507", "~lagrev-nocfep", "see urb://~zod/notes", 2_000, parentId = parent))
+    }) { _, _ ->
+        shows("A page title")
+        shows("LN")
+        onAllNodesWithText("LN").onFirst().performClick()
+        waitUntil(timeoutMillis = 5_000) { profiles.isNotEmpty() }
+        assertEquals(listOf("~lagrev-nocfep"), profiles.toList())
+    }
+
     @Test
     fun `our own reply is deleted after asking`() = thread(seed = {
         messages().upsert(msg(parent, "~bus", "the question", 1_000))
@@ -284,7 +454,7 @@ class ThreadListTest {
         assertTrue(ship.pokesTo("groups").any { "~bus/crew" in it.json.toString() })
     }
 
-    // Offered to everyone in a channel, the ship refused it and nothing said why.
+    // Offered to everyone in a channel, the node refused it and nothing said why.
     @Test
     fun `in a channel we do not host another's reply offers no delete`() = thread(whom = nest, parentId = "170141184506", seed = {
         groups().upsertChannelGroups(listOf(io.nisfeb.talon.data.ChannelGroupEntity(nest, "~bus/crew")))
@@ -350,7 +520,7 @@ class ThreadListTest {
     fun `an edit the ship refuses stays open with its words and says why`() = thread(whom = nest, parentId = "170141184506", seed = ownReply,
         prepare = { refuse = { if (it.app == "channels") "nope" else null } }) { _, _ ->
         editReply("second try")
-        shows("Couldn't save the edit: the ship refused it (nope).")
+        shows("Couldn't save the edit: the node refused it (nope).")
         onNodeWithText("Edit message").assertExists()
         val box = onAllNodes(hasSetTextAction()).let { it[it.fetchSemanticsNodes().size - 1] }.fetchSemanticsNode()
             .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text

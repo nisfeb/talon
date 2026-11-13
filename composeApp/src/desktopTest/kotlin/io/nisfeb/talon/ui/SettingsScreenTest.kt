@@ -24,7 +24,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import io.ktor.client.engine.mock.respond
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.call.CallController
 import io.nisfeb.talon.call.CallEngineProvider
@@ -55,6 +55,10 @@ class SettingsScreenTest {
     private val theme = InMemoryThemePreference()
     private val patpChanges = mutableListOf<Boolean>()
     private val did = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val pictures = okio.FileSystem.SYSTEM_TEMPORARY_DIRECTORY / "talon-settings-pictures-${System.nanoTime()}"
+
+    @kotlin.test.AfterTest
+    fun cleanPictures() = okio.FileSystem.SYSTEM.deleteRecursively(pictures)
 
     private fun settings(
         health: NotificationHealth? = null,
@@ -63,6 +67,10 @@ class SettingsScreenTest {
         pinCandidates: List<Pair<String, String>> = emptyList(),
         ai: FakeAiSettings = FakeAiSettings(),
         fontRepo: FontRepo? = null,
+        allGroups: (suspend (String) -> Int)? = null,
+        startOnLocalShip: Boolean = false,
+        // Never the app's own data dir: Remove empties this one.
+        files: io.nisfeb.talon.ui.ChatBackgroundFiles = io.nisfeb.talon.ui.ChatBackgroundFiles(pictures),
         block: ComposeUiTest.() -> Unit,
     ) = runComposeUiTest {
         setContent {
@@ -80,12 +88,35 @@ class SettingsScreenTest {
                         onAlwaysPatpChanged = { patpChanges += it },
                         notificationHealth = health, systemNotificationProbe = probe, callController = calls,
                         homePinCandidates = pinCandidates,
+                        onSetAllGroupsNotify = allGroups,
+                        startOnLocalShip = startOnLocalShip,
+                        chatBackgroundFiles = files,
                     )
                 }
             }
         }
         waitForIdle()
         block()
+    }
+
+    // sneagan, 2026-11-06: a picture behind the bubbles, not a colour;
+    // colours are the theme's.
+    @Test
+    fun `a background picture shows small, and Remove takes it off this device`() {
+        val files = io.nisfeb.talon.ui.ChatBackgroundFiles(pictures)
+        ui.setChatBackgroundImage(files.write(byteArrayOf(1, 2, 3)))
+        settings(files = files) {
+            tap("Chats")
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodes(androidx.compose.ui.test.hasContentDescription("Your background picture")).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(shows("Change"))
+            tap("Remove")
+            waitForIdle()
+            assertEquals("", ui.chatBackgroundImage.value)
+            assertEquals(emptyList(), okio.FileSystem.SYSTEM.list(pictures), "the file goes with it")
+            assertTrue(shows("Choose a picture"))
+        }
     }
 
     private fun ComposeUiTest.tap(text: String) {
@@ -103,6 +134,23 @@ class SettingsScreenTest {
         val nearest = switches.fetchSemanticsNodes().indices
             .minBy { kotlin.math.abs(switches[it].fetchSemanticsNode().boundsInRoot.center.y - y) }
         return switches[nearest]
+    }
+
+    // 2026-11-08: who can reach you, in one place under Notifications.
+    @Test
+    fun `who can message you, quiet hours and favourites are set under Notifications`() = settings {
+        tap("Notifications")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Who can reach you").fetchSemanticsNodes().isNotEmpty() }
+        tap("People I've added")
+        assertEquals(io.nisfeb.talon.ui.WhoCanMessage.Added, ui.reach.value.whoCanMessage)
+        assertTrue(onAllNodesWithText("waits under Requests", substring = true).fetchSemanticsNodes().isNotEmpty(), "said what it means")
+        switchBeside("Quiet hours").performClick()
+        waitForIdle()
+        assertTrue(ui.reach.value.quiet.on)
+        assertTrue(ui.reach.value.quiet.zone.isNotEmpty(), "the zone goes with it, for the relay")
+        assertTrue(onAllNodesWithText("From 10:00 PM").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText("to 7:00 AM").fetchSemanticsNodes().isNotEmpty())
+        tap("Anyone")
+        assertEquals(io.nisfeb.talon.ui.WhoCanMessage.Anyone, ui.reach.value.whoCanMessage)
     }
 
     @Test
@@ -164,10 +212,12 @@ class SettingsScreenTest {
 
     @Test
     fun `density and the home list's order are stored as chosen`() = settings {
+        tap("Appearance")
         tap("Compact")
         assertEquals(Density.Compact, ui.density.value)
         tap("Cozy")
         assertEquals(Density.Cozy, ui.density.value)
+        tap("Chats")
         tap("Host order")
         assertEquals(GroupChannelOrder.HostOrder, ui.groupChannelOrder.value)
         tap("Saved order")
@@ -176,10 +226,18 @@ class SettingsScreenTest {
 
     @Test
     fun `showing raw ship names is switched and reported`() = settings {
-        switchBeside("Always show ~ship names").performClick()
+        tap("General")
+        switchBeside("Always show addresses").performClick()
         waitForIdle()
         assertEquals(listOf(true), patpChanges)
-        switchBeside("Always show ~ship names").assertIsOn()
+        switchBeside("Always show addresses").assertIsOn()
+    }
+
+    // The local comet's Terminal link opened the Urbit tab once the comet
+    // moved to Experimental, and that tab holds only the Login QR row.
+    @Test
+    fun `the way in to the local ship opens the tab it lives on`() = settings(startOnLocalShip = true) {
+        assertTrue(shows("Power features"), "Experimental is open")
     }
 
     @Test
@@ -191,13 +249,29 @@ class SettingsScreenTest {
         assertTrue(ui.hideComposerButtons.value)
         switchBeside("Hide composer buttons").assertIsOn()
 
+        tap("Experimental")
         switchBeside("Power features").performClick()
         waitForIdle()
         assertTrue(ui.powerFeaturesEnabled.value)
 
+        tap("Chats")
         val before = ui.swipeQuotes.value
         tap(if (before) "Replies in its thread" else "Quotes it")
         assertEquals(!before, ui.swipeQuotes.value)
+
+        assertTrue(ui.chatBubbles.value)
+        assertTrue(shows("Background") && shows("Choose a picture"), "a background picture is offered with bubbles")
+        assertTrue(shows("take their colours from your theme"))
+        tap("Rows")
+        assertFalse(ui.chatBubbles.value)
+        // Home has no bubbles, so its picture is offered in rows too.
+        assertTrue(shows("Choose a picture"), "offered in rows, for Home")
+        assertFalse(shows("take their colours from your theme"), "the bubbles' note goes with them")
+        tap("Bubbles")
+        assertTrue(ui.chatBubbles.value)
+
+        // sneagan, 2026-11-08: groups are cards only, with no choice.
+        assertTrue(onAllNodesWithText("Cards").fetchSemanticsNodes().isEmpty(), "no List or Cards choice")
     }
 
     private fun ComposeUiTest.shows(text: String) = onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
@@ -206,6 +280,7 @@ class SettingsScreenTest {
 
     @Test
     fun `a new theme saves only when named with good colours, is used, and is deleted`() = settings {
+        tap("Appearance")
         tap("New theme")
         onNodeWithText("Save and use").performScrollTo().assertIsNotEnabled()
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
@@ -229,10 +304,11 @@ class SettingsScreenTest {
 
     @Test
     fun `more colours start Auto, set from what was drawn, go back to Auto, and save whole`() = settings {
+        tap("Appearance")
         tap("New theme")
         onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
         tap("More colours")
-        assertEquals(6, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all six derived")
+        assertEquals(10, onAllNodesWithText("Auto").fetchSemanticsNodes().size, "all ten derived")
         // Set Links: it starts from the standard blue.
         val autoRows = onAllNodesWithText("Set")
         autoRows[5].performScrollTo().performClick()
@@ -248,6 +324,24 @@ class SettingsScreenTest {
         waitForIdle()
         tap("Save and use")
         assertEquals("", ui.themeSettings.value.active!!.link, "back to Auto")
+    }
+
+    // sneagan, 2026-11-05: the theme tooling sets the owner's bubbles, their
+    // contacts' and everyone else's.
+    @Test
+    fun `a theme sets its bubbles' colours, a contact's among them, from what Auto drew`() = settings {
+        tap("Appearance")
+        tap("New theme")
+        onNode(hasSetTextAction() and hasText("Theme name")).performTextInput("Dusk")
+        tap("More colours")
+        assertTrue(shows("My bubbles") && shows("Contacts' bubbles") && shows("Others' bubbles") && shows("Unread badges"))
+        // The eighth extra is the contacts' bubbles.
+        onAllNodesWithText("Set")[7].performScrollTo().performClick()
+        waitForIdle()
+        tap("Save and use")
+        val saved = ui.themeSettings.value.active!!
+        assertTrue(parseHexColor(saved.bubbleContact.orEmpty()) != null, "set: ${saved.bubbleContact}")
+        assertEquals("" to "", saved.bubbleMine to saved.bubbleTheirs, "the others written as Auto")
     }
 
     @Test
@@ -293,9 +387,9 @@ class SettingsScreenTest {
     // The hour sat under Home's dial, while chats, search and the calendar
     // each kept a clock of their own.
     @Test
-    fun `the clock is chosen once, under Appearance, and every time shown follows it`() {
+    fun `the clock is chosen once, under General, and every time shown follows it`() {
         settings {
-            tap("Appearance")
+            tap("General")
             tap("24-hour")
             assertTrue(ui.homeTwentyFourHour.value)
             val oneTwentySixPm = kotlinx.datetime.LocalDateTime(2026, 7, 10, 13, 26)
@@ -377,7 +471,7 @@ class SettingsScreenTest {
             settings(calls = controller) {
                 waitUntil(timeoutMillis = 10_000) { controller.wire.value == 8 }
                 tap("About")
-                waitUntil(timeoutMillis = 5_000) { shows("so your ship's copy is behind") }
+                waitUntil(timeoutMillis = 5_000) { shows("so your node's copy is behind") }
                 assertTrue(shows(io.nisfeb.talon.TalonBuild.versionName))
                 tap("Copy version info")
                 val copied = did.single()
@@ -402,7 +496,7 @@ class SettingsScreenTest {
     @Test
     fun `without calling, About leaves the desk out`() = settings {
         tap("About")
-        assertTrue(shows("github.com/nisfeb/talon") && !shows("Your ship's calling app"))
+        assertTrue(shows("github.com/nisfeb/talon") && !shows("Your Groundwire node's calling app"))
         tap("Copy version info")
         assertTrue("%trunk" !in did.single())
     }
@@ -448,7 +542,7 @@ class SettingsScreenTest {
 
     @Test
     fun `the login QR generator opens from Account`() = settings {
-        tap("Account")
+        tap("Urbit")
         tap("Login QR generator")
         assertEquals(listOf("login qr"), did.toList())
     }
@@ -459,7 +553,7 @@ class SettingsScreenTest {
     fun `a shortcut is set by pressing its keys, and moves from the action that had it`() {
         val mac = io.nisfeb.talon.util.isMacOsHost
         settings {
-            tap("Appearance")
+            tap("Keyboard shortcuts")
             val search = defaultKeybinds(mac).getValue("search").label(mac)
             onAllNodesWithText(search)[0].performScrollTo()
             // Mail: a key on its own is typing, and is refused.
@@ -480,5 +574,27 @@ class SettingsScreenTest {
             assertTrue(ui.keybinds.value.isEmpty())
         }
     }
-}
 
+    @Test
+    fun `experimental switches sit apart from everyday ones`() = settings {
+        assertTrue(!shows("Power features"))
+        tap("Chats")
+        assertTrue(shows("Hide composer buttons") && !shows("Power features"))
+        tap("Experimental")
+        waitUntil(timeoutMillis = 5_000) { shows("Power features") }
+        assertTrue(!shows("Hide composer buttons"))
+    }
+
+    @Test
+    fun `Notifications says what notifies you, and sets every group's level at once`() {
+        val set = mutableListOf<String>()
+        settings(allGroups = { level -> set += level; 3 }) {
+            tap("Notifications")
+            waitUntil(timeoutMillis = 5_000) { shows("What notifies you") }
+            assertTrue(shows("Direct messages") && shows("When you are mentioned"))
+            tap("Off")
+            waitUntil(timeoutMillis = 5_000) { shows("Set for 3 groups.") }
+            assertEquals(listOf("none"), set)
+        }
+    }
+}

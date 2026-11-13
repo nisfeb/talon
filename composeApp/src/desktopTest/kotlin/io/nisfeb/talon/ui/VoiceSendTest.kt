@@ -6,7 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -62,6 +62,7 @@ class VoiceSendTest {
 
     private fun recording(dir: File) = File(dir, "voice-1.m4a").apply { writeBytes(byteArrayOf(0, 0, 0, 24, 102, 116, 121, 112)) }
 
+    /** Real time, for after the chat is left; while it is open, waitUntil runs its frames. */
     private fun until(ms: Long = 8_000, done: () -> Boolean) {
         val end = System.currentTimeMillis() + ms
         while (!done() && System.currentTimeMillis() < end) Thread.sleep(50)
@@ -108,7 +109,7 @@ class VoiceSendTest {
         } finally {
             events.cancel()
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -131,12 +132,15 @@ class VoiceSendTest {
     fun `a sent voice message leaves the words in the box`() =
         withVoice(hostingShip(putMs = 0), typed = "and another thing") { state, _, file, drafts ->
             onNodeWithContentDescription("Send recording").performClick()
-            until { texts.isNotEmpty() && state().pendingVoice == null }
+            // The chat still open, its frames must run for the send to go
+            // on: a sleeping wait held it back, and CI's slower upload left
+            // it nothing sent after eight seconds (2026-11-07).
+            waitUntil(timeoutMillis = 20_000) { texts.isNotEmpty() && state().pendingVoice == null }
             waitForIdle()
             assertEquals(1, texts.size)
             assertEquals("and another thing", state().draft.text)
             assertEquals("and another thing", drafts.load("~zod"))
-            until { !file.exists() }
+            waitUntil(timeoutMillis = 20_000) { !file.exists() }
             assertFalse(file.exists())
         }
 
@@ -144,7 +148,7 @@ class VoiceSendTest {
     fun `a voice message that fails stays staged with its file for another try`() =
         withVoice(ship = null, typed = "") { state, _, file, _ ->
             onNodeWithContentDescription("Send recording").performClick()
-            until { state().sendError != null }
+            waitUntil(timeoutMillis = 20_000) { state().sendError != null }
             waitForIdle()
             assertNotNull(state().sendError)
             assertTrue(texts.isEmpty())
@@ -163,7 +167,7 @@ class VoiceSendTest {
             assertTrue(r.isFailure)
             assertFalse(file.exists(), "nobody is left to send it again")
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -199,7 +203,7 @@ class VoiceSendTest {
             screen.coroutineContext[Job]?.cancel()
             events.cancel()
             runBlocking { repo.stopAndJoinForTest() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

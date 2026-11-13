@@ -195,7 +195,7 @@ class LatticeMemoryTest {
         // Still refused within its first minutes: said so, and not revoked.
         ship.answers = { HttpStatusCode.Unauthorized to "{}" }
         val said = m.tools.single { it.spec.name == "memory_read" }.execute(buildJsonObject { put("key", "/user/x") })
-        assertEquals("Lattice did not answer: lattice has not taken Talon's new key yet", said)
+        assertEquals("Lattice did not answer: lattice has not taken Groundwire's new key yet", said)
         assertEquals(false, dao.get("~zod")?.revoked)
     }
 
@@ -215,6 +215,30 @@ class LatticeMemoryTest {
         keys(dao, ship).mind()
         assertEquals(1, ship.owned.size)
         assertNull(dao.get("~zod"))
+    }
+
+    // Kept for the whole run of the app, a Lattice installed after the
+    // first ask went unseen by the assistants until a restart.
+    @Test fun `a lattice installed after a ship had none is found`() = runTest {
+        val ship = Ship().apply { mint = HttpStatusCode.NotFound to "<html>not found</html>" }
+        val dao = Keys()
+        keys(dao, ship).mind()
+        ship.mint = HttpStatusCode.OK to """{"key":{"id":"k7"},"token":"k7.s3cret"}"""
+        assertTrue(keys(dao, ship).mind().tools.isEmpty(), "asked again at once")
+        assertEquals(1, ship.owned.size)
+        // Coming back to the app asks again.
+        LatticeKeys.refreshSkills()
+        assertEquals(14, keys(dao, ship).mind().tools.size)
+        assertEquals(2, ship.owned.size)
+    }
+
+    @Test fun `a ship with no lattice is asked again after a while`() = runTest {
+        val ship = Ship().apply { mint = HttpStatusCode.NotFound to "<html>not found</html>" }
+        val dao = Keys()
+        keys(dao, ship).mind()
+        clock += LatticeKeys.INDEX_FOR_MS
+        keys(dao, ship).mind()
+        assertEquals(2, ship.owned.size)
     }
 
     @Test fun `a ship that does not answer says so, keeps nothing and tries again next time`() = runTest {

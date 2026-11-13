@@ -71,7 +71,7 @@ class SettingsSyncApplyBucketTest {
 
     @After
     fun tearDown() {
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db) }
         tmpDir.deleteRecursively()
     }
 

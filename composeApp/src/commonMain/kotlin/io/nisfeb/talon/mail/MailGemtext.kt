@@ -113,14 +113,14 @@ object MailGemtext {
         Verdict.VERIFIED -> "Signature checked against the author's key."
         // Not an accusation, and the note has to say which it is.
         Verdict.UNVERIFIED ->
-            "Signature NOT checked: no key held for that ship at that life."
+            "Signature NOT checked: no key held for that address at that life."
         Verdict.FORGED ->
             "FORGED: the signature does not match these contents. Kept as evidence."
     }
 
     internal fun unreadableNote(n: Int): String =
-        if (n == 1) "1 copy on the ship is in a form this build cannot read, and is not below."
-        else "$n copies on the ship are in a form this build cannot read, and are not below."
+        if (n == 1) "1 copy on the node is in a form this build cannot read, and is not below."
+        else "$n copies on the node are in a form this build cannot read, and are not below."
 
     /**
      * One line of it. Anything sender-controlled that lands on a line

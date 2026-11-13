@@ -5,7 +5,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -43,7 +43,6 @@ class HomeTabsTest {
                     onOpenConversation = {},
                     onOpenSearch = {},
                     onNewMessage = {},
-                    onSignOut = {},
                     onOpenSelfProfile = {},
                     onOpenStatusFeed = {},
                     onOpenBookmarks = {},
@@ -76,7 +75,6 @@ class HomeTabsTest {
                     onOpenConversation = {},
                     onOpenSearch = {},
                     onNewMessage = {},
-                    onSignOut = {},
                     onOpenSelfProfile = {},
                     onOpenStatusFeed = {},
                     onOpenBookmarks = {},

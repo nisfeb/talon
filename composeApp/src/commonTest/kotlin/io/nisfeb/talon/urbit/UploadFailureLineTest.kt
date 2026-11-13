@@ -22,7 +22,7 @@ class UploadFailureLineTest {
         val line = uploadFailureLine(memex500, s3403)
         assertEquals(
             "The upload didn't go through: Tlon's image hosting had a problem on its side, " +
-                "and your ship's storage turned down its keys (see Storage in Landscape's settings).",
+                "and your Groundwire node's storage turned down its keys (see Storage in Landscape's settings).",
             line,
         )
         assertFalse('<' in line)
@@ -31,7 +31,7 @@ class UploadFailureLineTest {
     @Test
     fun a_route_the_ship_does_not_have_is_left_out() {
         assertEquals(
-            "The upload didn't go through: your ship's storage turned down its keys (see Storage in Landscape's settings).",
+            "The upload didn't go through: your Groundwire node's storage turned down its keys (see Storage in Landscape's settings).",
             uploadFailureLine(IllegalStateException("no memex token"), s3403),
         )
         assertEquals(
@@ -39,7 +39,7 @@ class UploadFailureLineTest {
             uploadFailureLine(memex500, IllegalStateException("no %storage credentials on this ship")),
         )
         assertEquals(
-            "The upload didn't go through: this ship has no image storage set up.",
+            "The upload didn't go through: this Groundwire node has no image storage set up.",
             uploadFailureLine(IllegalStateException("no memex token"), IllegalStateException("no %storage configuration on this ship")),
         )
     }

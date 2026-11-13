@@ -203,22 +203,22 @@ class AuspexApiTest {
             val a = api { respond(NGINX_502, code, headersOf("Content-Type", "text/html")) }
             val e = assertFailsWith<AuspexError.Unreachable> { a.inbox(MailView.INBOX) }
             assertTrue(e.down, "$code")
-            assertEquals("Your ship isn't answering. It may be restarting.", e.said())
+            assertEquals("Your Groundwire node isn't answering. It may be restarting.", e.said())
         }
         // A 504 is a ship that is there and slow: no answer, not down.
         val slow = api { respond(NGINX_502, HttpStatusCode.GatewayTimeout, headersOf("Content-Type", "text/html")) }
         val e = assertFailsWith<AuspexError.Unreachable> { slow.inbox(MailView.INBOX) }
         assertTrue(!e.down)
-        assertEquals("No answer from the ship.", e.said())
+        assertEquals("No answer from the node.", e.said())
     }
 
     @Test
     fun `an error page is never read out as the ship's reason`() = runBlocking<Unit> {
         val a = api { respond("<html><body><h1>500 Internal Server Error</h1></body></html>", HttpStatusCode.InternalServerError, headersOf("Content-Type", "text/html")) }
         val e = assertFailsWith<AuspexError.Refused> { a.inbox(MailView.INBOX) }
-        assertEquals("the ship answered with an error page", e.said())
+        assertEquals("the node answered with an error page", e.said())
         // Armillary and Orrery read a refusal the same way, behind the same web server.
-        assertEquals("the ship answered with an error page", io.nisfeb.talon.armillary.armillaryReason(NGINX_502))
+        assertEquals("the node answered with an error page", io.nisfeb.talon.armillary.armillaryReason(NGINX_502))
     }
 }
 

@@ -66,9 +66,9 @@ class CustomThemeExtrasTest {
     }
 
     @Test
-    fun `Talon writes all six, Auto as empty, and a theme of five writes none`() {
+    fun `Talon writes all ten, Auto as empty, and a theme of five writes none`() {
         val written = Json.parseToJsonElement(ThemeSettings(listOf(five.explicit())).toJson()).jsonObject["themes"]!!.jsonArray[0].jsonObject
-        for (k in listOf("text", "muted", "raised", "error", "selection", "link")) assertEquals("\"\"", written[k].toString(), k)
+        for (k in listOf("text", "muted", "raised", "error", "selection", "link", "bubbleMine", "bubbleContact", "bubbleTheirs", "badge")) assertEquals("\"\"", written[k].toString(), k)
         val old = Json.parseToJsonElement(ThemeSettings(listOf(five)).toJson()).jsonObject["themes"]!!.jsonArray[0].jsonObject
         assertTrue(old.keys.none { it in setOf("text", "link") }, "$old")
         assertEquals("", CustomTheme.blank(dark = true, id = "x").link, "a new theme is written whole")
@@ -76,6 +76,28 @@ class CustomThemeExtrasTest {
 
     // Another device's Talon from before the extras, or a tool that
     // writes the five, drops the keys it does not know.
+    // sneagan, 2026-11-05: the theme tooling sets the owner's bubbles, their
+    // contacts' and everyone else's. A writer that knows only the older
+    // keys (another device, the Omarchy plugin) keeps this device's.
+    @Test
+    fun `bubble colours are a theme's extras, set or Auto, and kept from a writer that does not know them`() {
+        val set = five.copy(bubbleMine = "#112233", bubbleContact = "#00FF00", bubbleTheirs = "")
+        assertEquals(io.nisfeb.talon.ui.BubbleColors(mine = Color(0xFF112233), contact = Color(0xFF00FF00), theirs = null), set.bubbleColors())
+        assertTrue(set.valid)
+        assertFalse(five.copy(bubbleTheirs = "grey").valid)
+        val arriving = five.copy(text = "")
+        assertEquals("#00FF00", arriving.keepingLocalExtras(set).bubbleContact)
+        assertEquals("", five.copy(bubbleContact = "").keepingLocalExtras(set).bubbleContact, "empty is Auto, chosen")
+    }
+
+    // sneagan, 2026-11-05: unread counts in the theme's colour, or one it sets.
+    @Test
+    fun `the unread badge is the primary unless a theme sets it`() {
+        assertNull(five.badgeColor(), "Auto")
+        assertEquals(Color(0xFFDC2626), five.copy(badge = "#DC2626").badgeColor())
+        assertEquals("#DC2626", five.keepingLocalExtras(five.copy(badge = "#DC2626")).badge)
+    }
+
     @Test
     fun `a theme arriving without its extras keeps this device's, and empty clears one`() {
         val mine = ThemeSettings(listOf(five.copy(link = "#FF0000", text = "#EEEEEE")), activeId = "a1")

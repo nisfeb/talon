@@ -11,9 +11,9 @@ class BugReportTest {
 
     @Test
     fun `the subject is the first line of what went wrong, cut short`() {
-        assertEquals("Talon bug: Calls drop", bugReport("  Calls drop\nafter a minute", about, null).subject)
+        assertEquals("Groundwire bug: Calls drop", bugReport("  Calls drop\nafter a minute", about, null).subject)
         val long = bugReport("a".repeat(100), about, null).subject
-        assertEquals("Talon bug: " + "a".repeat(60) + "…", long)
+        assertEquals("Groundwire bug: " + "a".repeat(60) + "…", long)
     }
 
     @Test

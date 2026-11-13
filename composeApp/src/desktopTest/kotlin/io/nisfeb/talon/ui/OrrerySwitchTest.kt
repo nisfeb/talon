@@ -19,7 +19,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -173,7 +173,7 @@ class OrrerySwitchTest {
             }
         } finally {
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -182,18 +182,24 @@ class OrrerySwitchTest {
 
     @Test
     fun `off until turned on, what it is is said, and none of it shows`() = page(orrery = null) { _, _, _ ->
-        assertTrue(shows("a private notebook about your life"))
-        // What turning it on allows, as orrery 58 reads: every DM by default.
+        assertTrue(shows("Enable Groundwire Assistant"))
+        assertTrue(shows("A private notebook about your life"))
+        // What turning it on allows, as orrery 58 reads: every DM by
+        // default. Said before the button, not folded under it.
         assertTrue(shows("every direct message unless you pick which ones"))
         assertTrue(shows("Turning it off stops all of it"))
-        onAllNodes(isToggleable())[0].assertIsOff()
+        assertTrue(
+            onNodeWithText("every direct message unless you pick which ones", substring = true).fetchSemanticsNode().boundsInRoot.top <
+                onNodeWithText("Enable Groundwire Assistant").fetchSemanticsNode().boundsInRoot.top,
+            "consent comes before the button",
+        )
         assertTrue(!shows("Read calls and status lines"), "no settings while it is off")
         assertTrue("preferences" !in reads, "nor are the owner's preferences asked for")
     }
 
     @Test
     fun `turned on, its settings show, and the switch goes to every device`() = page(orrery = null) { ai, _, _ ->
-        onAllNodes(isToggleable())[0].performClick()
+        onNodeWithText("Enable Groundwire Assistant").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Read calls and status lines on this device") }
         assertEquals(true, ai.state.value.savedProfile?.orrery)
         assertEquals("true", ai.state.value.savedProfile!!.switches()["orrery"].toString(), "it travels with the switches")
@@ -202,13 +208,13 @@ class OrrerySwitchTest {
     @Test
     fun `turned off, it asks, stops the ship's own work, and gives this device's key back`() = page(orrery = true) { ai, _, db ->
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Keep it on").performClick()
         waitForIdle()
         assertEquals(true, ai.state.value.savedProfile?.orrery, "kept")
 
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Turn off").performClick()
         waitUntil(timeoutMillis = 10_000) { ai.state.value.savedProfile?.orrery == false }
         // Exactly these: orrery merges a partial body into what it has, so
@@ -226,7 +232,7 @@ class OrrerySwitchTest {
     fun `a reader the ship does not stop is said, and Orrery is off here anyway`() = page(orrery = true) { ai, _, db ->
         refused = setOf("chat")
         onAllNodes(isToggleable())[0].performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Turn Orrery off?") }
+        waitUntil(timeoutMillis = 5_000) { shows("Turn the assistant off?") }
         onNodeWithText("Turn off").performClick()
         waitUntil(timeoutMillis = 10_000) { shows("did not confirm it stopped reading your chats") }
         assertEquals(false, ai.state.value.savedProfile?.orrery)
@@ -270,8 +276,8 @@ class OrrerySwitchTest {
     fun `a ship without Orrery has no switch to turn on`() {
         missing = true
         page(orrery = null) { _, _, _ ->
-            waitUntil(timeoutMillis = 5_000) { shows("Orrery is not on your ship. Install it from the Apps page.") }
-            onAllNodes(isToggleable())[0].assertIsNotEnabled()
+            waitUntil(timeoutMillis = 5_000) { shows("is not on your Groundwire node. Install it from the Apps page.") }
+            onNodeWithText("Enable Groundwire Assistant").assertIsNotEnabled()
         }
     }
 
@@ -294,11 +300,13 @@ class OrrerySwitchTest {
         try {
             db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "c1.secret"))
             repo.attach("https://ship.test", "~zod")
-            kotlinx.coroutines.withTimeout(5_000) { while (repo.availability.value == OrreryAvailability.UNKNOWN) kotlinx.coroutines.delay(20) }
+            // Attached: probed, and the kept row read. The probe answers
+            // before the row is read, so availability alone came a tick early.
+            kotlinx.coroutines.withTimeout(5_000) { while (repo.availability.value == OrreryAvailability.UNKNOWN || !repo.enabled.value) kotlinx.coroutines.delay(20) }
             block(repo, db)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -394,7 +402,7 @@ class OrrerySwitchTest {
             assertTrue(writes.isEmpty(), "a switch off by default stops nothing on the ship")
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -419,7 +427,7 @@ class OrrerySwitchTest {
             assertEquals(listOf("c9"), mints.toList())
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -438,7 +446,7 @@ class OrrerySwitchTest {
             assertEquals(listOf("c9"), mints.toList())
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -456,7 +464,7 @@ class OrrerySwitchTest {
             assertFalse(repo.enabled.value)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }

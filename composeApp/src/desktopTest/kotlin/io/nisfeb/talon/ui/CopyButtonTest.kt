@@ -6,7 +6,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,11 +21,11 @@ class CopyButtonTest {
             override fun getText() = AnnotatedString(clip)
             override fun setText(annotatedString: AnnotatedString) { clip = annotatedString.text }
         }
-        setContent { CompositionLocalProvider(LocalClipboardManager provides board) { CopyButton({ "~zod" }, "Copy ship name") } }
-        onNodeWithText("Copy ship name").performClick()
+        setContent { CompositionLocalProvider(LocalClipboardManager provides board) { CopyButton({ "~zod" }, "Copy address") } }
+        onNodeWithText("Copy address").performClick()
         assertEquals("~zod", clip)
         onNodeWithText("Copied").assertExists()
         mainClock.advanceTimeBy(COPIED_FOR_MS + 100)
-        onNodeWithText("Copy ship name").assertExists()
+        onNodeWithText("Copy address").assertExists()
     }
 }

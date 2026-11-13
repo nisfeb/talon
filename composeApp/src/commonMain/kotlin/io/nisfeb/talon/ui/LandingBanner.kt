@@ -58,7 +58,7 @@ fun LandingBanner(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (progress.slow) "Still getting your ship ready" else "Getting your ship ready",
+                        if (progress.slow) "Still getting your Groundwire node ready" else "Getting your Groundwire node ready",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                     )
                     Text(
@@ -68,10 +68,10 @@ fun LandingBanner(
                     Text(
                         if (progress.slow) {
                             "This is taking longer than usual, which happens on a slower machine or network. " +
-                                "Nothing has gone wrong; the ship is still installing its updates and the chat opens when it is done."
+                                "Nothing has gone wrong; the node is still installing its updates and the chat opens when it is done."
                         } else {
-                            "The ship is installing its updates and using most of a CPU core. " +
-                                "Talon may stutter or freeze for a minute at a time until it settles; it recovers on its own."
+                            "Your Groundwire node is installing its updates and using most of a CPU core. " +
+                                "Groundwire may stutter or freeze for a minute at a time until it settles; it recovers on its own."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

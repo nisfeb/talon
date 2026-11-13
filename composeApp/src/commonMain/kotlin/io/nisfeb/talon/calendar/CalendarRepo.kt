@@ -48,7 +48,19 @@ class CalendarRepo(
     /** The first pause between the reads back after a write; each doubles it. */
     private val readBackPauseMs: Long = 500L,
 ) {
-    private var api: CalendarApi? = null
+    @kotlin.concurrent.Volatile private var api: CalendarApi? = null
+
+    /** Held across swapping the ship (attach, detach) and each write a read for one makes ([still]). */
+    private val shipLock = kotlinx.atomicfu.locks.SynchronizedObject()
+
+    /**
+     * [write] only while [a] is still the ship read from, as one step
+     * against attach's swap and clear: false once another, or none, is
+     * attached. A read for the last ship that landed after the clear
+     * filled the next ship's screen with the last one's calendars.
+     */
+    private inline fun still(a: CalendarApi, write: () -> Unit): Boolean =
+        kotlinx.atomicfu.locks.synchronized(shipLock) { (api === a).also { if (it) write() } }
     private var poller: Job? = null
     private var foreground = true
     private val gate = Mutex()
@@ -507,6 +519,45 @@ class CalendarRepo(
     suspend fun addShared(calId: String?, title: String, startMs: Long, endMs: Long): Boolean =
         addSharedWhyNot(calId, title, startMs, endMs) == null
 
+    /** How a chat card's add of a shared event stands ([addFromCard]). */
+    sealed interface CardAdd {
+        data object Adding : CardAdd
+        data class Added(val calendar: String) : CardAdd
+        data class NotAdded(val why: String) : CardAdd
+    }
+
+    private val _cardAdds = MutableStateFlow<Map<String, CardAdd>>(emptyMap())
+
+    /**
+     * Each card's add, by [cardKey]. Here and not in the card: a chat row
+     * scrolled away mid-add is composed anew, and with the state its own
+     * it came back armed while the first add was still finishing, so a
+     * second tap wrote the event twice.
+     */
+    val cardAdds: StateFlow<Map<String, CardAdd>> = _cardAdds.asStateFlow()
+
+    fun cardKey(title: String, startMs: Long, endMs: Long): String = "$startMs|$endMs|$title"
+
+    /**
+     * Add a chat card's event to [calId], unless that card's add is under
+     * way or done. On the repo's scope, so it finishes with the card gone.
+     */
+    fun addFromCard(calId: String, calName: String, title: String, startMs: Long, endMs: Long) {
+        val key = cardKey(title, startMs, endMs)
+        while (true) {
+            val now = _cardAdds.value
+            if (now[key] is CardAdd.Adding || now[key] is CardAdd.Added) return
+            if (_cardAdds.compareAndSet(now, now + (key to CardAdd.Adding))) break
+        }
+        scope.launch {
+            val why = runSuspendCatching { addSharedWhyNot(calId, title, startMs, endMs) }
+                .getOrElse { failedLine("The calendar did not take \"$title\".") }
+            _cardAdds.update { it + (key to if (why == null) CardAdd.Added(calName) else CardAdd.NotAdded(why)) }
+            // Said on the card, and so not again on the calendar.
+            if (why != null) heard(why)
+        }
+    }
+
     /** Every event in an .ics onto [calId] (else the calendar new events go to). False when refused. */
     suspend fun importIcs(calId: String?, ics: String): Boolean = carry {
         val a = api ?: return@carry false
@@ -602,7 +653,7 @@ class CalendarRepo(
             }
             // Why first, then the stand-in goes: the other way round, a
             // screen watching the list saw it leave before it heard why.
-            if (!ok) onFailed(failedLine("The ship did not take \"${d.name.trim()}\"."))
+            if (!ok) onFailed(failedLine("Your Groundwire node did not take \"${d.name.trim()}\"."))
             refused?.let { onFailed(said(it)) }
             _pendingTasks.value = _pendingTasks.value - ghost
         }
@@ -800,7 +851,7 @@ class CalendarRepo(
 
     /** Dismiss orrery's action [id]; replaced in tests. */
     internal var dismissOrrery: suspend (id: String) -> Unit = { id ->
-        val url = shipUrl ?: error("not attached to a ship")
+        val url = shipUrl ?: error("not attached to a Groundwire node")
         io.nisfeb.talon.orrery.OrreryApi(http, http, url).transition(null, id, "dismissed", DISMISS_NOTE)
     }
 
@@ -1147,14 +1198,16 @@ class CalendarRepo(
      */
     fun attach(baseUrl: String, poll: Boolean = true) {
         if (api != null && shipUrl == baseUrl) return
+        poller?.cancel()
+        poller = null
         shipUrl = baseUrl
         zoneAdopted = false
         zoneNames = null
         details.clear()
-        api = CalendarApi(http, baseUrl)
-        clearShipState()
-        poller?.cancel()
-        poller = null
+        kotlinx.atomicfu.locks.synchronized(shipLock) {
+            api = CalendarApi(http, baseUrl)
+            clearShipState()
+        }
         pollStopped = false
         if (poll) startPoller(readFirst = true)
     }
@@ -1208,12 +1261,14 @@ class CalendarRepo(
         poller?.cancel()
         poller = null
         pollStopped = false
-        api = null
         shipUrl = null
         zoneAdopted = false
         zoneNames = null
         details.clear()
-        clearShipState()
+        kotlinx.atomicfu.locks.synchronized(shipLock) {
+            api = null
+            clearShipState()
+        }
     }
 
     private var lastShareSyncMs = 0L
@@ -1269,7 +1324,7 @@ class CalendarRepo(
      * Ticking a box and pulling the list are one request now.
      */
     suspend fun refreshTasks(): Result<Unit> = gate.withLock {
-        val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a ship."))
+        val a = api ?: return@withLock Result.failure(IllegalStateException("Not attached to a Groundwire node."))
         runSuspendCatching {
             _tasks.value = shipTasks(a.tasks())
             _availability.value = CalendarAvailability.PRESENT
@@ -1291,51 +1346,74 @@ class CalendarRepo(
         try {
             val now = nowMs()
             val w = a.window(now - BEHIND_MS, now + AHEAD_MS)
-            _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
-            // The ship has just said what is current, so nothing read of
-            // one event before now is: the assistant reads through here too.
-            details.clear()
-            if (full) _calendars.value = runSuspendCatching { a.calendars() }.getOrNull() ?: _calendars.value
-            _tasks.value = runSuspendCatching { a.tasks() }.getOrNull()?.let(::shipTasks) ?: _tasks.value
-            if (full && rarely) readRarely(a)
+            // Each write after a read, only while this is still the ship read from ([still]).
+            if (!still(a) {
+                    _rows.value = w.rows.sortedWith(compareBy({ it.l }, { it.r }))
+                    // The ship has just said what is current, so nothing read of
+                    // one event before now is: the assistant reads through here too.
+                    details.clear()
+                }
+            ) return@withLock
+            if (full) {
+                val cals = runSuspendCatching { a.calendars() }.getOrNull()
+                if (!still(a) { if (cals != null) _calendars.value = cals }) return@withLock
+            }
+            val tasks = runSuspendCatching { a.tasks() }.getOrNull()
+            if (!still(a) { if (tasks != null) _tasks.value = shipTasks(tasks) }) return@withLock
+            if (full && rarely && !readRarely(a)) return@withLock
+            // keep() suspends, so not under the lock: it skips a state a detach emptied.
+            if (api !== a) return@withLock
             keep()
             val config = if (full) runSuspendCatching { a.config() }.getOrNull() else null
-            config?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
-            noteReminders(w.rows)
-            _availability.value = CalendarAvailability.PRESENT
-            _error.value = null
-            lastReadMs = now
-            if (full) {
-                lastFullMs = now
-                if (config != null && config.zone == null) adoptZoneIfNone()
-            }
+            if (!still(a) {
+                    config?.let { _zone.value = it.zone; ball = it.ball; _leadMin.value = it.leadMin }
+                    noteReminders(w.rows)
+                    _availability.value = CalendarAvailability.PRESENT
+                    _error.value = null
+                    lastReadMs = now
+                    if (full) lastFullMs = now
+                }
+            ) return@withLock
+            if (full && config != null && config.zone == null) adoptZoneIfNone()
             // A 403 stopped the poll; signed in again, this read is the first
             // to go through, and nothing else would start it again.
             if (pollStopped) { pollStopped = false; startPoller(readFirst = false) }
         } catch (e: AuspexError) {
-            readFailed(e)
+            still(a) { readFailed(e) }
         }
     }
 
-    /** What a full read adds between the tasks and the config: shares, sync state and tags. */
-    private suspend fun readRarely(a: CalendarApi) {
+    /**
+     * What a full read adds between the tasks and the config: shares, sync
+     * state and tags. False when another ship was attached meanwhile, and
+     * nothing of this one's was kept.
+     */
+    private suspend fun readRarely(a: CalendarApi): Boolean {
         // Null only when the calendar has no sharing (404); a hiccup
         // keeps the last answer, and with it the read-only guard.
-        _shares.value = runSuspendCatching { a.shares() }.getOrElse { e ->
-            if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
-        }
+        val shares = runSuspendCatching { a.shares() }
+        if (!still(a) {
+                _shares.value = shares.getOrElse { e ->
+                    if (e is AuspexError.Refused && e.status == AuspexApi.NOT_FOUND) null else _shares.value
+                }
+            }
+        ) return false
         // Sync state and conflicts only where a calendar syncs: three
         // reads of the ship's one queue that say nothing of local ones.
         val syncing = _calendars.value.any { it.kind != "local" }
-        _conflicts.value = if (syncing) runSuspendCatching { a.conflicts() }.getOrElse { _conflicts.value } else emptyList()
-        _sync.value = buildMap {
-            if (syncing) {
-                runSuspendCatching { a.google() }.getOrNull()?.linked?.forEach { (id, row) -> put(id, row) }
-                runSuspendCatching { a.caldavSubscriptions() }.getOrNull()?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
-            }
-            _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
-        }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
-        _tags.value = runSuspendCatching { a.tags() }.getOrNull()?.map { it.tag } ?: _tags.value
+        val conflicts = if (syncing) runSuspendCatching { a.conflicts() } else null
+        val google = if (syncing) runSuspendCatching { a.google() }.getOrNull() else null
+        val caldav = if (syncing) runSuspendCatching { a.caldavSubscriptions() }.getOrNull() else null
+        val tags = runSuspendCatching { a.tags() }.getOrNull()
+        return still(a) {
+            _conflicts.value = conflicts?.getOrElse { _conflicts.value } ?: emptyList()
+            _sync.value = buildMap {
+                google?.linked?.forEach { (id, row) -> put(id, row) }
+                caldav?.forEach { put(it.id, SyncRow(it.lastMs, it.error)) }
+                _shares.value?.accepted?.forEach { (id, acc) -> put(id, SyncRow(acc.lastMs, acc.error)) }
+            }.ifEmpty { if (_calendars.value.any { it.kind != "local" }) _sync.value else emptyMap() }
+            if (tags != null) _tags.value = tags.map { it.tag }
+        }
     }
 
     private fun readFailed(e: AuspexError) {

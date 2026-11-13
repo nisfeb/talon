@@ -30,31 +30,55 @@ Everything is self-contained. Desktop builds bundle a JRE, so you don't need Jav
 - Semantic search across chat history. Android uses MediaPipe. Desktop uses an on-device sentence-transformer (DJL ONNX, model cached on first use under `~/.djl.ai/cache`, about 30 MB).
 - Native OS notifications (libnotify on Linux, Notification Center on macOS, system toasts on Windows, Android and iOS), a system tray on desktop, dark, light or system theme, per-chat mute, folders. Desktop updates itself, and Android takes the APK for its ABI. An Apps page in Settings shows what the ship has and installs what is missing.
 
-## Notifications (Android)
+## Notifications
 
-For pushes that arrive when Talon's process has been killed by Android, force-stopped, or evicted by the dataSync background-cap. Without this, notifications still work *while Talon is running*. They just stop the moment Android decides to reclaim the foreground service. This setup plugs that gap.
+While Talon is open it notifies you itself. This section is about notifications when it is closed: killed by Android, swiped away, or an iPhone in a pocket.
 
-The architecture is server-relay-plus-distributor: your ship's chat events flow through a relay holding a 24×7 SSE connection, which POSTs to a per-device endpoint minted by a local push distributor app ([UnifiedPush](https://unifiedpush.org)). No FCM, no Play Services.
+There are two ways they reach a closed phone. Talon picks the first whenever it can.
 
-### Setup (~2 minutes)
+### From your own ship (the default)
 
-1. **Install ntfy from F-Droid** (or any other UnifiedPush distributor, such as NextPush or Conversations). The Play Store build of ntfy strips the UnifiedPush distributor; F-Droid's doesn't.
+Your ship pushes to your devices itself, through [%trunk](https://github.com/gwbtc/trunk), the same app that carries calls. It watches its own activity and sends each device a hint that something came. No `+code` and no session leave your ship, and nobody else's server reads your activity.
 
-   F-Droid → search "ntfy" → install.
+You do not set this up. When you sign in, Talon installs %trunk if the ship lacks it, registers the device with it, and asks for a test push. Only once that test arrives does the device count as moved, so a setup that cannot deliver never leaves you with nothing. Settings → Notifications then says **Notifications come from ~your-ship**, with how the last pushes went.
 
-2. **Open ntfy once**, tap the ⋮ menu → Settings → scroll to the **UnifiedPush** section → confirm the toggle is on. Default server is `ntfy.sh`; leave that for now unless you self-host an ntfy server.
+What each platform needs:
 
-3. **In Talon**: Settings → Notifications → **Push relay** section.
-   - Endpoint: `https://relay.nisfeb.com` (the relay I run; see below to self-host instead)
-   - Tap **Save endpoint**, then **Register this device** → paste your ship's `+code` → Register
-   - Status should jump to `Registered (deviceId=…)` within a second
-   - If it doesn't, tap **Diagnose distributor** for an inline report of what's broken (PackageManager / connector / cached endpoint)
+- **Android** needs a [UnifiedPush](https://unifiedpush.org) distributor, the app that holds one connection open for every app's pushes. No FCM, no Play Services.
+  1. Install **ntfy from F-Droid** (or another distributor, such as NextPush or Sunup). The Play Store build of ntfy strips the distributor; F-Droid's doesn't.
+  2. Open ntfy once, ⋮ → Settings → **UnifiedPush**, and confirm the toggle is on. The default server `ntfy.sh` is fine unless you run your own.
+  3. Open Talon. It registers by itself shortly after you sign in.
+- **iPhone** needs only notifications allowed for Talon. Apple takes pushes over HTTP/2 with a signed token, which a ship cannot make, so the ship hands each one to a small gateway on the relay, which signs it and passes it to Apple. The gateway holds the phone's tokens behind a handle only the phone and its ship know. It has no `+code`, no session and no stream from your ship. It does see each alert it forwards: who it is from and the preview line.
+- **Desktop** is not pushed to. It notifies while it runs.
 
-That's it. Test by killing Talon (swipe from recents) and having someone DM you. The push should arrive on the lock screen.
+What the ship decides before it pushes, so every device agrees:
+
+- **Tlon's own rules**: only what `%activity` marks as worth a notification.
+- **Your level for each chat and group** in Talon (All messages, Mentions only, Off). A chat with no level is Mentions only.
+- **Quiet hours**, with favourites still getting through (Talon 1.8.40 and a %trunk from November 2026 on). An iPhone cannot hold an alert itself, so the ship does.
+- **The switches on the ship's own page** at `/apps/trunk`: DMs, group DMs, channel posts, replies, calls, reads and notices from other apps.
+
+It also carries rings for calls, reads (so a chat read on one device clears its notification on the others), the app-icon count on an iPhone, and notices from other apps on the ship such as calendar reminders.
+
+To check it, kill Talon (swipe it from recents) and have someone DM you. If nothing comes, Settings → Notifications shows the ship's last answer for this device, and the ship's page at `/apps/trunk` has a log that says, for each message, whether it was pushed or why not.
+
+### Through the relay (for a ship without %trunk)
+
+A ship that cannot run %trunk can use a relay instead: a server that signs in to your ship, holds a connection to it around the clock, and pushes to your device when something notifies. It works, but it means handing a server your ship's `+code`.
+
+Talon never moves a device from its ship to the relay by itself. In Settings → Notifications:
+
+- **Use the relay** stops the ship pushing to this device. Then, under **Background delivery**:
+  - Endpoint: `https://relay.nisfeb.com` (the relay I run; see below to run your own)
+  - **Save endpoint**, then **Register this device** → paste your ship's `+code` → Register
+  - The status reads `Registered (deviceId=…)` within a second. If it doesn't, **Diagnose distributor** reports what is wrong on Android (PackageManager, connector, cached endpoint).
+- **Use my node** goes back to the ship's own notifications.
+
+The relay applies the same chat and group levels, and quiet hours.
 
 ### About the `+code`
 
-The relay needs your ship's `+code` to log in once and derive a session cookie. The `+code` is encrypted at rest (AES-GCM, key derived from a relay-side master secret via PBKDF2). Same trust model as any hosted ship. If you're not comfortable with this, self-host the relay below.
+Only the relay path uses it. The relay needs your ship's `+code` to log in once and derive a session cookie. The `+code` is encrypted at rest (AES-GCM, key derived from a relay-side master secret via PBKDF2). Same trust model as any hosted ship. If you're not comfortable with this, use your ship's own notifications above, or self-host the relay below.
 
 ### Self-host the relay
 
@@ -158,7 +182,7 @@ curl https://relay.example.com/
 # {"relay":"talon","status":"ok"}
 ```
 
-In Talon: Settings → Notifications → Push relay → set Endpoint to `https://relay.example.com` → Save → Register → paste `+code`.
+In Talon: Settings → Notifications → Background delivery → set Endpoint to `https://relay.example.com` → Save → Register → paste `+code`.
 
 `sudo journalctl -u talon-relay -f` shows live registration / push activity. `sudo journalctl -u talon-relay | grep "push whom"` is the "how often is this thing actually pushing" view.
 

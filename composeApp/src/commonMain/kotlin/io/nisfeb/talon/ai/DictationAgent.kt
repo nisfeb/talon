@@ -156,7 +156,7 @@ class DictationAgent(
             "list_tasks", "create_task", "complete_task",
             "find_places", "open_directions", "call_place", "web_search",
             "orrery_guide", "orrery_find", "orrery_read", "orrery_flights", "orrery_observe", "orrery_file_text", "orrery_instruct", "orrery_correct",
-        ) + LatticeMemory.NAMES
+        ) + LatticeMemory.NAMES + LatticeSkills.PRIVATE_READS
 
         /**
          * The writes a dictation keeps while the phone is locked: the
@@ -192,7 +192,7 @@ class DictationAgent(
          */
         val PRIVATE_READS: Set<String> = setOf(
             "search_history", "read_conversation", "list_unread", "list_mail", "search_mail", "read_mail",
-        ) + LatticeMemory.PRIVATE_READS
+        ) + LatticeMemory.PRIVATE_READS + LatticeSkills.PRIVATE_READS
 
         /** What the model reads, and the card shows, while the phone stays locked. */
         const val UNLOCK_TO_READ = "Unlock your phone to hear messages."
@@ -367,7 +367,7 @@ class DictationRun(
         /** What a dictation is recorded at: Whisper's own rate, so nothing is resampled or uploaded for nothing. */
         const val RATE = 16_000
 
-        const val NO_SHIP = "Log in to your ship in Talon first."
+        const val NO_SHIP = "Log in to your ship in Groundwire first."
         /** No Armillary key on this device yet: credit first. Where buying is not allowed, nothing points to it. */
         val NO_ARMILLARY: String get() =
             if (io.nisfeb.talon.ui.isArmillaryPurchaseSupported) "Top up Armillary under Settings, AI, to dictate."

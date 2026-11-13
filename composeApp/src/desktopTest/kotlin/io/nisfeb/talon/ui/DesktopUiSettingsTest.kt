@@ -14,6 +14,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -41,7 +42,7 @@ class DesktopUiSettingsTest {
         // query at construction, and closing the db under it is a native
         // SQLite crash that takes the whole test JVM down.
         runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-        runCatching { db.close() }
+        runCatching { io.nisfeb.talon.urbit.closeAfter(db) }
         tmpDir.deleteRecursively()
     }
 
@@ -61,6 +62,52 @@ class DesktopUiSettingsTest {
     fun `setHideComposerButtons with same value is a no-op and does not touch disk`() {
         newStore().setHideComposerButtons(false)  // already default
         assertFalse(file.exists())
+    }
+
+    @Test
+    fun `rows instead of bubbles persist and survive reload, and bubbles are the default`() {
+        assertTrue(newStore().chatBubbles.value)
+        newStore().setChatBubbles(true)
+        assertFalse(file.exists(), "the default again touches nothing")
+        newStore().setChatBubbles(false)
+        assertFalse(newStore().chatBubbles.value)
+    }
+
+    @Test
+    fun `who can reach you persists and survives reload, and anyone with no quiet hours is the default`() {
+        assertEquals(ReachSettings(), newStore().reach.value)
+        val r = ReachSettings(whoCanMessage = WhoCanMessage.Added, favourites = setOf("~nec"), quiet = QuietHours(on = true))
+        newStore().setReach(r)
+        assertEquals(r, newStore().reach.value)
+    }
+
+    @Test
+    fun `a file saved while groups had a List or Cards choice still loads`() {
+        file.writeText("""{"chatBubbles":false,"groupCards":true}""")
+        assertFalse(newStore().chatBubbles.value)
+    }
+
+    @Test
+    fun `a chat background picture persists and survives reload, and there is none at first`() {
+        assertEquals("", newStore().chatBackgroundImage.value)
+        newStore().setChatBackgroundImage("/kept/a.img")
+        assertEquals("/kept/a.img", newStore().chatBackgroundImage.value)
+    }
+
+    // 1.8.40-rc2 kept a background colour; its file must still load whole.
+    @Test
+    fun `a file from when the background was a colour keeps its other settings`() {
+        file.writeText("""{"chatBubbles":false,"chatBackground":"#0B1120"}""")
+        val store = newStore()
+        assertFalse(store.chatBubbles.value)
+        assertEquals("", store.chatBackgroundImage.value)
+    }
+
+    @Test
+    fun `recent searches persist and survive reload, and there are none at first`() {
+        assertEquals(emptyList(), newStore().recentSearches.value)
+        newStore().setRecentSearches(listOf("from:~nec lunch", "dinner"))
+        assertEquals(listOf("from:~nec lunch", "dinner"), newStore().recentSearches.value)
     }
 
     @Test

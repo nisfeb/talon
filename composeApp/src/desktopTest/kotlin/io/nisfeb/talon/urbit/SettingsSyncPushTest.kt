@@ -39,7 +39,7 @@ class SettingsSyncPushTest {
     private val ship = FakeShip("~zod")
 
     @AfterTest
-    fun close() = db.close()
+    fun close() = io.nisfeb.talon.urbit.closeAfter(db)
 
     private fun sync(cfg: AiSettings.Config = config()) =
         SettingsSyncImpl(db = db, aiSettings = FakeAiSettings(cfg)).apply { attach(ship.channel) }

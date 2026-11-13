@@ -40,7 +40,7 @@ suspend fun enrollDevice(
         patp = ship,
         code = code,
     ) ?: return Enrollment.Refused(
-        "The relay could not sign in to your ship. Check the +code, and that the ship is reachable from the internet.",
+        "The relay could not sign in to your Groundwire node. Check the access code, and that the node is reachable from the internet.",
     )
     settings.setDeviceIdFor(ship, id)
     settings.setRegisteredEndpointFor(ship, endpoint)

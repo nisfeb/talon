@@ -56,8 +56,10 @@ import io.nisfeb.talon.util.runSuspendCatching
 fun AppsSettingsScreen(
     mail: MailRepo?,
     calendar: CalendarRepo?,
-    /** The pipe into orrery on the ship; null where no ship is known. */
+    /** The pipe into orrery on the ship; null where no ship is known, or the assistant is off. */
     orrery: io.nisfeb.talon.orrery.OrreryRepo? = null,
+    /** The assistant's switch is off: Orrery is listed as off, with where to turn it on. */
+    assistantOff: Boolean = false,
     /** Armillary on the ship, where the AI features buy their inference; null where no ship is known. */
     armillary: io.nisfeb.talon.armillary.ArmillaryRepo? = null,
     /** Probes whether Grubbery is on the ship; null where no ship is known. */
@@ -76,6 +78,8 @@ fun AppsSettingsScreen(
     latticeKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
     /** A new key in place of one the owner revoked. Null hides the offer. */
     onNewLatticeKey: (suspend () -> Result<Unit>)? = null,
+    /** Asks lattice whether the key reads skills ([io.nisfeb.talon.ai.LatticeKeys.skillsReadable]); a refusal is shown beside the key. */
+    latticeSkillsReadable: (suspend () -> Boolean?)? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -97,6 +101,10 @@ fun AppsSettingsScreen(
 
     var lattice by remember { mutableStateOf<Boolean?>(null) }
     val memoryKey = latticeKey?.collectAsState(initial = null)?.value
+    val skillsRefused by io.nisfeb.talon.ai.LatticeKeys.SKILLS_REFUSED.collectAsState()
+    LaunchedEffect(memoryKey?.token, memoryKey?.revoked, latticeSkillsReadable) {
+        if (memoryKey != null && !memoryKey.revoked) latticeSkillsReadable?.let { runSuspendCatching { it() } }
+    }
     var groups by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
@@ -118,6 +126,9 @@ fun AppsSettingsScreen(
         add(latticeRow(lattice))
         add(groupsRow(groups))
         if (orreryAvailability != null) add(io.nisfeb.talon.ui.orreryRow(orreryAvailability, orreryError))
+        // Off, nothing asks the ship, and the row was left out: the one
+        // place people looked for it said nothing (2026-11-10).
+        else if (assistantOff) add(io.nisfeb.talon.ui.orreryOffRow())
         if (armillaryAvailability != null) add(io.nisfeb.talon.ui.armillaryRow(armillaryAvailability, armillaryError))
     }
 
@@ -145,7 +156,7 @@ fun AppsSettingsScreen(
                         io.nisfeb.talon.ui.AppInstall.GRUBBERY -> "Grubbery and its apps are here."
                         // The desk is on the ship; what it may reach is
                         // the owner's to allow, on the ship's own page.
-                        else -> "Added ${row.name} to your Grubbery shell. Open it on your ship to approve what it reaches."
+                        else -> "Added ${row.name} to your Grubbery shell. Open it on your Groundwire node to approve what it reaches."
                     }
                 },
                 onFailure = { note = io.nisfeb.talon.util.failureLine("The install did not finish", it) },
@@ -195,7 +206,7 @@ fun AppsSettingsScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                "Mail, the calendar and Lattice run on your ship, inside Grubbery.",
+                "Mail, the calendar and Lattice run on your Groundwire node, inside Grubbery.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -247,11 +258,19 @@ fun AppsSettingsScreen(
                     Column(Modifier.weight(1f)) {
                         Text("Assistant memory", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (key.revoked) "Lattice refused Talon's key: it was revoked. The assistants have no memory until there is a new one."
+                            if (key.revoked) "Lattice refused this app's key: it was revoked. The assistants have no memory until there is a new one."
                             else "The assistants remember in Lattice with this install's own key.",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (key.revoked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // A key minted before lattice had skills reads none until the owner grants it.
+                        if (!key.revoked && key.token in skillsRefused) {
+                            Text(
+                                "This key can't read skills. Grant it skills read in Lattice, Settings, Agent keys, and the assistants get your skills.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     val renew = onNewLatticeKey
                     if (busy == "memory") {
@@ -286,7 +305,7 @@ fun AppsSettingsScreen(
             if (orrery != null && orreryAvailability == io.nisfeb.talon.orrery.OrreryAvailability.PRESENT) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (orreryOn) "Talon is feeding Orrery. Its settings are under AI." else "Feed Orrery from Settings, under AI.",
+                    if (orreryOn) "Groundwire is feeding Orrery. Its settings are under Assistant." else "Feed Orrery from Settings, under Assistant.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -305,7 +324,7 @@ fun AppsSettingsScreen(
             Spacer(Modifier.height(16.dp))
             Text("Permissions", style = MaterialTheme.typography.bodyLarge)
             Text(
-                "Each app asks your ship for what it needs. Your ship's permits page is where those are answered.",
+                "Each app asks your Groundwire node for what it needs. Your node's permits page is where those are answered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -315,11 +334,11 @@ fun AppsSettingsScreen(
                     modifier = Modifier.fillMaxWidth().clickable { openPermits() }.padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Open permits on your ship", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text("Open permits on your node", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 }
             } else {
                 Text(
-                    "Sign in to a ship to reach its permits page.",
+                    "Sign in to a node to reach its permits page.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -334,4 +353,5 @@ private fun stateWord(state: AppState): String = when (state) {
     AppState.MISSING -> "not installed"
     AppState.SIGNED_OUT -> "signed out"
     AppState.UNKNOWN -> "unknown"
+    AppState.OFF -> "off"
 }

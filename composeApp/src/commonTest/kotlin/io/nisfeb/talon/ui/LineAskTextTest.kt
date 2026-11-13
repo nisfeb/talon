@@ -12,17 +12,17 @@ class LineAskTextTest {
     fun eachOutcomeNamesItsCause() {
         assertEquals("Asking ~bus to open it…", lineAskText(LineAsk.Asking(), "~bus", 3))
         assertEquals(
-            "Your ship didn't take the request. Check that %trunk is installed and running on it.",
+            "Your Groundwire node didn't take the request. Check that %trunk is installed and running on it.",
             lineAskText(LineAsk.OwnShip, "~bus", 3),
         )
         assertEquals("~bus turned it down. Its %trunk may be out of date.", lineAskText(LineAsk.Refused, "~bus", 3))
         assertEquals(
-            "~bus has %trunk but didn't open the line. Its call settings may not let your ship ring it.",
+            "~bus has %trunk but didn't open the line. Its call settings may not let your Groundwire node ring it.",
             lineAskText(LineAsk.Ignored, "~bus", 3),
         )
         assertEquals(
             "~bus hasn't answered. This group's line lives on ~bus, which needs %trunk installed and running. " +
-                "It may also be offline, or not let your ship ring it.",
+                "It may also be offline, or not let your Groundwire node ring it.",
             lineAskText(LineAsk.NoAnswer, "~bus", 3),
         )
     }

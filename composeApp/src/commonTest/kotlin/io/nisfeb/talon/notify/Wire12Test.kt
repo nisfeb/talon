@@ -57,11 +57,11 @@ class Wire12Test {
         )
         assertEquals("No notification sent here yet.", shipPushStatusLine(debug("""[{"id":"me","sent":null,"last":null}]"""), "me"))
         assertEquals(
-            "The last notification 5 min ago got 503 from the push service; your ship tries again.",
+            "The last notification 5 min ago got 503 from the push service; your Groundwire node tries again.",
             shipPushStatusLine(debug("""[{"id":"me","sent":{"at":${now - 3_600_000},"kind":"message"},"last":{"at":${now - 300_000},"code":503}}]"""), "me"),
         )
         assertEquals(
-            "The last notification just now got no answer from the push service; your ship tries again.",
+            "The last notification just now got no answer from the push service; your Groundwire node tries again.",
             shipPushStatusLine(debug("""[{"id":"me","sent":null,"last":{"at":$now,"code":0}}]"""), "me"),
         )
     }
@@ -69,11 +69,11 @@ class Wire12Test {
     @Test
     fun a_device_the_ship_dropped_is_said_with_why() {
         assertEquals(
-            "Your ship stopped pushing here (its push service answered 410). Talon sets it up again when it next starts.",
+            "Your Groundwire node stopped pushing here (its push service answered 410). Groundwire sets it up again when it next starts.",
             shipPushStatusLine(debug("[]", """[{"at":$now,"id":"me","platform":"unifiedpush","reason":"410"}]"""), "me"),
         )
         assertEquals(
-            "Your ship does not have this device yet. Talon sets it up again when it next starts.",
+            "Your Groundwire node does not have this device yet. Groundwire sets it up again when it next starts.",
             shipPushStatusLine(debug("[]"), "me"),
         )
         assertNull(shipPushStatusLine(null, "me"), "an older trunk has no status")

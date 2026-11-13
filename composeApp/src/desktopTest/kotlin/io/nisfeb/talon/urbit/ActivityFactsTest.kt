@@ -31,7 +31,7 @@ class ActivityFactsTest {
 
     @AfterTest
     fun close() {
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db, repo)
         dir.deleteRecursively()
     }
 

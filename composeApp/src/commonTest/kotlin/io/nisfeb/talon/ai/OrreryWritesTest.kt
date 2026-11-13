@@ -198,7 +198,7 @@ class OrreryWritesTest {
     }
 
     @Test
-    fun `a refusal or no answer from the ship is said and not claimed`() = runTest {
+    fun `a refusal or no answer from your Groundwire node is said and not claimed`() = runTest {
         val refused = OrreryToolsTest.Tap(answer = ObserveAnswer(emptyList(), listOf(ItemAnswer(null, false, false, "attr: unknown"))))
         refused.views[jax] = mutableListOf(view())
         assertEquals("Orrery refused it: attr: unknown.", run(refused, "orrery_set", set("attr" to "needs", "value" to "x")))
@@ -207,7 +207,7 @@ class OrreryWritesTest {
         assertTrue("may or may not have taken it" in run(gone, "orrery_set", set("attr" to "needs", "value" to "x")))
 
         val unread = OrreryToolsTest.Tap().apply { viewFails = OrreryError.Unreachable(RuntimeException("timeout")) }
-        assertEquals("Could not read $jax: no answer from the ship. Nothing was changed.", run(unread, "orrery_set", set("attr" to "needs", "value" to "x")))
+        assertEquals("Could not read $jax: no answer from your Groundwire node. Nothing was changed.", run(unread, "orrery_set", set("attr" to "needs", "value" to "x")))
         assertNull(unread.observed)
 
         // Struck, then the new value refused: the strike is said to stand.
@@ -324,7 +324,7 @@ class OrreryWritesTest {
     @Test
     fun `a list that cannot be read before or after says so`() = runTest {
         val before = OrreryToolsTest.Tap().apply { open[0] = listOf(late); actionsFailFrom = 1 }
-        assertEquals("Could not read orrery's actions: no answer from the ship. Nothing was changed.", run(before, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
+        assertEquals("Could not read orrery's actions: no answer from your Groundwire node. Nothing was changed.", run(before, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))
         assertTrue(before.marks.isEmpty())
         val after = OrreryToolsTest.Tap().apply { open[0] = listOf(late); actionsFailFrom = 2 }
         assertEquals("Not confirmed: orrery took it, but its list could not be read back. $NOT_CONFIRMED", run(after, "orrery_mark", buildJsonObject { put("id", "a1"); put("high", true) }))

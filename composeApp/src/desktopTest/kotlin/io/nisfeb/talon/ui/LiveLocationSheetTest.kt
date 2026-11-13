@@ -8,9 +8,11 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.http.HttpStatusCode
@@ -67,10 +69,18 @@ class LiveLocationSheetTest {
     private val live: MutableList<Long?> = java.util.concurrent.CopyOnWriteArrayList()
     private val maps: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
 
+    /** The ship's orrery, as GET /api/version answers. */
+    @Volatile private var orreryVersion = 141
+
+    /** Whether the ship holds a Mapbox token, as GET /api/travel's token_set says. */
+    @Volatile private var mapbox = false
+
     private fun ship(onShare: (String) -> Unit = {}) = FakeShip("~zod").apply {
         answerApi = { method, path, body ->
             when {
                 path == "/apps/orrery/api/state" -> "{}"
+                path == "/apps/orrery/api/version" -> """{"version":$orreryVersion}"""
+                method == "GET" && path == "/apps/orrery/api/travel" -> """{"enabled":false,"token_set":$mapbox}"""
                 method == "GET" && path == "/apps/orrery/api/location" -> doc
                 method == "POST" && path == "/apps/orrery/api/location/share" -> {
                     onShare(body)
@@ -79,7 +89,9 @@ class LiveLocationSheetTest {
                     val hours = asked["hours"]?.jsonPrimitive?.content?.toLong()
                     val until = hours?.let { "\"${iso(now + it * 3_600_000)}\"" } ?: "null"
                     val exact = asked["precision"]?.jsonPrimitive?.content == "exact"
-                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}"}"""
+                    // "auto": the ship works it out, here half an hour and five minutes off.
+                    val by = asked["by"]?.jsonPrimitive?.content?.let { if (it == "auto") iso(now + 35 * 60_000) else it }?.let { "\"$it\"" } ?: "null"
+                    outs[to] = """{"ship": "$to", "until": $until, "home": ${hours == null}, "exact": $exact, "since": "${iso(now)}", "by": $by}"""
                     """{"ship": "$to"}"""
                 }
                 // Orrery 137: accept moves the ask's fix in, decline drops it.
@@ -144,7 +156,7 @@ class LiveLocationSheetTest {
             // closes: closed under one, SQLite's native side crashed the
             // test JVM later, in a finalizer (CI, 2026-11-01).
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -226,8 +238,8 @@ class LiveLocationSheetTest {
 
     @Test
     fun `a refusal says the ship's reason, and nothing is shown as shared`() = card(ship().apply {
-        answerApiStatus = { method, path, _ ->
-            if (method == "POST" && path.endsWith("/location/share")) {
+        answerApiStatus = { method, path, body ->
+            if (method == "POST" && path.endsWith("/location/share") && "\"home\":true" in body) {
                 HttpStatusCode.BadRequest to """{"error": "home: this ship does not know where home is; give hours too"}"""
             } else null
         }
@@ -237,19 +249,137 @@ class LiveLocationSheetTest {
         onNodeWithText("Until I'm home").performClick()
         onNodeWithText("Share").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't share: home: this ship does not know where home is; give hours too") }
-        assertTrue(shows("Share where you are with ~bus"), "the choices stay, to pick hours instead")
+        // The dialog closed on the tap: the reason is on the card, by Share, to pick hours instead.
+        assertTrue(!shows("Share where you are with ~bus"))
+        assertTrue(shows("Share my location"), "offered again")
         assertTrue(!shows("You're sharing where you are"))
         assertTrue(live.isEmpty() || live.last() == null, "no fast sending for a share the ship refused")
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("For 8 hours") }
+        onNodeWithText("For 8 hours").performClick()
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are") && !shows("Sending to your Groundwire node") }
+        assertTrue(!shows("Couldn't share"), "asked again, the old reason goes")
+    }
+
+    // A check-in (orrery 142): until home, by a time, or the ship tells them.
+    @Test
+    fun `an orrery before 142 is not offered a check-in, which it would ignore`() = card { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/version" in it } }
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        waitForIdle()
+        assertTrue(!shows("Check in"))
     }
 
     @Test
-    fun `no answer says the ship did not answer`() = card(ship().apply {
+    fun `Check in sends a time to be home by, and the card says it`() = card(ship().also { orreryVersion = 142 }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/version" in it } }
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        assertTrue(!shows("Check in"), "only for until home")
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("even if your phone is off") && shows("Home by") }
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+        val body = ship.api.single { "/location/share" in it }
+        val by = Regex(""""by":"([^"]+)"""").find(body)?.groupValues?.get(1)
+        assertTrue(body.startsWith("""POST /apps/orrery/api/location/share {"ship":"~bus","home":true,"precision":"exact","by":"""), body)
+        val byMs = kotlin.time.Instant.parse(by!!).toEpochMilliseconds()
+        assertTrue(byMs > now && byMs < now + 26 * 3_600_000, "the next one: $by")
+        waitUntil(timeoutMillis = 5_000) { shows("check in by") }
+    }
+
+    // orrery 143 with a Mapbox token: the ship works the time out from the drive home.
+    @Test
+    fun `with Mapbox on the ship, Check in works its time out from the drive home`() = card(ship().also { orreryVersion = 143; mapbox = true }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("works it out from the drive home") }
+        assertTrue(!shows("Home by"), "no clock while Automatic")
+        onNodeWithText("Share").performClick()
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+        assertEquals("""POST /apps/orrery/api/location/share {"ship":"~bus","home":true,"precision":"exact","by":"auto"}""", ship.api.single { "/location/share" in it })
+        waitUntil(timeoutMillis = 5_000) { shows("check in by") }
+    }
+
+    @Test
+    fun `Set a time is there beside Automatic, and without Mapbox only a time`() {
+        card(ship().also { orreryVersion = 143; mapbox = true }) { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+            tap("Share my location")
+            waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+            onNodeWithText("Until I'm home").performClick()
+            tap("Check in")
+            tap("Set a time")
+            waitUntil(timeoutMillis = 5_000) { shows("Home by") }
+        }
+        card(ship().also { orreryVersion = 143; mapbox = false }) { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+            tap("Share my location")
+            waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+            onNodeWithText("Until I'm home").performClick()
+            tap("Check in")
+            waitUntil(timeoutMillis = 5_000) { shows("Home by") }
+            assertTrue(!shows("Automatic"), "no token, nothing to work it out with")
+        }
+    }
+
+    // The token was read once, with the version at sign-in: one added on
+    // the ship after that was never seen until the next (review of #99).
+    @Test
+    fun `a Mapbox token added since sign-in is found when the choices open`() = card(ship().also { orreryVersion = 143; mapbox = false }) { ship, _, _ ->
+        waitUntil(timeoutMillis = 5_000) { ship.api.any { "/api/travel" in it } }
+        mapbox = true
+        tap("Share my location")
+        waitUntil(timeoutMillis = 5_000) { shows("Until I'm home") }
+        onNodeWithText("Until I'm home").performClick()
+        tap("Check in")
+        waitUntil(timeoutMillis = 5_000) { shows("works it out from the drive home") }
+        assertEquals(2, ship.api.count { "/api/travel" in it }, "asked again as the choices opened, and only then")
+    }
+
+    @Test
+    fun `theirs, not home by their time, says so`() {
+        inbound = """{"~bus": {"name": "Bus", "lat": "1", "lon": "2", "at": "${iso(now)}", "until": null, "home": true, "late": "${iso(now - 60_000)}"}}"""
+        card { _, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Not home yet, meant to be by") }
+        }
+    }
+
+    // sneagan, 2026-11-08: "tapping share doesn't dismiss the modal". It
+    // waited for the ship's answer, and then the shares read back.
+    @Test
+    fun `Share closes the choices on the tap, and the card says it is being sent until the ship takes it`() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        card(ship(onShare = { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) })) { ship, _, _ ->
+            tap("Share my location")
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 2_000) { !shows("Share where you are with ~bus") }
+            waitUntil(timeoutMillis = 2_000) { shows("Sending to your Groundwire node") }
+            assertTrue(shows("You're sharing where you are"), "shown at once")
+            onNodeWithText("Stop").assertIsNotEnabled()
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { it.startsWith("POST /apps/orrery/api/location/share") } }
+            gate.countDown()
+            waitUntil(timeoutMillis = 5_000) { !shows("Sending to your Groundwire node") }
+            assertTrue(shows("You're sharing where you are"))
+            onNodeWithText("Stop").assertIsEnabled()
+        }
+    }
+
+    @Test
+    fun `no answer says the node did not answer`() = card(ship().apply {
         answerApiStatus = { method, path, _ ->
             if (method == "DELETE") throw java.io.IOException("connection reset") else null
         }
     }.also { out = """[{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": true, "since": "${iso(now)}"}]""" }) { _, _, _ ->
         tap("Stop")
-        waitUntil(timeoutMillis = 5_000) { shows("Couldn't stop: your ship didn't answer. Try again.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Couldn't stop: your Groundwire node didn't answer. Try again.") }
         assertTrue(shows("You're sharing where you are"), "still shared: it was not stopped")
     }
 
@@ -265,7 +395,11 @@ class LiveLocationSheetTest {
             show(false)
             waitForIdle()
             gate.countDown()
-            runBlocking { withTimeout(5_000) { while (repo.live.shares.value?.outTo("~bus") == null) delay(20) } }
+            // Until the ship has taken it, not only until it shows: a share
+            // shows at once, as being sent, and the phone is told to send
+            // fast when the ship answers. Read a moment sooner, on a slow
+            // machine, that had not happened yet (CI, 2026-11-10).
+            runBlocking { withTimeout(10_000) { while (repo.live.shares.value?.outTo("~bus")?.sending != false || live.lastOrNull() == null) delay(20) } }
             assertTrue(live.lastOrNull() != null, "the phone sends fast for it")
         }
     }
@@ -295,6 +429,48 @@ class LiveLocationSheetTest {
         )
         assertEquals(2, ship.api.count { it.startsWith("DELETE") })
         assertEquals(null, live.last())
+    }
+
+    // 2026-11-10: one share with a member hid the group's offer, and a
+    // group share would have replaced that member's own exact share.
+    @Test
+    fun `a member's own share is kept, the group is still offered, and its Stop ends only the group's`() {
+        out = """[{"ship": "~bus", "until": "${iso(now + 8 * 3_600_000)}", "home": false, "exact": true}]"""
+        card(group = crew) { ship, repo, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("has a share of their own, kept as it is.") }
+            tap("Share my location with the group")
+            waitUntil(timeoutMillis = 5_000) { shows("Share where you are with the group's 1 other member") }
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("You're sharing where you are with 1 of its members") }
+            assertEquals(
+                listOf("""POST /apps/orrery/api/location/share {"ship":"~nec","hours":1,"precision":"area"}"""),
+                ship.api.filter { "/location/share" in it },
+            )
+            assertTrue(!shows("Share my location with the group"), "everyone has a share now")
+            tap("Stop")
+            waitUntil(timeoutMillis = 5_000) { shows("Share my location with the group") }
+            assertEquals(listOf("DELETE /apps/orrery/api/location/share/~nec "), ship.api.filter { it.startsWith("DELETE") })
+            assertEquals(listOf("~bus"), repo.live.shares.value?.out?.map { it.ship })
+            assertTrue(shows("has a share of their own, kept as it is."))
+        }
+    }
+
+    // Stopping first was the only way to a new length or precision.
+    @Test
+    fun `a running share is changed from the profile without stopping it`() {
+        out = """[{"ship": "~bus", "until": "${iso(now + 3_600_000)}", "home": false, "exact": false}]"""
+        card { ship, _, _ ->
+            waitUntil(timeoutMillis = 5_000) { shows("Change") }
+            tap("Change")
+            waitUntil(timeoutMillis = 5_000) { shows("Share where you are with") }
+            onNodeWithText("Share").performClick()
+            waitUntil(timeoutMillis = 5_000) { ship.api.any { "/location/share" in it } }
+            assertEquals(
+                listOf("""POST /apps/orrery/api/location/share {"ship":"~bus","hours":1,"precision":"exact"}"""),
+                ship.api.filter { "/location/share" in it },
+            )
+            assertTrue(ship.api.none { it.startsWith("DELETE") }, "replaced, not stopped")
+        }
     }
 
     @Test

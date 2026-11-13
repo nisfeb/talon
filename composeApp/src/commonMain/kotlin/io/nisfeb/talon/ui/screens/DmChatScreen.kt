@@ -1,4 +1,9 @@
 package io.nisfeb.talon.ui.screens
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.WindowInsetsSides
+import io.nisfeb.talon.ui.ChatBackdrop
+import io.nisfeb.talon.ui.chatLabel
+import androidx.compose.foundation.border
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.nisfeb.talon.ai.forFeature
 import io.nisfeb.talon.util.formatMonthDay
@@ -143,6 +148,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import io.ktor.client.HttpClient
 import io.nisfeb.talon.ui.icons.TalonIcons
 import io.nisfeb.talon.ai.hasModelFor
@@ -244,6 +250,11 @@ fun DmChatScreen(
     val aiConfigured by aiSettings.state.collectAsState()
     val hideComposerButtons by uiSettings.hideComposerButtons.collectAsState()
     val swipeQuotes by uiSettings.swipeQuotes.collectAsState()
+    val chatBubbles by uiSettings.chatBubbles.collectAsState()
+    val chatBackgroundImage by uiSettings.chatBackgroundImage.collectAsState()
+    val chatLook = remember(chatBubbles, chatBackgroundImage) { io.nisfeb.talon.ui.chatLookOf(chatBubbles, chatBackgroundImage) }
+    // The owner's contact book: their bubbles take the contacts' colour.
+    val book by repo.bookContacts.collectAsState()
     val powerFeaturesEnabled by uiSettings.powerFeaturesEnabled.collectAsState()
     val aiFeatures = remember(aiSettings) {
         AiFeatures(AiClient(io.nisfeb.talon.ai.AiFeature.CatchUp) { aiSettings.state.value.forFeature(io.nisfeb.talon.ai.AiFeature.CatchUp) })
@@ -862,22 +873,64 @@ fun DmChatScreen(
             }
         }
 
+    // A stranger's DM not yet accepted: read, but nothing of theirs is
+    // fetched (pictures, previews, media), and nothing here answers them,
+    // since on the ship a reply or a reaction accepts it (2026-11-08). Null
+    // until the database says: guarded until then, so nothing loads early,
+    // but the composer is there at once, as it was; the request's bar takes
+    // its place within the first read.
+    // Held with the chat it is of: this screen is not made again for
+    // another chat, and the last one's answer stood until the database
+    // said, so a request opened after a chat drew a moment unguarded.
+    val requestUnread: Boolean? = if (whom.startsWith("~")) null else false
+    val requestOf by androidx.compose.runtime.produceState(whom to requestUnread, whom) {
+        if (whom.startsWith("~")) db.dmInvites().stream().collect { l -> value = whom to l.any { it.ship == whom } }
+        else value = whom to false
+    }
+    val request = if (requestOf.first == whom) requestOf.second else requestUnread
+    val guarded = request != false
+    // What Accept, Decline or Block could not do, said in the bar: the
+    // composer, where a send's failure shows, is not there in a request.
+    var requestProblem by remember(whom) { mutableStateOf<io.nisfeb.talon.util.Problem?>(null) }
+    var requestBusy by remember(whom) { mutableStateOf(false) }
+    // The write on the repo's scope, so leaving does not stop it; what
+    // the screen does with its answer, on the screen's.
+    fun answerRequest(what: String, leave: Boolean, write: suspend () -> Unit) {
+        if (requestBusy) return
+        requestBusy = true
+        requestProblem = null
+        val done = repo.pushScope.async { runCatching { write() } }
+        scope.launch {
+            val r = try { done.await() } finally { requestBusy = false }
+            r.onFailure { requestProblem = io.nisfeb.talon.util.problemOf(what, it) }
+            if (r.isSuccess && leave) onBack()
+        }
+    }
+
     Column(
+        // The foot's inset is padded inside the picture's box below, so
+        // the picture runs to the bottom of the screen.
         modifier = modifier
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             io.nisfeb.talon.ui.NavIcon(onBack = onBack)
-            // One line however narrow: the buttons keep their room.
+            // One line however narrow: the buttons keep their room. In a
+            // DM the name opens their profile, as their picture on a
+            // message does (sneagan, 2026-11-10); not in a request, where
+            // the picture opens nothing either.
+            val toProfile = whom.startsWith("~") && !guarded
             Text(
                 contactMap.conversationLabel(whom),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 4.dp),
+                modifier = Modifier.weight(1f)
+                    .then(if (toProfile) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open profile") { onAvatarTap(whom) } else Modifier)
+                    .padding(start = 4.dp),
             )
             // Group/channel chats only for v1 — clubs (`0v...`) don't
             // map to a single group flag, so GroupInfoPane's "View
@@ -1031,6 +1084,16 @@ fun DmChatScreen(
                 },
             )
         }
+        // The owner's picture behind the bubbles, down to the bottom of
+        // the screen under the composer (sneagan, 2026-11-06), and the
+        // look this screen read for everything drawn over it.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        ChatBackdrop(chatLook)
+        androidx.compose.runtime.CompositionLocalProvider(
+            io.nisfeb.talon.ui.LocalChatLook provides chatLook,
+            io.nisfeb.talon.ui.LocalGuardedContent provides guarded,
+        ) {
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
         Box(
             modifier = Modifier.weight(1f).fillMaxSize()
                 .onGloballyPositioned { listTop = it.positionInRoot().y },
@@ -1151,20 +1214,9 @@ fun DmChatScreen(
                     // Into the composer, not a dialog: same keyboard,
                     // same autocomplete, and the conversation stays
                     // visible behind what you are changing.
-                    val prior = composerState.draft.text
-                    val editText = io.nisfeb.talon.urbit.editableText(target.contentJson)
-                    composerState.draft = androidx.compose.ui.text.input.TextFieldValue(
-                        editText,
-                        // Caret at the end of the text being edited, not
-                        // its start — you almost always append or fix a
-                        // typo near where you stopped typing.
-                        selection = androidx.compose.ui.text.TextRange(editText.length),
-                    )
-                    composerState.editing = io.nisfeb.talon.ui.EditTarget(
-                        postId = target.id,
-                        originalSentMs = target.sentMs,
-                        originalContentJson = target.contentJson,
-                        priorDraftText = prior,
+                    composerState.beginEdit(
+                        target.id, target.sentMs, target.contentJson,
+                        io.nisfeb.talon.urbit.editableText(target.contentJson),
                     )
                 },
                 onDelete = {
@@ -1239,7 +1291,7 @@ fun DmChatScreen(
                             contactMap = contactMap,
                             http = http,
                             menuExpanded = actionTarget?.id == rowMsg.id,
-                            onMenuExpand = { actionTarget = rowMsg },
+                            onMenuExpand = { if (!guarded) actionTarget = rowMsg },
                             onMenuDismiss = { actionTarget = null },
                             actionMenu = {
                                 // Per-row menu body. State lookups
@@ -1250,17 +1302,21 @@ fun DmChatScreen(
                                 // old bottom-sheet's auto-close.
                                 messageActionMenuFor(rowMsg)
                             },
-                            onOpenThread = onOpenThreadForMessage,
-                            onSwipe = onSwipeMessage,
-                            onReactionTap = onReactionForMessage,
+                            // A thread has a composer of its own, and a reply accepts.
+                            onOpenThread = if (guarded) { _ -> } else onOpenThreadForMessage,
+                            // A request answers nothing and opens nothing of theirs.
+                            onSwipe = if (guarded) { _ -> } else onSwipeMessage,
+                            onReactionTap = if (guarded) { _, _, _ -> } else onReactionForMessage,
                             onReactionLongPress = { reactions ->
                                 reactionDetailsTarget = reactions
                             },
-                            onMentionTap = onMentionTap,
-                            onLinkTap = onLinkTap,
-                            onImageTap = currentOnOpenImage,
-                            onAvatarTap = onAvatarTap,
+                            onMentionTap = if (guarded) { _ -> } else onMentionTap,
+                            onLinkTap = if (guarded) { _ -> } else onLinkTap,
+                            onImageTap = if (guarded) { _ -> } else currentOnOpenImage,
+                            onAvatarTap = if (guarded) { _ -> } else onAvatarTap,
                             flashAmber = item.row.m.id == flashMessageId,
+                            bubbles = chatBubbles,
+                            bubbleKind = io.nisfeb.talon.ui.bubbleKindOf(item.row.m.author, ourPatp, book),
                         )
                     }
                 }
@@ -1301,7 +1357,14 @@ fun DmChatScreen(
         }
         } // close empty-state Box
         TypingIndicator(whom = whom, repo = repo, contactMap = contactMap)
-        io.nisfeb.talon.ui.ChatComposer(
+        if (request == true) DmRequestBar(
+            who = contactMap.conversationLabel(whom),
+            problem = requestProblem,
+            busy = requestBusy,
+            onAccept = { answerRequest("Couldn't accept the request", leave = false) { repo.acceptDmInvite(whom) } },
+            onDecline = { answerRequest("Couldn't decline the request", leave = true) { repo.declineDmInvite(whom) } },
+            onBlock = { answerRequest("Couldn't block them", leave = true) { repo.blockShip(whom) } },
+        ) else io.nisfeb.talon.ui.ChatComposer(
             state = composerState,
             db = db,
             repo = repo,
@@ -1349,21 +1412,9 @@ fun DmChatScreen(
                         .filter { it.author == ourPatp && it.parentId == null && !isLocalOnly(it.id) }
                         .maxByOrNull { it.sentMs }
                         ?.let { target ->
-                            val prior = composerState.draft.text
-                            val editText =
-                                io.nisfeb.talon.urbit.editableText(target.contentJson)
-                            composerState.draft =
-                                androidx.compose.ui.text.input.TextFieldValue(
-                                    editText,
-                                    selection = androidx.compose.ui.text.TextRange(
-                                        editText.length,
-                                    ),
-                                )
-                            composerState.editing = io.nisfeb.talon.ui.EditTarget(
-                                postId = target.id,
-                                originalSentMs = target.sentMs,
-                                originalContentJson = target.contentJson,
-                                priorDraftText = prior,
+                            composerState.beginEdit(
+                                target.id, target.sentMs, target.contentJson,
+                                io.nisfeb.talon.urbit.editableText(target.contentJson),
                             )
                         }
                 }
@@ -1382,6 +1433,9 @@ fun DmChatScreen(
             },
             strategy = dmStrategy,
         )
+        } // the column over the picture
+        } // the look's provider
+        } // the picture's box
     }
 
     reactionDetailsTarget?.let { reactions ->
@@ -1561,7 +1615,7 @@ fun DmChatScreen(
                     ) {
                         Text(
                             "Publishes this message and its thread replies as a " +
-                                "note on your own ship.",
+                                "note on your own Groundwire node.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedTextField(
@@ -1680,13 +1734,18 @@ private fun MessageRow(
     onImageTap: (String) -> Unit,
     onAvatarTap: (String) -> Unit,
     flashAmber: Boolean = false,
+    /** Bubbles, or the classic rows: [io.nisfeb.talon.ui.UiSettings.chatBubbles]. */
+    bubbles: Boolean = true,
+    /** Whose words, for the bubble's colour. */
+    bubbleKind: io.nisfeb.talon.ui.BubbleKind = io.nisfeb.talon.ui.BubbleKind.Theirs,
+    /** What the bubbles sit on, for their ink. */
 ) {
     val m = row.m
     val parts = remember(m.id, m.contentJson) { StoryCache.partsFor(m.id, m.contentJson) }
     val stamp = remember(m.sentMs) { formatMonthDayClock(m.sentMs) }
+    val clock = remember(m.sentMs) { io.nisfeb.talon.util.formatClock(m.sentMs) }
+    val mine = m.author == ourPatp
     val authorLabel = remember(m.author, contactMap) { contactMap.displayName(m.author) }
-    val avatarUrl = remember(m.author, contactMap) { contactMap.avatar(m.author) }
-    val avatarColor = remember(m.author, contactMap) { contactMap.shipColor(m.author) }
     val grouped = remember(row.reactions) {
         // Normalize on read too: rows stored before we normalized on write
         // still carry FE0F, and would otherwise render as a separate chip.
@@ -1710,6 +1769,8 @@ private fun MessageRow(
     // hover (the touch path opens the menu by tapping the row instead).
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
+    val tapOpens = LocalTapOpensMenu.current
+    val tapAt = remember { TapPoint() }
 
     Row(
         modifier = Modifier
@@ -1721,6 +1782,10 @@ private fun MessageRow(
             // "⋯" acts on when rows are short or the window is wide.
             .background(
                 when {
+                    // In bubbles the row is the window's width, and a tint
+                    // across all of it said little: the "⋯" beside the bubble
+                    // says which message the pointer is on (sneagan).
+                    bubbles -> Color.Transparent
                     menuExpanded -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                     hovered -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
                     else -> Color.Transparent
@@ -1732,10 +1797,11 @@ private fun MessageRow(
             // clickable is OFF so a left-press-drag reaches the message
             // text's SelectionContainer instead of being swallowed and
             // popping the menu on mouse-up; desktop opens the menu via
-            // right-click below. (isTapToOpenMenuSupported)
+            // right-click below. (isTapToOpenMenuSupported) The press is
+            // noted first, so the menu opens at the finger.
             .then(
-                if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-                    Modifier.clickable { onMenuExpand() }
+                if (tapOpens) {
+                    Modifier.tapPoint(tapAt).clickable { onMenuExpand() }
                 } else Modifier,
             )
             .onSecondaryClick { onMenuExpand() }
@@ -1771,92 +1837,109 @@ private fun MessageRow(
                     )
                 } else Modifier,
             )
-            .padding(top = if (row.showHeader) 12.dp else 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .then(
+                if (bubbles) Modifier.padding(top = if (row.showHeader) 10.dp else 2.dp, start = 8.dp, end = 8.dp)
+                else Modifier.padding(top = if (row.showHeader) 12.dp else 2.dp),
+            ),
+        // Bubbles blend the big messengers' shared shape: ours on the right
+        // in a soft accent bubble, theirs on the left in grey with the
+        // avatar beside the first of a run, the time inside the bubble.
+        // The avatar at the run's top: at the foot of its first message it
+        // sat down by the second (sneagan, 2026-11-08).
+        // Rows put every message on the left under its author and time.
+        horizontalArrangement = when {
+            !bubbles -> Arrangement.spacedBy(10.dp)
+            mine -> Arrangement.End
+            else -> Arrangement.spacedBy(8.dp)
+        },
+        verticalAlignment = Alignment.Top,
     ) {
-        if (row.showHeader) {
-            Avatar(
-                label = authorLabel,
-                url = avatarUrl,
-                colorHex = avatarColor,
-                size = AVATAR_SIZE,
-                onClick = { onAvatarTap(m.author) },
-            )
-        } else {
-            Spacer(Modifier.width(AVATAR_SIZE))
-        }
+        val onRight = bubbles && mine
+        if (!onRight) MessageAvatar(m.author, contactMap, row.showHeader) { onAvatarTap(m.author) }
+        if (onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = if (bubbles) Modifier.weight(1f, fill = false).widthIn(max = 560.dp) else Modifier.weight(1f),
+            horizontalAlignment = if (onRight) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (row.showHeader) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        contactMap.byline(m.author, authorLabel, stamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    // Send-state indicator. status is set only on our own
-                    // outgoing messages (see TlonChatRepo.postContent /
-                    // reply), DMs included: they are "pending" until the
-                    // ship acks them, so a send cut off is requeued. "failed"
-                    // renders below the body instead — grouped rows
-                    // (a burst of your own sends) have no header, and
-                    // a failed send must never be invisible.
-                    if (m.status == "pending") SendingIcon()
-                }
+            val body: @Composable () -> Unit = {
+                StoryRenderer(
+                    parts = parts,
+                    onMentionTap = onMentionTap,
+                    onLinkTap = onLinkTap,
+                    onImageTap = onImageTap,
+                    reactions = row.reactions,
+                    ourPatp = ourPatp,
+                    // A poll the ship has not taken yet has no post to vote on.
+                    onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
+                    // Touch only: tapping the message text (off any link) opens
+                    // the action menu — same as tapping the row background. Null
+                    // on desktop so a left-press-drag in text selects rather than
+                    // opening the menu (right-click opens it instead).
+                    onMessageTap = if (tapOpens) onMenuExpand else null,
+                )
             }
             // Only a post that could run long is measured for a fold.
-            val body: @Composable () -> Unit = {
-            StoryRenderer(
-                parts = parts,
-                onMentionTap = onMentionTap,
-                onLinkTap = onLinkTap,
-                onImageTap = onImageTap,
-                reactions = row.reactions,
-                ourPatp = ourPatp,
-                // A poll the ship has not taken yet has no post to vote on.
-                onPollVote = if (isPending) null else { emoji -> onReactionTap(m, row.reactions, emoji) },
-                // Touch only: tapping the message text (off any link) opens
-                // the action menu — same as tapping the row background. Null
-                // on desktop so a left-press-drag in text selects rather than
-                // opening the menu (right-click opens it instead).
-                onMessageTap = if (io.nisfeb.talon.ui.isTapToOpenMenuSupported) onMenuExpand else null,
-            )
+            val folded: @Composable () -> Unit = {
+                if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
+                    io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
+                } else body()
             }
-            if (remember(parts) { io.nisfeb.talon.ui.mightFold(parts) }) {
-                io.nisfeb.talon.ui.FoldLongPost(m.id, hasMedia = remember(parts) { io.nisfeb.talon.ui.hasMedia(parts) }, content = body)
-            } else body()
+            if (bubbles) {
+                io.nisfeb.talon.ui.MessageBubble(bubbleKind) {
+                    // Their name opens the first bubble of a run wherever
+                    // more than one other person talks: a group's channel
+                    // or a club. In a 1:1 DM, only when it says more than
+                    // the name (a bot that is offline). Ours need none.
+                    val nameLine = contactMap.byline(m.author, authorLabel, "").removeSuffix(" · ")
+                    // In the bubble's own ink, softened: a theme or a
+                    // background can make the bubble any colour.
+                    val quiet = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.72f)
+                    if (!mine && row.showHeader && (!m.whom.startsWith("~") || nameLine != authorLabel)) {
+                        Text(
+                            nameLine,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            color = quiet,
+                            modifier = Modifier.padding(bottom = 2.dp),
+                        )
+                    }
+                    folded()
+                    // The time inside the bubble, at its foot, with the
+                    // send state beside it.
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(clock, style = MaterialTheme.typography.labelSmall, color = quiet)
+                        if (m.status == "pending") SendingIcon()
+                    }
+                }
+            } else {
+                if (row.showHeader) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            contactMap.byline(m.author, authorLabel, stamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // Send-state indicator. status is set only on our own
+                        // outgoing messages (see TlonChatRepo.postContent /
+                        // reply), DMs included: they are "pending" until the
+                        // ship acks them, so a send cut off is requeued. "failed"
+                        // renders below the body instead — grouped rows
+                        // (a burst of your own sends) have no header, and
+                        // a failed send must never be invisible.
+                        if (m.status == "pending") SendingIcon()
+                    }
+                }
+                folded()
+            }
             SendStateNote(m.status)
-            val firstLink = remember(parts) { firstLinkUrl(parts) }
-            if (firstLink != null) {
-                LinkPreviewCard(
-                    url = firstLink,
-                    http = http,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }
-            if (firstUrb != null) {
-                io.nisfeb.talon.ui.UrbUnfurlCard(
-                    urbUrl = firstUrb,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-            val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }
-            if (firstFurum != null) {
-                io.nisfeb.talon.ui.FurumCard(
-                    link = firstFurum,
-                    http = http,
-                    onOpen = onLinkTap,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
+            MessageLinkCards(parts, http, onLinkTap)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
@@ -1894,40 +1977,95 @@ private fun MessageRow(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            // Action menu, anchored to the message. On touch, opened by a
-            // single tap on the row (see the gated row clickable + the
-            // StoryRenderer onMessageTap above); on desktop, by the trailing
-            // hover "⋯" below (left-click/drag is reserved for text selection,
-            // and right-click is eaten by the text's SelectionContainer).
-            androidx.compose.material3.DropdownMenu(
+            // Action menu. On touch, opened by a single tap on the row (see
+            // the gated row clickable + the StoryRenderer onMessageTap above),
+            // at the finger. On desktop, anchored to the message and opened
+            // by the trailing hover "⋯" below (left-click/drag is reserved for
+            // text selection, and right-click is eaten by the text's
+            // SelectionContainer).
+            if (tapOpens) {
+                if (menuExpanded) TouchMenuPopup(tapAt, onMenuDismiss) { actionMenu() }
+            } else androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = onMenuDismiss,
-                modifier = Modifier.widthIn(min = 280.dp, max = 360.dp),
+                // Narrower, and set off from the chat behind it: its own
+                // raised colour and a hairline edge, as the menu's own (on
+                // its inner column they lost the menu's rounded corners).
+                modifier = Modifier.widthIn(min = 200.dp, max = 260.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 actionMenu()
             }
         }
-        // Desktop affordance: a hover-revealed "⋯" is the reliable way to
-        // open the menu when tap-to-open is off. Without it the menu is
-        // unreachable over a message's text (selection owns left-drag;
-        // SelectionContainer swallows the row's right-click). A plain Icon,
-        // NOT IconButton — the latter's 48dp min touch size inflates short
-        // rows. Top-aligned + alpha-toggled so the slot never shifts.
-        if (!io.nisfeb.talon.ui.isTapToOpenMenuSupported) {
-            Icon(
-                Icons.Filled.MoreVert,
-                contentDescription = "Message actions",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.Top)
-                    .alpha(if (hovered || menuExpanded) 1f else 0f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(onClick = onMenuExpand)
-                    .padding(2.dp)
-                    .size(20.dp),
-            )
-        }
+        if (!onRight) MessageActionsDots(hovered, menuExpanded, onMenuExpand, Modifier.align(Alignment.Top))
     }
+}
+
+/**
+ * The poster's picture beside the first message of their run, and its
+ * width kept empty beside the rest. Shared by the chat and the thread.
+ */
+@Composable
+internal fun MessageAvatar(author: String, contactMap: ContactMap, show: Boolean, onClick: () -> Unit) {
+    if (!show) {
+        Spacer(Modifier.width(AVATAR_SIZE))
+        return
+    }
+    Avatar(
+        label = remember(author, contactMap) { contactMap.displayName(author) },
+        url = remember(author, contactMap) { contactMap.avatar(author) },
+        colorHex = remember(author, contactMap) { contactMap.shipColor(author) },
+        size = AVATAR_SIZE,
+        onClick = onClick,
+    )
+}
+
+/**
+ * The cards under a message for its first web, urb:// and furum links.
+ * Shared by the chat and the thread. A request's links are not fetched
+ * for a card ([io.nisfeb.talon.ui.LocalGuardedContent]).
+ */
+@Composable
+internal fun MessageLinkCards(parts: List<io.nisfeb.talon.urbit.StoryPart>, http: HttpClient, onLinkTap: (String) -> Unit) {
+    val guarded = io.nisfeb.talon.ui.LocalGuardedContent.current
+    val firstLink = remember(parts) { firstLinkUrl(parts) }.takeUnless { guarded }
+    if (firstLink != null) {
+        LinkPreviewCard(url = firstLink, http = http, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+    val firstUrb = remember(parts) { io.nisfeb.talon.ui.firstUrbUrl(parts) }.takeUnless { guarded }
+    if (firstUrb != null) {
+        io.nisfeb.talon.ui.UrbUnfurlCard(urbUrl = firstUrb, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+    val firstFurum = remember(parts) { io.nisfeb.talon.ui.firstFurumLink(parts) }.takeUnless { guarded }
+    if (firstFurum != null) {
+        io.nisfeb.talon.ui.FurumCard(link = firstFurum, http = http, onOpen = onLinkTap, modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+/**
+ * Desktop affordance: a hover-revealed "⋯" beside the bubble is the
+ * reliable way to open the menu when tap-to-open is off (selection owns
+ * left-drag; SelectionContainer swallows the row's right-click). A plain
+ * Icon, not IconButton, so short rows keep their height; alpha-toggled so
+ * the slot never shifts.
+ */
+@Composable
+internal fun MessageActionsDots(hovered: Boolean, menuExpanded: Boolean, onMenuExpand: () -> Unit, modifier: Modifier = Modifier) {
+    if (LocalTapOpensMenu.current) return
+    Icon(
+        Icons.Filled.MoreVert,
+        contentDescription = "Message actions",
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        // At the top of the bubble, beside its first line, where the eye
+        // (and the tests) look for it.
+        modifier = modifier
+            .alpha(if (hovered || menuExpanded) 1f else 0f)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onMenuExpand)
+            .padding(2.dp)
+            .size(20.dp),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -2021,6 +2159,48 @@ private fun PinnedPostBanner(
     }
 }
 
+/**
+ * A stranger's DM, not yet accepted, in place of the composer: on the ship
+ * a reply or a reaction would accept it. Accept makes it a chat; Decline
+ * and Block leave it. Block says what Tlon tells their ship.
+ */
+@Composable
+private fun DmRequestBar(
+    who: String,
+    problem: io.nisfeb.talon.util.Problem?,
+    busy: Boolean,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onBlock: () -> Unit,
+) {
+    var confirmBlock by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("$who wants to message you", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+        Text(
+            "Their pictures and links stay hidden until you accept.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        problem?.let { io.nisfeb.talon.ui.ProblemLine(it) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            io.nisfeb.talon.ui.DestructiveTextButton(onClick = { confirmBlock = true }, enabled = !busy) { Text("Block") }
+            Spacer(Modifier.weight(1f))
+            io.nisfeb.talon.ui.OutlinedButton(onClick = onDecline, enabled = !busy) { Text("Decline") }
+            io.nisfeb.talon.ui.Button(onClick = onAccept, enabled = !busy) { Text("Accept") }
+        }
+    }
+    if (confirmBlock) io.nisfeb.talon.ui.ConfirmDestructive(
+        title = "Block $who?",
+        text = "They won't be able to message or call you, and this request is declined. Their node is told that you blocked them.",
+        confirm = "Block",
+        onConfirm = onBlock,
+        onDismiss = { confirmBlock = false },
+    )
+}
+
 @Composable
 private fun EmptyChatPlaceholder(
     label: String,
@@ -2040,7 +2220,7 @@ private fun EmptyChatPlaceholder(
         )
         Text(
             text = when {
-                unread -> "Your ship did not send this chat. Open it again to retry."
+                unread -> "Your Groundwire node did not send this chat. Open it again to retry."
                 isDm -> "Say hi to $label — your first message starts the DM."
                 else -> "Be the first to post in this channel."
             },
@@ -2057,7 +2237,7 @@ private fun PartyNoteRow(text: String, onDismiss: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .background(io.nisfeb.talon.ui.onChatPicture(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)))
             .clickable(onClick = onDismiss)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
@@ -2087,7 +2267,7 @@ private fun DateDividerRow(label: String) {
             label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp).chatLabel(),
         )
         HorizontalDivider(modifier = Modifier.weight(1f))
     }
@@ -2164,7 +2344,15 @@ private object ChatRowsSnapshot {
     // the other ship's rows showed for the first frames.
     fun get(ship: String, whom: String): List<ChatListItem> = recent["$ship $whom"].orEmpty()
     fun put(ship: String, whom: String, rows: List<ChatListItem>) = recent.put("$ship $whom", rows)
+    fun clear() = recent.clear()
 }
+
+/**
+ * Forget the chats' rows kept for the life of the process. Tests sign in
+ * as the same ship, and one's rows opened another's chat (shown until its
+ * own came), as [forgetHomeListSnapshot] is for the list.
+ */
+internal fun forgetChatRowsSnapshot() = ChatRowsSnapshot.clear()
 
 /** The last [keep] values put, by key; past that, the one put longest ago goes. */
 internal class RecentByKey<V>(private val keep: Int) {
@@ -2172,6 +2360,9 @@ internal class RecentByKey<V>(private val keep: Int) {
     operator fun get(key: String): V? = byKey.value[key]
     fun put(key: String, value: V) {
         byKey.update { m -> (m - key + (key to value)).let { if (it.size > keep) it - it.keys.first() else it } }
+    }
+    fun clear() {
+        byKey.value = emptyMap()
     }
 }
 
@@ -2418,88 +2609,111 @@ private fun MessageActionMenu(
     val onShip = !isLocalOnly(message.id)
     val sending = !onShip && message.status == "pending"
     val canReply = message.parentId == null && onShip
+    val copyText = MenuAct("Copy text", onCopy)
+    val copyMarkdown = MenuAct("Copy as Markdown", onCopyMarkdown)
+    val copyLink = MenuAct("Copy link", onCopyLink).takeIf { onShip }
+    val bookmark = MenuAct(if (isBookmarked) "Remove bookmark" else "Bookmark", onToggleBookmark).takeIf { canBookmark && onShip }
+    val reply = MenuAct("Reply in thread", onReply).takeIf { canReply }
+    val event = onMakeEvent?.let { MenuAct("New event", it) }
+    val task = onMakeTask?.let { MenuAct("New task", it) }
+    val quote = MenuAct("Quote", onQuote).takeIf { canQuote && onShip }
+    // Edit on channel chats only — %chat (DMs + clubs) silently
+    // ignores edit pokes. Thread replies have their own Edit
+    // affordance in ThreadActionSheet; top-level posts get it here.
+    val edit = MenuAct("Edit", onEdit).takeIf { isMine && isChannel && message.parentId == null && onShip }
+    val follow = followLabel?.takeIf { onShip }?.let { MenuAct(it, onToggleFollow) }
+    // Pin / Unpin — chat channels only, top-level posts only.
+    val pin = MenuAct(if (isPinned) "Unpin" else "Pin", onTogglePin).takeIf { canPin && onShip }
+    // Report — other people's messages in group channels only:
+    // flag-content routes through the group host, so DMs have
+    // nowhere to send it, and reporting yourself is noise.
+    val report = MenuAct("Report", onReport, danger = true).takeIf { !isMine && isChannel }
+    // Publish this message (and its thread replies) as a
+    // Lattice note on your own ship. Channel content only.
+    val publish = MenuAct("Publish to Lattice", onPublish).takeIf { isChannel }
+    // Your own always; other people's only where you can
+    // actually moderate. Offering it to everyone and letting
+    // the ship refuse was the old behaviour: the row stayed
+    // put, nothing said why, and the app had advertised a
+    // power the reader did not have.
+    val delete = MenuAct(if (isMine) "Delete" else "Delete (admin)", onDelete, danger = true)
+        .takeIf { (isMine || (isChannel && canModerate)) && !sending }
+
+    LocalTouchMenuSide.current?.let { side ->
+        // A phone: what is done most at the top level, the rest a level
+        // down, and an admin's delete with the rare things.
+        TouchMenu(
+            side,
+            entries = listOfNotNull(reply, quote, edit) +
+                group("Copy", listOfNotNull(copyText, copyMarkdown, copyLink)) +
+                listOfNotNull(bookmark) +
+                group("More", listOfNotNull(follow, pin, event, task, publish, report, delete?.takeIf { !isMine })) +
+                listOfNotNull(delete?.takeIf { isMine }),
+            reactions = if (onShip) ({ TouchReactions(db, onPickReaction, onBrowseEmoji) }) else null,
+        )
+        return
+    }
+
     // Compact density tokens. The previous menu used Material's
     // default 8.dp spacedBy + full TextButton heights (~48.dp each)
     // and a 16.dp-tall HorizontalDivider, which on a row with 6-8
     // actions stacked to ~400.dp of dropdown — too tall for
     // single-thumb reach on phones.
-    val itemPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-    val itemMinHeight = 36.dp
+    val itemPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+    val itemMinHeight = 30.dp
     Column(
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
             if (onShip) {
-                val topUsage by remember {
-                    db.reactionUsage().streamTop(8)
-                }.collectAsState(initial = emptyList())
+                // Usage-ranked reactions first, then the palette, so the
+                // row is always 8 wide even before the user has reacted
+                // much.
+                val suggested = rememberSuggestedReactions(db, 8)
 
-                // Merge usage-ranked reactions with the default palette so
-                // the row is always 8 wide even before the user has reacted
-                // much. De-dupe by canonical reaction (normalize) so a glyph
-                // already in history (❤️) and its palette code (:heart:) don't
-                // both show as separate-looking options. Usage rows rank
-                // first, then the palette fills the rest.
-                val suggested = remember(topUsage) {
-                    val seen = mutableSetOf<String>()
-                    val out = mutableListOf<String>()
-                    (topUsage.map { it.shortcode } + ReactionPalette.picker.map { it.first })
-                        .forEach { item ->
-                            if (seen.add(ReactionPalette.normalize(item))) out.add(item)
-                        }
-                    out.take(8)
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "React",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 4.dp),
-                    )
-                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = "Browse emojis",
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
+                // One line of reactions, the emoji browser at its end: the
+                // "React" heading over them took a row of its own.
                 FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 2.dp),
                 ) {
                     suggested.forEach { code ->
                         val glyph = ReactionPalette.display(code)
                         Text(
                             glyph,
                             fontFamily = io.nisfeb.talon.ui.EmojiFontFamily,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable { onPickReaction(code) }
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                    io.nisfeb.talon.ui.IconButton(tip = "Browse emojis", onClick = onBrowseEmoji,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = "Browse emojis",
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
             }
             // Action rows — short, left-aligned, full-width so the
             // tap target spans the popover and reads like a menu
             // item instead of a centered button. minHeight 36 (vs
             // Material default 48) is the main driver of total
-            // popover height.
-            @Composable
-            fun ActionRow(
-                onClick: () -> Unit,
-                label: String,
-                color: androidx.compose.ui.graphics.Color = androidx.compose.material3.LocalContentColor.current,
-            ) {
+            // popover height. The menu's own ink, not the button's.
+            val ink = androidx.compose.material3.LocalContentColor.current
+            listOfNotNull(
+                copyText, copyMarkdown, copyLink, bookmark, reply, event, task,
+                quote, edit, follow, pin, report, publish, delete,
+            ).forEach { act ->
                 TextButton(
-                    onClick = onClick,
+                    onClick = act.onClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = itemMinHeight),
@@ -2507,70 +2721,12 @@ private fun MessageActionMenu(
                     shape = RoundedCornerShape(6.dp),
                 ) {
                     Text(
-                        label,
-                        color = color,
+                        act.label,
+                        color = if (act.danger) MaterialTheme.colorScheme.error else ink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
                 }
-            }
-            ActionRow(onClick = onCopy, label = "Copy text")
-            ActionRow(onClick = onCopyMarkdown, label = "Copy as Markdown")
-            if (onShip) ActionRow(onClick = onCopyLink, label = "Copy link")
-            if (canBookmark && onShip) {
-                ActionRow(
-                    onClick = onToggleBookmark,
-                    label = if (isBookmarked) "Remove bookmark" else "Bookmark",
-                )
-            }
-            if (canReply) {
-                ActionRow(onClick = onReply, label = "Reply in thread")
-            }
-            onMakeEvent?.let { ActionRow(onClick = it, label = "New event") }
-            onMakeTask?.let { ActionRow(onClick = it, label = "New task") }
-            if (canQuote && onShip) {
-                ActionRow(onClick = onQuote, label = "Quote")
-            }
-            // Edit on channel chats only — %chat (DMs + clubs) silently
-            // ignores edit pokes. Thread replies have their own Edit
-            // affordance in ThreadActionSheet; top-level posts get it here.
-            if (isMine && isChannel && message.parentId == null && onShip) {
-                ActionRow(onClick = onEdit, label = "Edit")
-            }
-            followLabel?.takeIf { onShip }?.let { ActionRow(onClick = onToggleFollow, label = it) }
-            // Pin / Unpin — chat channels only, top-level posts only.
-            if (canPin && onShip) {
-                ActionRow(
-                    onClick = onTogglePin,
-                    label = if (isPinned) "Unpin" else "Pin",
-                )
-            }
-            // Your own always; other people's only where you can
-            // actually moderate. Offering it to everyone and letting
-            // the ship refuse was the old behaviour: the row stayed
-            // put, nothing said why, and the app had advertised a
-            // power the reader did not have.
-            // Report — other people's messages in group channels only:
-            // flag-content routes through the group host, so DMs have
-            // nowhere to send it, and reporting yourself is noise.
-            if (!isMine && isChannel) {
-                ActionRow(
-                    onClick = onReport,
-                    label = "Report",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            // Publish this message (and its thread replies) as a
-            // Lattice note on your own ship. Channel content only.
-            if (isChannel) {
-                ActionRow(onClick = onPublish, label = "Publish to Lattice")
-            }
-            if ((isMine || (isChannel && canModerate)) && !sending) {
-                ActionRow(
-                    onClick = onDelete,
-                    label = if (isMine) "Delete" else "Delete (admin)",
-                    color = MaterialTheme.colorScheme.error,
-                )
             }
     }
 }
@@ -2607,13 +2763,22 @@ private fun TypingIndicator(
             "${names.size} people are active"
         }
     }
+    TypingLine(label)
+}
+
+/** Who is typing, above the composer; on a picture, on a pill, so it reads (sneagan, 2026-11-06). */
+@Composable
+internal fun TypingLine(label: String) {
+    val onPicture = io.nisfeb.talon.ui.LocalChatLook.current.image != null
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+        modifier = (if (onPicture) Modifier else Modifier.fillMaxWidth())
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .chatLabel(),
     )
 }
 
@@ -2650,9 +2815,9 @@ internal fun SendingIcon() {
  */
 @Composable
 internal fun SendStateNote(status: String?) {
-    when (status) {
-        "failed" -> SendFailedNote()
-        "queued" -> QueuedNote()
+    if (status != "failed" && status != "queued") return
+    Box(Modifier.chatLabel()) {
+        if (status == "failed") SendFailedNote() else QueuedNote()
     }
 }
 
@@ -2670,7 +2835,7 @@ internal fun QueuedNote() {
             modifier = Modifier.size(14.dp),
         )
         Text(
-            "Queued · sends when your ship is back",
+            "Queued · sends when your Groundwire node is back",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -109,7 +109,7 @@ class OrreryLateRepoTest {
             block(repo)
         } finally {
             scope.coroutineContext.job.cancelAndJoin()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             dir.deleteRecursively()
         }
     }
@@ -234,7 +234,7 @@ class OrreryLateRepoTest {
             down = true
             repo.mark("a1", snoozeMinutes = SNOOZE_MINUTES)
             withTimeout(5_000) { while (repo.answerProblem.value == null) delay(20) }
-            assertEquals("Snooze did not go through: your ship did not answer. Try it again.", repo.answerProblem.value)
+            assertEquals("Snooze did not go through: your Groundwire node did not answer. Try it again.", repo.answerProblem.value)
             assertEquals(listOf("a1"), repo.late())
             down = false
             repo.answer("a1", "done")

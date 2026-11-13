@@ -14,6 +14,34 @@ interface UiSettings {
     fun setHideComposerButtons(hidden: Boolean)
 
     /**
+     * A conversation's messages as bubbles (ours on the right, theirs on
+     * the left), or as rows: each on the left under its author's name and
+     * time. A taste rather than a screen size, so it syncs.
+     */
+    val chatBubbles: StateFlow<Boolean>
+    fun setChatBubbles(on: Boolean)
+
+    /**
+     * The picture behind Home and behind a conversation's bubbles: a
+     * file's path, kept by [ChatBackgroundFiles]; "" is none. This
+     * device's alone: it never syncs. A colour behind them is the theme's.
+     */
+    val chatBackgroundImage: StateFlow<String>
+    fun setChatBackgroundImage(path: String)
+
+    /** Who can reach the owner, and when ([ReachSettings]). A choice of the owner's, so it syncs. */
+    val reach: StateFlow<ReachSettings>
+    fun setReach(settings: ReachSettings)
+
+    /**
+     * The last searches run on this device, newest first, at most five
+     * (see [io.nisfeb.talon.ui.screens.withRecentSearch]). This device's
+     * alone: they never sync (sneagan, 2026-11-05).
+     */
+    val recentSearches: StateFlow<List<String>>
+    fun setRecentSearches(searches: List<String>)
+
+    /**
      * Theme accent color preferences. The effective tint that drives
      * every primary-colored UI element (send icon, focus rings, ship
      * pip, FilterChip selected state, etc) is derived from this plus
@@ -307,6 +335,30 @@ class InMemoryUiSettings(
         _hideComposerButtons.value = hidden
     }
 
+    private val _chatBubbles = MutableStateFlow(true)
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+    override fun setChatBubbles(on: Boolean) {
+        _chatBubbles.value = on
+    }
+
+    private val _chatBackgroundImage = MutableStateFlow("")
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+    override fun setChatBackgroundImage(path: String) {
+        _chatBackgroundImage.value = path
+    }
+
+    private val _reach = MutableStateFlow(ReachSettings())
+    override val reach: StateFlow<ReachSettings> = _reach.asStateFlow()
+    override fun setReach(settings: ReachSettings) {
+        _reach.value = settings
+    }
+
+    private val _recentSearches = MutableStateFlow<List<String>>(emptyList())
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
+    override fun setRecentSearches(searches: List<String>) {
+        _recentSearches.value = searches
+    }
+
     private val _accentSettings = MutableStateFlow(initialAccent)
     override val accentSettings: StateFlow<AccentSettings> =
         _accentSettings.asStateFlow()
@@ -452,3 +504,5 @@ class InMemoryUiSettings(
 /** [UiSettings.keybinds] where a host keeps none: the defaults alone. */
 private val NoKeybinds: StateFlow<Map<String, KeyCombo?>> = MutableStateFlow<Map<String, KeyCombo?>>(emptyMap()).asStateFlow()
 
+/** The shell's [UiSettings], for a sheet with no path to them otherwise: a profile's favourite star. Null in a tree with none. */
+val LocalUiSettings = androidx.compose.runtime.staticCompositionLocalOf<UiSettings?> { null }

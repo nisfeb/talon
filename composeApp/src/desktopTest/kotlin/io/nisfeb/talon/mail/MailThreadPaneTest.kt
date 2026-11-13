@@ -8,7 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -378,7 +378,7 @@ class MailThreadPaneTest {
     // A thread that failed to load with no copy kept was shown as deleted.
     @OptIn(ExperimentalTestApi::class)
     @Test
-    fun `a thread the ship did not answer for says so and is read again, not called gone`() = runComposeUiTest {
+    fun `a thread the node did not answer for says so and is read again, not called gone`() = runComposeUiTest {
         var down = true
         val http = HttpClient(MockEngine { req ->
             if (down) respond(NGINX_502, HttpStatusCode.BadGateway, headersOf("Content-Type", "text/html"))

@@ -193,7 +193,7 @@ class OrreryRepo(
 
     /** The ship's calendars, for the executor's picks. */
     suspend fun calendars(): Result<List<io.nisfeb.talon.calendar.CalendarInfo>> = runCatching {
-        CalendarApi(http, shipUrl ?: error("Not attached to a ship.")).calendars()
+        CalendarApi(http, shipUrl ?: error("Not attached to a Groundwire node.")).calendars()
     }
 
     private val _schema = MutableStateFlow<JsonObject?>(null)
@@ -423,8 +423,14 @@ class OrreryRepo(
         // ship switch started a loop and a beacon for the ship just left.
         attaching = scope.launch {
             probe()
-            _enabled.value = db.orreryAccounts().get(ship) != null
-            if (_enabled.value) startLoop()
+            // Raised only: detach() above lowered it, and an enable() since
+            // is newer than this read. Assigned, a read from before
+            // enable's row landed put the switch back off with the pipe
+            // feeding, and the next enable minted a second key.
+            if (db.orreryAccounts().get(ship) != null && !_enabled.value) {
+                _enabled.value = true
+                startLoop()
+            }
             // A ship with no pipe has nowhere to send a move, and its
             // screen has no switch to stop them: the phone kept waking
             // for every one after a switch from a ship that had a pipe.
@@ -534,35 +540,56 @@ class OrreryRepo(
     // ─── live location (orrery 88) ───
 
     private val _shares = MutableStateFlow<LocationShares?>(null)
+    private val _shareProblems = MutableStateFlow<Map<String, Throwable>>(emptyMap())
 
     /** Live location with other ships, as every screen reads it ([LocalLiveLocation]). */
     val live: LiveLocation = object : LiveLocation {
         override val shares: StateFlow<LocationShares?> = _shares.asStateFlow()
         override val canShare: Boolean get() = canShareLocation
+        override val canCheckIn: Boolean get() = (_version.value ?: 0) >= CHECK_IN_VERSION
+        override val canAutoCheckIn: Boolean get() = (_version.value ?: 0) >= AUTO_CHECK_IN_VERSION && _mapbox.value
+        override suspend fun refreshCheckIn() {
+            val a = api ?: return
+            if (_version.value == null) readVersion() else readMapbox(a)
+        }
 
         override suspend fun refresh() {
             runCatching { readShares() }.onFailure { Log.i(TAG, "location shares not read: ${it.message}") }
         }
 
-        // Said here at once, so every screen shows it; then read back from the
-        // ship, which a failed read leaves as said.
-        override suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit> = scope.async {
-            runCatching {
-                try {
-                    for (ship in ships) {
-                        attached().shareLocation(ship, length, exact)
-                        val until = length.hours?.let { now() + it * 3_600_000L }
-                        _shares.update { s ->
-                            val was = s ?: LocationShares(emptyList(), emptyList())
-                            was.copy(out = was.out.filter { it.ship != ship } + OutShare(ship, until, length.hours == null, exact))
-                        }
-                    }
-                } finally {
-                    location.live(_shares.value?.let { sendFastUntil(it, now()) })
-                    refresh()
-                }
+        override val shareProblems: StateFlow<Map<String, Throwable>> = _shareProblems.asStateFlow()
+
+        // Shown at once as sending, so every screen has it and the dialog
+        // closes on the tap (sneagan, 2026-11-08: it stayed open while the
+        // ship answered); each confirmed as the ship takes it, then read
+        // back, which a failed read leaves as said.
+        override fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long?, autoBy: Boolean, group: Boolean): Job = scope.launch {
+            val until = length.hours?.let { now() + it * 3_600_000L }
+            groupShared().let { setGroupShared(if (group) it + ships else it - ships.toSet()) }
+            _shareProblems.update { it - ships.toSet() }
+            _shares.update { s ->
+                val was = s ?: LocationShares(emptyList(), emptyList())
+                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true, byMs = byMs.takeIf { length.hours == null }, group = group) })
             }
-        }.await()
+            try {
+                for ((i, ship) in ships.withIndex()) {
+                    try {
+                        attached().shareLocation(ship, length, exact, byMs, autoBy)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        val unsent = ships.drop(i).toSet()
+                        _shares.update { s -> s?.copy(out = s.out.filterNot { it.sending && it.ship in unsent }) }
+                        _shareProblems.update { it + (ship to e) }
+                        break
+                    }
+                    _shares.update { s -> s?.copy(out = s.out.map { if (it.ship == ship) it.copy(sending = false) else it }) }
+                }
+            } finally {
+                location.live(_shares.value?.let { sendFastUntil(it, now()) })
+                refresh()
+            }
+        }
 
         override suspend fun stop(ships: List<String>): Result<Unit> = scope.async {
             runCatching {
@@ -571,6 +598,7 @@ class OrreryRepo(
                         attached().unshareLocation(ship)
                         _shares.update { s -> s?.copy(out = s.out.filter { it.ship != ship }) }
                     }
+                    setGroupShared(groupShared() - ships.toSet())
                 } finally {
                     location.live(_shares.value?.let { sendFastUntil(it, now()) })
                     refresh()
@@ -591,9 +619,22 @@ class OrreryRepo(
         }
     }.await()
 
+    // Which shares were started as a group's, by ship. The ship keeps one
+    // grant a person and not where it came from.
+    // ponytail: kept on this device only, so a group share started on
+    // another shows here as each member's own; sync it if that matters.
+    private suspend fun groupShared(): Set<String> =
+        ship?.let { db.orrerySent().get(it, GROUP_SHARES_KEY)?.value }?.split(',')?.filter { it.isNotBlank() }?.toSet().orEmpty()
+
+    private suspend fun setGroupShared(ships: Set<String>) {
+        ship?.let { db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(it, GROUP_SHARES_KEY, ships.joinToString(","), now())) }
+    }
+
     private suspend fun readShares() {
-        val s = locationShares(attached().locationDoc(), now())
-        _shares.value = s
+        val marked = groupShared()
+        val s = locationShares(attached().locationDoc(), now()).let { r -> r.copy(out = r.out.map { it.copy(group = it.ship in marked) }) }
+        // A share still being sent is kept: the ship has not got it yet.
+        _shares.update { was -> s.copy(out = s.out + was?.out.orEmpty().filter { it.sending && s.outTo(it.ship) == null }) }
         location.live(sendFastUntil(s, now()))
     }
 
@@ -673,7 +714,7 @@ class OrreryRepo(
                 },
                 onFailure = { e ->
                     _told.value = null
-                    _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + (e.message ?: "the ship did not answer")
+                    _answerProblem.value = "Orrery did not take \u201c$text\u201d: " + (e.message ?: "the node did not answer")
                 },
             )
         }
@@ -739,7 +780,7 @@ class OrreryRepo(
     suspend fun readActions(): Result<List<OrreryAction>> =
         runCatching { attached().actions(keyToken()) }.onSuccess { published(it) }
 
-    private fun attached(): OrreryApi = api ?: error("Not attached to a ship.")
+    private fun attached(): OrreryApi = api ?: error("Not attached to a Groundwire node.")
 
     private suspend fun keyToken(): String? = ship?.let { db.orreryAccounts().get(it)?.token }
 
@@ -776,6 +817,9 @@ class OrreryRepo(
     }
 
     private val _version = MutableStateFlow<Int?>(null)
+
+    /** Whether the ship holds a Mapbox token, read with the version where it can work out a check-in. */
+    private val _mapbox = MutableStateFlow(false)
     /** Orrery's version on the ship, once read; null before, or while it did not answer. */
     val version: StateFlow<Int?> = _version.asStateFlow()
 
@@ -786,6 +830,15 @@ class OrreryRepo(
         io.nisfeb.talon.util.runSuspendCatching { a.version() }
             .onSuccess { if (api === a) _version.value = it }
             .onFailure { Log.i(TAG, "version skipped: ${it.message}") }
+        readMapbox(a)
+    }
+
+    /** Whether the ship has a Mapbox token: read with the version, and again as the share dialog opens. */
+    private suspend fun readMapbox(a: OrreryApi) {
+        if ((_version.value ?: 0) < AUTO_CHECK_IN_VERSION) return
+        io.nisfeb.talon.util.runSuspendCatching { a.mapboxSet() }
+            .onSuccess { if (api === a) _mapbox.value = it }
+            .onFailure { Log.i(TAG, "travel settings skipped: ${it.message}") }
     }
 
     fun detach() {
@@ -822,6 +875,7 @@ class OrreryRepo(
         answering.value = emptyMap()
         marking.value = emptyMap()
         _version.value = null
+        _mapbox.value = false
         _actions.value = emptyList()
         if (shown.isNotEmpty()) onActions?.invoke(emptyList(), shown)
     }
@@ -1012,7 +1066,7 @@ class OrreryRepo(
 
     suspend fun enable(): Result<Unit> = scope.async { runCatching {
         val a = attached()
-        val s = ship ?: error("Not attached to a ship.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         // Everything the ship has; the lists are only a fallback.
         val full = runCatching { a.schema() }.getOrNull()
         val key = a.mint(
@@ -1358,7 +1412,7 @@ class OrreryRepo(
                     rowLock.withLock { stillOurs().also { if (it) db.orreryAccounts().delete(s) } }
                 }
                 if (ours) {
-                    _error.value = "The ship no longer accepts this install's key. Turn the pipe on again to mint a new one."
+                    _error.value = "Your Groundwire node no longer accepts this install's key. Turn the pipe on again to mint a new one."
                     turnOff()
                 } else {
                     requeue()
@@ -1954,8 +2008,8 @@ class OrreryRepo(
      * does not take the answer back halfway.
      */
     suspend fun setAction(id: String, status: String, note: String = "", proposed: Boolean = false): Result<Unit> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        val s = ship ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         // This install's key where it has one, else the owner's own say.
         val token = db.orreryAccounts().get(s)?.token
         // Done on a proposal is approve, then done: the answer below stays
@@ -1987,8 +2041,8 @@ class OrreryRepo(
      * not drop the revision or what it filed beside it.
      */
     suspend fun refine(id: String, text: String): Result<io.nisfeb.talon.orrery.Refined> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
-        val s = ship ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
+        val s = ship ?: error("Not attached to a Groundwire node.")
         val answer = a.refine(db.orreryAccounts().get(s)?.token, id, text)
         answer.action?.let { revised ->
             _actions.value = (_actions.value.map { if (it.id == revised.id) revised else it } + answer.extras)
@@ -2017,7 +2071,7 @@ class OrreryRepo(
                 answering.update { it - id }
                 if (was != null) _actions.value = listOf(was) + _actions.value.filterNot { it.id == id }
                 // No answer is not a refusal: said as one, a proxy's error page was the reason.
-                _answerProblem.value = if (e is OrreryError.Unreachable) "Your ship did not answer, so that answer was not given. Try it again."
+                _answerProblem.value = if (e is OrreryError.Unreachable) "Your Groundwire node did not answer, so that answer was not given. Try it again."
                 else "Orrery did not take that answer: ${e.message ?: "no reason given"}"
                 Log.w(TAG, "answer $status on $id refused: ${e.message}")
             }
@@ -2031,7 +2085,7 @@ class OrreryRepo(
      * value the ship answered it holds, until the list shows it.
      */
     suspend fun markAction(id: String, high: Boolean? = null, snoozeMinutes: Int? = null): Result<Unit> = scope.async { runCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         val token = keyToken()
         val (field, held) = if (high != null) "priority" to a.priority(token, id, high)
         else "snooze_until" to a.snooze(token, id, snoozeMinutes ?: error("Say high or a snooze."))
@@ -2129,6 +2183,8 @@ class OrreryRepo(
 
     private fun now(): Long = nowMs()
 
+    private val GROUP_SHARES_KEY = "location:group"
+
     companion object {
         private const val TAG = "OrreryRepo"
 
@@ -2167,7 +2223,7 @@ class OrreryRepo(
         const val ACTIONS_EVERY_MS = 15L * 60 * 1000
         /** How long one answer of the page's settings serves every row that asks. */
         const val SETTINGS_FRESH_MS = 30_000L
-        private const val BEACON_PATH = "/grubbery/api/keep/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
+        private const val BEACON_PATH = "/grubbery/api/keep/apps/shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
         /** Decision calls the gate check has in flight at once. */
         const val GATE_CHECK_AT_ONCE = 6
         /** How long a new key's forbidden reads as not stored yet, not as revoked. */
@@ -2313,10 +2369,10 @@ suspend fun settleOrreryGate(
 /** A failed check for orrery, said plainly: no status codes and no error pages. */
 internal fun probeProblemLine(e: Throwable): String = when (e) {
     is OrreryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
-        ?.let { "Orrery on your ship could not answer: $it." } ?: "Orrery on your ship could not answer."
-    is OrreryError.Garbled -> "Your ship's answer about Orrery could not be read."
-    else -> "Your ship did not answer."
-} + " Talon asks again by itself."
+        ?.let { "Orrery on your Groundwire node could not answer: $it." } ?: "Orrery on your Groundwire node could not answer."
+    is OrreryError.Garbled -> "Your Groundwire node's answer about Orrery could not be read."
+    else -> "Your Groundwire node did not answer."
+} + " Groundwire asks again by itself."
 
 /** The first pause before a failed check for orrery is tried again, and the most it grows to. */
 internal const val PROBE_RETRY_FIRST_MS = 30_000L

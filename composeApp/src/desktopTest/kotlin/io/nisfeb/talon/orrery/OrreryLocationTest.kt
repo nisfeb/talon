@@ -65,7 +65,7 @@ class OrreryLocationTest {
         assertEquals(buildJsonObject { put("ref", "place/home") }, row["value"])
         assertEquals("device", row["source"]!!.jsonObject["kind"]!!.jsonPrimitive.content)
         assertTrue("40.67" !in observed.single(), "never the coordinates")
-        db.close()
+        io.nisfeb.talon.urbit.closeAfter(db)
         dir.deleteRecursively()
     }
 
@@ -100,7 +100,7 @@ class OrreryLocationTest {
         val db = Room.databaseBuilder<AppDatabase>(name = File(dir, "t.db").absolutePath)
             .setDriver(BundledSQLiteDriver()).fallbackToDestructiveMigration(dropAllTables = true).build()
         db.orreryAccounts().upsert(OrreryAccountEntity("~zod", "c1", "k1.secret"))
-        try { block(db) } finally { db.close(); dir.deleteRecursively() }
+        try { block(db) } finally { io.nisfeb.talon.urbit.closeAfter(db); dir.deleteRecursively() }
     }
 
     @Test

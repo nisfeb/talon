@@ -9,7 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -46,6 +46,7 @@ class AppsSettingsScreenTest {
         installGroups: (suspend () -> Result<Unit>)? = { did += "install groups"; groupsHere = true; Result.success(Unit) },
         grubbery: (suspend () -> Result<Unit>)? = null,
         withOrrery: Boolean = false,
+        assistantOff: Boolean = false,
         shipUrl: String? = "https://zod.test",
         memoryKey: kotlinx.coroutines.flow.Flow<io.nisfeb.talon.data.LatticeKeyEntity?>? = null,
         renewKey: (suspend () -> Result<Unit>)? = null,
@@ -71,7 +72,7 @@ class AppsSettingsScreenTest {
                     ) {
                         TalonTheme(darkTheme = false) {
                             AppsSettingsScreen(
-                                mail = null, calendar = null, orrery = orrery,
+                                mail = null, calendar = null, orrery = orrery, assistantOff = assistantOff,
                                 latticeInstalled = { did += "asked lattice"; latticeHere },
                                 groupsInstalled = { groupsHere },
                                 onInstallGroups = installGroups,
@@ -88,7 +89,7 @@ class AppsSettingsScreenTest {
             // Joined, not just cancelled: work still running on a closed db
             // fails a later test as an uncaught exception.
             kotlinx.coroutines.runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.let { it.cancel(); it.join() } }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -102,7 +103,7 @@ class AppsSettingsScreenTest {
     fun `each app says whether it answers, and Groups is installed where it is missing`() = apps {
         row("Lattice", "working")
         row("Groups", "not installed")
-        assertTrue(shows("Chat runs on Groups, which this ship does not have."))
+        assertTrue(shows("Chat runs on Groups, which this node does not have."))
         onNodeWithText("Install").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("Installed Groups.") }
         waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("not installed").fetchSemanticsNodes().isEmpty() }
@@ -124,7 +125,7 @@ class AppsSettingsScreenTest {
     ) {
         row("Groups", "not installed")
         onNodeWithText("Install").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("The install did not finish: your ship is slow or out of reach.") }
+        waitUntil(timeoutMillis = 5_000) { shows("The install did not finish: your Groundwire node is slow or out of reach.") }
         assertTrue(!shows("url="))
     }
 
@@ -157,15 +158,27 @@ class AppsSettingsScreenTest {
             row("Orrery", "not installed")
             onNodeWithText("Install").performClick()
             waitUntil(timeoutMillis = 5_000) { shows("Added Orrery to your Grubbery shell.") }
-            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under AI.") }
+            waitUntil(timeoutMillis = 5_000) { shows("Feed Orrery from Settings, under Assistant.") }
             assertTrue("add orrery" in did)
+        }
+    }
+
+    // 2026-11-10: someone looked here for Orrery to turn it on, found
+    // nothing, and bought Armillary credit hoping it would appear.
+    @Test
+    fun `with the assistant off, Orrery is listed as off with where to turn it on`() {
+        groupsHere = true
+        apps(assistantOff = true) {
+            row("Orrery", "off")
+            assertTrue(shows("Turn on Groundwire Assistant in Settings, under Assistant, to use it."))
+            assertTrue(onAllNodesWithText("Install").fetchSemanticsNodes().isEmpty(), "nothing to install: it may be on the node already")
         }
     }
 
     @Test
     fun `permits open on the ship, and Check again asks each app afresh`() = apps {
         row("Lattice", "working")
-        onNodeWithText("Open permits on your ship").performClick()
+        onNodeWithText("Open permits on your node").performClick()
         assertTrue("open https://zod.test/~/login?redirect=/apps/grubbery/permits" in did, did.toString())
         val asked = did.count { it == "asked lattice" }
         onNodeWithText("Check again").performClick()
@@ -174,8 +187,8 @@ class AppsSettingsScreenTest {
 
     @Test
     fun `signed out, the permits page is only mentioned`() = apps(shipUrl = null) {
-        waitUntil(timeoutMillis = 5_000) { shows("Sign in to a ship to reach its permits page.") }
-        assertTrue(!shows("Open permits on your ship"))
+        waitUntil(timeoutMillis = 5_000) { shows("Sign in to a node to reach its permits page.") }
+        assertTrue(!shows("Open permits on your node"))
     }
 
     // sneagan, 2026-10-19: the assistants' memory key. Made on first use;
@@ -207,7 +220,7 @@ class AppsSettingsScreenTest {
             Result.success(Unit)
         }) {
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Make a new key").fetchSemanticsNodes().isNotEmpty() }
-            onNodeWithText("Lattice refused Talon's key", substring = true).assertExists()
+            onNodeWithText("Lattice refused this app's key", substring = true).assertExists()
             onNodeWithText("Make a new key").performClick()
             waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("Made a new key. The assistants remember again.").fetchSemanticsNodes().isNotEmpty() }
             assertEquals(listOf("renew"), did.filter { it == "renew" })

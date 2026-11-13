@@ -140,11 +140,11 @@ fun inviteFailure(e: Throwable): String = when {
     // owner to invite again; saying it worked is what left them
     // asking the other ship why nothing arrived.
     e is io.nisfeb.talon.urbit.PokeUnacked ->
-        "Your ship did not confirm the invite. It may still have gone: check the group's members before inviting again."
+        "Your Groundwire node did not confirm the invite. It may still have gone: check the group's members before inviting again."
     e !is io.nisfeb.talon.urbit.PokeNacked ->
-        "Could not send the invite: ${io.nisfeb.talon.util.readableReason(e.message) ?: "no answer from your ship"}"
+        "Could not send the invite: ${io.nisfeb.talon.util.readableReason(e.message) ?: "no answer from your Groundwire node"}"
     PERMISSION.containsMatchIn(e.reason) -> "The host refused it: only admins invite to this group. (${e.reason})"
-    else -> "Your ship refused the invite: ${e.reason}"
+    else -> "Your Groundwire node refused the invite: ${e.reason}"
 }
 
 private val PERMISSION = Regex("permission|not an admin|admin only|unauthor", RegexOption.IGNORE_CASE)

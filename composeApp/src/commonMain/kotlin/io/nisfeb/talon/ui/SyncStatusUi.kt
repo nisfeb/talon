@@ -43,6 +43,8 @@ fun rememberSyncStatus(repo: TlonChatRepo): SyncStatus {
     val signedOut by repo.signedOut.collectAsState()
     val syncing by repo.bootstrapping.collectAsState()
     val pending by remember(repo) { repo.queuedWrites }.collectAsState(initial = 0)
+    // A state, so coming back to the app is seen at once, not at the next tick.
+    val trySince by repo.tryingSinceMs.collectAsState()
     val thresholds = LocalSyncThresholds.current
     val now by produceState(nowMs(), thresholds) {
         while (true) {
@@ -50,7 +52,7 @@ fun rememberSyncStatus(repo: TlonChatRepo): SyncStatus {
             delay(minOf(SYNC_TICK_MS, thresholds.heardRecentlyMs / 2))
         }
     }
-    return syncStatus(signedOut, repo.lastHeardMs(), repo.startedMs, now, syncing, pending, thresholds)
+    return syncStatus(signedOut, repo.lastHeardMs(), trySince, now, syncing, pending, thresholds)
 }
 
 private const val SYNC_TICK_MS = 3_000L
@@ -68,6 +70,10 @@ fun SyncStatusIcon(repo: TlonChatRepo, ship: String, onSignIn: (() -> Unit)?) {
     val headline = syncHeadline(status, handle, nowMs())
     var open by remember { mutableStateOf(false) }
     val problem = status is SyncStatus.Unreachable || status is SyncStatus.SignedOut
+    // Nothing while all is well: a cloud with a tick on every screen said
+    // nothing anyone needed. It shows while the ship is not heard from,
+    // the login lapsed, or messages wait to go out.
+    if (status is SyncStatus.Connected && !status.syncing && status.pending == 0) return
     Box {
         IconButton(tip = headline, onClick = { open = true }) {
             Icon(

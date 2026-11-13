@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -147,11 +148,11 @@ fun ContactProfileSheet(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.clickable(onClick = copyRow(ship, "the @p")),
+                        modifier = Modifier.clickable(onClick = copyRow(ship, "the address")),
                     )
-                    TextButton(onClick = copyRow(ship, "the @p")) { Text("Copy @p") }
+                    TextButton(onClick = copyRow(ship, "the address")) { Text("Copy address") }
                 } else {
-                    TextButton(onClick = { showPatp = true }) { Text("Show @p") }
+                    TextButton(onClick = { showPatp = true }) { Text("Show address") }
                 }
             }
             // Asked of the ship once per comet, ever: see [CometDomes].
@@ -226,6 +227,12 @@ fun ContactProfileSheet(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Add to contacts") }
                 }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    FavouriteButton(ship)
+                    Spacer(Modifier.weight(1f))
+                    BlockRow(ship, label)
+                }
+                LocalShipBlocking.current?.problem?.collectAsState()?.value?.let { ProblemLine(it) }
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -294,5 +301,61 @@ val LocalOpenProfile = androidx.compose.runtime.staticCompositionLocalOf<((Strin
  */
 val LocalCallTo = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
 
+/**
+ * Who is blocked from reaching us, chats and calls, and the switch for a
+ * ship ([io.nisfeb.talon.urbit.TlonChatRepo.blockShip]); the write runs on
+ * the repo's scope. Null in a tree with no ship.
+ */
+class ShipBlocking(
+    val blocked: kotlinx.coroutines.flow.StateFlow<Set<String>?>,
+    /** The last block or unblock the ship did not take, until the next one is asked. */
+    val problem: kotlinx.coroutines.flow.StateFlow<io.nisfeb.talon.util.Problem?> = kotlinx.coroutines.flow.MutableStateFlow(null),
+    val set: (ship: String, blocked: Boolean) -> Unit,
+)
+
+val LocalShipBlocking = androidx.compose.runtime.staticCompositionLocalOf<ShipBlocking?> { null }
+
+/** [ShipBlocking] for [repo], as both shells provide it. */
+fun shipBlocking(repo: io.nisfeb.talon.urbit.TlonChatRepo): ShipBlocking {
+    val problem = kotlinx.coroutines.flow.MutableStateFlow<io.nisfeb.talon.util.Problem?>(null)
+    return ShipBlocking(repo.blockedShips, problem) { ship, block ->
+        problem.value = null
+        repo.pushScope.launch {
+            runCatching { if (block) repo.blockShip(ship) else repo.unblockShip(ship) }.onFailure {
+                io.nisfeb.talon.util.Log.w("Blocking", "block $ship=$block failed: ${it.message}")
+                problem.value = io.nisfeb.talon.util.problemOf(if (block) "Couldn't block ${shipHandle(ship)}" else "Couldn't unblock ${shipHandle(ship)}", it)
+            }
+        }
+    }
+}
+
 /** Asks our ship for a ship's profile when it holds none ([io.nisfeb.talon.urbit.TlonChatRepo.meetIfUnknown]). */
 val LocalFetchProfile = androidx.compose.runtime.staticCompositionLocalOf<((String) -> Unit)?> { null }
+
+/** A favourite reaches the owner in quiet hours ([ReachSettings.favourites]). */
+@Composable
+private fun FavouriteButton(ship: String) {
+    val ui = LocalUiSettings.current ?: return
+    val reach by ui.reach.collectAsState()
+    val fav = ship in reach.favourites
+    TextButton(onClick = { ui.setReach(reach.copy(favourites = if (fav) reach.favourites - ship else reach.favourites + ship)) }) {
+        Text(if (fav) "★ Favorite" else "☆ Add to favorites")
+    }
+}
+
+/** Block or unblock [ship] from the profile: chats and calls, with what Tlon tells their ship. */
+@Composable
+private fun BlockRow(ship: String, who: String) {
+    val blocking = LocalShipBlocking.current ?: return
+    val blocked = blocking.blocked.collectAsState().value?.contains(ship) == true
+    var confirm by remember(ship) { mutableStateOf(false) }
+    if (blocked) TextButton(onClick = { blocking.set(ship, false) }) { Text("Unblock") }
+    else DestructiveTextButton(onClick = { confirm = true }) { Text("Block") }
+    if (confirm) ConfirmDestructive(
+        title = "Block $who?",
+        text = "They won't be able to message or call you. Their node is told that you blocked them.",
+        confirm = "Block",
+        onConfirm = { blocking.set(ship, true) },
+        onDismiss = { confirm = false },
+    )
+}

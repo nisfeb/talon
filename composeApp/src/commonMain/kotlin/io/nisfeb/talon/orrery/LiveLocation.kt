@@ -4,6 +4,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import io.nisfeb.talon.ui.parseIsoUtc
 import io.nisfeb.talon.urbit.asText
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.datetime.plus
+import kotlinx.datetime.toInstant
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -34,7 +37,39 @@ data class LocationShares(
     fun asking(ship: String): Boolean = ship in asks
 }
 
-data class OutShare(val ship: String, val untilMs: Long?, val home: Boolean, val exact: Boolean)
+data class OutShare(
+    val ship: String,
+    val untilMs: Long?,
+    val home: Boolean,
+    val exact: Boolean,
+    /** Asked for here and not yet answered by the ship: shown at once, taken back if refused. */
+    val sending: Boolean = false,
+    /** A check-in (orrery 142): if the owner is not home by then, the ship tells them. */
+    val byMs: Long? = null,
+    /**
+     * Started from a group's Info on this device, with the group's other
+     * members; false for one shared with a person on their own, or
+     * started on another device.
+     */
+    val group: Boolean = false,
+)
+
+/**
+ * A group's Info, from the shares this ship runs: the members sharing as
+ * the group ([group], what its Stop ends), the members with a share of
+ * their own ([own], which a group share and its Stop leave as they are),
+ * who a group share would go to ([toShare]), and whether to offer one:
+ * whenever a member has no share yet. One running share with a member
+ * used to hide the offer altogether (2026-11-10).
+ */
+data class GroupShareView(val group: List<String>, val own: List<String>, val toShare: List<String>, val offer: Boolean)
+
+fun groupShareView(others: List<String>, out: List<OutShare>): GroupShareView {
+    val mine = out.filter { it.ship in others }
+    val group = mine.filter { it.group }.map { it.ship }
+    val own = mine.filterNot { it.group }.map { it.ship }
+    return GroupShareView(group, own, toShare = others - own.toSet(), offer = (others - group.toSet() - own.toSet()).isNotEmpty())
+}
 
 data class InShare(
     val ship: String,
@@ -46,7 +81,15 @@ data class InShare(
     val atMs: Long?,
     val untilMs: Long?,
     val home: Boolean,
+    /** Checking in, and not home by this time (orrery 142): their ship said so. */
+    val lateByMs: Long? = null,
 )
+
+/** The orrery that keeps a check-in's time and tells the peer when it passes. */
+const val CHECK_IN_VERSION = 142
+
+/** The orrery that works a check-in's time out from the drive home, where it holds a Mapbox token. */
+const val AUTO_CHECK_IN_VERSION = 143
 
 /** How long a share runs, as orrery's share route takes it. */
 enum class ShareLength(val label: String, val hours: Int?) {
@@ -73,7 +116,7 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         val until = ms(g["until"])
         val home = flag(g["home"])
         if (if (until != null) until <= nowMs else !home) return@mapNotNull null
-        OutShare(ship, until, home, flag(g["exact"]))
+        OutShare(ship, until, home, flag(g["exact"]), byMs = ms(g["by"]))
     }
     val entries: List<Pair<String?, JsonObject>> = when (val i = doc["in"]) {
         is JsonObject -> i.entries.mapNotNull { (k, v) -> (v as? JsonObject)?.let { k to it } }
@@ -88,7 +131,7 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         val at = ms(v["at"])
         val live = if (until != null) until > nowMs else at != null && nowMs - at < SHARE_QUIET_MS
         if (!live) return@mapNotNull null
-        InShare(ship, v["name"].asText().orEmpty(), lat, lon, v["acc"].asText()?.toDoubleOrNull(), at, until, flag(v["home"]))
+        InShare(ship, v["name"].asText().orEmpty(), lat, lon, v["acc"].asText()?.toDoubleOrNull(), at, until, flag(v["home"]), lateByMs = ms(v["late"]))
     }
     // An ask holds a fix too, never shown; it lives as a share with no end time does.
     val asks = when (val a = doc["asks"]) {
@@ -105,11 +148,24 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
 fun askBody(ship: String): String = buildJsonObject { put("ship", ship) }.toString()
 
 /** The body of POST /api/location/share, as orrery's +serve-location-share reads it. */
-fun shareBody(ship: String, length: ShareLength, exact: Boolean): String = buildJsonObject {
+fun shareBody(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false): String = buildJsonObject {
     put("ship", ship)
     if (length.hours != null) put("hours", length.hours) else put("home", true)
     put("precision", if (exact) "exact" else "area")
+    // A check-in, only with until home (orrery 142), to the second as the ship reads it;
+    // "auto" has the ship work it out from the drive home (orrery 143).
+    if (length.hours == null && autoBy) put("by", "auto")
+    else if (length.hours == null && byMs != null) put("by", kotlin.time.Instant.fromEpochMilliseconds(byMs / 1000 * 1000).toString())
 }.toString()
+
+/** The next [minuteOfDay] here after [nowMs]: today's, or tomorrow's once today's has gone. A check-in's time. */
+fun nextAtMinute(minuteOfDay: Int, nowMs: Long, zone: kotlinx.datetime.TimeZone = kotlinx.datetime.TimeZone.currentSystemDefault()): Long {
+    val today = kotlin.time.Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
+    fun on(d: kotlinx.datetime.LocalDate) =
+        kotlinx.datetime.LocalDateTime(d, kotlinx.datetime.LocalTime(minuteOfDay / 60, minuteOfDay % 60)).toInstant(zone).toEpochMilliseconds()
+    val t = on(today)
+    return if (t > nowMs) t else on(today.plus(1, kotlinx.datetime.DateTimeUnit.DAY))
+}
 
 /**
  * Until when the phone should send a fix a minute: the last share's end,
@@ -138,15 +194,29 @@ interface LiveLocation {
     /** Whether this device can send fixes, so offer to share. */
     val canShare: Boolean
 
+    /** Whether the ship's orrery keeps a check-in ([CHECK_IN_VERSION]): an older one ignores the time, so it is not offered. */
+    val canCheckIn: Boolean
+
+    /** Whether the ship can work a check-in's time out from the drive home: [AUTO_CHECK_IN_VERSION] and a Mapbox token. */
+    val canAutoCheckIn: Boolean
+
+    /** Ask the ship again what check-in it can do, as the share dialog opens: a version not yet read, a token added since. */
+    suspend fun refreshCheckIn() {}
+
     /** Read the shares again: cheap, a scry where the ship allows one. */
     suspend fun refresh()
 
     /**
      * Start sharing with each of [ships], one grant each (a group's members),
-     * or replace the share there. Runs to the end on the repo's scope; the
-     * first refusal stops it, and the shares made before it stand.
+     * or replace the share there. Shown in [shares] at once, as sending, so
+     * the asking screen can close on the tap; runs to the end on the repo's
+     * scope. The first refusal stops it, lands in [shareProblems], and the
+     * shares made before it stand.
      */
-    suspend fun share(ships: List<String>, length: ShareLength, exact: Boolean): Result<Unit>
+    fun share(ships: List<String>, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false, group: Boolean = false): kotlinx.coroutines.Job
+
+    /** Why the last share with a ship failed, by ship; cleared when it is asked for again. */
+    val shareProblems: StateFlow<Map<String, Throwable>>
 
     /** Stop sharing with each of [ships]. Runs to the end on the repo's scope. */
     suspend fun stop(ships: List<String>): Result<Unit>

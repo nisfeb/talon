@@ -1,5 +1,9 @@
 package io.nisfeb.talon.ui
 
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.material3.Text
@@ -22,7 +26,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.performMouseInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.nisfeb.talon.data.AppDatabase
@@ -59,6 +63,9 @@ class HomeScreenTest {
         calendar: io.nisfeb.talon.calendar.CalendarRepo? = null,
         onInstallCalendar: (suspend () -> Result<Unit>)? = null,
         onTalk: (() -> Unit)? = null,
+        backgroundImage: String = "",
+        /** Handed the theme's colours, for a test that reads pixels. */
+        scheme: (androidx.compose.material3.ColorScheme) -> Unit = {},
         block: ComposeUiTest.(AppDatabase) -> Unit,
     ) {
         val tmp = createTempDirectory(prefix = "talon-homepage-").toFile()
@@ -69,6 +76,7 @@ class HomeScreenTest {
             runComposeUiTest {
                 setContent {
                     TalonTheme(darkTheme = false) {
+                        scheme(androidx.compose.material3.MaterialTheme.colorScheme)
                         HomeScreen(
                             db = db, mail = null, contacts = ContactMap.EMPTY, ourShip = "~zod",
                             calendar = calendar, onOpenCalendar = { calendarOpened++ }, onInstallCalendar = onInstallCalendar,
@@ -78,6 +86,7 @@ class HomeScreenTest {
                             onOpenConversation = { opened += it }, onOpenChats = { chatsOpened++ },
                             onOpenMailThread = {}, onOpenMail = {},
                             onTalk = onTalk,
+                            backgroundImage = backgroundImage,
                         )
                     }
                 }
@@ -85,7 +94,7 @@ class HomeScreenTest {
                 block(db)
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -100,6 +109,61 @@ class HomeScreenTest {
         messages().upsert(msg("~bus", "~bus", "are you coming?", 1_000))
         messages().upsert(msg("~nec", "~nec", "old news", 500))
         unreads().upsert(UnreadEntity("~bus", count = 2, notifyCount = 1, recencyMs = 1_000))
+    }
+
+    /** A picture of one colour, kept where a chosen one would be. */
+    private fun picture(rgb: Int): String {
+        val f = File(createTempDirectory(prefix = "talon-picture-").toFile(), "p.png")
+        val img = java.awt.image.BufferedImage(64, 64, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        img.createGraphics().apply { color = java.awt.Color(rgb); fillRect(0, 0, 64, 64); dispose() }
+        javax.imageio.ImageIO.write(img, "png", f)
+        return f.absolutePath
+    }
+
+    private fun assertNear(expected: androidx.compose.ui.graphics.Color, actual: androidx.compose.ui.graphics.Color, what: String) {
+        val off = maxOf(kotlin.math.abs(expected.red - actual.red), kotlin.math.abs(expected.green - actual.green), kotlin.math.abs(expected.blue - actual.blue))
+        assertTrue(off < 3f / 255f, "$what: expected $expected, was $actual")
+    }
+
+    // sneagan, 2026-11-06: the background picture is Home's too. In the
+    // page's margin only the picture is; a widget and the greeting are
+    // solid on it, so they read.
+    @Test
+    fun `the background picture is behind the page, with the widgets and greeting solid on it`() {
+        var colors: androidx.compose.material3.ColorScheme? = null
+        val red = androidx.compose.ui.graphics.Color(0xFFFF0000)
+        home(backgroundImage = picture(0xFF0000), scheme = { colors = it }) {
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            fun pixels() = onRoot().captureToImage().toPixelMap()
+            fun margin() = pixels()[2, (root.height / 2).toInt()]
+            waitUntil(timeoutMillis = 5_000) { margin() == red }
+            val c = colors!!
+            val px = pixels()
+            val dp = density.density
+            val mail = onNodeWithText("Mail").fetchSemanticsNode().boundsInRoot
+            assertNear(
+                c.surfaceVariant.copy(alpha = 0.30f).compositeOver(c.surface),
+                px[(mail.left - 30 * dp).toInt(), mail.center.y.toInt()],
+                "a widget, solid on the page",
+            )
+            val greeting = onNodeWithText("Good ", substring = true).fetchSemanticsNode().boundsInRoot
+            assertNear(
+                c.surface.copy(alpha = 0.9f).compositeOver(red),
+                // In the pill's side padding, before the words.
+                px[(greeting.left - 4 * dp).toInt(), greeting.center.y.toInt()],
+                "the greeting's pill",
+            )
+        }
+    }
+
+    @Test
+    fun `with no picture the page is the theme's`() {
+        home {
+            waitForIdle()
+            val root = onRoot().fetchSemanticsNode().boundsInRoot
+            val margin = onRoot().captureToImage().toPixelMap()[2, (root.height / 2).toInt()]
+            assertTrue(margin != androidx.compose.ui.graphics.Color(0xFFFF0000))
+        }
     }
 
     // sneagan, 2026-10-17: "a button on the home screen next to good
@@ -119,7 +183,7 @@ class HomeScreenTest {
     @Test
     fun `the page greets the ship, and says what this ship does not have`() = home {
         assertTrue(shows("~zod") && shows("Good "), "a greeting by name")
-        assertTrue(shows("This ship has no mail app yet."))
+        assertTrue(shows("This node has no mail app yet."))
         assertTrue(shows("This host has no calendar."))
     }
 
@@ -329,7 +393,7 @@ class HomeScreenTest {
                 assertTrue(!shows("Buy milk"), "the task goes once the ship has it done")
             }
         } finally {
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -396,7 +460,7 @@ class HomeScreenTest {
     ) {
         waitUntil(timeoutMillis = 5_000) { shows("Install the calendar") }
         onNodeWithText("Install the calendar").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer") }
         assertTrue(!shows("Connection refused"))
     }
 

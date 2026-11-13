@@ -21,6 +21,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import io.nisfeb.talon.TalonApplication
+import io.nisfeb.talon.ai.orreryOn
 import io.nisfeb.talon.util.Log
 import io.nisfeb.talon.util.runSuspendCatching
 import java.time.Duration
@@ -111,6 +112,11 @@ class HealthWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val app = applicationContext as? TalonApplication ?: return Result.success()
         val session = app.sessionStore.active() ?: return Result.success()
+        // Orrery turned off, on another device as well: as LocationWorker.
+        if (!app.aiSettings.state.value.orreryOn()) {
+            HealthWatch.set(app, false)
+            return Result.success()
+        }
         if (!HealthWatch.available(app)) return Result.success()
         return sendHealth(
             app.session.http, app.db, session.shipUrl, session.ship,

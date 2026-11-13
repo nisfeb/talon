@@ -37,11 +37,12 @@ object Mnemonym {
      *  implementation's test vectors. Memoized — displayName and the
      *  mention matcher run per row/keystroke, and the answer never
      *  changes. */
-    fun forShip(ship: String): String? = synchronized(nymLock) {
-        nymCache.getOrPut(ship) {
-            val bytes = patpBytes(ship) ?: return@getOrPut ""
-            encode(bytes, tweaked = ship in groundwire)
-        }
+    fun forShip(ship: String): String? = synchronized(nymLock) { nymLocked(ship) }
+
+    /** [forShip], under [nymLock]. */
+    private fun nymLocked(ship: String): String? = nymCache.getOrPut(ship) {
+        val bytes = patpBytes(ship) ?: return@getOrPut ""
+        encode(bytes, tweaked = ship in groundwire)
     }.takeIf { it.isNotEmpty() }
 
     /**
@@ -81,14 +82,19 @@ object Mnemonym {
      *  the truncated comet @p people already read. Short nyms (a value
      *  with enough leading zeros to lose most of its words) are already
      *  that short and are left alone. */
-    fun display(ship: String): String? = forShip(ship)?.let { full ->
+    fun display(ship: String): String? {
         // Abridged beside the full name, so a row's name is a map read
-        // and not three allocations per recomposition.
+        // and not three allocations per recomposition. One section for
+        // both: a markGroundwire between two cleared both caches, and the
+        // two-dot name read before it was cached abridged for good.
         var first = false
-        val shown = synchronized(nymLock) { abridgedCache.getOrPut(ship) { first = true; abridge(full) } }
+        val shown = synchronized(nymLock) {
+            val full = nymLocked(ship) ?: return null
+            abridgedCache.getOrPut(ship) { first = true; abridge(full) }
+        }
         // The first time it is drawn: is it on Groundwire? Asked outside the lock.
         if (first) onComet?.invoke(ship)
-        shown
+        return shown
     }
 
     /**

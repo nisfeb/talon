@@ -22,7 +22,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -111,7 +111,7 @@ class AiSettingsSectionTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
-        onNodeWithText("Armillary is not on your ship. Install it from the Apps page.").assertExists()
+        onNodeWithText("Armillary is not on your Groundwire node. Install it from the Apps page.").assertExists()
         onNodeWithText("Armillary is published by ~ricsul-bilwyt, the same as Orrery and the Calendar.").assertExists()
         onNodeWithText("Top up").assertIsNotEnabled()
         // No address and no key anywhere: the ship holds both, and an
@@ -172,7 +172,7 @@ class AiSettingsSectionTest {
                 Column(Modifier.verticalScroll(rememberScrollState())) { AiSettingsSection(ai, orrery = null, armillary = bought) }
             }
         }
-        onNodeWithText("Signed out of the ship.").assertExists()
+        onNodeWithText("Signed out of your Groundwire node.").assertExists()
     }
 
     @Test
@@ -198,7 +198,7 @@ class AiSettingsSectionTest {
             }
         }
         // An app that answers needs no line saying so.
-        onNodeWithText("Answering on this ship.").assertDoesNotExist()
+        onNodeWithText("Answering on this node.").assertDoesNotExist()
         onNodeWithText("$12.35 credit with ~wex").assertExists()
         onNodeWithText("Change vendor").assertExists()
         onNodeWithText("Pay as you go.").assertExists()
@@ -357,7 +357,7 @@ class AiSettingsSectionTest {
     fun `a checkout with no page yet says not to order again, and its page is offered once it comes`() {
         fun row(status: String, url: String = "https://pay.example/late") = Checkout("n9", url, status, "btcpay", 10_000_000L)
         val pending = Payment("n9", "btcpay", 0L, Payment.Phase.WAITING)
-        assertEquals("Your ship is waiting for the vendor's checkout. Do not order again: it opens from here when it comes", paymentLine(pending, null))
+        assertEquals("Your Groundwire node is waiting for the vendor's checkout. Do not order again: it opens from here when it comes", paymentLine(pending, null))
         assertEquals(paymentLine(pending, null), paymentLine(pending, row("pending", url = "")))
         assertNull(checkoutPage(pending, null), "nothing to open yet")
         assertEquals("https://pay.example/late", checkoutPage(pending, row("pending")), "the vendor's row brings its page")

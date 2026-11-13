@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.ktor.client.HttpClient
@@ -167,7 +167,7 @@ class OrreryActionsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -179,7 +179,7 @@ class OrreryActionsTest {
         ),
     ) {
         assertTrue(shows("Not true: person/andrea's location is place/barcelona") && shows("Why: she stayed home"))
-        assertTrue(shows("Approve lets the ship make this change."))
+        assertTrue(shows("Approve lets your Groundwire node make this change."))
         onNodeWithText("Approve").performClick()
         assertEquals("""{"status":"approved"}""", answered("c1"))
     }
@@ -220,7 +220,7 @@ class OrreryActionsTest {
         // Said where Actions shows problems, with the words to say again.
         waitUntil(timeoutMillis = 5_000) { repo.answerProblem.value != null }
         val said = repo.answerProblem.value!!
-        assertTrue("\u201cshe moved to Lisbon\u201d" in said && "Orrery has no model key on your ship" in said, said)
+        assertTrue("\u201cshe moved to Lisbon\u201d" in said && "Orrery has no model key on your Groundwire node" in said, said)
         assertEquals(null, repo.told.value)
     }
 
@@ -336,7 +336,7 @@ class OrreryActionsTest {
             }
         } finally {
             runBlocking { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() }
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }

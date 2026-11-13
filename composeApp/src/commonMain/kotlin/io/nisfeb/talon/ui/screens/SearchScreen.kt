@@ -1,5 +1,8 @@
 package io.nisfeb.talon.ui.screens
 import io.nisfeb.talon.ui.shipHandle
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
 import io.nisfeb.talon.util.formatMonthDayClock
 import io.nisfeb.talon.util.nowMs
 
@@ -53,8 +56,23 @@ import kotlinx.coroutines.flow.take
  */
 internal object SearchDraft {
     var query = ""
+    /** The query is the list's search bar's first letters, not one a
+     *  result brought back: only then does emptying it close Search. */
+    var fromBar = false
 }
 
+
+/**
+ * [searches] with [query] put first, as Search keeps its recent ones: a
+ * repeat moves up rather than showing twice, and five at most are kept.
+ * Under two characters is no search, so nothing changes.
+ */
+internal fun withRecentSearch(searches: List<String>, query: String, max: Int = 5): List<String> {
+    // A pasted line break would split the one-a-line Android store.
+    val q = query.replace('\n', ' ').trim()
+    if (q.length < 2) return searches
+    return (listOf(q) + searches.filter { it != q }).take(max)
+}
 
 /** When Search last ran an indexer pass, for the life of the process. */
 internal var lastSearchPassMs = Long.MIN_VALUE / 2
@@ -82,9 +100,23 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
 ) {
     val aiState by aiSettings.state.collectAsState()
-    var query by remember { mutableStateOf(SearchDraft.query.also { SearchDraft.query = "" }) }
+    // The text and the cursor: opened from the list's search bar with a
+    // letter already typed, the cursor goes after it, not before.
+    val opened = remember { SearchDraft.query.also { SearchDraft.query = "" } }
+    val fromBar = remember { SearchDraft.fromBar.also { SearchDraft.fromBar = false } }
+    var field by remember {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(opened, androidx.compose.ui.text.TextRange(opened.length)))
+    }
+    val query = field.text
+    // Emptied after the bar opened it with text, search gives the list
+    // back: no blank page with only a box in it. A query a result brought
+    // back is cleared to type a new one, and Search stays.
+    LaunchedEffect(query) { if (fromBar && opened.isNotEmpty() && query.isEmpty()) onBack() }
     var showSyntaxHelp by remember { mutableStateOf(false) }
     val trimmed = query.trim()
+    val recents by uiSettings.recentSearches.collectAsState()
+    // Kept when it was worth something: a result opened from it, or Enter.
+    val keep = { uiSettings.setRecentSearches(withRecentSearch(uiSettings.recentSearches.value, query)) }
 
     // Debounce typing — `db.messages().search(...)` is a full-table LIKE
     // scan with no index. On a 50K-row archive every keystroke would
@@ -110,39 +142,38 @@ fun SearchScreen(
         else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
 
-    // Read once a query: as a live flow the LIKE scan ran again on every
-    // write to messages while the results showed.
-    val substringResults by remember(filter, escapedNeedle) {
-        if (filter.isTrivial) flowOf(emptyList())
-        else db.messages().searchFiltered(
-            needle = escapedNeedle,
-            fromShip = filter.fromShip,
-            inWhom = filter.inWhom,
-            sinceMs = filter.sinceMs,
-            hasImage = if (filter.hasImage) 1 else 0,
-            hasLink = if (filter.hasLink) 1 else 0,
-        ).take(1)
-    }.collectAsState(initial = emptyList<MessageEntity>())
-
-    // People search runs against the keyword text only — operators
-    // like since: / from: / has: have no analog for contacts.
+    // People and group search run against the keyword text only:
+    // operators like since: / from: / has: have no analog for them.
     val peopleEscapedNeedle = remember(filter) {
         if (filter.needle.length < 2) ""
         else io.nisfeb.talon.data.escapeLikeNeedle(filter.needle)
     }
-    val people by remember(peopleEscapedNeedle) {
-        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
-        else db.contacts().search(peopleEscapedNeedle)
-    }.collectAsState(initial = emptyList<ContactEntity>())
 
-    // Group-name search — same free-text needle as people (operators
-    // like since:/has: have no analog for groups). Surfaced above
-    // message hits because a name match is a stronger signal of intent
-    // than a substring buried in some message body.
-    val groups by remember(peopleEscapedNeedle) {
-        if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
-        else db.groups().searchGroups(peopleEscapedNeedle)
-    }.collectAsState(initial = emptyList<io.nisfeb.talon.data.GroupEntity>())
+    // Groups, people and messages, as one: shown as each query landed, a
+    // kind a frame late went in above the row the list held its place by,
+    // out of sight for good (a search for a group's name found it and showed
+    // only its messages), or moved the rows under a click as it landed.
+    // Groups come first, a name match being a stronger sign of intent than
+    // a word in some message. Messages are read once a query: as a live flow
+    // the LIKE scan ran again on every write to messages while they showed.
+    val found by remember(filter) {
+        kotlinx.coroutines.flow.combine(
+            if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+            else db.groups().searchGroups(peopleEscapedNeedle),
+            if (peopleEscapedNeedle.isEmpty()) flowOf(emptyList())
+            else db.contacts().search(peopleEscapedNeedle),
+            if (filter.isTrivial) flowOf(emptyList())
+            else db.messages().searchFiltered(
+                needle = escapedNeedle,
+                fromShip = filter.fromShip,
+                inWhom = filter.inWhom,
+                sinceMs = filter.sinceMs,
+                hasImage = if (filter.hasImage) 1 else 0,
+                hasLink = if (filter.hasLink) 1 else 0,
+            ).take(1),
+        ) { g: List<io.nisfeb.talon.data.GroupEntity>, p: List<ContactEntity>, m: List<MessageEntity> -> Triple(g, p, m) }
+    }.collectAsState(initial = Triple(emptyList(), emptyList(), emptyList()))
+    val (groups, people, substringResults) = found
 
     // Set of whoms the user has any activity with — used to flag a
     // search result as "you've never DMed this person, tap to start"
@@ -182,14 +213,22 @@ fun SearchScreen(
     // Again when a pass ends, so a search typed while it ran sees what it
     // added. Not when one starts: that asked the same query again.
     androidx.compose.runtime.LaunchedEffect(debouncedTrimmed, smartMode, embedder, indexProgress.running) {
+        // Each way out says it is not searching: a search this one cut off
+        // left "Searching…" up for good.
         if (!smartMode || debouncedTrimmed.length < 2 || embedder == null) {
             semanticResults.value = emptyList()
             searchedFor = null
+            semanticBusy = false
             return@LaunchedEffect
         }
-        if (indexProgress.running && searchedFor == debouncedTrimmed) return@LaunchedEffect
+        if (indexProgress.running && searchedFor == debouncedTrimmed) {
+            semanticBusy = false
+            return@LaunchedEffect
+        }
         semanticBusy = true
-        semanticResults.value = runCatching { embedder.semanticSearch(debouncedTrimmed) }
+        // A search the next keystroke cut off goes quietly. Caught as a
+        // failure, it wrote no results over the newer search's, a beat later.
+        semanticResults.value = io.nisfeb.talon.util.runSuspendCatching { embedder.semanticSearch(debouncedTrimmed) }
             .getOrElse { emptyList() }
         searchedFor = debouncedTrimmed
         semanticBusy = false
@@ -225,8 +264,10 @@ fun SearchScreen(
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { focus.requestFocus() }
             OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
+                value = field,
+                onValueChange = { field = it },
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                leadingIcon = { Icon(androidx.compose.material.icons.Icons.Filled.Search, contentDescription = null) },
                 placeholder = {
                     // One line only: a long placeholder wrapped to two
                     // lines on a narrow phone, inflating the field so the
@@ -238,6 +279,8 @@ fun SearchScreen(
                     )
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keep() }),
                 modifier = Modifier.fillMaxWidth().padding(start = 4.dp).focusRequester(focus),
             )
         }
@@ -296,26 +339,41 @@ fun SearchScreen(
             SearchSyntaxDialog(onDismiss = { showSyntaxHelp = false })
         }
         HorizontalDivider()
-        if (trimmed.length < 2 && highlightsEnabled && highlights.value.isNotEmpty()) {
-            // No query yet, but the user has highlights — show them
-            // as the empty state. Same row component as a search hit.
+        val showHighlights = highlightsEnabled && highlights.value.isNotEmpty()
+        if (trimmed.length < 2 && (recents.isNotEmpty() || showHighlights)) {
+            // No query yet: the recent searches to run again, then the
+            // user's highlights. Highlights use the search hit's row.
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
-                item(key = "__highlights_header", contentType = "header") {
-                    SectionHeader("Highlights")
-                }
-                items(
-                    items = highlights.value,
-                    key = { "hl:${it.whom}:${it.id}" },
-                    contentType = { "hl" },
-                ) { m ->
-                    ResultRow(m, contactMap) {
-                        SearchDraft.query = query
-                        onOpenMessage(m.whom, m.id, m.parentId)
+                if (recents.isNotEmpty()) {
+                    item(key = "__recent_header", contentType = "header") {
+                        SectionHeader("Recent searches")
                     }
-                    HorizontalDivider()
+                    items(items = recents, key = { "recent:$it" }, contentType = { "recent" }) { q ->
+                        RecentRow(
+                            query = q,
+                            onRun = { field = androidx.compose.ui.text.input.TextFieldValue(q, androidx.compose.ui.text.TextRange(q.length)) },
+                            onRemove = { uiSettings.setRecentSearches(uiSettings.recentSearches.value - q) },
+                        )
+                    }
+                }
+                if (showHighlights) {
+                    item(key = "__highlights_header", contentType = "header") {
+                        SectionHeader("Highlights")
+                    }
+                    items(
+                        items = highlights.value,
+                        key = { "hl:${it.whom}:${it.id}" },
+                        contentType = { "hl" },
+                    ) { m ->
+                        ResultRow(m, contactMap) {
+                            SearchDraft.query = query
+                            onOpenMessage(m.whom, m.id, m.parentId)
+                        }
+                        HorizontalDivider()
+                    }
                 }
             }
         } else if (trimmed.length < 2) {
@@ -358,7 +416,7 @@ fun SearchScreen(
                     ) { g ->
                         GroupRow(
                             group = g,
-                            onClick = { onOpenGroup(g.flag) },
+                            onClick = { keep(); onOpenGroup(g.flag) },
                         )
                         HorizontalDivider()
                     }
@@ -375,7 +433,7 @@ fun SearchScreen(
                         PersonRow(
                             contact = p,
                             hasChatHistory = p.ship in activeWhomSet,
-                            onClick = { SearchDraft.query = query; onOpenConversation(p.ship) },
+                            onClick = { keep(); SearchDraft.query = query; onOpenConversation(p.ship) },
                         )
                         HorizontalDivider()
                     }
@@ -390,6 +448,7 @@ fun SearchScreen(
                         contentType = { "hit" },
                     ) { m ->
                         ResultRow(m, contactMap) {
+                            keep()
                             SearchDraft.query = query
                             onOpenMessage(m.whom, m.id, m.parentId)
                         }
@@ -397,6 +456,34 @@ fun SearchScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun RecentRow(query: String, onRun: () -> Unit, onRemove: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onRun).padding(start = 16.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            androidx.compose.material.icons.Icons.Filled.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            query,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+        )
+        androidx.compose.material3.IconButton(onClick = onRemove) {
+            Icon(
+                androidx.compose.material.icons.Icons.Filled.Close,
+                contentDescription = "Remove $query from recent searches",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -590,8 +677,8 @@ private fun SearchSyntaxDialog(onDismiss: () -> Unit) {
         title = { Text("Advanced search") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SyntaxRow("from:~ship", "messages from one person")
-                SyntaxRow("in:chat/~ship/channel", "one conversation")
+                SyntaxRow("from:~address", "messages from one person")
+                SyntaxRow("in:chat/~address/channel", "one conversation")
                 SyntaxRow("since:1w", "newer than the offset (m, h, d, w, mo)")
                 SyntaxRow("has:image", "messages with an image")
                 SyntaxRow("has:link", "messages with a link")

@@ -375,8 +375,8 @@ fun guestsProblem(meta: JsonObject, text: String, google: Boolean): String? {
     val names = guestNames(text)
     if (names.joinToString(", ") == guestText(meta)) return null
     val (ships, emails) = names.partition { it.startsWith("~") }
-    ships.firstOrNull { !SHIP_NAME.matches(it) }?.let { return "Not a ship name: $it" }
-    emails.firstOrNull { !EMAIL.matches(it) }?.let { return "Not an email or a ship: $it" }
+    ships.firstOrNull { !SHIP_NAME.matches(it) }?.let { return "Not an address: $it" }
+    emails.firstOrNull { !EMAIL.matches(it) }?.let { return "Not an email or an address: $it" }
     if (emails.isNotEmpty() && !google) return "Email guests need a calendar linked to Google"
     return null
 }

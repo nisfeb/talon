@@ -41,6 +41,10 @@ class FileUiSettings(
     @Serializable
     private data class Persisted(
         val hideComposerButtons: Boolean = false,
+        val chatBubbles: Boolean = true,
+        val chatBackgroundImage: String = "",
+        val reach: ReachSettings = ReachSettings(),
+        val recentSearches: List<String> = emptyList(),
         // Accent settings — `enabled` is nullable so we can tell
         // "user never opted in" apart from "user explicitly off",
         // matching the contract in [AccentSettings].
@@ -97,6 +101,18 @@ class FileUiSettings(
     private val _hideComposerButtons = MutableStateFlow(initial.hideComposerButtons)
     override val hideComposerButtons: StateFlow<Boolean> =
         _hideComposerButtons.asStateFlow()
+
+    private val _chatBubbles = MutableStateFlow(initial.chatBubbles)
+    override val chatBubbles: StateFlow<Boolean> = _chatBubbles.asStateFlow()
+
+    private val _chatBackgroundImage = MutableStateFlow(initial.chatBackgroundImage)
+    override val chatBackgroundImage: StateFlow<String> = _chatBackgroundImage.asStateFlow()
+
+    private val _reach = MutableStateFlow(initial.reach)
+    override val reach: StateFlow<ReachSettings> = _reach.asStateFlow()
+
+    private val _recentSearches = MutableStateFlow(initial.recentSearches)
+    override val recentSearches: StateFlow<List<String>> = _recentSearches.asStateFlow()
 
     private val _accentSettings = MutableStateFlow(
         AccentSettings(
@@ -289,6 +305,30 @@ class FileUiSettings(
         persistCurrent()
     }
 
+    override fun setChatBubbles(on: Boolean) {
+        if (_chatBubbles.value == on) return
+        _chatBubbles.value = on
+        persistCurrent()
+    }
+
+    override fun setChatBackgroundImage(path: String) {
+        if (_chatBackgroundImage.value == path) return
+        _chatBackgroundImage.value = path
+        persistCurrent()
+    }
+
+    override fun setReach(settings: ReachSettings) {
+        if (_reach.value == settings) return
+        _reach.value = settings
+        persistCurrent()
+    }
+
+    override fun setRecentSearches(searches: List<String>) {
+        if (_recentSearches.value == searches) return
+        _recentSearches.value = searches
+        persistCurrent()
+    }
+
     override fun setAccentSettings(settings: AccentSettings) {
         if (_accentSettings.value == settings) return
         _accentSettings.value = settings
@@ -370,6 +410,10 @@ class FileUiSettings(
         persist(
             Persisted(
                 hideComposerButtons = _hideComposerButtons.value,
+                chatBubbles = _chatBubbles.value,
+                chatBackgroundImage = _chatBackgroundImage.value,
+                reach = _reach.value,
+                recentSearches = _recentSearches.value,
                 accentEnabled = accent.enabled,
                 accentMode = accent.mode.name,
                 accentCustomHex = accent.customHex,

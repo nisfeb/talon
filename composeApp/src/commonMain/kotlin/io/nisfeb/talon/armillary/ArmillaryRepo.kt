@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -70,6 +71,9 @@ class ArmillaryRepo(
     private var catalog: List<CatalogRow>? = null
     private val _inference = MutableStateFlow<Inference?>(null)
     val inference: StateFlow<Inference?> = _inference.asStateFlow()
+
+    /** Inference configs taken so far: a "no key" read that began before the last one is older news. */
+    private val keysTaken = MutableStateFlow(0)
     private val _refreshing = MutableStateFlow(false)
     val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
     private val _payment = MutableStateFlow<Payment?>(null)
@@ -214,7 +218,7 @@ class ArmillaryRepo(
      * is too old to have leaves its flow as it was.
      */
     suspend fun refresh(fresh: Boolean = false): Result<Unit> = lock.withLock {
-        val a = api ?: return Result.failure(IllegalStateException("Not attached to a ship."))
+        val a = api ?: return Result.failure(IllegalStateException("Not attached to a Groundwire node."))
         _refreshing.value = true
         try {
             runSuspendCatching { a.probe() }
@@ -226,11 +230,12 @@ class ArmillaryRepo(
                     retryCheck()
                 }
             if (_availability.value != ArmillaryAvailability.PRESENT) {
-                return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this ship."))
+                return Result.failure(IllegalStateException(_error.value ?: "Armillary does not answer on this Groundwire node."))
             }
             var got: Inference? = null
+            val taken = keysTaken.value
             runSuspendCatching { a.inference() }
-                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey() }
+                .onSuccess { if (it is InferenceAnswer.Have) got = it.inference else if (it is InferenceAnswer.NoKey) dropKey(taken) }
                 .onFailure {
                     Log.i(TAG, "inference skipped: ${it.message}")
                     if (_inference.value == null) _keyProblem.value = keyProblemLine(it)
@@ -256,8 +261,9 @@ class ArmillaryRepo(
     /** The vendor's picks, the key and the models read off the ship and put on the row; a failed read keeps what the row had. */
     private suspend fun readPicks() = lock.withLock {
         val a = api ?: return@withLock
+        val taken = keysTaken.value
         runSuspendCatching { a.inference() }
-            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey() }
+            .onSuccess { if (it is InferenceAnswer.Have) took(it.inference) else if (it is InferenceAnswer.NoKey) dropKey(taken) }
             .onFailure { Log.i(TAG, "picks skipped: ${it.message}") }
     }
 
@@ -285,9 +291,13 @@ class ArmillaryRepo(
      * the key revoked. The row kept the old key and the card said
      * Connected; now the key goes from the row, and the card offers to
      * set this device up. A read that failed says nothing of the kind,
-     * and keeps what the row had.
+     * and keeps what the row had. So does one that began before a key
+     * was [taken][keysTaken] since: a refresh's read, answered after this
+     * device minted its key, took the new key off the row, and nothing
+     * asked again (CI, 2026-11-07).
      */
-    private fun dropKey() {
+    private fun dropKey(takenWhenAsked: Int) {
+        if (keysTaken.value != takenWhenAsked) return
         _inference.value = null
         val ai = aiSettings ?: return
         val profile = ai.state.value.savedProfile ?: return
@@ -347,11 +357,11 @@ class ArmillaryRepo(
     }
 
     private suspend fun askForKey(deviceName: String): Result<Inference> = runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         _deletion.value = null
         when (val first = a.inference()) {
             is InferenceAnswer.Have -> return@runSuspendCatching took(first.inference)
-            InferenceAnswer.Missing -> error("Armillary is not on this ship. Install it from the Grubbery shell on your ship.")
+            InferenceAnswer.Missing -> error("Armillary is not on this Groundwire node. Install it from the Grubbery shell on your node.")
             InferenceAnswer.NoKey -> Unit
         }
         ensureVendor(a)
@@ -365,7 +375,7 @@ class ArmillaryRepo(
             delay(KEY_POLL_MS)
             waited += KEY_POLL_MS
         }
-        error("Your ship has asked the vendor for a key and is still waiting. Try Refresh in a moment.")
+        error("Your Groundwire node has asked the vendor for a key and is still waiting. Try Refresh in a moment.")
     }
 
     /**
@@ -374,11 +384,11 @@ class ArmillaryRepo(
      * failure says what failed instead of leaving the last answer.
      */
     suspend fun readInference(): Result<Inference> = runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         when (val got = a.inference()) {
             is InferenceAnswer.Have -> took(got.inference)
-            InferenceAnswer.NoKey -> error("Your ship holds no Armillary key for this device yet.")
-            InferenceAnswer.Missing -> error("Armillary is not on your ship.")
+            InferenceAnswer.NoKey -> error("Your Groundwire node holds no Armillary key for this device yet.")
+            InferenceAnswer.Missing -> error("Armillary is not on your Groundwire node.")
         }
     }
 
@@ -399,7 +409,7 @@ class ArmillaryRepo(
      * asked for again, since a key belongs to one vendor.
      */
     suspend fun setVendor(ship: String, deviceName: String): Result<Inference> = scope.async { runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         a.setVendor(ship.trim())
         refresh()
         ensureKey(deviceName).getOrThrow()
@@ -416,7 +426,7 @@ class ArmillaryRepo(
      * does not lose the checkout it made.
      */
     suspend fun topUp(rail: String, plan: String?, amountMicro: Long?): Result<String?> = scope.async { runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         if (!_asking.compareAndSet(null, now())) error(CHECKOUT_ON_ITS_WAY)
         try { checkout(a, rail, plan, amountMicro) } finally { _asking.value = null }
     } }.await()
@@ -484,7 +494,7 @@ class ArmillaryRepo(
 
     /** Ask the vendor to stop the subscription renewing. The view says when it is done. */
     suspend fun cancelSubscription(): Result<Unit> = scope.async { runSuspendCatching {
-        val a = api ?: error("Not attached to a ship.")
+        val a = api ?: error("Not attached to a Groundwire node.")
         a.cancelSubscription()
         watchBalance(null)
     } }.await()
@@ -501,7 +511,7 @@ class ArmillaryRepo(
         // Under the refresh's lock: a refresh in flight finishing after
         // forget() put the deleted account back on the screen.
         lock.withLock { runSuspendCatching {
-            val a = api ?: error("Not attached to a ship.")
+            val a = api ?: error("Not attached to a Groundwire node.")
             val vendor = _account.value?.vendor.orEmpty()
             val answer = a.deleteAccount()
             if (answer.taken) forget(Deletion(vendor, answer))
@@ -615,6 +625,7 @@ class ArmillaryRepo(
 
     /** An inference config just read: kept, and written onto the provider row. */
     private fun took(inf: Inference): Inference {
+        keysTaken.update { it + 1 }
         // The row first: whatever waits for the inference reads the key
         // off the row, and found it blank when it woke in between.
         publish(inf)
@@ -766,18 +777,18 @@ data class Deletion(val vendor: String, val answer: DeleteAnswer)
 /** A failed check for Armillary, said plainly: no status codes and no error pages. */
 internal fun checkProblemLine(e: Throwable): String = when (e) {
     is ArmillaryError.Refused -> io.nisfeb.talon.util.readableReason(e.reason)
-        ?.let { "Armillary on your ship could not answer: $it." } ?: "Armillary on your ship could not answer."
-    is ArmillaryError.Garbled -> "Your ship's answer about Armillary could not be read."
-    else -> "Your ship did not answer."
-} + " Talon asks again by itself."
+        ?.let { "Armillary on your Groundwire node could not answer: $it." } ?: "Armillary on your Groundwire node could not answer."
+    is ArmillaryError.Garbled -> "Your Groundwire node's answer about Armillary could not be read."
+    else -> "Your Groundwire node did not answer."
+} + " Groundwire asks again by itself."
 
 /** A failed key ask, said plainly: no HTTP codes or exception names on the card. */
 /** A second order while the first is on its way. */
 internal const val CHECKOUT_ON_ITS_WAY = "A checkout is already on its way. It opens from here when it comes."
 
 internal fun keyProblemLine(e: Throwable): String = when (e) {
-    is ArmillaryError.Refused -> "Your ship refused: ${e.reason.ifBlank { "it gave no reason" }}."
-    is ArmillaryError.Unreachable -> "Your ship did not answer. Try Refresh in a moment."
-    is ArmillaryError.Garbled -> "Your ship's answer could not be read."
-    else -> e.message ?: "Your ship did not answer. Try Refresh in a moment."
+    is ArmillaryError.Refused -> "Your Groundwire node refused: ${e.reason.ifBlank { "it gave no reason" }}."
+    is ArmillaryError.Unreachable -> "Your Groundwire node did not answer. Try Refresh in a moment."
+    is ArmillaryError.Garbled -> "Your Groundwire node's answer could not be read."
+    else -> e.message ?: "Your Groundwire node did not answer. Try Refresh in a moment."
 }

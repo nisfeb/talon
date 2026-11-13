@@ -70,10 +70,10 @@ fun LocalShipSection(localShip: LocalShip) {
 
     Spacer(Modifier.height(8.dp))
     Column {
-        Text("Local ship (beta)", style = MaterialTheme.typography.titleMedium)
+        Text("Local node (beta)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(4.dp))
         Text(
-            "A comet that lives on this computer. Talon runs it while the app is open; " +
+            "A comet that lives on this computer. The app runs it while it is open; " +
                 "it is yours only as long as this computer keeps it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -83,16 +83,16 @@ fun LocalShipSection(localShip: LocalShip) {
         // Copy of their own.
         SelectionContainer {
             Column {
-                InfoRow("Ship", info.ship ?: "not yet known")
+                InfoRow("Address", info.ship ?: "not yet known")
                 InfoRow("Status", status)
-                InfoRow("Pier", info.pierPath + (pierBytes?.let { "  (${it / 1_048_576} MB)" } ?: ""))
+                InfoRow("Files", info.pierPath + (pierBytes?.let { "  (${it / 1_048_576} MB)" } ?: ""))
                 InfoRow("Runtime", "vere ${info.runtimeVersion}")
             }
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             info.ship?.let { ship ->
-                io.nisfeb.talon.ui.CopyButton({ ship }, "Copy ship name")
+                io.nisfeb.talon.ui.CopyButton({ ship }, "Copy address")
             }
             if (running) {
                 OutlinedButton(
@@ -100,7 +100,7 @@ fun LocalShipSection(localShip: LocalShip) {
                     onClick = {
                         busy = true; error = null
                         scope.launch {
-                            runCatching { localShip.stop() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't stop the ship", it) }
+                            runCatching { localShip.stop() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't stop the node", it) }
                             busy = false
                         }
                     },
@@ -111,7 +111,7 @@ fun LocalShipSection(localShip: LocalShip) {
                     onClick = {
                         busy = true; error = null
                         scope.launch {
-                            runCatching { localShip.start() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't start the ship", it) }
+                            runCatching { localShip.start() }.onFailure { error = io.nisfeb.talon.util.problemOf("Couldn't start the node", it) }
                             busy = false
                         }
                     },
@@ -185,8 +185,8 @@ fun LocalShipSection(localShip: LocalShip) {
             }
         }
         Text(
-            "Upgrading stops the ship, fetches the new runtime, and starts it again; " +
-                "the pier migrates itself on the way up.",
+            "Upgrading stops the node, fetches the new runtime, and starts it again; " +
+                "the node's files migrate themselves on the way up.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -199,7 +199,7 @@ fun LocalShipSection(localShip: LocalShip) {
         Spacer(Modifier.height(12.dp))
         Text("Dojo", style = MaterialTheme.typography.titleSmall)
         Text(
-            "The ship's terminal. Anything you would type into a dojo goes here.",
+            "Your Groundwire node's terminal. Anything you would type into a dojo goes here.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -240,7 +240,7 @@ private fun DojoPanel(localShip: LocalShip, enabled: Boolean) {
     ) {
         SelectionContainer {
             Text(
-                shown.ifEmpty { if (enabled) "Waiting for output…" else "The ship is not running." },
+                shown.ifEmpty { if (enabled) "Waiting for output…" else "Your Groundwire node is not running." },
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
             )
@@ -253,8 +253,8 @@ private fun DojoPanel(localShip: LocalShip, enabled: Boolean) {
                 // Not taken yet, and nothing says the ship is busy: it is
                 // on its way, or about to be.
                 !busy -> "Sent: ${waiting?.first}"
-                waiting != null -> "Your ship is busy and will take \"${waiting?.first}\" when it's done. " + BUSY_WHY
-                else -> "Your ship is busy and will answer when it's done. $BUSY_WHY"
+                waiting != null -> "Your node is busy and will take \"${waiting?.first}\" when it's done. " + BUSY_WHY
+                else -> "Your node is busy and will answer when it's done. $BUSY_WHY"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -300,7 +300,7 @@ private fun InfoRow(label: String, value: String) {
     }
 }
 
-private const val BUSY_WHY = "A new ship spends its first several minutes installing updates."
+private const val BUSY_WHY = "A new node spends its first several minutes installing updates."
 
 /** How often [cmd] has been taken: dojo prints a line back as `> cmd` once it takes it. */
 internal fun takenCount(terminal: String, cmd: String): Int {

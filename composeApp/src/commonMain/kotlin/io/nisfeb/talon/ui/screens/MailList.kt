@@ -112,7 +112,7 @@ fun MailList(
     if (confirmingDelete) {
         io.nisfeb.talon.ui.ConfirmDestructive(
             title = "Delete ${chosen.size} thread${if (chosen.size == 1) "" else "s"}?",
-            text = "They are deleted from your ship. This cannot be undone.",
+            text = "They are deleted from your Groundwire node. This cannot be undone.",
             dismiss = "Keep",
             onConfirm = { repo.deleteMany(chosen); picked = emptySet() },
             onDismiss = { confirmingDelete = false },
@@ -274,7 +274,7 @@ private fun MailBody(
                             "which takes a few minutes."
                     installProblem != null -> installProblem
                     availability == MailAvailability.NO_GRUBBERY ->
-                        "Mail runs in Grubbery, which this ship does not have yet."
+                        "Mail runs in Grubbery, which this node does not have yet."
                     else -> "Grubbery is here, but not its Mail yet."
                 },
                 actionLabel = when {

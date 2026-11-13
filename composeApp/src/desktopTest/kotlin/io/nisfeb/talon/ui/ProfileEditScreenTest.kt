@@ -15,7 +15,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
@@ -81,7 +81,7 @@ class ProfileEditScreenTest {
         } finally {
             runBlocking { repo.stopAndJoinForTest() }
             scope.cancel()
-            db.close()
+            io.nisfeb.talon.urbit.closeAfter(db)
             tmp.deleteRecursively()
         }
     }
@@ -111,6 +111,7 @@ class ProfileEditScreenTest {
 
     @Test
     fun `the ship's public keys are shown and copied`() = profile(keys = zodKeys) {
+        onNodeWithText("Public keys").performClick()
         waitUntil(timeoutMillis = 5_000) { shows("0xauthkey") }
         assertTrue(shows("0xcryptkey"))
         onNodeWithText("Copy keys").performScrollTo().performClick()
@@ -122,10 +123,16 @@ class ProfileEditScreenTest {
     fun `a ship Azimuth has no keys for, or a lookup that fails, says which`() {
         profile(keys = object : AzimuthRpc by zodKeys {
             override suspend fun keys(ship: String) = Result.success<AzimuthRpc.Keys?>(null)
-        }) { waitUntil(timeoutMillis = 5_000) { shows("Azimuth holds no keys for this ship.") } }
+        }) {
+            onNodeWithText("Public keys").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Azimuth holds no keys for this node.") }
+        }
         profile(keys = object : AzimuthRpc by zodKeys {
             override suspend fun keys(ship: String) = Result.failure<AzimuthRpc.Keys?>(IllegalStateException("down"))
-        }) { waitUntil(timeoutMillis = 5_000) { shows("Could not read your keys") } }
+        }) {
+            onNodeWithText("Public keys").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Could not read your keys") }
+        }
     }
 
     // Back left with whatever was typed, unsaved and unsaid.
@@ -164,5 +171,15 @@ class ProfileEditScreenTest {
         waitUntil(timeoutMillis = 5_000) { fieldText("Nickname") == "Zeta" }
         assertEquals("mine", fieldText("Bio"))
     }
-}
 
+    @Test
+    fun `each kind of thing has its own section, keys and the invite code apart from the profile`() = profile(keys = zodKeys) {
+        assertTrue(shows("Nickname"))
+        assertTrue(!shows("0xauthkey") && !shows("Post this anywhere"))
+        onNodeWithText("Invite me").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Post this anywhere") }
+        assertTrue(!shows("Nickname"))
+        onNodeWithText("Profile").performClick()
+        waitUntil(timeoutMillis = 5_000) { shows("Nickname") }
+    }
+}

@@ -29,6 +29,18 @@ class SyncStatusTest {
         assertEquals(SyncStatus.Unreachable(now - 20_001, pending = 0), status(null, triedAgo = 20_001))
     }
 
+    // sneagan, 2026-11-08: "it shouldn't already be present when returning
+    // to the app". Behind, the OS cut the stream; the last heard is from
+    // before the app came back, and that is a reconnect, not a lost ship.
+    @Test
+    fun `back at the app, a stream last heard before it is connecting for a while, then out of reach since it was heard`() {
+        val hourAgo = 3_600_000L
+        assertEquals(SyncStatus.Connecting, status(hourAgo, triedAgo = 1_000))
+        assertEquals(SyncStatus.Connecting, status(hourAgo, triedAgo = 20_000))
+        assertEquals(SyncStatus.Unreachable(now - hourAgo, pending = 0), status(hourAgo, triedAgo = 20_001), "since it was last heard, not since it came back")
+        assertEquals(SyncStatus.Unreachable(now - 80_000, pending = 0), status(80_000, triedAgo = 100_000), "heard since it came back, then nothing: no grace again")
+    }
+
     @Test
     fun `a lapsed login outranks everything`() {
         assertEquals(SyncStatus.SignedOut, status(1_000, signedOut = true))
@@ -51,9 +63,9 @@ class SyncStatusTest {
         assertEquals("Connecting to ~zod…", syncHeadline(SyncStatus.Connecting, "~zod", now, at))
         assertEquals("Can't reach ~zod since 2:02 PM", syncHeadline(SyncStatus.Unreachable(0, 0), "~zod", now, at))
         assertEquals("Can't reach ~zod since t123", syncHeadline(SyncStatus.Unreachable(123, 0), "~zod", now) { "t$it" }, "since the time it was last heard")
-        assertEquals("Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 0)))
-        assertEquals("1 waiting to send. Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 1)))
-        assertEquals("3 waiting to send. Talon keeps trying.", syncDetail(SyncStatus.Unreachable(0, 3)))
+        assertEquals("Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 0)))
+        assertEquals("1 waiting to send. Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 1)))
+        assertEquals("3 waiting to send. Groundwire keeps trying.", syncDetail(SyncStatus.Unreachable(0, 3)))
         assertEquals("Signed out of ~zod", syncHeadline(SyncStatus.SignedOut, "~zod", now, at))
         assertEquals("New messages wait until you sign in again.", syncDetail(SyncStatus.SignedOut))
     }

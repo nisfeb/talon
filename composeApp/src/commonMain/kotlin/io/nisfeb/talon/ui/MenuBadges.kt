@@ -42,6 +42,8 @@ data class MenuBadges(
         RailItem.Mail -> mailUnread
         RailItem.Assistant -> assistantNews
         RailItem.Activity -> noticesUnread
+        // A followed thread's reply: from Mail or the calendar, the only
+        // sign of it outside the chat list's Threads tab.
         RailItem.Chats -> threadsUnread
         else -> false
     }

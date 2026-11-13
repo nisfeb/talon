@@ -75,11 +75,11 @@ fun rememberUrbLinkHandler(
         ShipAppInstallDialog(
             app = if (furum != null) "furum" else "Lattice",
             pitch = if (furum != null) {
-                "${furum.shorthand} is on furum, the forums of the Urbit network. Your ship reads it with furum, " +
-                    "which isn't installed yet. Add it to your ship from ~ricsul-bilwyt?"
+                "${furum.shorthand} is on furum, the forums of the Urbit network. Your Groundwire node reads it with furum, " +
+                    "which isn't installed yet. Add it to your node from ~ricsul-bilwyt?"
             } else {
                 "This is a urb:// link — an address on the Urbit network. Opening it needs Lattice, which isn't " +
-                    "installed on your ship yet. Install it from ~ricsul-bilwyt?"
+                    "installed on your Groundwire node yet. Install it from ~ricsul-bilwyt?"
             },
             // A furum link someone shared has its own page on their ship,
             // which may be public.
@@ -95,7 +95,7 @@ fun rememberUrbLinkHandler(
                     val s = shipUrl()
                     if (s == null) {
                         installing = false
-                        installError = "Not signed in to a ship."
+                        installError = "Not signed in to a Groundwire node."
                         return@launch
                     }
                     // Lattice is a stock desk of the Grubbery shell: on a

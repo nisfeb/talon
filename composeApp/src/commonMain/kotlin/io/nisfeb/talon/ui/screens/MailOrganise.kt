@@ -60,7 +60,7 @@ fun MailOrganiseSheet(repo: MailRepo, onDismiss: () -> Unit) {
     deleting?.let { (what, go) ->
         io.nisfeb.talon.ui.ConfirmDestructive(
             title = "Delete $what?",
-            text = "It goes from your ship, for every device.",
+            text = "It goes from your Groundwire node, for every device.",
             onConfirm = go,
             onDismiss = { deleting = null },
         )
@@ -113,8 +113,8 @@ fun MailOrganiseSheet(repo: MailRepo, onDismiss: () -> Unit) {
 
             SectionTitle("Lists")
             Text(
-                "A name for a set of ships, used when addressing. The name " +
-                    "never travels; a message carries the ships.",
+                "A name for a set of people, used when addressing. The name " +
+                    "never travels; a message carries their addresses.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -206,7 +206,7 @@ private fun NewRule(onSave: (Rule) -> Unit) {
                 when {
                     f == null && s == null ->
                         problem = "Give it a sender or a subject, or it matches everything."
-                    f != null && !isShip(f) -> problem = "$f is not a ship."
+                    f != null && !isShip(f) -> problem = "$f is not an address."
                     label.isNotBlank() && !labelOk(label.trim()) ->
                         problem = "A label is lower-case letters, digits and dashes."
                     else -> {
@@ -252,7 +252,7 @@ private fun NewList(onSave: (MailingList) -> Unit) {
             OutlinedTextField(
                 value = members,
                 onValueChange = { members = it },
-                label = { Text("Ships") },
+                label = { Text("People") },
                 placeholder = { Text("~zod ~sampel-palnet") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
@@ -270,8 +270,8 @@ private fun NewList(onSave: (MailingList) -> Unit) {
                     // The name becomes a path segment on the ship, so its
                     // rule is stricter than a label's.
                     !labelOk(n) -> problem = "A name is lower-case letters, digits and dashes."
-                    bad.isNotEmpty() -> problem = "Not a ship: ${bad.joinToString(", ")}"
-                    good.isEmpty() -> problem = "Put at least one ship in it."
+                    bad.isNotEmpty() -> problem = "Not an address: ${bad.joinToString(", ")}"
+                    good.isEmpty() -> problem = "Put at least one person in it."
                     else -> {
                         problem = null
                         onSave(MailingList(n, good))

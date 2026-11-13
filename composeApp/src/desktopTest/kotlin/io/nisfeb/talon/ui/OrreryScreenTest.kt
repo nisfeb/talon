@@ -13,7 +13,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import io.nisfeb.talon.ui.screens.OrreryScreen
 import io.nisfeb.talon.ui.theme.TalonTheme
 import kotlinx.serialization.json.Json
@@ -167,7 +167,7 @@ class OrreryScreenTest {
     @Test
     fun `a ship that never answered says so, and the Actions tab still works`() = orrery(view = null, problem = down) {
         onNodeWithText("Coming up").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer.") }
         onNodeWithText("Actions").performClick()
         assertTrue(shows("The actions list"))
     }
@@ -178,7 +178,7 @@ class OrreryScreenTest {
         orrery(view = io.nisfeb.talon.orrery.OrreryView(state, plan, System.currentTimeMillis() - 3 * hour), problem = down) {
             onNodeWithText("Coming up").performClick()
             assertTrue(shows("Fencing lesson"), "the kept answer, not Looking…")
-            assertTrue(shows("Your ship did not answer; this is as of"))
+            assertTrue(shows("Your Groundwire node did not answer; this is as of"))
             onNodeWithContentDescription("Refresh").performClick()
             assertTrue("refresh" in did)
         }
@@ -209,7 +209,7 @@ class OrreryScreenTest {
     @Test
     fun `on for this device, a read that failed still says so`() = orrery(view = null, problem = down) {
         onNodeWithText("Coming up").performClick()
-        waitUntil(timeoutMillis = 5_000) { shows("Your ship did not answer.") }
+        waitUntil(timeoutMillis = 5_000) { shows("Your Groundwire node did not answer.") }
         assertTrue(!shows("Try again"))
     }
 
@@ -238,7 +238,7 @@ class OrreryScreenTest {
             setUpAgain = { Result.success(Unit) },
         ) {
             onNodeWithText("Coming up").performClick()
-            assertTrue(shows("Orrery is not on your ship now; this is as of"))
+            assertTrue(shows("Orrery is not on your Groundwire node now; this is as of"))
             assertTrue(!shows("Set up this device again"))
         }
         orrery(view = null, problem = io.nisfeb.talon.orrery.OrreryError.Refused(403, "outside this key's scope"), setUpAgain = { Result.success(Unit) }) {

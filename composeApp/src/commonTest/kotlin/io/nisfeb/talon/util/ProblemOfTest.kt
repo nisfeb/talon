@@ -16,14 +16,14 @@ class ProblemOfTest {
     fun `a slow ship is said calmly, a refusal as one, and either keeps the error whole`() {
         val slow = problemOf("Couldn't save", kotlinx.io.IOException("Request timeout has expired [url=https://ship.test/~/channel/1]"))
         assertTrue(slow.calm)
-        assertEquals("Couldn't save: your ship is slow or out of reach. Try again when it's back.", slow.line)
+        assertEquals("Couldn't save: your Groundwire node is slow or out of reach. Try again when it's back.", slow.line)
         assertTrue("url=https://ship.test" in slow.details.orEmpty())
 
         val refused = problemOf("Couldn't join", PokeNacked("groups", "group-join", "banned"))
         assertFalse(refused.calm)
-        assertEquals("Couldn't join: the ship refused it (banned).", refused.line)
+        assertEquals("Couldn't join: the node refused it (banned).", refused.line)
         val traced = problemOf("Couldn't join", PokeNacked("groups", "group-join", "/sys/vane/gall/hoon:<[1.2 3.4]>\n/app/groups/hoon"))
-        assertEquals("Couldn't join: the ship refused it.", traced.line)
+        assertEquals("Couldn't join: the node refused it.", traced.line)
     }
 
     @Test
@@ -32,14 +32,14 @@ class ProblemOfTest {
             failureLine("The install did not finish", IllegalStateException("Install is taking a while. Try again shortly.")))
         assertEquals("The install did not finish.",
             failureLine("The install did not finish", RuntimeException("java.lang.IllegalStateException: boom")))
-        assertEquals("The install did not finish: your ship is slow or out of reach. Try again when it's back.",
+        assertEquals("The install did not finish: your Groundwire node is slow or out of reach. Try again when it's back.",
             failureLine("The install did not finish", kotlinx.io.IOException("Connect timeout has expired [url=https://ship.test/x]")))
     }
 
     @Test
     fun `a sentence is said, a dump is not`() {
-        assertEquals("Couldn't load: The ship's list of groups could not be read.",
-            problemOf("Couldn't load", IllegalStateException("The ship's list of groups could not be read.")).line)
+        assertEquals("Couldn't load: Your Groundwire node's list of groups could not be read.",
+            problemOf("Couldn't load", IllegalStateException("Your Groundwire node's list of groups could not be read.")).line)
         listOf(
             "Client request(GET https://ship.test/x) invalid: 500",
             "HTTP 502 <html><body>Bad Gateway</body></html>",

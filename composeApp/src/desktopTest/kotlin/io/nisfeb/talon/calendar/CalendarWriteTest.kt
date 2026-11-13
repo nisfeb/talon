@@ -725,9 +725,9 @@ class CalendarWriteTest {
         ship.down = true
         val thrown = runCatching { repo.share("default", "~nec", edit = false) }.exceptionOrNull()
         assertTrue(thrown is io.nisfeb.talon.mail.AuspexError.Unreachable, "$thrown")
-        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "said in words")
+        assertEquals("Your Groundwire node isn't answering. It may be restarting.", repo.error.value, "said in words")
         assertTrue(repo.refreshTasks().isFailure)
-        assertEquals("Your ship isn't answering. It may be restarting.", repo.error.value, "a read too")
+        assertEquals("Your Groundwire node isn't answering. It may be restarting.", repo.error.value, "a read too")
         ship.down = false
         assertTrue(repo.revoke("default", "~nec"), "the repo's scope still runs writes")
     }

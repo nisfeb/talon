@@ -12,7 +12,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
-import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import io.nisfeb.talon.login.TalonLoginUri
 import io.nisfeb.talon.ui.screens.LoginQrShareScreen
@@ -45,25 +45,25 @@ class LoginQrShareScreenTest {
     @Test
     fun `nothing is offered until both the ship and the code are in`() = share(initialUrl = "https://zod.test") {
         assertTrue(shows("Fill in both fields to see a QR.") && !shows("Copy the link"))
-        onNode(hasSetTextAction() and hasText("+code")).performTextInput("lidlut-tabwed")
+        onNode(hasSetTextAction() and hasText("Access code")).performTextInput("lidlut-tabwed")
         waitUntil(timeoutMillis = 5_000) { shows("Copy the link") }
         assertTrue(!shows("Fill in both fields"))
     }
 
     @Test
     fun `the link copied carries the ship and code, and a new edit clears the note`() = share {
-        onNode(hasSetTextAction() and hasText("Ship URL")).performTextInput(" https://zod.test ")
-        onNode(hasSetTextAction() and hasText("+code")).performTextInput("lidlut-tabwed")
+        onNode(hasSetTextAction() and hasText("Node address")).performTextInput(" https://zod.test ")
+        onNode(hasSetTextAction() and hasText("Access code")).performTextInput("lidlut-tabwed")
         onNodeWithText("Copy the link").performClick()
         assertEquals(TalonLoginUri.Payload("https://zod.test", "lidlut-tabwed"), TalonLoginUri.decode(copied.single()))
         waitUntil(timeoutMillis = 5_000) { shows("Copied the link") }
-        onNode(hasSetTextAction() and hasText("+code")).performTextReplacement("sampel-sampel")
+        onNode(hasSetTextAction() and hasText("Access code")).performTextReplacement("sampel-sampel")
         waitUntil(timeoutMillis = 5_000) { !shows("Copied the link") }
     }
 
     @Test
     fun `more than a QR can hold says so`() = share(initialUrl = "https://zod.test") {
-        onNode(hasSetTextAction() and hasText("+code")).performTextInput("x".repeat(4_000))
+        onNode(hasSetTextAction() and hasText("Access code")).performTextInput("x".repeat(4_000))
         waitUntil(timeoutMillis = 5_000) { shows("Couldn't generate QR") }
     }
 }

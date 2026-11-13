@@ -253,6 +253,8 @@ class TalonMessagingReceiver : MessagingReceiver() {
                 val n = pushHintNotification(whom, patp, currentShip, names)
                 // Read on another client while this waited: nothing to tell.
                 if (io.nisfeb.talon.notify.ReadPushes.readSince(patp, whom, arrivedMs)) return@launch
+                // Quiet hours: a hint names the chat, not who wrote, so only a favourite's DM gets through.
+                if (app != null && !io.nisfeb.talon.ui.hintReaches(app.reach(), whom, io.nisfeb.talon.ui.localMinuteOfDay())) return@launch
                 io.nisfeb.talon.Notifications.showMessage(
                     context = context,
                     whom = whom,

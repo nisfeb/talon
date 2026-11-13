@@ -1,17 +1,20 @@
 package io.nisfeb.talon.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,8 +71,10 @@ fun LiveLocationProfileRows(ship: String, who: String) {
     if (shares?.asking(ship) == true) AskRow(ship, who)
     shares?.from(ship)?.let { InboundRow(it, who) }
     val out = shares?.outTo(ship)
-    if (out != null) OutboundRow(out)
+    // Change, where this device can send: stopping first was the only way to a new length or precision.
+    if (out != null) OutboundRow(out, onChange = { asking = true }.takeIf { live.canShare })
     else if (live.canShare) TextButton(onClick = { asking = true }) { Text("Share my location") }
+    ShareProblem(live.shareProblems.collectAsState().value[ship])
     if (asking) ShareLocationDialog(listOf(ship), "Share where you are with $who", exactFirst = true, onDone = { asking = false })
 }
 
@@ -84,7 +89,8 @@ fun GroupLiveLocationRows(members: List<String>, us: String) {
     val shares by live.shares.collectAsState()
     LaunchedEffect(Unit) { live.refresh() }
     val others = members.filter { it != us }
-    val sharedWith = shares?.out.orEmpty().map { it.ship }.filter { it in others }
+    val view = io.nisfeb.talon.orrery.groupShareView(others, shares?.out.orEmpty())
+    val sharedWith = view.group
     val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -93,14 +99,22 @@ fun GroupLiveLocationRows(members: List<String>, us: String) {
             Text("You're sharing where you are with ${sharedWith.size} of its members", style = MaterialTheme.typography.bodyMedium)
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
-        TextButton(onClick = {
+        TextButton(enabled = shares?.out.orEmpty().none { it.sending && it.ship in others }, onClick = {
             problem = null
             scope.launch { live.stop(sharedWith).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
-    } else if (live.canShare && others.isNotEmpty() && others.size <= GROUP_SHARE_MAX) {
+    }
+    // A share of their own is theirs: the group's share and its Stop leave it as it is.
+    if (view.own.isNotEmpty()) Text(
+        view.own.joinToString { shipHandle(it) } + (if (view.own.size == 1) " has" else " have") + " a share of their own, kept as it is.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (live.canShare && view.offer && others.size <= GROUP_SHARE_MAX) {
         TextButton(onClick = { asking = true }) { Text("Share my location with the group") }
     }
-    if (asking) ShareLocationDialog(others, "Share where you are with the group's ${others.size} members", exactFirst = false, onDone = { asking = false })
+    val problems by live.shareProblems.collectAsState()
+    ShareProblem(others.firstNotNullOfOrNull { problems[it] })
+    if (asking) ShareLocationDialog(view.toShare, "Share where you are with the group's ${view.toShare.size} ${if (view.toShare.size == 1) "other member" else "members"}", exactFirst = false, group = true, onDone = { asking = false })
 }
 
 /** Settings' list of the shares this ship runs, each with Stop. */
@@ -115,6 +129,12 @@ fun SharingWithList() {
     if (out.isEmpty()) return
     Text("Sharing where you are with", style = MaterialTheme.typography.labelLarge)
     out.forEach { s -> OutboundRow(s, label = shipHandle(s.ship)) }
+}
+
+/** Why a share the dialog handed over did not start: it closed on the tap, so the reason shows where Share is. */
+@Composable
+private fun ShareProblem(e: Throwable?) {
+    if (e != null) Text(shareProblem("share", e), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
 }
 
 /** A ship this orrery does not know wants to share where they are: nothing of theirs shows until accepted. */
@@ -162,7 +182,7 @@ private fun InboundRow(s: InShare, who: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("$who is sharing where they are", style = MaterialTheme.typography.bodyMedium)
-            Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (s.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         // A map in Talon follows each fix; elsewhere the point goes to the maps app.
         if (isLiveMapSupported) TextButton(onClick = { mapOpen = true }) { Text("Map") }
@@ -194,7 +214,7 @@ private fun LiveMapDialog(ship: String, who: String, onDone: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 LiveMapView(s.lat, s.lon, s.accuracyM, Modifier.fillMaxWidth().height(360.dp))
-                Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(inboundDetail(s, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (s.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = { TextButton(onClick = onDone) { Text("Close") } },
@@ -203,7 +223,7 @@ private fun LiveMapDialog(ship: String, who: String, onDone: () -> Unit) {
 }
 
 @Composable
-private fun OutboundRow(s: OutShare, label: String? = null) {
+private fun OutboundRow(s: OutShare, label: String? = null, onChange: (() -> Unit)? = null) {
     val live = LocalLiveLocation.current ?: return
     val scope = rememberCoroutineScope()
     var problem by remember(s.ship) { mutableStateOf<String?>(null) }
@@ -213,7 +233,9 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
             Text(outboundDetail(s), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
-        TextButton(onClick = {
+        if (onChange != null) TextButton(enabled = !s.sending, onClick = onChange) { Text("Change") }
+        // Not while the ship has yet to take it: a stop could land first, and the share after.
+        TextButton(enabled = !s.sending, onClick = {
             problem = null
             scope.launch { live.stop(listOf(s.ship)).onFailure { problem = shareProblem("stop", it) } }
         }) { Text("Stop") }
@@ -221,12 +243,29 @@ private fun OutboundRow(s: OutShare, label: String? = null) {
 }
 
 @Composable
-private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, onDone: () -> Unit) {
+private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: Boolean, group: Boolean = false, onDone: () -> Unit) {
     val live = LocalLiveLocation.current ?: return
     val sending = rememberLocationSharing()
     val scope = rememberCoroutineScope()
     var length by remember { mutableStateOf(ShareLength.Hour) }
     var exact by remember { mutableStateOf(exactFirst) }
+    // A check-in (orrery 142): home by a time, or they are told, by the ship.
+    var checkIn by remember { mutableStateOf(false) }
+    var byMin by remember { mutableStateOf(((localMinuteOfDay() / 15 + 1) * 15 + 60) % (24 * 60)) }
+    // With a Mapbox token the ship works the time out from the drive home (orrery 143): the default there.
+    // Read again as the dialog opens: asked for before the ship's version
+    // was read, or with a token added since sign-in, it offered no check-in
+    // and never learned better.
+    var canCheckIn by remember { mutableStateOf(live.canCheckIn) }
+    var canAutoCheckIn by remember { mutableStateOf(live.canAutoCheckIn) }
+    var autoBy by remember { mutableStateOf(canAutoCheckIn) }
+    var autoChosen by remember { mutableStateOf(false) }
+    LaunchedEffect(live) {
+        live.refreshCheckIn()
+        canCheckIn = live.canCheckIn
+        canAutoCheckIn = live.canAutoCheckIn
+        if (!autoChosen) autoBy = canAutoCheckIn
+    }
     var busy by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     AlertDialog(
@@ -243,6 +282,29 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                         Text(l.label, Modifier.padding(start = 8.dp))
                     }
                 }
+                // Gated, not faked: an older orrery would take the time and tell no one.
+                if (length == ShareLength.Home && canCheckIn) {
+                    Row(Modifier.fillMaxWidth().clickable { checkIn = !checkIn }, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Check in")
+                            Text(
+                                if (checkIn) "If you're not home by then, ${if (ships.size == 1) "they're" else "each is"} told, even if your phone is off."
+                                else "Tell them if you're not home by a time.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = checkIn, onCheckedChange = { checkIn = it })
+                    }
+                    if (checkIn && canAutoCheckIn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.FilterChip(selected = autoBy, onClick = { autoBy = true; autoChosen = true }, label = { Text("Automatic") })
+                        androidx.compose.material3.FilterChip(selected = !autoBy, onClick = { autoBy = false; autoChosen = true }, label = { Text("Set a time") })
+                    }
+                    if (checkIn && canAutoCheckIn && autoBy) Text(
+                        "Your Groundwire node works it out from the drive home, with traffic, plus your travel buffer.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else if (checkIn) ClockTimeButton(byMin, { byMin = it }, label = "Home by")
+                }
                 Row(Modifier.fillMaxWidth().clickable { exact = !exact }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Exact")
@@ -254,9 +316,10 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                     Switch(checked = exact, onCheckedChange = { exact = it })
                 }
                 Text(
-                    "Your ship sends where you are each minute while this runs. Stop it any time.",
+                    "Your Groundwire node sends where you are each minute while this runs. Stop it any time.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (busy) Text("Waiting for location access…", style = MaterialTheme.typography.bodySmall)
                 problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -266,14 +329,16 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
                 problem = null
                 scope.launch {
                     // The phone sends only while "Send where I am" is on: turned on here, its prompts with it.
-                    if (sending != null && !sending.on.value && !sending.start()) {
-                        problem = "Talon needs location access all the time to send where you are."
+                    if (!readyToShare(sending)) {
+                        problem = "Groundwire needs location access all the time to send where you are."
                         busy = false
                         return@launch
                     }
-                    live.share(ships, length, exact)
-                        .onSuccess { onDone() }
-                        .onFailure { problem = shareProblem("share", it); busy = false }
+                    // The ship's answer lands where the share shows: no waiting on it here.
+                    val checking = checkIn && length == ShareLength.Home && canCheckIn
+                    val auto = checking && canAutoCheckIn && autoBy
+                    live.share(ships, length, exact, byMs = if (checking && !auto) io.nisfeb.talon.orrery.nextAtMinute(byMin, nowMs()) else null, autoBy = auto, group = group)
+                    onDone()
                 }
             }) { Text("Share") }
         },
@@ -283,22 +348,125 @@ private fun ShareLocationDialog(ships: List<String>, title: String, exactFirst: 
 
 /** "Updated 3m ago · until 2:30 PM", and "area only" for a share cut to a kilometre. */
 internal fun inboundDetail(s: InShare, nowMs: Long): String = listOfNotNull(
+    s.lateByMs?.let { "Not home yet, meant to be by ${formatClock(it)}" },
     s.atMs?.let { "Updated ${shortRelativeTime(it, nowMs)}" },
     s.untilMs?.let { "until ${formatClock(it)}" } ?: if (s.home) "until they're home" else null,
     if ((s.accuracyM ?: 0.0) >= 1000.0) "area only" else null,
 ).joinToString(" · ")
 
 internal fun outboundDetail(s: OutShare): String = listOfNotNull(
+    if (s.sending) "Sending to your Groundwire node" else null,
     s.untilMs?.let { "until ${formatClock(it)}" } ?: "until you're home",
+    s.byMs?.let { "check in by ${formatClock(it)}" },
     if (s.exact) "exact" else "area only",
 ).joinToString(" · ")
 
 /** What a failed share or stop says: the ship's reason when it gave one, never an exception's text. */
 internal fun shareProblem(what: String, e: Throwable): String = when (e) {
-    is OrreryError.Refused -> "Couldn't $what: ${e.reason.ifBlank { "the ship said no (${e.status})" }}"
-    is OrreryError.Unreachable -> "Couldn't $what: your ship didn't answer. Try again."
+    is OrreryError.Refused -> "Couldn't $what: ${e.reason.ifBlank { "the node said no (${e.status})" }}"
+    is OrreryError.Unreachable -> "Couldn't $what: your Groundwire node didn't answer. Try again."
     else -> "Couldn't $what. Try again."
 }
 
 /** How often a shown share is read again: the phone sends a fix a minute. */
 const val LIVE_REREAD_MS = 60_000L
+
+/**
+ * Everyone sharing where they are with this ship, in one place, with
+ * the asks waiting on the owner and the shares the owner runs (sneagan,
+ * 2026-11-10: "like find my friends", "everyone on one full screen
+ * map"). Where there is a map it fills the page, a named pin each, with
+ * the list a tap away; elsewhere the list is the page. Read on opening
+ * and each minute while it shows, a share showing or not: one that
+ * starts while the page is open appears on it.
+ */
+@Composable
+fun LocationsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val live = LocalLiveLocation.current
+    val shares = live?.shares?.collectAsState()?.value
+    val inbound = shares?.inbound.orEmpty()
+    // The map first where there is one and someone to show on it.
+    var listChosen by remember { mutableStateOf<Boolean?>(null) }
+    val canMap = isLiveMapSupported && inbound.isNotEmpty()
+    val list = !canMap || (listChosen ?: false)
+    var focus by remember { mutableStateOf<String?>(null) }
+    Column(modifier = modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            NavIcon(onBack = onBack)
+            Text(
+                "Locations",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                modifier = Modifier.padding(start = 4.dp).weight(1f),
+            )
+            if (canMap) TextButton(onClick = { listChosen = !list }) {
+                Text(if (list) "Map" else locationsListLabel(shares?.asks.orEmpty().size))
+            }
+        }
+        androidx.compose.material3.HorizontalDivider()
+        if (live == null) return@Column
+        // Real time, as [WatchShares]: a test's virtual clock would spin it.
+        LaunchedEffect(live) {
+            live.refresh()
+            withContext(Dispatchers.Default) {
+                while (true) {
+                    delay(LIVE_REREAD_MS)
+                    live.refresh()
+                }
+            }
+        }
+        if (!list) {
+            PeopleMapView(
+                inbound.map { MapPin(it.ship, locationName(it), it.lat, it.lon, it.accuracyM) }, focus,
+                Modifier.fillMaxWidth().weight(1f),
+            )
+            // Who is on it: a tap looks at one of them, Everyone at them all.
+            if (inbound.size > 1) Row(
+                Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TextButton(onClick = { focus = null }) { Text("Everyone") }
+                inbound.forEach { p -> TextButton(onClick = { focus = p.ship }) { Text(locationName(p)) } }
+            }
+            return@Column
+        }
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val s = shares
+            if (s == null) {
+                Text("Asking your Groundwire node…", style = MaterialTheme.typography.bodyMedium)
+                return@Column
+            }
+            s.asks.forEach { AskRow(it, shipHandle(it)) }
+            if (s.inbound.isEmpty()) Text("Nobody is sharing where they are with you.", style = MaterialTheme.typography.bodyMedium)
+            val open = rememberOpenInMaps()
+            s.inbound.forEach { p ->
+                // On a phone a tap shows them on the map; elsewhere Open map hands the point on.
+                Row(
+                    Modifier.fillMaxWidth().then(if (isLiveMapSupported) Modifier.clickable { focus = p.ship; listChosen = false } else Modifier),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(locationName(p), style = MaterialTheme.typography.bodyLarge)
+                        Text(inboundDetail(p, nowMs()), style = MaterialTheme.typography.bodySmall, color = if (p.lateByMs != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { open(p.lat, p.lon) }) { Text("Open map") }
+                }
+            }
+            if (s.out.isNotEmpty()) {
+                androidx.compose.material3.HorizontalDivider()
+                Text("Sharing where you are with", style = MaterialTheme.typography.labelLarge)
+                var changing by remember { mutableStateOf<String?>(null) }
+                s.out.forEach { o -> OutboundRow(o, label = shipHandle(o.ship), onChange = { changing = o.ship }.takeIf { live.canShare }) }
+                changing?.let { ship -> ShareLocationDialog(listOf(ship), "Share where you are with ${shipHandle(ship)}", exactFirst = true, onDone = { changing = null }) }
+            }
+        }
+    }
+}
+
+/** The map's way to the list, saying when someone waits there for an answer. */
+internal fun locationsListLabel(asks: Int): String = if (asks > 0) "List ($asks waiting)" else "List"
+
+/** Who a share is from: the name orrery keeps for them, else their ship's. */
+internal fun locationName(s: InShare): String = s.name.takeIf { it.isNotBlank() && it != s.ship } ?: shipHandle(s.ship)
