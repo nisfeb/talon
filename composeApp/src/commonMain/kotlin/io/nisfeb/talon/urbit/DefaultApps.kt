@@ -27,8 +27,9 @@ import kotlinx.serialization.json.put
 /**
  * Talon's apps on the user's own ship without a tap, once per sign-in, as
  * %trunk is ([io.nisfeb.talon.call.CallController]): Grubbery where it is
- * plainly missing, and every app its shell stocks (lattice, mail, the
- * calendar, armillary, orrery) that is not there. So a ship that signs in
+ * plainly missing, and each of Talon's apps ([LatticeInstall.TALON_APPS]:
+ * lattice, mail, the calendar, armillary, orrery) its shell lists and has
+ * not got. Nothing else the shell lists. So a ship that signs in
  * has what the AI and the assistant run on, rather than an Apps page to
  * find first. Quiet on failure: the Apps page still offers each install.
  *
@@ -152,6 +153,7 @@ object DefaultApps {
                     arr.mapNotNull { e ->
                         val o = e as? JsonObject ?: return@mapNotNull null
                         val name = o["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        if (name !in LatticeInstall.TALON_APPS) return@mapNotNull null
                         name to (o["synced"]?.jsonPrimitive?.booleanOrNull == true)
                     },
                 )
