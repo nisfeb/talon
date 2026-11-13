@@ -423,6 +423,9 @@ class OrreryRepo(
         // ship switch started a loop and a beacon for the ship just left.
         attaching = scope.launch {
             probe()
+            // On a device that sends, the shares are read as the app starts:
+            // the reminder of shares with no end has nothing else to wake it.
+            if (canShareLocation && _availability.value == OrreryAvailability.PRESENT) runCatching { readShares() }
             // Raised only: detach() above lowered it, and an enable() since
             // is newer than this read. Assigned, a read from before
             // enable's row landed put the switch back off with the pipe
@@ -541,11 +544,18 @@ class OrreryRepo(
 
     private val _shares = MutableStateFlow<LocationShares?>(null)
     private val _shareProblems = MutableStateFlow<Map<String, Throwable>>(emptyMap())
+    private val _shareBack = MutableStateFlow<String?>(null)
+
+    /** Shares with no end still run: for the host to say, every [ALWAYS_REMINDER_MS]. The ships, by @p. */
+    var onAlwaysReminder: ((ships: List<String>) -> Unit)? = null
 
     /** Live location with other ships, as every screen reads it ([LocalLiveLocation]). */
     val live: LiveLocation = object : LiveLocation {
         override val shares: StateFlow<LocationShares?> = _shares.asStateFlow()
         override val canShare: Boolean get() = canShareLocation
+        override val canAlways: Boolean get() = (_version.value ?: 0) >= ALWAYS_VERSION
+        override val shareBack: StateFlow<String?> = _shareBack.asStateFlow()
+        override fun shareBackDone() { _shareBack.value = null }
         override val canCheckIn: Boolean get() = (_version.value ?: 0) >= CHECK_IN_VERSION
         override val canAutoCheckIn: Boolean get() = (_version.value ?: 0) >= AUTO_CHECK_IN_VERSION && _mapbox.value
         override suspend fun refreshCheckIn() {
@@ -569,7 +579,7 @@ class OrreryRepo(
             _shareProblems.update { it - ships.toSet() }
             _shares.update { s ->
                 val was = s ?: LocationShares(emptyList(), emptyList())
-                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length.hours == null, exact, sending = true, byMs = byMs.takeIf { length.hours == null }, group = group) })
+                was.copy(out = was.out.filter { it.ship !in ships } + ships.map { OutShare(it, until, length == ShareLength.Home, exact, sending = true, byMs = byMs.takeIf { length.hours == null }, group = group, always = length == ShareLength.Always) })
             }
             try {
                 for ((i, ship) in ships.withIndex()) {
@@ -613,9 +623,12 @@ class OrreryRepo(
 
     private suspend fun answerAsk(ship: String, take: Boolean): Result<Unit> = scope.async {
         runCatching {
+            val always = _shares.value?.alwaysAsks?.contains(ship) == true
             if (take) attached().acceptLocation(ship) else attached().declineLocation(ship)
             _shares.update { s -> s?.copy(asks = s.asks - ship) }
             live.refresh()
+            // Offered, not done (sneagan, 2026-11-10): theirs is accepted whatever the answer.
+            if (take && always && canShareLocation && live.canAlways && _shares.value?.outTo(ship) == null) _shareBack.value = ship
         }
     }.await()
 
@@ -636,6 +649,24 @@ class OrreryRepo(
         // A share still being sent is kept: the ship has not got it yet.
         _shares.update { was -> s.copy(out = s.out + was?.out.orEmpty().filter { it.sending && s.outTo(it.ship) == null }) }
         location.live(sendFastUntil(s, now()))
+        remindOfAlways(s)
+    }
+
+    // Only on a device that sends: the phone, where the share is spent.
+    private suspend fun remindOfAlways(s: LocationShares) {
+        val me = ship ?: return
+        if (!canShareLocation) return
+        val always = s.out.filter { it.always && !it.sending }.map { it.ship }
+        val last = db.orrerySent().get(me, ALWAYS_REMINDED_KEY)?.atMs
+        when {
+            always.isEmpty() -> Unit
+            // First seen here: the month counts from now.
+            last == null -> db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(me, ALWAYS_REMINDED_KEY, "", now()))
+            alwaysReminderDue(last, now(), true) -> {
+                db.orrerySent().put(io.nisfeb.talon.data.OrrerySentEntity(me, ALWAYS_REMINDED_KEY, "", now()))
+                onAlwaysReminder?.invoke(always)
+            }
+        }
     }
 
     /** Orrery's flight and page watches, with what each last found; the flight API key masked. */
@@ -2184,6 +2215,7 @@ class OrreryRepo(
     private fun now(): Long = nowMs()
 
     private val GROUP_SHARES_KEY = "location:group"
+    private val ALWAYS_REMINDED_KEY = "location:always-reminded"
 
     companion object {
         private const val TAG = "OrreryRepo"

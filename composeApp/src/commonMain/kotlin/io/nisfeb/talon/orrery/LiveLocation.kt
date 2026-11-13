@@ -31,6 +31,8 @@ data class LocationShares(
      * nothing of theirs shows until the owner accepts.
      */
     val asks: List<String> = emptyList(),
+    /** The asks that share with no end: accepting one offers to share back. */
+    val alwaysAsks: Set<String> = emptySet(),
 ) {
     fun outTo(ship: String): OutShare? = out.firstOrNull { it.ship == ship }
     fun from(ship: String): InShare? = inbound.firstOrNull { it.ship == ship }
@@ -52,6 +54,8 @@ data class OutShare(
      * started on another device.
      */
     val group: Boolean = false,
+    /** No end, until stopped (orrery 146). */
+    val always: Boolean = false,
 )
 
 /**
@@ -83,6 +87,8 @@ data class InShare(
     val home: Boolean,
     /** Checking in, and not home by this time (orrery 142): their ship said so. */
     val lateByMs: Long? = null,
+    /** Shared with no end (orrery 146): shown however old the fix. */
+    val always: Boolean = false,
 )
 
 /** The orrery that keeps a check-in's time and tells the peer when it passes. */
@@ -96,6 +102,30 @@ enum class ShareLength(val label: String, val hours: Int?) {
     Hour("For 1 hour", 1),
     EightHours("For 8 hours", 8),
     Home("Until I'm home", null),
+
+    /** No end, until stopped (orrery 146): sent only as the phone moves, never each minute. */
+    Always("Always, until I stop", null),
+}
+
+/** The orrery that keeps a share with no end, and shows one past a quiet day. */
+const val ALWAYS_VERSION = 146
+
+/** How often the owner is reminded that shares with no end still run. */
+const val ALWAYS_REMINDER_MS = 30L * 24 * 60 * 60_000L
+
+/**
+ * Whether to remind the owner now that they share where they are with
+ * no end: every [ALWAYS_REMINDER_MS] while one runs, counted from
+ * [lastMs], the last reminder or when one was first seen here.
+ */
+fun alwaysReminderDue(lastMs: Long?, nowMs: Long, anyAlways: Boolean): Boolean =
+    anyAlways && lastMs != null && nowMs - lastMs >= ALWAYS_REMINDER_MS
+
+/** What the reminder says: who, by the names given. */
+fun alwaysReminderText(names: List<String>): String = when (names.size) {
+    1 -> "${names[0]} can always see where you are. Open Locations to change or stop it."
+    2 -> "${names[0]} and ${names[1]} can always see where you are. Open Locations to change or stop it."
+    else -> "${names.size} people can always see where you are. Open Locations to change or stop it."
 }
 
 /** A share with no end time ends on the sender's ship at home; one quiet this long is taken to be over, as orrery 137 does. */
@@ -115,8 +145,9 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         val ship = g["ship"].asText()?.takeIf { it.startsWith("~") } ?: return@mapNotNull null
         val until = ms(g["until"])
         val home = flag(g["home"])
-        if (if (until != null) until <= nowMs else !home) return@mapNotNull null
-        OutShare(ship, until, home, flag(g["exact"]), byMs = ms(g["by"]))
+        val always = flag(g["always"])
+        if (if (until != null) until <= nowMs else !(home || always)) return@mapNotNull null
+        OutShare(ship, until, home, flag(g["exact"]), byMs = ms(g["by"]), always = always)
     }
     val entries: List<Pair<String?, JsonObject>> = when (val i = doc["in"]) {
         is JsonObject -> i.entries.mapNotNull { (k, v) -> (v as? JsonObject)?.let { k to it } }
@@ -129,9 +160,10 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         val lon = v["lon"].asText()?.toDoubleOrNull()?.takeIf { it in -180.0..180.0 } ?: return@mapNotNull null
         val until = ms(v["until"])
         val at = ms(v["at"])
-        val live = if (until != null) until > nowMs else at != null && nowMs - at < SHARE_QUIET_MS
+        val always = flag(v["always"])
+        val live = if (until != null) until > nowMs else always || (at != null && nowMs - at < SHARE_QUIET_MS)
         if (!live) return@mapNotNull null
-        InShare(ship, v["name"].asText().orEmpty(), lat, lon, v["acc"].asText()?.toDoubleOrNull(), at, until, flag(v["home"]), lateByMs = ms(v["late"]))
+        InShare(ship, v["name"].asText().orEmpty(), lat, lon, v["acc"].asText()?.toDoubleOrNull(), at, until, flag(v["home"]), lateByMs = ms(v["late"]), always = always)
     }
     // An ask holds a fix too, never shown; it lives as a share with no end time does.
     val asks = when (val a = doc["asks"]) {
@@ -139,9 +171,9 @@ fun locationShares(doc: JsonObject, nowMs: Long): LocationShares {
         is JsonArray -> a.mapNotNull { (it as? JsonObject)?.let { o -> o["ship"].asText() to o } }
         else -> emptyList()
     }.mapNotNull { (ship, v) ->
-        ship?.takeIf { it.startsWith("~") && ms(v["at"])?.let { at -> nowMs - at < SHARE_QUIET_MS } == true }
+        ship?.takeIf { it.startsWith("~") && ms(v["at"])?.let { at -> nowMs - at < SHARE_QUIET_MS } == true }?.let { it to flag(v["always"]) }
     }
-    return LocationShares(out, inbound, asks)
+    return LocationShares(out, inbound, asks.map { it.first }, alwaysAsks = asks.filter { it.second }.map { it.first }.toSet())
 }
 
 /** The body of POST /api/location/accept and /decline (orrery 137). */
@@ -150,12 +182,16 @@ fun askBody(ship: String): String = buildJsonObject { put("ship", ship) }.toStri
 /** The body of POST /api/location/share, as orrery's +serve-location-share reads it. */
 fun shareBody(ship: String, length: ShareLength, exact: Boolean, byMs: Long? = null, autoBy: Boolean = false): String = buildJsonObject {
     put("ship", ship)
-    if (length.hours != null) put("hours", length.hours) else put("home", true)
+    when {
+        length == ShareLength.Always -> put("always", true)
+        length.hours != null -> put("hours", length.hours)
+        else -> put("home", true)
+    }
     put("precision", if (exact) "exact" else "area")
     // A check-in, only with until home (orrery 142), to the second as the ship reads it;
     // "auto" has the ship work it out from the drive home (orrery 143).
-    if (length.hours == null && autoBy) put("by", "auto")
-    else if (length.hours == null && byMs != null) put("by", kotlin.time.Instant.fromEpochMilliseconds(byMs / 1000 * 1000).toString())
+    if (length == ShareLength.Home && autoBy) put("by", "auto")
+    else if (length == ShareLength.Home && byMs != null) put("by", kotlin.time.Instant.fromEpochMilliseconds(byMs / 1000 * 1000).toString())
 }.toString()
 
 /** The next [minuteOfDay] here after [nowMs]: today's, or tomorrow's once today's has gone. A check-in's time. */
@@ -174,7 +210,9 @@ fun nextAtMinute(minuteOfDay: Int, nowMs: Long, zone: kotlinx.datetime.TimeZone 
  * Null when no share runs.
  */
 fun sendFastUntil(shares: LocationShares, nowMs: Long, recheckMs: Long = 15 * 60_000L): Long? =
-    shares.out.maxOfOrNull { it.untilMs ?: (nowMs + recheckMs) }
+    // Not for a share with no end: it rides the phone's ordinary moves, so
+    // a phone that stays put sends nothing and spends nothing.
+    shares.out.filterNot { it.always }.maxOfOrNull { it.untilMs ?: (nowMs + recheckMs) }
 
 /**
  * Whether a fix goes up now. While a share runs (or a trip), at most one
@@ -193,6 +231,18 @@ interface LiveLocation {
 
     /** Whether this device can send fixes, so offer to share. */
     val canShare: Boolean
+
+    /** Whether the ship's orrery keeps a share with no end ([ALWAYS_VERSION]): an older one would end it at once. */
+    val canAlways: Boolean
+
+    /**
+     * A ship whose share with no end was just accepted here, for the
+     * offer to share back; null when there is none. Offered, never done:
+     * [shareBackDone] takes it down either way.
+     */
+    val shareBack: StateFlow<String?>
+
+    fun shareBackDone()
 
     /** Whether the ship's orrery keeps a check-in ([CHECK_IN_VERSION]): an older one ignores the time, so it is not offered. */
     val canCheckIn: Boolean
