@@ -248,8 +248,17 @@ object LatticeInstall {
     }.getOrDefault(false)
 
     /**
-     * Ask the shell for its default apps, one at a time by name: each stock
-     * entry it boots with ("setup":"boot") that is not installed yet. Never
+     * The shell desks Talon runs on, and the only ones it asks a ship for.
+     * A shell's catalog may stock or offer more (the Hatchery, the
+     * Groundwire Suite); those are the owner's to install. Asked for
+     * because they were missing, both came back on ricsul at every
+     * sign-in after the owner removed them (2026-11-13).
+     */
+    val TALON_APPS = listOf("lattice", "auspex", "calendar", "armillary", "orrery")
+
+    /**
+     * Ask the shell for Talon's apps, one at a time by name: each of
+     * [TALON_APPS] in its stock list that is not installed yet. Never
      * Install all (/desks/sync-defaults), which also brings every desk the
      * shell only offers. A shell whose list has no lattice gets lattice
      * from [PUBLISHER] directly. Idempotent.
@@ -280,7 +289,7 @@ object LatticeInstall {
 
     /** A stock entry the shell boots with. A shell too old to say which is all defaults. */
     private fun isDefault(entry: JsonObject): Boolean =
-        entry["setup"]?.jsonPrimitive?.content.let { it == null || it == "boot" }
+        entry["name"]?.jsonPrimitive?.content in TALON_APPS
 
     private fun refuse(resp: HttpResponse) {
         if (!resp.status.isSuccess()) {

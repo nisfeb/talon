@@ -88,6 +88,15 @@ class DefaultAppsTest {
     }
 
     @Test
+    fun `only Talon's own apps are asked for, whatever else the shell lists`() {
+        val more = stock("lattice" to true, "armillary" to true, "orrery" to true, "hatchery" to false, "gw-suite" to false)
+        ship.answerApi = { m, p, _ -> if (m == "GET" && p == "/apps/grubbery/desks/stock") more else if (m == "POST") "syncing" else null }
+        assertEquals(emptyList(), ensure())
+        assertEquals(emptyList(), syncs())
+        assertTrue(ship.api.none { "/permits/refresh" in it }, "none of Talon's apps missing, nothing refreshed")
+    }
+
+    @Test
     fun `a ship with every app is asked for nothing`() {
         ship.answerApi = { m, p, _ ->
             if (m == "GET" && p == "/apps/grubbery/desks/stock") stock("lattice" to true, "armillary" to true, "orrery" to true) else null
