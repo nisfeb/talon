@@ -29,8 +29,15 @@ sealed interface SyncStatus {
 
 /** How long the chat list waits before it says something is wrong. */
 data class SyncThresholds(
-    /** Heard within this, it is connected: three of eyre's heartbeats, so a reconnect's few seconds never show. */
-    val heardRecentlyMs: Long = 75_000L,
+    /**
+     * Heard within this, it is connected. Five minutes: silence is not a
+     * ship out of reach. A busy ship sends no heartbeat while it works,
+     * the stream is given 90 s before it is opened again, and opening it
+     * on a slow ship takes its own time. At 75 s the red line came up
+     * before the first reconnect was tried, of a ship that was there
+     * (sneagan, 2026-11-13: "way too sensitive", "pops up all the time").
+     */
+    val heardRecentlyMs: Long = 5 * 60_000L,
     /** Nothing heard since it began trying (this run, or back at the app), connecting for this long before it is unreachable. */
     val connectGraceMs: Long = 20_000L,
 )
