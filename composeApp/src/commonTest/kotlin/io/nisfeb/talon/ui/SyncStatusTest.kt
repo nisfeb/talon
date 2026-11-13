@@ -85,4 +85,16 @@ class SyncStatusTest {
         assertEquals(io.nisfeb.talon.util.formatClock(now - 60_000), sinceLabel(now - 60_000, now))
         assertEquals(io.nisfeb.talon.util.formatMonthDayClock(now - 3 * day), sinceLabel(now - 3 * day, now))
     }
+
+    // sneagan, 2026-11-13: the red line "pops up all the time" on desktop.
+    // The app gives a silent stream 90 s before it opens it again, so
+    // nothing is said until that has had its chance and then some.
+    @Test
+    fun `as shipped, a silence the reconnect has not yet answered is not called out of reach`() {
+        val now = 10_000_000L
+        fun shipped(heardAgo: Long) = syncStatus(signedOut = false, lastHeardMs = now - heardAgo, trySinceMs = 0, nowMs = now, syncing = false, pending = 0)
+        assertEquals(SyncStatus.Connected(120_000, syncing = false, pending = 0), shipped(120_000), "past the 90 s watchdog, a reconnect under way")
+        assertEquals(SyncStatus.Connected(300_000, syncing = false, pending = 0), shipped(300_000))
+        assertEquals(SyncStatus.Unreachable(now - 300_001, pending = 0), shipped(300_001), "five minutes of nothing is said")
+    }
 }
