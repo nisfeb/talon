@@ -45,7 +45,7 @@ class ShellDeskTest {
         val o = Json.parseToJsonElement(body).jsonObject
         assertEquals("orrery", o["name"]!!.jsonPrimitive.content)
         assertEquals(
-            "~ricsul-bilwyt/apps/shell.shell/desks/orrery.desk/desk/code",
+            "~ricsul-bilwyt/apps/shell/desks/orrery.desk/desk/code",
             o["code"]!!.jsonPrimitive.content,
             "the shell reads the code from the publisher's own tree",
         )

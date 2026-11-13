@@ -843,7 +843,7 @@ class OrreryApi(
 
         const val APP_PATH = "/apps/orrery"
         /** Orrery's data directory as grubbery's shell installs it, under eyre's scry of grubbery's files. */
-        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app"
+        const val SCRY_ROOT = "/~/scry/grubbery/peek/file/apps/shell/desks/orrery.desk/desk/data/orrery.orrery_app"
         private const val SCRY_FAILED = 500
         private const val NOT_FOUND = 404
         private const val FORBIDDEN = 403

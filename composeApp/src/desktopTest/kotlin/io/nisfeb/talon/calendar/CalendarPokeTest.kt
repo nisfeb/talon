@@ -21,7 +21,7 @@ class CalendarPokeTest {
     fun `the ball keeps its separators`() = runTest {
         var seen: HttpRequestData? = null
         val http = HttpClient(MockEngine { req -> seen = req; respond("", HttpStatusCode.OK) })
-        val ball = "apps/shell.shell/desks/calendar.desk/desk/data/calendar.calendar_app"
+        val ball = "apps/shell/desks/calendar.desk/desk/data/calendar.calendar_app"
         assertTrue(CalendarApi(http, "https://ship").poke(ball, buildJsonObject { }))
         assertEquals("/grubbery/api/poke/$ball/calendar.calendar", seen!!.url.encodedPath)
     }

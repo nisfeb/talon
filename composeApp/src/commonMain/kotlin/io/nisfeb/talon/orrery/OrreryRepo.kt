@@ -2223,7 +2223,7 @@ class OrreryRepo(
         const val ACTIONS_EVERY_MS = 15L * 60 * 1000
         /** How long one answer of the page's settings serves every row that asks. */
         const val SETTINGS_FRESH_MS = 30_000L
-        private const val BEACON_PATH = "/grubbery/api/keep/apps/shell.shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
+        private const val BEACON_PATH = "/grubbery/api/keep/apps/shell/desks/orrery.desk/desk/data/orrery.orrery_app/beacon/rev"
         /** Decision calls the gate check has in flight at once. */
         const val GATE_CHECK_AT_ONCE = 6
         /** How long a new key's forbidden reads as not stored yet, not as revoked. */

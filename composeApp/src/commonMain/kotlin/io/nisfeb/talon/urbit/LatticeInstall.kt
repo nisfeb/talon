@@ -166,7 +166,7 @@ object LatticeInstall {
     ): Result<Unit> = runSuspendCatching {
         val body = buildJsonObject {
             put("name", name)
-            put("code", "$publisher/apps/shell.shell/desks/$name.desk/desk/code")
+            put("code", "$publisher/apps/shell/desks/$name.desk/desk/code")
         }
         val resp = http.post("${shipUrl.trimEnd('/')}/apps/grubbery/desks/add") {
             cookie?.let { header(HttpHeaders.Cookie, it) }
