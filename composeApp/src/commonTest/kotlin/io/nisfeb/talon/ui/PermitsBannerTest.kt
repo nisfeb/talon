@@ -34,4 +34,17 @@ class PermitsBannerTest {
         ).jsonObject
         assertEquals(listOf("/apps/a", "/apps/b"), pendingPermitApps(asks, approved))
     }
+
+    @Test
+    fun `an approval spelling the shell's old place is settled for the same road at the new one`() {
+        val moved = Json.parseToJsonElement(
+            """[{"app":"/apps/l","poke":[],"peek":[{"road":"/apps/shell/desks/orrery.desk/"}],"make":[]},
+                {"app":"/apps/m","poke":[],"peek":[{"road":"/apps/shell.shellfish/x"}],"make":[]}]""",
+        ).jsonArray
+        val approved = Json.parseToJsonElement(
+            """{"/apps/l":{"declared":{"poke":[],"peek":["/apps/shell.shell/desks/orrery.desk/"],"make":[]}},
+                "/apps/m":{"declared":{"poke":[],"peek":["/apps/shell.shell/x"],"make":[]}}}""",
+        ).jsonObject
+        assertEquals(listOf("/apps/m"), pendingPermitApps(moved, approved))
+    }
 }
