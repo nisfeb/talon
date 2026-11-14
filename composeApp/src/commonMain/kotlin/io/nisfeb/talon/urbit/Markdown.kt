@@ -62,6 +62,15 @@ object Markdown {
      *  [RawMarkdown]'s escaping. */
     const val ESCAPABLE = "\\`*_~[]()#>+-!"
 
+    /** Whether the backslash at [at] opens a line that goes on "1. " or "1) ", as [RawMarkdown.escape] writes one. */
+    private fun numberedLineAt(text: String, at: Int): Boolean {
+        var b = at - 1
+        while (b >= 0 && text[b] != '\n') { if (!text[b].isWhitespace()) return false; b-- }
+        var d = at + 1
+        while (d < text.length && text[d].isDigit()) d++
+        return d > at + 1 && d + 1 < text.length && (text[d] == '.' || text[d] == ')') && text[d + 1] == ' '
+    }
+
     private fun tokenize(text: String): List<Token> {
         val out = mutableListOf<Token>()
         var i = 0
@@ -84,6 +93,15 @@ object Markdown {
             if (c == '\\' && i + 1 < len && text[i + 1] in ESCAPABLE) {
                 plain.append(text[i + 1])
                 i += 2
+                continue
+            }
+
+            // The same before a line that starts like a numbered list:
+            // RawMarkdown writes "\1. " so a paragraph stays one. Only
+            // there, so a backslash before a digit elsewhere is kept.
+            // Left in, an edited message came back as "\1. yeah".
+            if (c == '\\' && numberedLineAt(text, i)) {
+                i += 1
                 continue
             }
 

@@ -30,6 +30,18 @@ class NotebookEditRoundTripTest {
         assertEquals(prose, MarkdownBlocks.toStory(md))
     }
 
+    // sneagan, 2026-11-13: a message of numbered lines, edited, came
+    // back with a backslash before each number.
+    @Test
+    fun `a message of numbered lines is edited without backslashes left in it`() {
+        val prose = story("""[{"inline":["1. yeah that's what I'll do",{"break":null},"2. yes but then",{"break":null},"3) fine"]}]""")
+        val md = RawMarkdown.fromStory(prose)
+        assertEquals(prose, chatTextToStory(md), "what the editor shows goes back as it was: $md")
+        assertEquals(prose, chatTextToStory(editableText(prose.toString())))
+        // Elsewhere a backslash before a digit is the writer's own.
+        assertEquals(story("""[{"inline":["see C:\\1. and x \\2. y"]}]"""), chatTextToStory("""see C:\1. and x \2. y"""))
+    }
+
     @Test
     fun `an image keeps its dimensions through an edit`() {
         val prior = story(
