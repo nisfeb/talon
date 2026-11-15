@@ -401,6 +401,21 @@ class ThreadListTest {
         assertEquals(listOf("~lagrev-nocfep"), profiles.toList())
     }
 
+    // As the chat's (sneagan, 2026-11-14): the card inside the bubble, above its time.
+    @Test
+    fun `in bubbles a reply's link card sits inside its bubble, above its time`() = thread(look = ChatLook(bubbles = true), seed = {
+        messages().upsert(msg(parent, "~bus", "the question", 3_600_000L * 10))
+        messages().upsert(msg("~lagrev-nocfep/170141184507", "~lagrev-nocfep", "see urb://~zod/notes", 3_600_000L * 30 + 60_000 * 17, parentId = parent))
+    }) { _, _ ->
+        val time = io.nisfeb.talon.util.formatClock(3_600_000L * 30 + 60_000 * 17)
+        shows("A page title")
+        shows(time)
+        waitForIdle()
+        val card = onNodeWithText("A page title").fetchSemanticsNode().boundsInRoot
+        val foot = onAllNodesWithText(time).onFirst().fetchSemanticsNode().boundsInRoot
+        assertTrue(card.bottom <= foot.top, "the card above the bubble's time: card ${card.bottom}, time ${foot.top}")
+    }
+
     @Test
     fun `our own reply is deleted after asking`() = thread(seed = {
         messages().upsert(msg(parent, "~bus", "the question", 1_000))

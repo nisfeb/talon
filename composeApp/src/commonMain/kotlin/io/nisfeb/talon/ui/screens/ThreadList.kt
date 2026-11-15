@@ -907,6 +907,8 @@ private fun ThreadMessage(
                         )
                     }
                     folded()
+                    // In the bubble, as the chat's.
+                    MessageLinkCards(parts, http, onLinkTap)
                     Row(
                         modifier = Modifier.align(Alignment.End).padding(top = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -918,7 +920,7 @@ private fun ThreadMessage(
                 }
             } else folded()
             SendStateNote(m.status)
-            MessageLinkCards(parts, http, onLinkTap)
+            if (!bubbles) MessageLinkCards(parts, http, onLinkTap)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),

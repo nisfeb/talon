@@ -1904,6 +1904,9 @@ private fun MessageRow(
                         )
                     }
                     folded()
+                    // A link's card is part of the message that posted it:
+                    // under the bubble it read as a second bubble.
+                    MessageLinkCards(parts, http, onLinkTap)
                     // The time inside the bubble, at its foot, with the
                     // send state beside it.
                     Row(
@@ -1939,7 +1942,7 @@ private fun MessageRow(
                 folded()
             }
             SendStateNote(m.status)
-            MessageLinkCards(parts, http, onLinkTap)
+            if (!bubbles) MessageLinkCards(parts, http, onLinkTap)
             if (grouped.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier.padding(top = 4.dp),
