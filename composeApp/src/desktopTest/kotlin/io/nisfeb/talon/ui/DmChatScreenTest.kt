@@ -131,6 +131,8 @@ class DmChatScreenTest {
                     androidx.compose.runtime.CompositionLocalProvider(
                         LocalBubbleColors provides (bubbleColors ?: LocalBubbleColors.current),
                         io.nisfeb.talon.ui.screens.LocalTapOpensMenu provides touch,
+                        // Lattice's answer for an urb:// card.
+                        LocalUrbFetcher provides { url: String -> kotlinx.coroutines.flow.flowOf(io.nisfeb.talon.urbit.UrbUnfurlCache.Unfurl(url, "A page title", "its first lines")) },
                     ) {
                         if (host.shown) DmChatScreen(
                             db = db, repo = repo, drafts = drafts, http = offline,
@@ -1372,6 +1374,33 @@ class DmChatScreenTest {
         assertTrue(first.height > tile.height * 2, "the first message wraps: ${first.height}")
         assertTrue(tile.center.y < first.top + 30f, "the tile at the run's top: tile ${tile.center.y}, first ${first.top}..${first.bottom}")
         assertTrue(tile.bottom < second.top, "not down by the second: tile ${tile.bottom}, second ${second.top}")
+    }
+
+    // sneagan, 2026-11-14: "in bubble mode the embed should be inside the
+    // bubble that posted its link rather than in a separate bubble after".
+    // The time is the bubble's foot, so a card above it is inside.
+    @Test
+    fun `in bubbles a link's card sits inside the bubble, above its time`() = chat(
+        ui = InMemoryUiSettings().apply { setChatBubbles(true) },
+        seed = { messages().upsert(msg("~bus/170141184506", "~bus", "see urb://~zod/notes", 3_600_000L * 30)) },
+    ) { _, _ ->
+        val time = io.nisfeb.talon.util.formatClock(3_600_000L * 30)
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("A page title").fetchSemanticsNodes().isNotEmpty() && onAllNodesWithText(time).fetchSemanticsNodes().isNotEmpty() }
+        waitForIdle()
+        val card = onNodeWithText("A page title").fetchSemanticsNode().boundsInRoot
+        val foot = onAllNodesWithText(time).onFirst().fetchSemanticsNode().boundsInRoot
+        assertTrue(card.bottom <= foot.top, "the card above the bubble's time: card ${card.bottom}, time ${foot.top}")
+    }
+
+    @Test
+    fun `in rows a link's card still follows the message`() = chat(
+        ui = InMemoryUiSettings().apply { setChatBubbles(false) },
+        seed = { messages().upsert(msg("~bus/170141184506", "~bus", "see urb://~zod/notes", 3_600_000L * 30)) },
+    ) { _, _ ->
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("A page title").fetchSemanticsNodes().isNotEmpty() }
+        val card = onNodeWithText("A page title").fetchSemanticsNode().boundsInRoot
+        val words = onNodeWithText("see urb://~zod/notes", substring = true).fetchSemanticsNode().boundsInRoot
+        assertTrue(card.top >= words.bottom, "under the words")
     }
 
     @Test
