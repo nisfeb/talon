@@ -161,141 +161,153 @@ fun PartyLineFullScreen(
         // Mute, camera, share and leave, and the rest behind More
         // (sneagan, 2026-11-02: too many buttons). FlowRow, so a
         // narrow phone still wraps rather than squeezing them.
-        FlowRow(
-            modifier = mod,
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (state.canSpeak) {
-                ControlButton(
-                    label = if (state.muted) "Unmute" else "Mute",
-                    onClick = { onToggleMute(!state.muted) },
-                    containerColor = if (state.muted) {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.primaryContainer
-                    },
-                    contentColor = if (state.muted) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    },
-                ) {
-                    Icon(
-                        if (state.muted) TalonIcons.MicOff else TalonIcons.Mic,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            } else {
-                // A listener or admin-muted person has no mic to
-                // toggle. Say which, big enough to read at a glance.
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(58.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center,
+        Column(mod) {
+            // A share that would not start, or ended by itself, says so here
+            // too: only the bar said it, and a call's own view said nothing.
+            screenShare?.problem?.let { said ->
+                Text(
+                    said,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (state.canSpeak) {
+                    ControlButton(
+                        label = if (state.muted) "Unmute" else "Mute",
+                        onClick = { onToggleMute(!state.muted) },
+                        containerColor = if (state.muted) {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer
+                        },
+                        contentColor = if (state.muted) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
                     ) {
                         Icon(
-                            TalonIcons.MicOff,
+                            if (state.muted) TalonIcons.MicOff else TalonIcons.Mic,
                             contentDescription = null,
-                            tint = if (state.selfMutedByAdmin) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
                             modifier = Modifier.size(26.dp),
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        if (state.selfMutedByAdmin) "Muted by an admin" else "Listening",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                } else {
+                    // A listener or admin-muted person has no mic to
+                    // toggle. Say which, big enough to read at a glance.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier
+                                .size(58.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                TalonIcons.MicOff,
+                                contentDescription = null,
+                                tint = if (state.selfMutedByAdmin) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (state.selfMutedByAdmin) "Muted by an admin" else "Listening",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-            }
 
-            if (onToggleCamera != null) {
-                ControlButton(
-                    label = if (cameraOn) "Camera off" else "Camera",
-                    onClick = onToggleCamera,
-                    containerColor = if (cameraOn) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
-                    contentColor = if (cameraOn) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                ) {
-                    Icon(
-                        if (cameraOn) TalonIcons.Videocam else TalonIcons.VideocamOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            }
-            if (screenShare != null) {
-                ScreenShareMenu(screenShare, sharing) { press ->
+                if (onToggleCamera != null) {
                     ControlButton(
-                        label = if (sharing) "Stop sharing" else "Share",
-                        onClick = press,
-                        containerColor = if (sharing) {
+                        label = if (cameraOn) "Camera off" else "Camera",
+                        onClick = onToggleCamera,
+                        containerColor = if (cameraOn) {
                             MaterialTheme.colorScheme.primaryContainer
                         } else {
                             MaterialTheme.colorScheme.surfaceVariant
                         },
-                        contentColor = if (sharing) {
+                        contentColor = if (cameraOn) {
                             MaterialTheme.colorScheme.onPrimaryContainer
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     ) {
                         Icon(
-                            if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                            if (cameraOn) TalonIcons.Videocam else TalonIcons.VideocamOff,
                             contentDescription = null,
                             modifier = Modifier.size(26.dp),
                         )
                     }
                 }
-            }
-            val menu = buildList {
-                val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
-                if (onToggleChat != null) add(CallMenuItem(if (chatOpen) "Hide chat" else "Show chat", onToggleChat))
-                if (hasDeviceChoices(audioDevices, videoDevices, cameraChoice)) add(CallMenuItem("Devices") { devicesOpen = true })
-                if (isWindowFullScreenSupported) add(CallMenuItem(if (meeting) "Exit full screen" else "Full screen") { fullScreen.set(!meeting) })
-                if (partyVideo) add(CallMenuItem(if (gallery) "Speaker view" else "Gallery view") { gallery = !gallery })
-                if (onSwitchCamera != null && cameraOn) add(CallMenuItem("Flip camera", onSwitchCamera))
-                if (onToggleRecord != null) add(CallMenuItem(if (recording) "Stop recording" else "Record", onToggleRecord))
-            }
-            CallMenu(menu) { open ->
-                ControlButton(
-                    label = "More",
-                    description = "Meeting options",
-                    onClick = open,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = null, modifier = Modifier.size(26.dp))
+                if (screenShare != null) {
+                    ScreenShareMenu(screenShare, sharing) { press ->
+                        ControlButton(
+                            label = if (sharing) "Stop sharing" else "Share",
+                            onClick = press,
+                            containerColor = if (sharing) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (sharing) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        ) {
+                            Icon(
+                                if (sharing) TalonIcons.StopScreenShare else TalonIcons.ScreenShare,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
                 }
-            }
+                val menu = buildList {
+                    val cameraChoice = onSelectCamera.takeIf { onToggleCamera != null && videoDevices.supported }
+                    if (onToggleChat != null) add(CallMenuItem(if (chatOpen) "Hide chat" else "Show chat", onToggleChat))
+                    if (hasDeviceChoices(audioDevices, videoDevices, cameraChoice)) add(CallMenuItem("Devices") { devicesOpen = true })
+                    if (isWindowFullScreenSupported) add(CallMenuItem(if (meeting) "Exit full screen" else "Full screen") { fullScreen.set(!meeting) })
+                    if (partyVideo) add(CallMenuItem(if (gallery) "Speaker view" else "Gallery view") { gallery = !gallery })
+                    if (onSwitchCamera != null && cameraOn) add(CallMenuItem("Flip camera", onSwitchCamera))
+                    if (onToggleRecord != null) add(CallMenuItem(if (recording) "Stop recording" else "Record", onToggleRecord))
+                }
+                CallMenu(menu) { open ->
+                    ControlButton(
+                        label = "More",
+                        description = "Meeting options",
+                        onClick = open,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = null, modifier = Modifier.size(26.dp))
+                    }
+                }
 
-            ControlButton(
-                label = if (directCall) "Hang up" else "Leave",
-                onClick = onLeave,
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ) {
-                Icon(
-                    TalonIcons.CallEnd,
-                    contentDescription = null,
-                    modifier = Modifier.size(26.dp),
-                )
+                ControlButton(
+                    label = if (directCall) "Hang up" else "Leave",
+                    onClick = onLeave,
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ) {
+                    Icon(
+                        TalonIcons.CallEnd,
+                        contentDescription = null,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
             }
         }
     }

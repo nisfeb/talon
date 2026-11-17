@@ -132,6 +132,32 @@ interface CallEngine {
  */
 data class ScreenSource(val id: Long, val title: String, val isWindow: Boolean)
 
+/**
+ * The sources as a menu should offer them. Two unnamed screens both read
+ * "Whole screen" (a Mac user, 2026-11-17), so with more than one each
+ * gets a name: "This screen" for the one the pointer is on ([pointerId],
+ * the platform's id for it, or null where it cannot be told), first,
+ * and "Other screen" for the rest, numbered when there are several.
+ * Unnamed windows are system surfaces nobody means to share, and go;
+ * the rest follow the screens, by name.
+ */
+fun offeredSources(all: List<ScreenSource>, pointerId: Long?): List<ScreenSource> {
+    val screens = all.filterNot { it.isWindow }
+    val windows = all.filter { it.isWindow && it.title.isNotBlank() }.sortedBy { it.title.lowercase() }
+    if (screens.size < 2) return screens + windows
+    val here = screens.firstOrNull { it.id == pointerId }
+    val others = screens.filter { it !== here }
+    val named = buildList {
+        if (here != null) add(here.copy(title = "This screen" + here.title.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()))
+        val word = if (here != null) "Other screen" else "Screen"
+        others.forEachIndexed { i, s ->
+            val n = if (others.size > 1 || here == null) " ${i + 1}" else ""
+            add(s.copy(title = word + n + s.title.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()))
+        }
+    }
+    return named + windows
+}
+
 /** Per-call engine factory the platform entry point injects into App. */
 fun interface CallEngineProvider {
     /** A fresh engine for one call, configured with the ship's
