@@ -106,7 +106,7 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     ),
     SlashCommandSpec(
         name = "trunk",
-        synopsis = "/trunk [guests] [2h] [listen] [title]",
+        synopsis = "/trunk [people] [2h] [listen] [title]",
         description = "Open a call on your ship and post its link: anyone joins from a browser, no ship needed",
     ),
     SlashCommandSpec(
@@ -388,7 +388,11 @@ private fun isValidTalkKey(s: String): Boolean =
 
 // ─────────── /trunk ───────────
 
-/** What /trunk asks for: [seats] guests over [ttlSecs] seconds. */
+/**
+ * What /trunk asks for: a link [seats] people may join through, over
+ * [ttlSecs] seconds. Everyone who opens the link takes a place, the
+ * host too: a line of its own has no way in from Talon yet.
+ */
 data class TrunkAsk(val seats: Int = 10, val ttlSecs: Int = 86_400, val speak: Boolean = true, val title: String = "")
 
 sealed interface TrunkParse {
@@ -406,7 +410,7 @@ typealias TrunkMaker = suspend (ask: TrunkAsk, post: suspend (link: String) -> U
 private val TRUNK_SPAN = Regex("^(\\d+)([mhd])$")
 
 /**
- * `/trunk [guests] [2h] [listen] [title]`: a number is how many guests
+ * `/trunk [people] [2h] [listen] [title]`: a number is how many people
  * the link takes, a number with m, h or d is how long it works, and
  * `listen` makes guests listeners. They come in any order, and the
  * title is everything from the first word that is none of them. The
@@ -422,7 +426,7 @@ fun parseTrunk(args: List<String>): TrunkParse {
         when {
             !seats && a.all { it.isDigit() } && a.isNotEmpty() -> {
                 val n = a.toIntOrNull()
-                if (n == null || n !in 1..1000) return TrunkParse.Problem("/trunk: a link takes 1 to 1000 guests")
+                if (n == null || n !in 1..1000) return TrunkParse.Problem("/trunk: a link takes 1 to 1000 people")
                 ask = ask.copy(seats = n); seats = true
             }
             !span && m != null -> {
@@ -453,7 +457,7 @@ fun trunkMessage(ask: TrunkAsk, link: String): String =
     "📞 ${ask.title.ifEmpty { "Call" }}: $link\n" +
         "Open it in any browser to join. No account is needed. " +
         (if (ask.speak) "" else "Guests listen and watch. ") +
-        "The link takes ${ask.seats} ${if (ask.seats == 1) "guest" else "guests"} and works for ${spanWords(ask.ttlSecs)}."
+        "The link takes ${ask.seats} ${if (ask.seats == 1) "person" else "people"} and works for ${spanWords(ask.ttlSecs)}."
 
 /** The link: the ship's public address where the owner set one, else the address we signed in at. */
 fun guestLink(origin: String, loginUrl: String, path: String): String =
@@ -489,8 +493,12 @@ private suspend fun runTrunk(
     return try {
         trunk(ask) { link ->
             post(trunkMessage(ask, link))
-            if (isPrivateAddress(link)) {
-                toast("That link is on an address only your own network reaches. Set your ship's public address on its trunk page.")
+            // Said after the post: the link is still good for those it reaches.
+            when {
+                isPrivateAddress(link) ->
+                    toast("That link is on an address only your own network reaches. Set your ship's public address on its trunk page.")
+                link.startsWith("http://") ->
+                    toast("That link is not https, and browsers give a microphone only over https. Set your ship's https address on its trunk page.")
             }
         }
         CommandResult.Handled

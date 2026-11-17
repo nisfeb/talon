@@ -11,12 +11,12 @@ class TrunkCommandTest {
     private fun problem(vararg args: String) = (parseTrunk(args.toList()) as TrunkParse.Problem).message
 
     @Test
-    fun `bare, it is ten guests for a day, speaking, untitled`() {
+    fun `bare, it is ten people for a day, speaking, untitled`() {
         assertEquals(TrunkAsk(seats = 10, ttlSecs = 86_400, speak = true, title = ""), ok())
     }
 
     @Test
-    fun `guests, a span and listen come in any order, and the rest is the title`() {
+    fun `people, a span and listen come in any order, and the rest is the title`() {
         assertEquals(TrunkAsk(5, 7_200, true, ""), ok("5", "2h"))
         assertEquals(TrunkAsk(5, 7_200, false, "Board meeting"), ok("2h", "listen", "5", "Board", "meeting"))
         assertEquals(TrunkAsk(10, 45 * 60, true, "Standup"), ok("45m", "Standup"))
@@ -47,12 +47,12 @@ class TrunkCommandTest {
     fun `the message says how to join and what the link allows`() {
         assertEquals(
             "📞 Call: https://ship.example/apps/trunk/guest/abc\n" +
-                "Open it in any browser to join. No account is needed. The link takes 10 guests and works for 1 day.",
+                "Open it in any browser to join. No account is needed. The link takes 10 people and works for 1 day.",
             trunkMessage(TrunkAsk(), "https://ship.example/apps/trunk/guest/abc"),
         )
         val m = trunkMessage(TrunkAsk(1, 5_400, false, "Town hall"), "L")
         assertTrue(m.startsWith("📞 Town hall: L\n"), m)
-        assertTrue("Guests listen and watch. The link takes 1 guest and works for 90 minutes." in m, m)
+        assertTrue("Guests listen and watch. The link takes 1 person and works for 90 minutes." in m, m)
         assertTrue("works for 2 hours." in trunkMessage(TrunkAsk(ttlSecs = 7_200), "L"))
     }
 

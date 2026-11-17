@@ -426,6 +426,15 @@ class SlashCommandsTest {
     }
 
     @Test
+    fun `trunk warns of a link that is not https, where a browser gives no microphone`() = runBlocking {
+        val posted = mutableListOf<String>()
+        val notes = mutableListOf<String>()
+        runCommand("/trunk", repo, http, toast = { notes += it }, trunk = { _, post -> post("http://ship.example/apps/trunk/guest/abc") }, post = { posted += it })
+        assertEquals(1, posted.size)
+        assertTrue(notes.single().contains("microphone only over https"), "$notes")
+    }
+
+    @Test
     fun `a refused trunk says why and posts nothing, and a bad argument never reaches the ship`() = runBlocking {
         val posted = mutableListOf<String>()
         val refused = runCommand(

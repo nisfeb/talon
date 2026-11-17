@@ -1031,7 +1031,7 @@ class DmChatScreenTest {
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
         waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
         val sent = ship.pokesTo("chat").joinToString { it.json.toString() }
-        assertTrue("https://ship.example/apps/trunk/guest/abc" in sent && "Standup" in sent && "5 guests" in sent, sent)
+        assertTrue("https://ship.example/apps/trunk/guest/abc" in sent && "Standup" in sent && "5 people" in sent, sent)
         assertFalse("/trunk" in sent.replace("/apps/trunk", ""), sent)
         assertEquals(1, ship.pokesTo("chat").size)
     }
@@ -1047,6 +1047,27 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("calls can't be made from here", substring = true).fetchSemanticsNodes().isNotEmpty() }
         waitUntil(timeoutMillis = 20_000) { draft() == "/trunk 5" }
         assertTrue(ship.pokesTo("chat").isEmpty())
+    }
+
+    // As the real maker does: the post comes from another scope while the
+    // chat is still up, here a group's channel.
+    @Test
+    fun `trunk in a channel posts there, from the scope the call was made on`() {
+        val apart = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            chat(whom = "chat/~bus/general", trunk = { _, post ->
+                apart.async { post("https://ship.example/apps/trunk/guest/chan") }.await()
+            }) { ship, _ ->
+                onNode(hasSetTextAction()).performTextInput("/trunk 3 Planning")
+                onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+                waitUntil(timeoutMillis = 20_000) { ship.pokesTo("channels").isNotEmpty() }
+                val sent = ship.pokesTo("channels").single().json.toString()
+                assertTrue("guest/chan" in sent && "Planning" in sent && "chat/~bus/general" in sent, sent)
+                waitUntil(timeoutMillis = 20_000) { draft() == "" }
+            }
+        } finally {
+            apart.cancel()
+        }
     }
 
     // The real maker runs on the call controller's scope (GuestCallTest),
