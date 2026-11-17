@@ -154,6 +154,20 @@ sealed interface TrunkUpdate {
         val expiresSecs: Long,
     ) : TrunkUpdate
 
+    /**
+     * Our ship's answer to invite-guests (wire 16): a link people with
+     * no ship can join a line through. [path] is on the ship, and the
+     * client puts an origin in front. It is a bearer secret: never log it.
+     */
+    data class GuestInvite(
+        override val from: String,
+        val room: String,
+        val path: String,
+        val speak: Boolean,
+        val expiresSecs: Long,
+        val uses: Int,
+    ) : TrunkUpdate
+
     /** The host's answer to %occupancy: how many are on a line right
      *  now. Wire 6. */
     data class Present(
@@ -244,6 +258,10 @@ object TrunkWire {
      *  fresh as our last ask, so surfaces that do not poll show a
      *  line as empty until something asks. */
     const val WIRE_VERSION_ANNOUNCES = 9
+
+    /** The wire where a ship seats guests: people with no ship, through
+     *  a link (invite-guests). */
+    const val WIRE_VERSION_GUESTS = 16
 
     const val PUBLISHER = "~ricsul-bilwyt"
     const val DESK = "trunk"
@@ -442,6 +460,25 @@ object TrunkWire {
             }
         }
 
+    /**
+     * Ask our ship for a guest invite to a line it hosts: [uses] new
+     * guests over [ttlSecs] seconds. Trunk's parser (lib/trunk-json.hoon)
+     * is `(ot ~[name+so speak+bo ttl+ni uses+ni])`, and it refuses zero
+     * of either, more than 1,000 guests, and a 65th live invite.
+     */
+    fun inviteGuestsAction(name: String, speak: Boolean, ttlSecs: Int, uses: Int): JsonElement =
+        buildJsonObject {
+            putJsonObject("invite-guests") {
+                put("name", name); put("speak", speak); put("ttl", ttlSecs); put("uses", uses)
+            }
+        }
+
+    /** The ship's public address from the /x/guests scry (wire 19), or
+     *  "" where the owner has set none or the ship is older. */
+    fun parseGuestsOrigin(body: JsonElement): String =
+        ((body as? JsonObject)?.get("origin") as? JsonPrimitive)
+            ?.takeIf { it.isString }?.content?.takeIf { it.startsWith("https://") || it.startsWith("http://") }.orEmpty()
+
     /** The sidecar this build ships with, or null if it has none. */
     fun defaultSfu(d: CallDefaults): SfuConfig? =
         d.sfuBase.takeIf { it.isNotEmpty() }?.let {
@@ -602,6 +639,16 @@ object TrunkWire {
             return TrunkUpdate.Shut(
                 who(o) ?: return null,
                 o["name"]?.jsonPrimitive?.content ?: return null,
+            )
+        }
+        (obj["guest-invite"] as? JsonObject)?.let { g ->
+            return TrunkUpdate.GuestInvite(
+                from = "",
+                room = g["name"]?.jsonPrimitive?.content ?: return null,
+                path = g["path"]?.jsonPrimitive?.content?.takeIf { it.startsWith("/") } ?: return null,
+                speak = g["speak"]?.jsonPrimitive?.content == "true",
+                expiresSecs = g["expires"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
+                uses = g["uses"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
             )
         }
         (obj["listen-link"] as? JsonObject)?.let { l ->

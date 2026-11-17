@@ -2909,6 +2909,9 @@ fun TalonApp(
                         } else {
                             null
                         },
+                    onSlashTrunk = callController?.let { c ->
+                        io.nisfeb.talon.ui.trunkMaker(c) { app.sessionStore.active()?.shipUrl }
+                    },
                     // No line, no button — see the same gate in App.kt.
                     onPartyLine = partyHere.join,
                     partyPresent = partyShown,

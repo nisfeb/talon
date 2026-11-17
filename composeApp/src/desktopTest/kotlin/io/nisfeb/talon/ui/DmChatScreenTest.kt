@@ -51,6 +51,7 @@ import io.nisfeb.talon.urbit.FakeAiSettings
 import io.nisfeb.talon.urbit.FakeShip
 import io.nisfeb.talon.urbit.TlonChatRepo
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -102,6 +103,8 @@ class DmChatScreenTest {
         scheme: (androidx.compose.material3.ColorScheme) -> Unit = {},
         /** A phone's way into a message's menu: a tap on it, opening at the finger. */
         touch: Boolean = false,
+        /** What makes /trunk's call, as a shell passes it. */
+        trunk: TrunkMaker? = null,
         block: ComposeUiTest.(FakeShip, AppDatabase) -> Unit,
     ) {
         // One test's rows for ~bus opened the next one's chat until its own
@@ -141,6 +144,7 @@ class DmChatScreenTest {
                             onBack = { backs++ }, onOpenThread = { threads += it }, onOpenConversation = {},
                             onOpenImage = {}, onOpenSelfProfile = {},
                             initialScrollMessageId = jumpTo,
+                            onSlashTrunk = trunk,
                         )
                     }
                     }
@@ -1013,6 +1017,64 @@ class DmChatScreenTest {
         waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("poll", substring = true).fetchSemanticsNodes().isNotEmpty() }
         onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Tab) }
         waitUntil(timeoutMillis = 20_000) { draft() == "/poll " }
+    }
+
+    // ─── /trunk: a call anyone can join from a browser ────────────────
+
+    @Test
+    fun `trunk posts the call's link to the chat, and what was typed never goes out`() = chat(
+        trunk = { _, post -> post("https://ship.example/apps/trunk/guest/abc") },
+    ) { ship, _ ->
+        onNode(hasSetTextAction()).performTextInput("/tru")
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Open a call on your ship", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction()).performTextReplacement("/trunk 5 2h Standup")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 20_000) { ship.pokesTo("chat").isNotEmpty() }
+        val sent = ship.pokesTo("chat").joinToString { it.json.toString() }
+        assertTrue("https://ship.example/apps/trunk/guest/abc" in sent && "Standup" in sent && "5 guests" in sent, sent)
+        assertFalse("/trunk" in sent.replace("/apps/trunk", ""), sent)
+        assertEquals(1, ship.pokesTo("chat").size)
+    }
+
+    @Test
+    fun `trunk where no call can be made says so, posts nothing, and gives the text back`() = chat { ship, _ ->
+        // Not offered where it cannot run: /t offers /talk and /tz, and no /trunk.
+        onNode(hasSetTextAction()).performTextInput("/t")
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("Brave Talk", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(onAllNodesWithText("Open a call on your ship", substring = true).fetchSemanticsNodes().isEmpty())
+        onNode(hasSetTextAction()).performTextReplacement("/trunk 5")
+        onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+        waitUntil(timeoutMillis = 20_000) { onAllNodesWithText("calls can't be made from here", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        waitUntil(timeoutMillis = 20_000) { draft() == "/trunk 5" }
+        assertTrue(ship.pokesTo("chat").isEmpty())
+    }
+
+    // The real maker runs on the call controller's scope (GuestCallTest),
+    // as this one runs on its own: the screen's going must not stop the post.
+    @Test
+    fun `a trunk link that comes after the chat was left is still posted`() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val asked = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val apart = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val host = Host("~bus")
+        try {
+            chat(host = host, trunk = { _, post ->
+                apart.async { asked.complete(Unit); gate.await(); post("https://ship.example/apps/trunk/guest/late") }.await()
+            }) { ship, _ ->
+                // An argument, so Enter sends: on the bare name it takes the suggestion.
+                onNode(hasSetTextAction()).performTextInput("/trunk 3")
+                onNode(hasSetTextAction()).performKeyInput { pressKey(Key.Enter) }
+                waitUntil(timeoutMillis = 20_000) { asked.isCompleted }
+                host.shown = false
+                waitForIdle()
+                gate.complete(Unit)
+                val until = System.currentTimeMillis() + 20_000
+                while (ship.pokesTo("chat").isEmpty() && System.currentTimeMillis() < until) Thread.sleep(50)
+                assertTrue(ship.pokesTo("chat").any { "guest/late" in it.json.toString() }, "the link was not posted after the chat was left")
+            }
+        } finally {
+            apart.cancel()
+        }
     }
 
     @Test

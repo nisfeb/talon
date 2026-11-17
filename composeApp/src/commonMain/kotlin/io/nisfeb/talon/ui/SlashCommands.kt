@@ -105,6 +105,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         description = "Drop a fresh Brave Talk voice/video room into the chat",
     ),
     SlashCommandSpec(
+        name = "trunk",
+        synopsis = "/trunk [guests] [2h] [listen] [title]",
+        description = "Open a call on your ship and post its link: anyone joins from a browser, no ship needed",
+    ),
+    SlashCommandSpec(
         name = "tz",
         synopsis = "/tz <time> [zone]",
         description = "Share a time across zones — everyone sees it localized",
@@ -160,6 +165,12 @@ suspend fun runCommand(
      *  toggle. Other commands are unaffected. */
     powerFeaturesEnabled: Boolean = false,
     toast: (String) -> Unit = {},
+    /** Makes a guest call for /trunk. Null where there are no calls,
+     *  and /trunk then says so: it is never posted as text. */
+    trunk: TrunkMaker? = null,
+    /** Posts a message where the command was typed, for a command whose
+     *  result comes after the screen may have gone (/trunk). */
+    post: suspend (String) -> Unit = {},
 ): CommandResult {
     val parsed = parseSlash(rawText) ?: return CommandResult.NotACommand
     return when (parsed.cmd) {
@@ -172,6 +183,7 @@ suspend fun runCommand(
         "poll" -> runPoll(parsed.args)
         "poke" -> runPoke(parsed.args, repo, powerFeaturesEnabled, toast)
         "talk" -> runTalk(parsed.args)
+        "trunk" -> runTrunk(parsed.args, trunk, post, toast)
         "tz" -> runTz(parsed.args)
         // UI-dispatched commands — DmChatScreen intercepts before this
         // function runs. Recognize them here so unknown-command errors
@@ -373,6 +385,119 @@ private fun randomTalkKey(): String {
 
 private fun isValidTalkKey(s: String): Boolean =
     Regex("^[A-Za-z0-9_-]{43}$").matches(s)
+
+// ─────────── /trunk ───────────
+
+/** What /trunk asks for: [seats] guests over [ttlSecs] seconds. */
+data class TrunkAsk(val seats: Int = 10, val ttlSecs: Int = 86_400, val speak: Boolean = true, val title: String = "")
+
+sealed interface TrunkParse {
+    data class Ok(val ask: TrunkAsk) : TrunkParse
+    data class Problem(val message: String) : TrunkParse
+}
+
+/**
+ * Makes the call and hands its link to [post]. It throws
+ * [io.nisfeb.talon.call.GuestCallRefused] with the reason when no call
+ * was made.
+ */
+typealias TrunkMaker = suspend (ask: TrunkAsk, post: suspend (link: String) -> Unit) -> Unit
+
+private val TRUNK_SPAN = Regex("^(\\d+)([mhd])$")
+
+/**
+ * `/trunk [guests] [2h] [listen] [title]`: a number is how many guests
+ * the link takes, a number with m, h or d is how long it works, and
+ * `listen` makes guests listeners. They come in any order, and the
+ * title is everything from the first word that is none of them. The
+ * limits are trunk's own: 1,000 guests and 30 days.
+ */
+fun parseTrunk(args: List<String>): TrunkParse {
+    var ask = TrunkAsk()
+    var i = 0
+    var seats = false; var span = false; var listen = false
+    while (i < args.size) {
+        val a = args[i].lowercase()
+        val m = TRUNK_SPAN.find(a)
+        when {
+            !seats && a.all { it.isDigit() } && a.isNotEmpty() -> {
+                val n = a.toIntOrNull()
+                if (n == null || n !in 1..1000) return TrunkParse.Problem("/trunk: a link takes 1 to 1000 guests")
+                ask = ask.copy(seats = n); seats = true
+            }
+            !span && m != null -> {
+                val unit = when (m.groupValues[2]) { "m" -> 60L; "h" -> 3_600L; else -> 86_400L }
+                val secs = (m.groupValues[1].toLongOrNull() ?: Long.MAX_VALUE / 86_400L) * unit
+                if (secs !in 60L..30L * 86_400L) return TrunkParse.Problem("/trunk: a link works for 1 minute to 30 days, like 45m, 2h or 7d")
+                ask = ask.copy(ttlSecs = secs.toInt()); span = true
+            }
+            !listen && a == "listen" -> { ask = ask.copy(speak = false); listen = true }
+            else -> break
+        }
+        i++
+    }
+    return TrunkParse.Ok(ask.copy(title = args.drop(i).joinToString(" ").take(64)))
+}
+
+private fun spanWords(secs: Int): String {
+    fun n(count: Int, word: String) = "$count $word" + if (count == 1) "" else "s"
+    return when {
+        secs % 86_400 == 0 -> n(secs / 86_400, "day")
+        secs % 3_600 == 0 -> n(secs / 3_600, "hour")
+        else -> n(secs / 60, "minute")
+    }
+}
+
+/** The message /trunk posts. */
+fun trunkMessage(ask: TrunkAsk, link: String): String =
+    "📞 ${ask.title.ifEmpty { "Call" }}: $link\n" +
+        "Open it in any browser to join. No account is needed. " +
+        (if (ask.speak) "" else "Guests listen and watch. ") +
+        "The link takes ${ask.seats} ${if (ask.seats == 1) "guest" else "guests"} and works for ${spanWords(ask.ttlSecs)}."
+
+/** The link: the ship's public address where the owner set one, else the address we signed in at. */
+fun guestLink(origin: String, loginUrl: String, path: String): String =
+    origin.ifEmpty { loginUrl }.trimEnd('/') + path
+
+/** Whether [url] is an address only this machine or its own network reaches. */
+fun isPrivateAddress(url: String): Boolean {
+    val host = url.substringAfter("://").substringBefore('/').substringBeforeLast(':').lowercase()
+    val o = host.split('.').mapNotNull { it.toIntOrNull() }
+    return host == "localhost" || host.endsWith(".local") || host.endsWith(".lan") || '.' !in host ||
+        (o.size == 4 && (o[0] == 127 || o[0] == 10 || (o[0] == 192 && o[1] == 168) || (o[0] == 172 && o[1] in 16..31)))
+}
+
+/** The [TrunkMaker] both shells pass: [controller] makes the call, and the link is built on [loginUrl]. */
+fun trunkMaker(controller: io.nisfeb.talon.call.CallController, loginUrl: () -> String?): TrunkMaker = { ask, post ->
+    val base = loginUrl() ?: throw io.nisfeb.talon.call.GuestCallRefused("Not signed in to a ship.")
+    controller.guestCall(ask.title.ifEmpty { "Call" }, ask.seats, ask.ttlSecs, ask.speak) { call ->
+        post(guestLink(call.origin, base, call.path))
+    }
+}
+
+private suspend fun runTrunk(
+    args: List<String>,
+    trunk: TrunkMaker?,
+    post: suspend (String) -> Unit,
+    toast: (String) -> Unit,
+): CommandResult {
+    if (trunk == null) return CommandResult.Error("/trunk: calls can't be made from here")
+    val ask = when (val p = parseTrunk(args)) {
+        is TrunkParse.Problem -> return CommandResult.Error(p.message)
+        is TrunkParse.Ok -> p.ask
+    }
+    return try {
+        trunk(ask) { link ->
+            post(trunkMessage(ask, link))
+            if (isPrivateAddress(link)) {
+                toast("That link is on an address only your own network reaches. Set your ship's public address on its trunk page.")
+            }
+        }
+        CommandResult.Handled
+    } catch (e: io.nisfeb.talon.call.GuestCallRefused) {
+        CommandResult.Error("/trunk: ${e.message}")
+    }
+}
 
 // ─────────── /hn ───────────
 

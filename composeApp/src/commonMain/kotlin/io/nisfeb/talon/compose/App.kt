@@ -3307,6 +3307,9 @@ fun App(
                                         } else {
                                             null
                                         },
+                                    onSlashTrunk = callController?.let { c ->
+                                        io.nisfeb.talon.ui.trunkMaker(c) { sessionStore.active()?.shipUrl }
+                                    },
                                     // No line, no button. A group's party
                                     // line exists only once its admins
                                     // turn it on, and the call icon
