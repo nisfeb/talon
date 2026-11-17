@@ -148,6 +148,7 @@ class DesktopCallEngine(
     )
 
     init {
+        DesktopWebRtcFactory.connectionMade()
         val source = DesktopWebRtcFactory.micSource()
         val track = factory.createAudioTrack("talon-mic", source)
         pc.addTrack(track, listOf("talon-call"))
@@ -532,6 +533,18 @@ object DesktopWebRtcFactory {
      */
     @Volatile
     var preferredRecordingDeviceId: String? = null
+
+    /**
+     * Run when a peer connection has just been made. From webrtc-java
+     * 0.18 the audio module sleeps once the last connection closes, and
+     * the first of the next call wakes it on the default devices: this
+     * is where the chosen ones are put back ([DesktopAudioDevices]).
+     */
+    @Volatile var onConnectionMade: (() -> Unit)? = null
+
+    internal fun connectionMade() {
+        runCatching { onConnectionMade?.invoke() }
+    }
 
     /**
      * What to build the factory's audio device from.
