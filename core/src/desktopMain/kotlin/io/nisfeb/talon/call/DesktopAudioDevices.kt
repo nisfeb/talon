@@ -53,9 +53,14 @@ class DesktopAudioDevices : AudioDevices {
      */
     private fun putBack() {
         val adm = DesktopWebRtcFactory.audioDeviceModule()
-        input?.let { id -> findExact(id, capture = true)?.let { runCatching { adm.setRecordingDevice(it) } } }
-        output?.let { id -> findExact(id, capture = false)?.let { runCatching { adm.setPlayoutDevice(it) } } }
+        inputDevice?.let { runCatching { adm.setRecordingDevice(it) } }
+        outputDevice?.let { runCatching { adm.setPlayoutDevice(it) } }
     }
+
+    // The chosen devices as the module takes them, null on the system
+    // default: kept so putBack lists nothing on each party line link.
+    @Volatile private var inputDevice: WebRtcAudioDevice? = null
+    @Volatile private var outputDevice: WebRtcAudioDevice? = null
 
     private fun invalidate() {
         inputCache = null
@@ -114,6 +119,10 @@ class DesktopAudioDevices : AudioDevices {
 
     private fun apply(id: String?, previous: String?, capture: Boolean): Boolean = runCatching {
         val adm = DesktopWebRtcFactory.audioDeviceModule()
+        fun chosen(device: WebRtcAudioDevice) {
+            val kept = device.takeIf { id != null }
+            if (capture) inputDevice = kept else outputDevice = kept
+        }
         // Strict when the user named a device: falling back to the
         // default here made a vanished-device click "succeed" and
         // commit the dead descriptor as selected.
@@ -140,6 +149,7 @@ class DesktopAudioDevices : AudioDevices {
                 // when the next one starts.
                 if (e is Asleep) {
                     Log.i(TAG, "audio ${if (capture) "input" else "output"} -> ${target.name}, from the next call")
+                    chosen(target)
                     return true
                 }
                 // The stop half already ran, so this side of the call
@@ -151,6 +161,7 @@ class DesktopAudioDevices : AudioDevices {
             }
         }
         Log.i(TAG, "audio ${if (capture) "input" else "output"} -> ${target.name}")
+        chosen(target)
         true
     }.getOrElse {
         // A device can vanish between listing and selecting. Keep
