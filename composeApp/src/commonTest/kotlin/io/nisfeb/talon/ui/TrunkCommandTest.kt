@@ -22,6 +22,7 @@ class TrunkCommandTest {
         assertEquals(TrunkAsk(10, 45 * 60, true, "Standup"), ok("45m", "Standup"))
         assertEquals(TrunkAsk(10, 7 * 86_400, true, ""), ok("7D"))
         assertEquals(TrunkAsk(1000, 30 * 86_400, true, ""), ok("1000", "30d"))
+        assertEquals(TrunkAsk(1, 60, true, ""), ok("1", "1m"))
     }
 
     @Test
