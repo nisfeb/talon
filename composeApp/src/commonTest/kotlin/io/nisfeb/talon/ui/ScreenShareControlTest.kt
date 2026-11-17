@@ -70,4 +70,25 @@ class ScreenShareControlTest {
         assertEquals("Untitled window", window.copy(title = "").label())
         assertEquals("Notes", window.label())
     }
+
+    // A Mac user's share (2026-11-17) could end with no word: without
+    // Screen Recording allowed no picture comes, and the call ends it.
+    @Test
+    fun `a share that ends by itself says so, and one the owner stops does not`() = runTest {
+        val c = ScreenShareControl({ listOf(screen) }, Calls()::set)
+        c.press(sharing = false)
+        c.sharingIs(true)
+        assertNull(c.problem)
+        c.sharingIs(false)
+        assertTrue(c.ended)
+        assertTrue("no picture came" in c.problem.orEmpty())
+        // Sharing again clears it; stopping by the button is no problem.
+        c.press(sharing = false)
+        c.sharingIs(true)
+        assertNull(c.problem)
+        c.press(sharing = true)
+        c.sharingIs(false)
+        assertFalse(c.ended)
+        assertNull(c.problem)
+    }
 }

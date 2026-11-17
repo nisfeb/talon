@@ -483,9 +483,9 @@ fun PartyLineBarContent(
             }
         }
     }
-    if (screenShare?.failed == true) {
+    screenShare?.problem?.let { said ->
         Text(
-            "Couldn't share: nothing to share, or the system refused the capture.",
+            said,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.error,
             maxLines = 1,

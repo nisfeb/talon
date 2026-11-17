@@ -28,6 +28,32 @@ class ScreenShareControl(
     var failed by mutableStateOf(false)
         private set
 
+    /**
+     * A share ended by itself: no picture came from the screen, or it
+     * stopped coming. Said where the button is; it used to go quietly.
+     */
+    var ended by mutableStateOf(false)
+        private set
+
+    private var wasSharing = false
+    private var stopping = false
+
+    /** The call's word on whether a share runs, each time it changes. */
+    fun sharingIs(sharing: Boolean) {
+        if (wasSharing && !sharing && !stopping) ended = true
+        if (sharing) ended = false
+        if (!sharing) stopping = false
+        wasSharing = sharing
+    }
+
+    /** What to say under the button, or null: a share that would not start, or one that ended by itself. */
+    val problem: String?
+        get() = when {
+            failed -> "Couldn't share: nothing to share, or the system refused the capture."
+            ended -> "The share ended: no picture came from the screen. On a Mac, allow it under Screen Recording in System Settings."
+            else -> null
+        }
+
     /** The share button: stop a share, or start one. */
     suspend fun press(sharing: Boolean) {
         if (sharing) return choose(null)
@@ -42,6 +68,7 @@ class ScreenShareControl(
     /** Share [source], or stop with null. */
     suspend fun choose(source: ScreenSource?) {
         offered = null
+        if (source == null) stopping = true else ended = false
         failed = !set(source) && source != null
     }
 }
@@ -61,6 +88,7 @@ fun ScreenShareMenu(
     button: @Composable (onClick: () -> Unit) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    androidx.compose.runtime.LaunchedEffect(sharing) { control.sharingIs(sharing) }
     Box {
         button { scope.launch { control.press(sharing) } }
         DropdownMenu(expanded = control.offered != null, onDismissRequest = { control.offered = null }) {

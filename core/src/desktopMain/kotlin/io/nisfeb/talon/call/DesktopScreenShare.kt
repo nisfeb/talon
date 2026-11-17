@@ -30,8 +30,21 @@ internal fun desktopScreenSources(): List<ScreenSource> {
         }
     }.onFailure { Log.w(TAG, "could not list ${if (isWindow) "windows" else "screens"}", it) }
         .getOrDefault(emptyList())
-    return list(::ScreenCapturer, isWindow = false) + list(::WindowCapturer, isWindow = true)
+    return offeredSources(list(::ScreenCapturer, isWindow = false) + list(::WindowCapturer, isWindow = true), pointerScreenId())
 }
+
+/**
+ * The capturer's id for the screen the pointer is on, or null where the
+ * two cannot be matched. macOS names a display "Display <id>" with the
+ * id the capturer uses; Windows numbers them in the capturer's order.
+ * Not matched on X11. Not run on a Mac or Windows yet.
+ */
+internal fun pointerScreenId(): Long? = runCatching {
+    val os = System.getProperty("os.name").orEmpty().lowercase()
+    if (!("mac" in os || "win" in os)) return null
+    val name = java.awt.MouseInfo.getPointerInfo()?.device?.iDstring ?: return null
+    Regex("(\\d+)\\s*$").find(name)?.groupValues?.get(1)?.toLongOrNull()
+}.getOrNull()
 
 /** A started capture: what a track is made from, and how to end it. */
 class OpenedCapture(val source: VideoTrackSource, val close: () -> Unit)
@@ -95,8 +108,13 @@ internal class ScreenShareSlot(
     private val capture: ScreenCapture,
     /** Told when a share ends itself: no frame came, or they stopped. */
     private val onEnded: () -> Unit,
-    /** How long to wait for the first frame: the system's dialog waits on the owner. */
-    private val firstFrameMs: Long = 60_000,
+    /**
+     * How long to wait for the first frame. A minute where the system's
+     * dialog waits on the owner (Wayland); ten seconds elsewhere, where a
+     * capture that works sends at once and one that does not left
+     * "Stop sharing" up for the whole minute.
+     */
+    private val firstFrameMs: Long = if (isWayland) 60_000 else 10_000,
     /** How long without a frame is a share that ended (a capture sends steadily, even of a still screen). */
     private val frameGapMs: Long = 10_000,
 ) {
