@@ -1,6 +1,8 @@
 package io.nisfeb.talon.call
 
+import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -50,5 +52,52 @@ class DesktopAudioDevicesTest {
             devices.selectOutput(it.id)
             assertTrue(devices.selectedOutput == it.id)
         }
+    }
+
+    // From webrtc-java 0.18, closing a call's last connection puts the
+    // audio module to sleep: it refused every set and stop, so a device
+    // picked between calls did not take (the reason 0.17 was kept until
+    // 2026-11-17). A machine with no sound card checks the hook only.
+    @Test
+    fun `a device picked between calls is kept, and the next call sets it`() {
+        val devices = try {
+            DesktopAudioDevices()
+        } catch (e: LinkageError) {
+            println("native webrtc unavailable here, skipping: ${e.message}")
+            return
+        }
+        DesktopPeerLink(emptyList(), sendAudio = true).close()
+        devices.selectInput(null)
+        devices.selectOutput(null)
+        devices.inputs().firstOrNull()?.let {
+            devices.selectInput(it.id)
+            assertEquals(it.id, devices.selectedInput, "the microphone picked with no call up")
+        }
+        devices.outputs().firstOrNull()?.let {
+            devices.selectOutput(it.id)
+            assertEquals(it.id, devices.selectedOutput, "the speaker picked with no call up")
+        }
+        val putBack = DesktopWebRtcFactory.onConnectionMade
+        var made = 0
+        DesktopWebRtcFactory.onConnectionMade = { made++; putBack?.invoke() }
+        try {
+            DesktopPeerLink(emptyList(), sendAudio = true).close()
+        } finally {
+            DesktopWebRtcFactory.onConnectionMade = putBack
+        }
+        assertTrue(putBack != null, "the devices pane puts its choices back")
+        assertEquals(1, made, "a new connection asks for the chosen devices")
+    }
+
+    @Test
+    fun `every peer connection made asks for the chosen devices`() {
+        val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").exists() }
+        val offenders = listOf("core/src", "composeApp/src", "bridge/src").map { File(root, it) }.filter { it.exists() }
+            .flatMap { dir -> dir.walk().filter { it.isFile && it.extension == "kt" && "Test" !in it.path }.toList() }
+            // Desktop only: Android and iOS have engines of their own.
+            .filter { "desktopMain" in it.path || it.path.contains("bridge/src") }
+            .filter { f -> f.readText().let { ".createPeerConnection(" in it && "DesktopWebRtcFactory.connectionMade()" !in it } }
+            .map { it.relativeTo(root).path }
+        assertEquals(emptyList(), offenders, "call DesktopWebRtcFactory.connectionMade() once the connection is made")
     }
 }

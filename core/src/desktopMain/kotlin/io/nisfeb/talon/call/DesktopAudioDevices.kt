@@ -43,6 +43,18 @@ class DesktopAudioDevices : AudioDevices {
                 },
             )
         }.onFailure { Log.w(TAG, "no device-change notifications", it) }
+        DesktopWebRtcFactory.onConnectionMade = ::putBack
+    }
+
+    /**
+     * Set the chosen devices on a module a new call has just woken. A
+     * bare set only: it is taken while the side is idle, and refused,
+     * harmlessly, when another connection already has it running.
+     */
+    private fun putBack() {
+        val adm = DesktopWebRtcFactory.audioDeviceModule()
+        input?.let { id -> findExact(id, capture = true)?.let { runCatching { adm.setRecordingDevice(it) } } }
+        output?.let { id -> findExact(id, capture = false)?.let { runCatching { adm.setPlayoutDevice(it) } } }
     }
 
     private fun invalidate() {
@@ -124,6 +136,12 @@ class DesktopAudioDevices : AudioDevices {
         }
         if (bareSet.isFailure || (if (capture) captureBroken else playoutBroken)) {
             runCatching { restart(adm, target, capture) }.onFailure { e ->
+                // No call is up: the choice is kept, and putBack sets it
+                // when the next one starts.
+                if (e is Asleep) {
+                    Log.i(TAG, "audio ${if (capture) "input" else "output"} -> ${target.name}, from the next call")
+                    return true
+                }
                 // The stop half already ran, so this side of the call
                 // is silent: best effort to bring the old device back
                 // (previous == null restores the system default).
@@ -143,16 +161,18 @@ class DesktopAudioDevices : AudioDevices {
     }
 
     private fun restart(adm: AudioDeviceModuleBase, target: WebRtcAudioDevice, capture: Boolean) {
+        // From webrtc-java 0.18 the module sleeps between calls, and a
+        // sleeping one refuses the set and the stop alike. A running
+        // side always stops, so a refused stop is the sleep.
+        runCatching { if (capture) adm.stopRecording() else adm.stopPlayout() }.onFailure { throw Asleep() }
         if (capture) {
             captureBroken = true
-            adm.stopRecording()
             adm.setRecordingDevice(target)
             adm.initRecording()
             adm.startRecording()
             captureBroken = false
         } else {
             playoutBroken = true
-            adm.stopPlayout()
             adm.setPlayoutDevice(target)
             adm.initPlayout()
             adm.startPlayout()
@@ -170,6 +190,8 @@ class DesktopAudioDevices : AudioDevices {
     private fun findDefault(capture: Boolean): WebRtcAudioDevice? =
         if (capture) MediaDevices.getDefaultAudioCaptureDevice()
         else MediaDevices.getDefaultAudioRenderDevice()
+
+    private class Asleep : Exception()
 
     private companion object {
         private const val TAG = "DesktopAudioDevices"

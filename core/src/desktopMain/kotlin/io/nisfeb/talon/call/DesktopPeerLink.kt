@@ -150,6 +150,7 @@ class DesktopPeerLink(
     )
 
     init {
+        DesktopWebRtcFactory.connectionMade()
         if (sendAudio) {
             val source = micPcm ?: DesktopWebRtcFactory.micSource()
             val track = factory.createAudioTrack("talon-mic", source)
