@@ -71,7 +71,32 @@ class CalendarRepo(
     /** Occurrences in the window, in time order; null before the first answer. */
     val rows: StateFlow<List<CalendarRow>?> = _rows.asStateFlow()
     private val _calendars = MutableStateFlow<List<CalendarInfo>>(emptyList())
+    /** The calendars in the owner's order ([order]), which every list and picker shows. */
     val calendars: StateFlow<List<CalendarInfo>> = _calendars.asStateFlow()
+    private val _order = MutableStateFlow<List<String>>(emptyList())
+    /**
+     * The order the owner put the calendars in, by id; empty for the
+     * ship's own, which is by the id each got from its first name (so
+     * "birthday" led, whatever it was renamed). Per device, seeded by
+     * the shell.
+     */
+    val order: StateFlow<List<String>> = _order.asStateFlow()
+    /** What this device had last time. */
+    fun seedOrder(ids: List<String>) {
+        _order.value = ids
+        _calendars.value = orderCalendars(_calendars.value, ids)
+    }
+    /** Move calendar [id] one place up or down the list. */
+    fun moveCalendar(id: String, up: Boolean) {
+        val ids = _calendars.value.map { it.id }.toMutableList()
+        val at = ids.indexOf(id)
+        val to = if (up) at - 1 else at + 1
+        if (at < 0 || to !in ids.indices) return
+        ids[at] = ids[to]; ids[to] = id
+        // The order is the device's, not one ship's: what it holds for
+        // calendars this ship does not have, another ship's, is kept.
+        seedOrder(ids + _order.value.filter { it !in ids })
+    }
     private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
     /** Every task, open or done, dated or not; null before the first answer. */
     val tasks: StateFlow<List<CalendarTask>?> = _tasks.asStateFlow()
@@ -418,7 +443,7 @@ class CalendarRepo(
         // grid was empty on every cold start until the ship answered,
         // though the last answer was in the database all along.
         if (_rangeRows.value == null && month.isNotEmpty()) _rangeRows.value = month
-        if (_calendars.value.isEmpty() && calendars.isNotEmpty()) _calendars.value = calendars
+        if (_calendars.value.isEmpty() && calendars.isNotEmpty()) _calendars.value = orderCalendars(calendars, _order.value)
         if (_tasks.value == null && tasks.isNotEmpty()) _tasks.value = tasks
         if (_tags.value.isEmpty() && tags.isNotEmpty()) _tags.value = tags
         if (_zone.value == null && zone != null) _zone.value = zone
@@ -1356,7 +1381,7 @@ class CalendarRepo(
             ) return@withLock
             if (full) {
                 val cals = runSuspendCatching { a.calendars() }.getOrNull()
-                if (!still(a) { if (cals != null) _calendars.value = cals }) return@withLock
+                if (!still(a) { if (cals != null) _calendars.value = orderCalendars(cals, _order.value) }) return@withLock
             }
             val tasks = runSuspendCatching { a.tasks() }.getOrNull()
             if (!still(a) { if (tasks != null) _tasks.value = shipTasks(tasks) }) return@withLock
@@ -1457,4 +1482,15 @@ class CalendarRepo(
         /** How long a dismissed todo is kept off the list while orrery takes it off the calendar. */
         const val DISMISS_HOLD_MS = 5 * 60 * 1000L
     }
+}
+
+/**
+ * [calendars] in the owner's [order]: those it names first, as it has
+ * them, then the rest as the ship gave them, so a calendar made since
+ * shows without being placed. An id the ship no longer has is passed over.
+ */
+fun orderCalendars(calendars: List<CalendarInfo>, order: List<String>): List<CalendarInfo> {
+    if (order.isEmpty()) return calendars
+    val place = order.withIndex().associate { (i, id) -> id to i }
+    return calendars.sortedBy { place[it.id] ?: Int.MAX_VALUE }
 }

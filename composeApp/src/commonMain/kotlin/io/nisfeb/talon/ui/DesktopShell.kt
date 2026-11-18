@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Call
@@ -307,6 +308,8 @@ internal fun railIcon(item: RailItem): ImageVector = when (item) {
     RailItem.Chats -> TalonIcons.Chat
     RailItem.Mail -> Icons.Filled.MailOutline
     RailItem.Calendar -> Icons.Filled.DateRange
+    // Not the checklist: that is Orrery's.
+    RailItem.Tasks -> Icons.Filled.CheckCircle
     RailItem.Statuses -> Icons.Filled.Person
     RailItem.Bookmarks -> Icons.Filled.Star
     RailItem.Activity -> Icons.Filled.Notifications
@@ -326,6 +329,7 @@ internal fun railLabel(item: RailItem): String = when (item) {
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"
     RailItem.Calendar -> "Calendar"
+    RailItem.Tasks -> "Tasks"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"

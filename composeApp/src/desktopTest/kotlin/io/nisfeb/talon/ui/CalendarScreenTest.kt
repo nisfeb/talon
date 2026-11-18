@@ -639,6 +639,55 @@ class CalendarScreenTest {
 
     private fun sentMatching(pattern: String) = writes.any { Regex(pattern).containsMatchIn(it.second) }
 
+    // The first calendar took every new event and task: "birthday", by the
+    // ship's sort. Put first by the owner, another takes them.
+    @Test
+    fun `a new event and a new task go to the calendar the owner put first`() {
+        calendarsJson = """[{"id":"birthday","name":"Birthdays","kind":"local"},{"id":"default","name":"Personal","kind":"local"},{"id":"work","name":"Work","kind":"local"}]"""
+        calendar(ready = "Dentist") { repo ->
+            // What the device holds for another ship's calendars is not lost to a move here.
+            repo.seedOrder(listOf("garden", "allotment"))
+            repo.moveCalendar("work", up = true)
+            repo.moveCalendar("work", up = true)
+            assertEquals(listOf("work", "birthday", "default"), repo.calendars.value.map { it.id })
+            assertEquals(listOf("work", "birthday", "default", "garden", "allotment"), repo.order.value)
+            newEvent()
+            field("Name").performTextInput("Planning")
+            save()
+            assertTrue("\"cal\":\"work\"" in wrote("Planning"), "the event went to the first")
+            onNodeWithContentDescription("Tasks").performClick()
+            onNodeWithContentDescription("New task").performClick()
+            field("New task").performTextInput("File the report")
+            onNodeWithContentDescription("Add task").performClick()
+            assertTrue("\"cal\":\"work\"" in wrote("File the report"), "the task went to the first")
+            // And a read of the ship again does not undo the order.
+            kotlinx.coroutines.runBlocking { repo.refreshAll() }
+            assertEquals(listOf("work", "birthday", "default"), repo.calendars.value.map { it.id })
+        }
+    }
+
+    // The menu's Tasks entry: the list at once, and no month to go to.
+    @Test
+    fun `opened for its tasks, the screen is the task list, and a task is added there`() {
+        val scope = CoroutineScope(SupervisorJob())
+        val repo = CalendarRepo(http, scope, pollIntervalMs = 60 * 60_000L).apply { attach("https://ship.test") }
+        runBlocking { repo.refresh(); repo.refreshAll() }
+        try {
+            runComposeUiTest {
+                setContent { TalonTheme(darkTheme = false) { CalendarScreen(repo = repo, twentyFourHour = true, onBack = {}, tasksOnly = true) } }
+                waitUntil(timeoutMillis = 5_000) { onAllNodesWithContentDescription("New task").fetchSemanticsNodes().isNotEmpty() }
+                assertTrue(onAllNodesWithContentDescription("Month").fetchSemanticsNodes().isEmpty(), "no way to the month: the Calendar entry is that")
+                assertTrue(onAllNodesWithContentDescription("Tasks").fetchSemanticsNodes().isEmpty())
+                onNodeWithContentDescription("New task").performClick()
+                field("New task").performTextInput("Water the plants")
+                onNodeWithContentDescription("Add task").performClick()
+                assertTrue("Water the plants" in wrote("Water the plants"))
+            }
+        } finally {
+            scope.cancel()
+        }
+    }
+
     // A user, 2026-11-02, on a phone: "I have more than 3 calendars but
     // that area doesn't scroll sideways or anything". The chips sat in
     // one row, and the last was squeezed to a letter a line, as was "A

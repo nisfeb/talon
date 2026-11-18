@@ -64,6 +64,7 @@ class FileUiSettings(
         val smartSearchPreferred: Boolean = false,
         val homePlace: String = "",
         val hiddenCalendars: List<String> = emptyList(),
+        val calendarOrder: List<String> = emptyList(),
         val defaultCalendar: String = "",
         val calendarWeekView: Boolean = false,
         val orreryDecide: io.nisfeb.talon.orrery.DecideSettings = io.nisfeb.talon.orrery.DecideSettings(),
@@ -205,6 +206,14 @@ class FileUiSettings(
     override fun setHiddenCalendars(ids: Set<String>) {
         if (_hiddenCalendars.value == ids) return
         _hiddenCalendars.value = ids
+        persistCurrent()
+    }
+
+    private val _calendarOrder = MutableStateFlow(initial.calendarOrder)
+    override val calendarOrder: StateFlow<List<String>> = _calendarOrder.asStateFlow()
+    override fun setCalendarOrder(ids: List<String>) {
+        if (_calendarOrder.value == ids) return
+        _calendarOrder.value = ids
         persistCurrent()
     }
 
@@ -425,6 +434,7 @@ class FileUiSettings(
                 smartSearchPreferred = _smartSearchPreferred.value,
                 homePlace = _homePlace.value,
                 hiddenCalendars = _hiddenCalendars.value.toList(),
+                calendarOrder = _calendarOrder.value,
                 defaultCalendar = _defaultCalendar.value,
                 calendarWeekView = _calendarWeekView.value,
                 orreryDecide = _orreryDecide.value,

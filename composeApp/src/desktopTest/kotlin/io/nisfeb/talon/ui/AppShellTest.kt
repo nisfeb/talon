@@ -955,11 +955,53 @@ class AppShellTest {
 
     /** A task typed into the calendar's task list and added. */
     private fun ComposeUiTest.addTask(name: String) {
-        onNodeWithContentDescription("Tasks").performClick()
+        // The calendar's own way to its tasks, not the menu's Tasks entry before it.
+        onAllNodesWithContentDescription("Tasks").onLast().performClick()
         waitUntil(timeoutMillis = 5_000) { showing("Open") }
         onNodeWithContentDescription("New task").performClick()
         field("New task").performTextInput(name)
         onNodeWithContentDescription("Add task").performClick()
+    }
+
+    // A user, 2026-11-17: "I would love to be able to click the todo icon
+    // in the sidebar and go to the todo list management area instead of
+    // having to go to calendar THEN todo THEN add something."
+    @Test
+    fun `Tasks in the menu opens the task list, a task is added there, and the menu leaves it`() = app(setup = withCalendar()) { ship ->
+        onNodeWithContentDescription("Tasks").performClick()
+        waitUntil(timeoutMillis = 10_000) { present("New task") }
+        assertTrue(!showing("Standup"), "the task list, not the month")
+        onNodeWithContentDescription("New task").performClick()
+        field("New task").performTextInput("Buy bread")
+        onNodeWithContentDescription("Add task").performClick()
+        waitUntil(timeoutMillis = 10_000) { ship.requests.any { it.endsWith("/calendar.calendar") } }
+        // The calendar is its own entry still, on its month.
+        onNodeWithContentDescription("Calendar").performClick()
+        waitUntil(timeoutMillis = 10_000) { showing("Standup") }
+        // Two are named Tasks on the calendar: the menu's is the first.
+        onAllNodesWithContentDescription("Tasks")[0].performClick()
+        waitUntil(timeoutMillis = 10_000) { present("New task") && !showing("Standup") }
+        onNodeWithContentDescription("Chats").performClick()
+        home()
+    }
+
+    // As the Mail tab was on a phone (2026-10-17): a saved tab with no
+    // rail to leave it by.
+    @Test
+    fun `with no rail, a saved Tasks tab is the task list with a way out`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, width = 600.dp, setup = withCalendar()) {
+            // Where the drawer and a saved tab land.
+            ui.setActiveRailTab(RailTab.Tasks)
+            waitUntil(timeoutMillis = 10_000) { present("New task") }
+            onNodeWithContentDescription("Back").performClick()
+            waitUntil(timeoutMillis = 5_000) { present("New message") }
+            // The Calendar tab, the same.
+            ui.setActiveRailTab(RailTab.Calendar)
+            waitUntil(timeoutMillis = 10_000) { showing("Standup") }
+            onNodeWithContentDescription("Back").performClick()
+            waitUntil(timeoutMillis = 5_000) { present("New message") }
+        }
     }
 
     // The task's refusal came back to the screen that added it, gone by

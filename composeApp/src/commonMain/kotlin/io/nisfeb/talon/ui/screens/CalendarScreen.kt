@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.InputChip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
@@ -189,6 +190,8 @@ fun CalendarScreen(
     /** A tapped reminder's push tag: its occurrence opens once the rows holding it are in. */
     openPushTag: String? = null,
     onOpenedPush: () -> Unit = {},
+    /** The menu's Tasks entry: the task list, with no month to go to. */
+    tasksOnly: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val availability by repo.availability.collectAsState()
@@ -201,7 +204,7 @@ fun CalendarScreen(
     val tasks by repo.tasks.collectAsState()
     // Whether the calendar keeps a priority: its tasks say one, 0 or more.
     val priorityKnown = tasks?.any { it.priority != null } == true
-    var showTasks by remember { mutableStateOf(false) }
+    var showTasks by remember(tasksOnly) { mutableStateOf(tasksOnly) }
     /** The top half: the month's grid, or the selected day's week by the hour. */
     val weekView by repo.weekView.collectAsState()
     val calendars by repo.calendars.collectAsState()
@@ -604,7 +607,7 @@ fun CalendarScreen(
                 )
                 monthSteps()
             }
-            IconButton(onClick = { showTasks = !showTasks }) {
+            if (!tasksOnly) IconButton(onClick = { showTasks = !showTasks }) {
                 if (showTasks) Icon(TalonIcons.CalendarMonth, contentDescription = "Month")
                 else Icon(TalonIcons.Checklist, contentDescription = "Tasks")
             }
@@ -1323,6 +1326,7 @@ fun CalendarScreen(
             onClearConflicts = { say("Clearing…", "Your Groundwire node did not clear them.") { repo.clearConflicts() } },
             defaultCalendar = defaultCalendar,
             onSetDefaultCalendar = { repo.defaultCalendar.value = it },
+            onMove = repo::moveCalendar,
             deviceZone = deviceZone,
             onSetZone = { z -> act("Setting the zone…", "Your Groundwire node did not take the zone.") { repo.setZone(z) } },
             leadMin = leadMin,
@@ -1785,6 +1789,8 @@ private fun CalendarsDialog(
     /** The calendar new events go to; "" for the first one. */
     defaultCalendar: String,
     onSetDefaultCalendar: (String) -> Unit,
+    /** Move a calendar one place up or down the list every picker shows. */
+    onMove: (id: String, up: Boolean) -> Unit = { _, _ -> },
     deviceZone: String?,
     onSetZone: (String) -> Unit,
     /** Minutes of the heads-up before every timed event, 0 for none; null from a calendar too old to say. */
@@ -1847,7 +1853,7 @@ private fun CalendarsDialog(
                     }
                     HorizontalDivider()
                 }
-                calendars.forEach { c ->
+                calendars.forEachIndexed { at, c ->
                     if (editingId == c.id) {
                         OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Name") }, singleLine = true)
                         ColorRow("Color", editColour) { editColour = it }
@@ -1932,6 +1938,15 @@ private fun CalendarsDialog(
                                 )
                                 if (error != null) Text(error, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
+                            if (calendars.size > 1) {
+                                val name = c.name.ifBlank { c.id }
+                                IconButton(onClick = { onMove(c.id, true) }, enabled = at > 0, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move $name up")
+                                }
+                                IconButton(onClick = { onMove(c.id, false) }, enabled = at < calendars.lastIndex, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move $name down")
+                                }
+                            }
                         }
                     }
                 }
@@ -1954,7 +1969,8 @@ private fun CalendarsDialog(
                 }
                 if (calendars.size > 1) {
                     HorizontalDivider()
-                    Text("New events go to", style = MaterialTheme.typography.labelMedium)
+                    Text("New events and tasks go to", style = MaterialTheme.typography.labelMedium)
+                    Text("With none picked, the first calendar above. The arrows put them in your order, here and wherever one is picked.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         calendars.forEach { c ->
                             FilterChip(selected = defaultCalendar == c.id, onClick = { onSetDefaultCalendar(if (defaultCalendar == c.id) "" else c.id) }, label = { Text(c.name.ifBlank { c.id }) })

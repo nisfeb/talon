@@ -382,6 +382,7 @@ private fun railLabel(item: RailItem): String = when (item) {
     RailItem.Chats -> "Chats"
     RailItem.Mail -> "Mail"
     RailItem.Calendar -> "Calendar"
+    RailItem.Tasks -> "Tasks"
     RailItem.Statuses -> "Statuses"
     RailItem.Bookmarks -> "Bookmarks"
     RailItem.Activity -> "Activity"

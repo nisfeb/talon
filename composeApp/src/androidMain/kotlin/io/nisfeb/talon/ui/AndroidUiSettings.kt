@@ -182,6 +182,15 @@ class AndroidUiSettings(
     override val orreryServerUrl: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_URL, "") ?: "")
     override val orreryServerModel: StateFlow<String> = MutableStateFlow(prefs.getString(KEY_ORRERY_SERVER_MODEL, "") ?: "")
 
+    // One id a line: an id is a slug, and holds no line break.
+    private val _calendarOrder = MutableStateFlow(prefs.getString(KEY_CALENDAR_ORDER, "").orEmpty().split('\n').filter { it.isNotEmpty() })
+    override val calendarOrder: StateFlow<List<String>> = _calendarOrder.asStateFlow()
+    override fun setCalendarOrder(ids: List<String>) {
+        if (_calendarOrder.value == ids) return
+        prefs.edit().putString(KEY_CALENDAR_ORDER, ids.joinToString("\n")).apply()
+        _calendarOrder.value = ids
+    }
+
     private val _defaultCalendar = MutableStateFlow(prefs.getString(KEY_DEFAULT_CALENDAR, "") ?: "")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) {
@@ -448,6 +457,7 @@ class AndroidUiSettings(
         private const val KEY_HOME_PLACE = HomePrefs.PLACE
         private const val KEY_HIDDEN_CALENDARS = "hidden_calendars"
         private const val KEY_DEFAULT_CALENDAR = "default_calendar"
+        private const val KEY_CALENDAR_ORDER = "calendar_order"
         private const val KEY_CALENDAR_WEEK_VIEW = "calendar_week_view"
         private const val KEY_ORRERY_DECIDE = "orrery_decide"
         private const val KEY_ORRERY_SERVER_URL = "orrery_server_url"

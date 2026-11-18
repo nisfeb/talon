@@ -6,6 +6,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -131,6 +132,27 @@ class CalendarsDialogTest {
         onNodeWithText("Delete").performClick()
         onNodeWithText("Delete it and its 1 event").performClick()
         assertTrue("\"id\":\"garden\"" in wrote("del-calendar"))
+    }
+
+    // A user, 2026-11-17: "calendars are sorted in a way that I can't
+    // understand. It defaults to the first one "birthday" but I'd like
+    // to ... physically reorder them." The ship sorts by the id each
+    // got from its first name.
+    @Test
+    fun `a calendar is moved up, the list and the chips follow, and the ends cannot move further`() = calendars {
+        fun at(name: String) = onAllNodes(hasText(name) and SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected)).onFirst().fetchSemanticsNode().boundsInRoot.top
+        assertTrue(at("Personal") < at("Garden"), "the ship's order to begin with")
+        onNodeWithContentDescription("Move Personal up").assertIsNotEnabled()
+        onNodeWithContentDescription("Move Garden down").assertIsNotEnabled()
+        onNodeWithContentDescription("Move Garden up").performScrollTo().performClick()
+        waitUntil(timeoutMillis = 5_000) { at("Garden") < at("Personal") }
+        onNodeWithContentDescription("Move Garden up").assertIsNotEnabled()
+        // The chips under "New events and tasks go to" are in the same order.
+        val chips = onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Selected) and (hasText("Garden") or hasText("Personal"))).fetchSemanticsNodes()
+        assertTrue(chips.first().config[SemanticsProperties.Text].first().text == "Garden", "the chips follow")
+        assertTrue(writes.none { "calendar" in it.second && "garden" in it.second }, "the order is this device's: nothing is written to the ship")
+        onNodeWithContentDescription("Move Garden down").performClick()
+        waitUntil(timeoutMillis = 5_000) { at("Personal") < at("Garden") }
     }
 
     @Test
