@@ -985,6 +985,25 @@ class AppShellTest {
         home()
     }
 
+    // As the Mail tab was on a phone (2026-10-17): a saved tab with no
+    // rail to leave it by.
+    @Test
+    fun `with no rail, a saved Tasks tab is the task list with a way out`() {
+        val ui = InMemoryUiSettings()
+        app(ui = ui, width = 600.dp, setup = withCalendar()) {
+            // Where the drawer and a saved tab land.
+            ui.setActiveRailTab(RailTab.Tasks)
+            waitUntil(timeoutMillis = 10_000) { present("New task") }
+            onNodeWithContentDescription("Back").performClick()
+            waitUntil(timeoutMillis = 5_000) { present("New message") }
+            // The Calendar tab, the same.
+            ui.setActiveRailTab(RailTab.Calendar)
+            waitUntil(timeoutMillis = 10_000) { showing("Standup") }
+            onNodeWithContentDescription("Back").performClick()
+            waitUntil(timeoutMillis = 5_000) { present("New message") }
+        }
+    }
+
     // The task's refusal came back to the screen that added it, gone by
     // then, and that screen's callback cleared it from what the calendar
     // says on opening: never said at all.

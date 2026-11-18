@@ -93,7 +93,9 @@ class CalendarRepo(
         val to = if (up) at - 1 else at + 1
         if (at < 0 || to !in ids.indices) return
         ids[at] = ids[to]; ids[to] = id
-        seedOrder(ids)
+        // The order is the device's, not one ship's: what it holds for
+        // calendars this ship does not have, another ship's, is kept.
+        seedOrder(ids + _order.value.filter { it !in ids })
     }
     private val _tasks = MutableStateFlow<List<CalendarTask>?>(null)
     /** Every task, open or done, dated or not; null before the first answer. */

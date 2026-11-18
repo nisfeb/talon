@@ -4012,7 +4012,8 @@ fun App(
                                     io.nisfeb.talon.ui.screens.CalendarScreen(
                                         repo = calendarRepo,
                                         twentyFourHour = homeTwentyFourHour,
-                                        onBack = null,
+                                        // No rail on screen, as for Mail: a way back to the chats.
+                                        onBack = if (expanded) null else { { uiSettings.setActiveRailTab(RailTab.Chats) } },
                                         onOpenWebSettings = onOpenCalendarPage,
                                         db = db, chat = repo, mail = mailRepo, ourShip = ship,
                                         tasksOnly = activeRailTab == RailTab.Tasks,

@@ -645,9 +645,12 @@ class CalendarScreenTest {
     fun `a new event and a new task go to the calendar the owner put first`() {
         calendarsJson = """[{"id":"birthday","name":"Birthdays","kind":"local"},{"id":"default","name":"Personal","kind":"local"},{"id":"work","name":"Work","kind":"local"}]"""
         calendar(ready = "Dentist") { repo ->
+            // What the device holds for another ship's calendars is not lost to a move here.
+            repo.seedOrder(listOf("garden", "allotment"))
             repo.moveCalendar("work", up = true)
             repo.moveCalendar("work", up = true)
             assertEquals(listOf("work", "birthday", "default"), repo.calendars.value.map { it.id })
+            assertEquals(listOf("work", "birthday", "default", "garden", "allotment"), repo.order.value)
             newEvent()
             field("Name").performTextInput("Planning")
             save()
