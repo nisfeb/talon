@@ -468,6 +468,9 @@ fun ChatComposer(
     /** `/party`: show who is on this channel's line. Null when the
      *  chat has no line, which also hides the suggestion. */
     onSlashParty: (() -> Unit)? = null,
+    /** `/trunk`: makes a call anyone can join from a browser. Null
+     *  where there are no calls, which also hides the suggestion. */
+    onSlashTrunk: TrunkMaker? = null,
     /** Per-device opt-in for the `/poke` advanced surface. Defaults
      *  off; off → /poke returns "enable in Settings" instead of
      *  poking. Caller threads `uiSettings.powerFeaturesEnabled`
@@ -756,13 +759,14 @@ fun ChatComposer(
     // /mic and /loc are wiring-dependent, and offering them where the
     // wiring is null just autocompletes into an error. Typed
     // invocations still hit the per-command error strings as a backstop.
-    val slashSuggestions = remember(slashTrigger, onSlashCall, onSlashMic, onSlashParty, locationProvider) {
+    val slashSuggestions = remember(slashTrigger, onSlashCall, onSlashMic, onSlashParty, onSlashTrunk, locationProvider) {
         slashTrigger?.let {
             filterSlashCommands(it.query).filter { s ->
                 when (s.name) {
                     "call" -> onSlashCall != null
                     "mic" -> onSlashMic != null
                     "party" -> onSlashParty != null
+                    "trunk" -> onSlashTrunk != null
                     "loc" -> locationProvider != null
                     else -> true
                 }
@@ -1008,6 +1012,8 @@ fun ChatComposer(
                             locationProvider = locationProvider,
                             powerFeaturesEnabled = powerFeaturesEnabled,
                             toast = { msg -> state.sendError = msg },
+                            trunk = onSlashTrunk,
+                            post = { text -> strategy.sendText(text) },
                         )
                     } else CommandResult.NotACommand
                     when (cmd) {

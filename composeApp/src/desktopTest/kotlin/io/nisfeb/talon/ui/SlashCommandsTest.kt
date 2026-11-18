@@ -391,4 +391,67 @@ class SlashCommandsTest {
         val worded: LocationProvider = { Result.failure(IllegalStateException("Location permission was not granted.")) }
         assertEquals("/loc: Location permission was not granted.", (run("/loc", locationProvider = worded) as CommandResult.Error).message)
     }
+
+    // ─── /trunk ───
+
+    @Test
+    fun `trunk with no way to make a call says so, and is never posted as text`() = runBlocking {
+        val r = runCommand("/trunk 5 2h", repo, http)
+        assertTrue(r is CommandResult.Error && "can't be made from here" in r.message, "$r")
+    }
+
+    @Test
+    fun `trunk hands what was asked to the maker and posts the link it gets`() = runBlocking {
+        val posted = mutableListOf<String>()
+        val notes = mutableListOf<String>()
+        var asked: TrunkAsk? = null
+        val r = runCommand(
+            "/trunk 5 2h Standup", repo, http, toast = { notes += it },
+            trunk = { ask, post -> asked = ask; post("https://ship.example/apps/trunk/guest/abc") },
+            post = { posted += it },
+        )
+        assertEquals(CommandResult.Handled, r)
+        assertEquals(TrunkAsk(5, 7_200, true, "Standup"), asked)
+        assertEquals(listOf(trunkMessage(TrunkAsk(5, 7_200, true, "Standup"), "https://ship.example/apps/trunk/guest/abc")), posted)
+        assertTrue(notes.isEmpty(), "a public link needs no warning: $notes")
+    }
+
+    @Test
+    fun `trunk warns of a link only our own network reaches, and still posts it`() = runBlocking {
+        val posted = mutableListOf<String>()
+        val notes = mutableListOf<String>()
+        runCommand("/trunk", repo, http, toast = { notes += it }, trunk = { _, post -> post("http://192.168.1.5:8080/apps/trunk/guest/abc") }, post = { posted += it })
+        assertEquals(1, posted.size)
+        assertTrue(notes.single().contains("only your own network"), "$notes")
+    }
+
+    @Test
+    fun `trunk warns of a link that is not https, where a browser gives no microphone`() = runBlocking {
+        val posted = mutableListOf<String>()
+        val notes = mutableListOf<String>()
+        runCommand("/trunk", repo, http, toast = { notes += it }, trunk = { _, post -> post("http://ship.example/apps/trunk/guest/abc") }, post = { posted += it })
+        assertEquals(1, posted.size)
+        assertTrue(notes.single().contains("microphone only over https"), "$notes")
+    }
+
+    @Test
+    fun `a refused trunk says why and posts nothing, and a bad argument never reaches the ship`() = runBlocking {
+        val posted = mutableListOf<String>()
+        val refused = runCommand(
+            "/trunk", repo, http,
+            trunk = { _, _ -> throw io.nisfeb.talon.call.GuestCallRefused("Your ship has no call server set up.") },
+            post = { posted += it },
+        )
+        assertTrue(refused is CommandResult.Error && refused.message == "/trunk: Your ship has no call server set up.", "$refused")
+        var made = 0
+        val bad = runCommand("/trunk 5000", repo, http, trunk = { _, _ -> made++ }, post = { posted += it })
+        assertTrue(bad is CommandResult.Error && "1 to 1000" in bad.message, "$bad")
+        assertEquals(0, made)
+        assertTrue(posted.isEmpty())
+    }
+
+    @Test
+    fun `trunk is offered among the commands`() {
+        assertEquals("trunk", filterSlashCommands("tru").first().name)
+    }
 }

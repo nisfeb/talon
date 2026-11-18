@@ -301,8 +301,33 @@ class TrunkWireTest {
 
     // Trunk wire 16 adds guest seats: the owner's invites arrive on /calls.
     @Test
-    fun aGuestInviteFactIsNotAnUpdateAndBreaksNothing() {
+    fun aGuestInviteFactIsReadForItsRoomAndPath() {
         val fact = """{"guest-invite":{"code":"0123456789abcdef0123456789abcdef","name":"lounge","path":"/apps/trunk/guest/0123456789abcdef0123456789abcdef","speak":true,"expires":1760140800,"uses":5,"guests":0}}"""
-        assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement(fact)))
+        assertEquals(
+            TrunkUpdate.GuestInvite("", "lounge", "/apps/trunk/guest/0123456789abcdef0123456789abcdef", true, 1760140800, 5),
+            TrunkWire.parseUpdate(Json.parseToJsonElement(fact)),
+        )
+        // A path that is not one on the ship is no link to post.
+        assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement("""{"guest-invite":{"name":"lounge","path":"https://evil.example/x"}}""")))
+        // A permanent link (wire 17) is not asked for here, and breaks nothing.
+        assertNull(TrunkWire.parseUpdate(Json.parseToJsonElement("""{"guest-link":{"code":"standup","name":"lounge","path":"/apps/trunk/guest/standup","speak":true}}""")))
+    }
+
+    // trunk-json.hoon: [%invite-guests (ot ~[name+so speak+bo ttl+ni uses+ni])]
+    @Test
+    fun anInviteAsksInTrunksOwnFields() {
+        assertEquals(
+            """{"invite-guests":{"name":"lounge","speak":false,"ttl":86400,"uses":10}}""",
+            TrunkWire.inviteGuestsAction("lounge", speak = false, ttlSecs = 86400, uses = 10).toString(),
+        )
+    }
+
+    @Test
+    fun theShipsPublicAddressIsReadFromGuests() {
+        assertEquals("https://ship.example", TrunkWire.parseGuestsOrigin(Json.parseToJsonElement("""{"invites":[],"origin":"https://ship.example"}""")))
+        assertEquals("", TrunkWire.parseGuestsOrigin(Json.parseToJsonElement("""{"invites":[]}""")))
+        assertEquals("", TrunkWire.parseGuestsOrigin(Json.parseToJsonElement("""{"origin":null}""")))
+        assertEquals("", TrunkWire.parseGuestsOrigin(Json.parseToJsonElement("[]")))
+        assertEquals("", TrunkWire.parseGuestsOrigin(Json.parseToJsonElement("""{"origin":"javascript:alert(1)"}""")))
     }
 }

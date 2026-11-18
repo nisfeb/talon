@@ -79,6 +79,16 @@ sealed interface LineAsk {
 /** An anonymous listen link, and when it stops working. */
 data class ListenLink(val room: String, val url: String, val expiresSecs: Long)
 
+/**
+ * A call people with no ship can join: the line opened for it and the
+ * link's [path] on our ship. [origin] is the ship's public address where
+ * the owner has set one, else "". The path is a bearer secret.
+ */
+data class GuestCall(val room: String, val path: String, val origin: String, val expiresSecs: Long, val uses: Int)
+
+/** Why a guest call was not made, in words for the person who asked. */
+class GuestCallRefused(message: String) : Exception(message)
+
 /** What the call UI renders. One active call at a time (v0). */
 sealed interface CallUiState {
     data object None : CallUiState
@@ -253,6 +263,8 @@ class CallController(
     val listenLink: StateFlow<ListenLink?> = _listenLink.asStateFlow()
 
     fun clearListenLink() { _listenLink.value = null }
+
+    private val guestInvites = kotlinx.coroutines.flow.MutableSharedFlow<TrunkUpdate.GuestInvite>(extraBufferCapacity = 16)
 
     private val _install = MutableStateFlow<TrunkInstall>(TrunkInstall.Hidden)
     val install: StateFlow<TrunkInstall> = _install.asStateFlow()
@@ -607,6 +619,7 @@ class CallController(
                             }
                             is TrunkUpdate.ListenLink ->
                                 _listenLink.value = ListenLink(up.room, up.url, up.expiresSecs)
+                            is TrunkUpdate.GuestInvite -> guestInvites.tryEmit(up)
                             is TrunkUpdate.AccessState ->
                                 _roomAccess.value = _roomAccess.value +
                                     ("${up.from}/${up.name}" to up.access)
@@ -1487,6 +1500,66 @@ class CallController(
                 TrunkWire.shareRoomAction(host, name, ttlSecs),
             )
         }.onFailure { Log.e(TAG, "share-room poke failed", it) }
+    }
+
+    /**
+     * Open a line of its own and make a link to it for people with no
+     * ship ([seats] new guests over [ttlSecs] seconds), then hand it to
+     * [deliver], which posts it. All of it runs on this controller's
+     * scope: asked from a chat the user then leaves, the line is still
+     * opened and its link still posted. Whatever fails, the line opened
+     * for it is closed again, and the reason is thrown as
+     * [GuestCallRefused].
+     *
+     * The line is opened plain, with no call server of its own: trunk
+     * seats guests only on the ship's own (503 otherwise).
+     * ponytail: nothing closes the line once its invite has expired;
+     * that belongs in trunk, which knows when the last guest left.
+     */
+    suspend fun guestCall(
+        title: String,
+        seats: Int,
+        ttlSecs: Int,
+        speak: Boolean,
+        answerTimeoutMs: Long = 15_000,
+        deliver: suspend (GuestCall) -> Unit,
+    ) {
+        val ch = channel ?: throw GuestCallRefused("Not connected to your ship yet. Try again in a moment.")
+        if (trunkMissing) throw GuestCallRefused("Your ship has no %trunk, which hosts calls.")
+        if (_wire.value < TrunkWire.WIRE_VERSION_GUESTS) {
+            throw GuestCallRefused("Your ship's %trunk is too old to seat guests. Update it and try again.")
+        }
+        if (_shipSfuBase.value.isEmpty()) throw GuestCallRefused("Your ship has no call server set up.")
+        scope.async {
+            val name = "call-" + kotlin.random.Random.nextBytes(6).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+            // Listening before the poke: the answer can come first.
+            val answer = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(answerTimeoutMs) { guestInvites.first { it.room == name } }
+            }
+            var opened = false
+            try {
+                ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.openRoomAction(name, title, emptyList()))
+                opened = true
+                ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.inviteGuestsAction(name, speak, ttlSecs, seats))
+                val inv = answer.await() ?: throw GuestCallRefused("Your ship did not answer. No call was made.")
+                val origin = runCatching { TrunkWire.parseGuestsOrigin(ch.scry(TrunkWire.AGENT, "/guests")) }.getOrDefault("")
+                deliver(GuestCall(name, inv.path, origin, inv.expiresSecs, inv.uses))
+                runCatching { refreshRooms() }
+            } catch (e: Throwable) {
+                answer.cancel()
+                if (opened) withContext(NonCancellable) {
+                    runCatching { ch.poke(TrunkWire.AGENT, TrunkWire.ACTION_MARK, TrunkWire.closeRoomAction(name)) }
+                }
+                Log.w(TAG, "guest call not made: ${e::class.simpleName}")
+                throw when (e) {
+                    is GuestCallRefused, is kotlinx.coroutines.CancellationException -> e
+                    is PokeNacked -> GuestCallRefused(
+                        if (opened) "Your ship refused the invite. It keeps at most 64 open at once." else "Your ship refused to open a line.",
+                    )
+                    else -> GuestCallRefused("The call's link could not be posted. No call was left open.")
+                }
+            }
+        }.await()
     }
 
     /**

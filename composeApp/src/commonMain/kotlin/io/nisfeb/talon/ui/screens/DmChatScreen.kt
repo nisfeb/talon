@@ -204,6 +204,9 @@ fun DmChatScreen(
     /** Place a Trunkline call to this conversation's peer. Null hides
      *  the affordance (platform unsupported or group chat). */
     onStartCall: (() -> Unit)? = null,
+    /** `/trunk`: makes a call anyone can join from a browser. Null
+     *  on platforms without a call engine. */
+    onSlashTrunk: io.nisfeb.talon.ui.TrunkMaker? = null,
     /** Join (or open) this channel's party line. Null for DMs and on
      *  platforms without a call engine. */
     onPartyLine: (() -> Unit)? = null,
@@ -1381,6 +1384,7 @@ fun DmChatScreen(
             voicePlayer = voicePlayer,
             onSlashMic = onSlashMic,
             onSlashCall = onStartCall,
+            onSlashTrunk = onSlashTrunk,
             onSlashParty = if (partyStatus != null) {
                 { partyNoteOpen = true; onSlashParty?.invoke() }
             } else {
