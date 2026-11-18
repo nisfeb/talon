@@ -17,6 +17,8 @@ enum class RailItem(val isPaneTab: Boolean) {
     Chats(true),
     Mail(true),
     Calendar(true),
+    /** The calendar's task list, by itself: add one, tick one, with no month to pass through. */
+    Tasks(true),
     Statuses(true),
     Bookmarks(true),
     Activity(true),

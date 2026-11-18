@@ -160,6 +160,10 @@ interface UiSettings {
     val hiddenCalendars: StateFlow<Set<String>>
     fun setHiddenCalendars(ids: Set<String>)
 
+    /** The calendars in the owner's order, by id; empty for the ship's own. */
+    val calendarOrder: StateFlow<List<String>>
+    fun setCalendarOrder(ids: List<String>)
+
     /** The calendar a new event goes to unless another is picked; "" for the first one. */
     val defaultCalendar: StateFlow<String>
     fun setDefaultCalendar(id: String)
@@ -439,6 +443,9 @@ class InMemoryUiSettings(
     private val _hiddenCalendars = MutableStateFlow<Set<String>>(emptySet())
     override val hiddenCalendars: StateFlow<Set<String>> = _hiddenCalendars.asStateFlow()
     override fun setHiddenCalendars(ids: Set<String>) { _hiddenCalendars.value = ids }
+    private val _calendarOrder = MutableStateFlow<List<String>>(emptyList())
+    override val calendarOrder: StateFlow<List<String>> = _calendarOrder.asStateFlow()
+    override fun setCalendarOrder(ids: List<String>) { _calendarOrder.value = ids }
     private val _defaultCalendar = MutableStateFlow("")
     override val defaultCalendar: StateFlow<String> = _defaultCalendar.asStateFlow()
     override fun setDefaultCalendar(id: String) { _defaultCalendar.value = id }

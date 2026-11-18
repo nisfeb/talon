@@ -773,7 +773,7 @@ fun App(
                 openMailThread = null
                 mailComposing = null
             }
-            if (tab == RailTab.Home || tab == RailTab.Mail || tab == RailTab.Calendar) {
+            if (tab == RailTab.Home || tab == RailTab.Mail || tab == RailTab.Calendar || tab == RailTab.Tasks) {
                 uiSettings.setActiveRailTab(RailTab.Chats)
             }
         }
@@ -1352,6 +1352,10 @@ fun App(
         LaunchedEffect(calendarRepo, uiSettings) {
             calendarRepo.seedHidden(uiSettings.hiddenCalendars.value)
             calendarRepo.hidden.collect { uiSettings.setHiddenCalendars(it) }
+        }
+        LaunchedEffect(calendarRepo, uiSettings) {
+            calendarRepo.seedOrder(uiSettings.calendarOrder.value)
+            calendarRepo.order.collect { uiSettings.setCalendarOrder(it) }
         }
         LaunchedEffect(calendarRepo, uiSettings) {
             calendarRepo.defaultCalendar.value = uiSettings.defaultCalendar.value
@@ -3621,7 +3625,7 @@ fun App(
                                 RailItem.Actions -> showActions = true
                                 RailItem.Settings -> showSettings = true
                                 // pane tabs handled above; never reaches here
-                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar,
+                                RailItem.Home, RailItem.Chats, RailItem.Mail, RailItem.Calendar, RailItem.Tasks,
                                 RailItem.Statuses, RailItem.Bookmarks, RailItem.Activity -> Unit
                             }
                         } }
@@ -3802,7 +3806,7 @@ fun App(
                                     onOpenContact = { other -> profileSheetShip = other },
                                 )
                                 // Calendar takes the whole area too; see the content slot.
-                                RailTab.Calendar -> Unit
+                                RailTab.Calendar, RailTab.Tasks -> Unit
                                 RailTab.Bookmarks -> BookmarksList(
                                     db = db,
                                     repo = repo,
@@ -4003,7 +4007,7 @@ fun App(
                                         )
                                     }
                                 }
-                            } else if (activeRailTab == RailTab.Calendar && !showAssistant && !showEvening) {
+                            } else if ((activeRailTab == RailTab.Calendar || activeRailTab == RailTab.Tasks) && !showAssistant && !showEvening) {
                                 {
                                     io.nisfeb.talon.ui.screens.CalendarScreen(
                                         repo = calendarRepo,
@@ -4011,6 +4015,7 @@ fun App(
                                         onBack = null,
                                         onOpenWebSettings = onOpenCalendarPage,
                                         db = db, chat = repo, mail = mailRepo, ourShip = ship,
+                                        tasksOnly = activeRailTab == RailTab.Tasks,
                                     )
                                 }
                             } else if (showAssistant) {
@@ -4060,7 +4065,8 @@ fun App(
                             // so no thread or info pane either.
                             rightSidebar = rightPaneContent?.takeIf {
                                 !meetingChatShown && !showAssistant && activeRailTab != RailTab.Home &&
-                                    activeRailTab != RailTab.Mail && activeRailTab != RailTab.Calendar
+                                    activeRailTab != RailTab.Mail && activeRailTab != RailTab.Calendar &&
+                                    activeRailTab != RailTab.Tasks
                             }?.let { content ->
                                 {
                                     val paneMicTrigger = remember(content) { kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1) }

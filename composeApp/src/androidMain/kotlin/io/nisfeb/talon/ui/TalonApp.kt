@@ -434,6 +434,10 @@ fun TalonApp(
         calendarRepo.hidden.collect { app.uiSettings.setHiddenCalendars(it) }
     }
     LaunchedEffect(calendarRepo) {
+        calendarRepo.seedOrder(app.uiSettings.calendarOrder.value)
+        calendarRepo.order.collect { app.uiSettings.setCalendarOrder(it) }
+    }
+    LaunchedEffect(calendarRepo) {
         calendarRepo.defaultCalendar.value = app.uiSettings.defaultCalendar.value
         calendarRepo.defaultCalendar.collect { app.uiSettings.setDefaultCalendar(it) }
     }
@@ -737,6 +741,8 @@ fun TalonApp(
     var bookmarksOpen by remember { sections.flag() }
     var locationsOpen by remember { sections.flag() }
     var calendarOpen by remember { sections.flag() }
+    /** The menu's Tasks: the calendar's screen, on its task list. */
+    var tasksOpen by remember { sections.flag() }
     var calendarPageOpen by remember { mutableStateOf(false) }
     /** The mail thread a tap outside mail asked for. */
     var pendingMailThread by remember { mutableStateOf<String?>(null) }
@@ -1822,6 +1828,7 @@ fun TalonApp(
             bookmarksOpen -> "Bookmarks"
             locationsOpen -> "Locations"
             calendarOpen -> "Calendar"
+            tasksOpen -> "Tasks"
             activityOpen -> "Activity"
             groupInfoDrilldown != null -> "MediaList"
             groupInfoOpenFor != null -> "GroupInfo"
@@ -1918,6 +1925,7 @@ fun TalonApp(
                                 io.nisfeb.talon.ui.RailItem.Statuses -> statusFeedOpen = true
                                 io.nisfeb.talon.ui.RailItem.Bookmarks -> bookmarksOpen = true
                                 io.nisfeb.talon.ui.RailItem.Calendar -> calendarOpen = true
+                                io.nisfeb.talon.ui.RailItem.Tasks -> tasksOpen = true
                                 io.nisfeb.talon.ui.RailItem.Activity -> activityOpen = true
                                 io.nisfeb.talon.ui.RailItem.Assistant -> assistantOpen = true
                                 io.nisfeb.talon.ui.RailItem.Profile -> editingProfile = true
@@ -2186,7 +2194,7 @@ fun TalonApp(
                 modifier = mod,
             )
 
-            calendarOpen -> {
+            calendarOpen || tasksOpen -> {
                 if (calendarPageOpen) {
                     app.sessionStore.active()?.let { active ->
                         io.nisfeb.talon.ui.ShipPageSheet(
@@ -2201,11 +2209,12 @@ fun TalonApp(
                 io.nisfeb.talon.ui.screens.CalendarScreen(
                     repo = calendarRepo,
                     twentyFourHour = app.uiSettings.homeTwentyFourHour.collectAsState().value,
-                    onBack = { calendarOpen = false },
+                    onBack = { calendarOpen = false; tasksOpen = false },
                     onOpenWebSettings = { calendarPageOpen = true },
                     db = app.db, chat = app.repo, mail = mailRepo, ourShip = loggedInShip,
                     openPushTag = calendarPushTag,
                     onOpenedPush = { calendarPushTag = null },
+                    tasksOnly = tasksOpen && !calendarOpen,
                     modifier = mod,
                 )
             }
