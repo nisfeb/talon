@@ -307,6 +307,12 @@ class SettingsSyncImpl(
     ) {
         if (ui != null) return
         ui = settings
+        // The watchers' own job, so [detachUiSettings] ends them and
+        // nothing else on the host's scope.
+        val job = kotlinx.coroutines.SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job])
+        watching = job
+        @Suppress("NAME_SHADOWING")
+        val scope = kotlinx.coroutines.CoroutineScope(scope.coroutineContext + job)
         pushScope = scope
         // Drain anything bootstrap parked before we had a store.
         pendingUiPrefs?.let { parked ->
@@ -351,6 +357,21 @@ class SettingsSyncImpl(
         watch(settings.accentSettings, ENTRY_ACCENT, ::encodeAccent)
         watch(settings.themeSettings, ENTRY_THEMES, ::encodeThemes)
         watch(settings.fontSettings, ENTRY_FONTS, ::encodeFonts)
+    }
+
+    @Volatile private var watching: kotlinx.coroutines.Job? = null
+
+    /**
+     * Let go of the settings store: for a host whose store outlives this
+     * sync, as Android's does a ship. It builds a sync for each ship it
+     * moves to and keeps one store, on a scope that never ends. Left
+     * attached, the old ship's sync went on hearing every change.
+     */
+    fun detachUiSettings() {
+        watching?.cancel()
+        watching = null
+        pushScope = null
+        ui = null
     }
 
     private fun encodeFonts(f: io.nisfeb.talon.ui.FontSettings): JsonElement = Json.parseToJsonElement(f.toJson())

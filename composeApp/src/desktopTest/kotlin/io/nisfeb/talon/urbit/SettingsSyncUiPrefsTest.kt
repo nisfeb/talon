@@ -315,4 +315,49 @@ class SettingsSyncUiPrefsTest {
         assertEquals(before, ui.groupChannelOrder.value)
         assertTrue(ui.railItemOrder.value.isNotEmpty())
     }
+
+    // A user, 2026-11-21, on a new Android phone beside an iPhone:
+    // "settings for theme and channel ordering and stuff aren't tracking
+    // what is on my iphone". Android keeps one settings store and builds a
+    // sync for every ship it moves to, the first signed in to among them.
+    // Only the sync built when the app started was given the store.
+    @Test
+    fun `the sync built at sign-in takes the ship's settings, and the one before it lets go`() = live {
+        // As the app starts on a new phone: a sync for no ship yet, with the store.
+        // With a channel, as the sync of a ship just left has: left attached, it sent every change again.
+        val before = SettingsSyncImpl(db = db, aiSettings = FakeAiSettings()).apply { attach(ship.channel) }
+        before.attachUiSettings(ui, watchers)
+        // Signed in: the ship holds what the other phone set.
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{
+            "group-channel-order":"{\"value\":\"HostOrder\"}",
+            "chat-bubbles":"{\"enabled\":true}",
+            "themes":"{\"themes\":[{\"id\":\"a1\",\"name\":\"Ocean\",\"dark\":true,\"primary\":\"#123456\",\"secondary\":\"#A78BFA\",\"tertiary\":\"#F472B6\",\"background\":\"#0B1020\",\"surface\":\"#131A2E\"}],\"activeId\":\"a1\"}"
+        }}}"""
+        before.detachUiSettings()
+        sync.attachUiSettings(ui, watchers)
+        sync.bootstrap()
+        settled { ui.themeSettings.value.active?.name == "Ocean" }
+        assertEquals(GroupChannelOrder.HostOrder, ui.groupChannelOrder.value)
+        assertTrue(ui.chatBubbles.value)
+        delay(300)
+        assertTrue(pushed("themes").isEmpty() && pushed("chat-bubbles").isEmpty(), "taking them is not an edit: ${ship.pokesTo("settings")}")
+        // And what is changed here goes to this ship, once: the sync let go of hears nothing.
+        ui.setChatBubbles(false)
+        settled { pushed("chat-bubbles").isNotEmpty() }
+        delay(300)
+        assertEquals(1, pushed("chat-bubbles").size, "once, by the sync for this ship")
+    }
+
+    // What the phone did before the fix, kept as the reason for it: with
+    // no store, the ship's settings wait and nothing here changes.
+    @Test
+    fun `a sync never given the store applies nothing`() = live {
+        ship.scries["settings/desk/talon"] = """{"desk":{"ui-prefs":{"chat-bubbles":"{\"enabled\":true}"}}}"""
+        val was = ui.chatBubbles.value
+        sync.bootstrap()
+        delay(300)
+        assertEquals(was, ui.chatBubbles.value)
+        sync.attachUiSettings(ui, watchers)
+        settled { ui.chatBubbles.value }
+    }
 }
