@@ -36,9 +36,16 @@ internal fun rememberSpeaker(devices: AudioDevices, onPick: () -> Unit): Speaker
         SpeakerButton.None -> null
         SpeakerButton.Pick -> SpeakerUi(pick = true, on = on, press = onPick)
         is SpeakerButton.Toggle -> SpeakerUi(pick = false, on = on) {
-            // Off picks the other route by name: "the system's choice" did
-            // nothing on Android's newer telecom and could never pick Bluetooth.
-            devices.selectOutput(if (on) button.other.id else button.speaker.id)
+            // The routes as they are at the press: telecom taking or leaving
+            // the call names the same earpiece anew, and an id from before
+            // was one the live backend did not know, so the press did nothing.
+            when (val now = speakerButton(devices.outputs())) {
+                // Off picks the other route by name: "the system's choice" did
+                // nothing on Android's newer telecom and could never pick Bluetooth.
+                is SpeakerButton.Toggle -> devices.selectOutput(if (on) now.other.id else now.speaker.id)
+                SpeakerButton.Pick -> onPick()
+                SpeakerButton.None -> Unit
+            }
         }
     }
 }

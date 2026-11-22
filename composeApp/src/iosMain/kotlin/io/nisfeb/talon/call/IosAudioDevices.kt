@@ -18,6 +18,7 @@ import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSOperationQueue
 import platform.UIKit.UIDevice
 import platform.UIKit.UIUserInterfaceIdiomPhone
+import platform.AVFAudio.AVAudioSessionCategoryOptionDefaultToSpeaker
 
 /**
  * Call routing on iOS.
@@ -90,7 +91,11 @@ class IosAudioDevices : AudioDevices {
         // availableInputs — but it is the one route people reach for
         // most on a phone, and leaving it out would make the list look
         // broken.
-        ports + AudioDevice(id = SPEAKER_ID, label = "Speaker", kind = if (phone) AudioRouteKind.Speaker else AudioRouteKind.Other)
+        // A party line's session defaults to the speaker (TalonRtc.swift):
+        // clearing the override goes back to it, so "off" could never reach
+        // the earpiece and the button would do nothing. No button there.
+        val toSpeaker = (session.categoryOptions and AVAudioSessionCategoryOptionDefaultToSpeaker) != 0uL
+        ports + AudioDevice(id = SPEAKER_ID, label = "Speaker", kind = if (phone && !toSpeaker) AudioRouteKind.Speaker else AudioRouteKind.Other)
     }.getOrElse {
         Log.w(TAG, "could not list audio routes", it)
         emptyList()

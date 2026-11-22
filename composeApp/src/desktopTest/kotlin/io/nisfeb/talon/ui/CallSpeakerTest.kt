@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import io.nisfeb.talon.call.AudioDevice
 import io.nisfeb.talon.call.AudioDevices
 import io.nisfeb.talon.call.AudioRouteKind
@@ -114,6 +116,39 @@ class CallSpeakerTest {
             phone.now.value = AudioRouteKind.Speaker
             waitUntil(timeoutMillis = 5_000) { shows("Speaker on") }
         }
+    }
+
+    // Telecom taking the call renames the same earpiece and speaker
+    // ("route:1" for the audio manager's "7"): the kind holds, the ids do not.
+    @Test
+    fun `a press picks from the routes as they are then, not as they were drawn`() {
+        val phone = Phone(listOf(ear, speaker))
+        bar(phone) {
+            phone.routes = listOf(ear.copy(id = "route:1"), speaker.copy(id = "route:8"))
+            onNodeWithContentDescription("Speaker off").performClick()
+            waitUntil(timeoutMillis = 5_000) { shows("Speaker on") }
+            assertEquals(listOf<String?>("route:8"), phone.picked)
+        }
+    }
+
+    // A phone opens a call full screen: its five buttons stay one row at 360 dp.
+    @Test
+    fun `the full-screen call's buttons stay one row on a phone`() = runComposeUiTest {
+        setContent {
+            TalonTheme(darkTheme = false) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.width(360.dp)) {
+                    PartyLineFullScreen(
+                        state = line, roomName = "Garden", directCall = true, nameFor = { it }, selfShip = "~zod",
+                        onToggleMute = {}, onLeave = {}, onMinimize = {}, audioDevices = Phone(listOf(ear, speaker)),
+                        cameraOn = true, onToggleCamera = {},
+                    )
+                }
+            }
+        }
+        waitForIdle()
+        fun top(word: String) = onAllNodesWithText(word).fetchSemanticsNodes().single().boundsInRoot.top
+        assertEquals(top("Mute"), top("Hang up"), "Hang up wrapped onto a row of its own")
+        assertEquals(top("Mute"), top("Speaker"))
     }
 
     @Test
