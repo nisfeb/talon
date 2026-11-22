@@ -42,8 +42,9 @@ import org.webrtc.audio.JavaAudioDeviceModule
  * Audio mode and focus go through [CallAudioSession] (default
  * routing — earpiece on handsets), refcounted so an overlapping
  * party line can't restore the wrong mode under us.
- * ponytail: no speakerphone/proximity handling yet — default routing
- * only; add an audio-route control when real-device testing demands it.
+ * The speaker button is the call views' ([rememberSpeaker] through
+ * [AndroidAudioDevices]), and the screen off at the ear is
+ * [AndroidCallProximity]'s.
  */
 class AndroidCallEngine(
     // A `val` because the camera is opened long after construction:

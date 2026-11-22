@@ -401,6 +401,9 @@ fun TalonApp(
     val androidAudioDevices = remember {
         io.nisfeb.talon.call.AndroidAudioDevices(app)
     }
+    // The screen off at the ear on the earpiece, as App.kt does it.
+    val callProximity = remember { io.nisfeb.talon.call.AndroidCallProximity(app) }
+    io.nisfeb.talon.ui.CallProximityEffect(callController?.state, partyLine?.state, androidAudioDevices, callProximity)
     // Mail rides the ship's own HTTP surface, not the eyre channel, so
     // the session's cookie-bearing client is all it needs.
     // The assistant's runs, over the app's scope: a run goes on when the

@@ -33,6 +33,7 @@ class PartyLineBarSizeTest {
     /** Render the bar at phone width and return its height in dp. */
     private fun barHeightDp(
         state: PartyState,
+        bar: @androidx.compose.runtime.Composable (PartyState) -> Unit = { PartyLineBarContent(state = it) },
     ): Int {
         val widthPx = (phoneWidthDp * density.density).toInt()
         val scene = ImageComposeScene(
@@ -48,7 +49,7 @@ class PartyLineBarSizeTest {
                         heightPx = it.size.height
                     },
                 ) {
-                    PartyLineBarContent(state = state)
+                    bar(state)
                 }
             }
             scene.render()
@@ -76,6 +77,32 @@ class PartyLineBarSizeTest {
         println("bar height, 4 members + 7 listeners: ${height}dp")
         // One row of controls plus padding. Two rows of text would push
         // this past ~80dp, which is what the second line used to cost.
+        assertTrue(height in 1..80, "bar grew to ${height}dp at 360dp wide")
+    }
+
+    /** A phone's two routes: the speaker button shows. */
+    private val phone = object : io.nisfeb.talon.call.AudioDevices {
+        val routes = listOf(
+            io.nisfeb.talon.call.AudioDevice("ear", "Earpiece", io.nisfeb.talon.call.AudioRouteKind.Earpiece),
+            io.nisfeb.talon.call.AudioDevice("spk", "Speaker", io.nisfeb.talon.call.AudioRouteKind.Speaker),
+        )
+        override val supported = true
+        override val unifiedRoute = true
+        override fun inputs() = routes
+        override fun outputs() = routes
+    }
+
+    // A speaker button joined mute, camera, the menu and hang-up on a
+    // phone's 1:1 call (2026-11-22): still one row at 360dp.
+    @Test
+    fun aCallWithTheSpeakerAndCameraStaysOneRowOnAPhone() {
+        val state = PartyState.Live(
+            room = "~bus", members = listOf(PartyMember("a", "~bus")), muted = false, media = MediaState.Live,
+        )
+        val height = barHeightDp(state) {
+            PartyLineBarContent(state = it, audioDevices = phone, headline = "On a call with ~ridlur-figbud", onToggleCamera = {})
+        }
+        println("bar height, a call with speaker and camera: ${height}dp")
         assertTrue(height in 1..80, "bar grew to ${height}dp at 360dp wide")
     }
 }

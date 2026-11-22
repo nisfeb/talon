@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import io.nisfeb.talon.ui.TextButton
@@ -392,7 +393,23 @@ fun PartyLineBarContent(
                             )
                         }
                     }
+                    // A phone's speaker beside the mic, a listener's too: they hear the line.
+                    val speaker = rememberSpeaker(audioDevices) { devicesOpen = true }
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (speaker != null) {
+                            val said = when {
+                                speaker.pick -> "Choose where the sound goes"
+                                speaker.on -> "Speaker on"
+                                else -> "Speaker off"
+                            }
+                            io.nisfeb.talon.ui.IconButton(tip = said, onClick = speaker.press) {
+                                Icon(
+                                    TalonIcons.VolumeUp,
+                                    contentDescription = said,
+                                    tint = if (speaker.on) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                                )
+                            }
+                        }
                         if (s.canSpeak) {
                             io.nisfeb.talon.ui.IconButton(tip = if (s.muted) "Unmute" else "Mute", onClick = { onToggleMute(!s.muted) }) {
                                 Icon(

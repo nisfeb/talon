@@ -49,6 +49,7 @@ internal object CallAudioSession {
         // rather than a new one: a reconnect closes every link, which
         // reaches release() below, and opens new ones here.
         AndroidAudioDevices.restoreSelection(am)
+        AndroidAudioDevices.refreshRoute()
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -86,6 +87,7 @@ internal object CallAudioSession {
             runCatching { am.clearCommunicationDevice() }
         }
         AndroidAudioDevices.sessionEnded()
+        AndroidAudioDevices.refreshRoute()
     }
 
     private const val TAG = "CallAudioSession"

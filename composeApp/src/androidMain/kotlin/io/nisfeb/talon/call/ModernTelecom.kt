@@ -201,12 +201,20 @@ class ModernTelecomRoute : CallRoute {
     private val endpoints = MutableStateFlow<List<CallEndpointCompat>>(emptyList())
     private val current = MutableStateFlow<CallEndpointCompat?>(null)
     @Volatile private var call: ModernCall? = null
+    @Volatile override var onChange: (() -> Unit)? = null
 
     override val active: Boolean get() = call != null
     override val selected: String? get() = current.value?.identifier?.toString()
 
     override fun devices(): List<AudioDevice> =
-        endpoints.value.map { AudioDevice(id = it.identifier.toString(), label = it.name.toString()) }
+        endpoints.value.map {
+            val kind = when (it.type) {
+                CallEndpointCompat.TYPE_EARPIECE -> AudioRouteKind.Earpiece
+                CallEndpointCompat.TYPE_SPEAKER -> AudioRouteKind.Speaker
+                else -> AudioRouteKind.Other
+            }
+            AudioDevice(id = it.identifier.toString(), label = it.name.toString(), kind = kind)
+        }
 
     override fun select(id: String?) {
         val c = call?.control ?: return
@@ -216,12 +224,12 @@ class ModernTelecomRoute : CallRoute {
 
     internal fun bind(c: ModernCall) {
         call = c
-        c.control.launch { c.control.availableEndpoints.collect { endpoints.value = it } }
-        c.control.launch { c.control.currentCallEndpoint.collect { current.value = it } }
+        c.control.launch { c.control.availableEndpoints.collect { endpoints.value = it; onChange?.invoke() } }
+        c.control.launch { c.control.currentCallEndpoint.collect { current.value = it; onChange?.invoke() } }
     }
 
     internal fun unbind(c: ModernCall) {
-        if (call === c) { call = null; endpoints.value = emptyList(); current.value = null }
+        if (call === c) { call = null; endpoints.value = emptyList(); current.value = null; onChange?.invoke() }
     }
 }
 

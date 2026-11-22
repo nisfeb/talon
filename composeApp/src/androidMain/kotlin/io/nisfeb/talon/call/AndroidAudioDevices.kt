@@ -31,12 +31,40 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
      *  routing; the list and the choice come from it. See [TelecomRoute]. */
     @Volatile
     var telecom: CallRoute? = null
+        set(value) {
+            field?.onChange = null
+            field = value
+            value?.onChange = ::refreshRoute
+            refreshRoute()
+        }
     private val viaTelecom: CallRoute? get() = telecom?.takeIf { it.active }
 
     override val supported: Boolean
         get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || viaTelecom != null
 
     override val unifiedRoute: Boolean = true
+
+    override val route: kotlinx.coroutines.flow.StateFlow<AudioRouteKind> get() = currentRoute
+
+    init {
+        // The newest of these is the one the shell uses: the route is read through it.
+        source = ::currentKind
+        listenForRoutes(audioManager, appContext)
+        refreshRoute()
+    }
+
+    /**
+     * Where the sound goes now: telecom's word while it owns the call,
+     * else the communication device. Below 31 without telecom there is
+     * no way to ask, so Other, and no button or screen-off there.
+     */
+    private fun currentKind(): AudioRouteKind = runCatching {
+        viaTelecom?.let { t ->
+            val at = t.selected
+            return@runCatching t.devices().firstOrNull { it.id == at }?.kind ?: AudioRouteKind.Other
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) kindOf(audioManager.communicationDevice) else AudioRouteKind.Other
+    }.getOrDefault(AudioRouteKind.Other)
 
     override val selectedInput: String? get() = viaTelecom?.selected ?: chosen
     override val selectedOutput: String? get() = viaTelecom?.selected ?: chosen
@@ -54,7 +82,7 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
         if (!supported) return emptyList()
         return runCatching {
             audioManager.availableCommunicationDevices.map { d ->
-                AudioDevice(id = d.id.toString(), label = labelFor(d))
+                AudioDevice(id = d.id.toString(), label = labelFor(d), kind = kindOf(d))
             }
         }.getOrElse {
             Log.w(TAG, "could not list communication devices", it)
@@ -110,6 +138,33 @@ class AndroidAudioDevices(context: Context) : AudioDevices {
 
     companion object {
         private const val TAG = "AndroidAudioDevices"
+
+        private fun kindOf(d: AudioDeviceInfo?): AudioRouteKind = when (d?.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> AudioRouteKind.Earpiece
+            AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> AudioRouteKind.Speaker
+            else -> AudioRouteKind.Other
+        }
+
+        // Process-wide, as [chosen] is: the communication device is the
+        // process's, and the listener is registered once, not once for
+        // every instance a recreated activity makes.
+        private val currentRoute = kotlinx.coroutines.flow.MutableStateFlow(AudioRouteKind.Other)
+        @Volatile private var source: (() -> AudioRouteKind)? = null
+        @Volatile private var listening = false
+
+        /** Read the route again: a session starting or ending, a pick, telecom's word. */
+        internal fun refreshRoute() {
+            source?.let { currentRoute.value = it() }
+        }
+
+        @Synchronized
+        private fun listenForRoutes(am: AudioManager, context: Context) {
+            if (listening || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            runCatching {
+                am.addOnCommunicationDeviceChangedListener(context.mainExecutor) { refreshRoute() }
+                listening = true
+            }.onFailure { Log.w(TAG, "no route change notices", it) }
+        }
 
         private fun labelFor(d: AudioDeviceInfo): String = when (d.type) {
             AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"

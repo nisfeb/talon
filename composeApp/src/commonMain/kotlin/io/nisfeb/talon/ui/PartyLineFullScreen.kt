@@ -161,6 +161,8 @@ fun PartyLineFullScreen(
         // Mute, camera, share and leave, and the rest behind More
         // (sneagan, 2026-11-02: too many buttons). FlowRow, so a
         // narrow phone still wraps rather than squeezing them.
+        // A phone's speaker beside the mic, as its own dialer has it.
+        val speaker = rememberSpeaker(audioDevices) { devicesOpen = true }
         Column(mod) {
             // A share that would not start, or ended by itself, says so here
             // too: only the bar said it, and a call's own view said nothing.
@@ -226,6 +228,31 @@ fun PartyLineFullScreen(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+
+                if (speaker != null) {
+                    ControlButton(
+                        label = if (speaker.pick) "Audio" else "Speaker",
+                        // The word under it does not say whether it is on.
+                        description = when {
+                            speaker.pick -> "Choose where the sound goes"
+                            speaker.on -> "Speaker on"
+                            else -> "Speaker off"
+                        },
+                        onClick = speaker.press,
+                        containerColor = if (speaker.on) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentColor = if (speaker.on) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    ) {
+                        Icon(TalonIcons.VolumeUp, contentDescription = null, modifier = Modifier.size(26.dp))
                     }
                 }
 

@@ -389,6 +389,8 @@ interface CallRoute {
     val selected: String?
     fun devices(): List<AudioDevice>
     fun select(id: String?)
+    /** Told when the route or the routes change, as telecom reports them. */
+    var onChange: (() -> Unit)?
 }
 
 /**
@@ -400,6 +402,7 @@ interface CallRoute {
 class TelecomRoute : CallRoute {
     @Volatile private var conn: TalonConnection? = null
     @Volatile private var state: CallAudioState? = null
+    @Volatile override var onChange: (() -> Unit)? = null
 
     override val active: Boolean get() = conn != null
 
@@ -412,8 +415,8 @@ class TelecomRoute : CallRoute {
         val s = state ?: return emptyList()
         val out = ArrayList<AudioDevice>()
         val mask = s.supportedRouteMask
-        if (mask and CallAudioState.ROUTE_EARPIECE != 0) out += AudioDevice("route:${CallAudioState.ROUTE_EARPIECE}", "Earpiece")
-        if (mask and CallAudioState.ROUTE_SPEAKER != 0) out += AudioDevice("route:${CallAudioState.ROUTE_SPEAKER}", "Speaker")
+        if (mask and CallAudioState.ROUTE_EARPIECE != 0) out += AudioDevice("route:${CallAudioState.ROUTE_EARPIECE}", "Earpiece", AudioRouteKind.Earpiece)
+        if (mask and CallAudioState.ROUTE_SPEAKER != 0) out += AudioDevice("route:${CallAudioState.ROUTE_SPEAKER}", "Speaker", AudioRouteKind.Speaker)
         if (mask and CallAudioState.ROUTE_WIRED_HEADSET != 0) out += AudioDevice("route:${CallAudioState.ROUTE_WIRED_HEADSET}", "Wired headset")
         if (mask and CallAudioState.ROUTE_BLUETOOTH != 0) {
             val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) s.supportedBluetoothDevices else emptyList()
@@ -449,13 +452,14 @@ class TelecomRoute : CallRoute {
     internal fun bind(c: TalonConnection) {
         conn = c
         state = runCatching { @Suppress("DEPRECATION") c.callAudioState }.getOrNull()
+        onChange?.invoke()
     }
 
     internal fun update(c: TalonConnection, s: CallAudioState) {
-        if (conn === c) state = s
+        if (conn === c) { state = s; onChange?.invoke() }
     }
 
     internal fun unbind(c: TalonConnection) {
-        if (conn === c) { conn = null; state = null }
+        if (conn === c) { conn = null; state = null; onChange?.invoke() }
     }
 }

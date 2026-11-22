@@ -55,6 +55,10 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The screen off at the ear on a call (AndroidCallProximity), and the
+         loops' and dictation's partial locks. It came only through a
+         library's manifest, which nothing here can see. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Incoming calls take over a locked screen. Auto-granted for
          apps that post CATEGORY_CALL notifications; without it the
          ring degrades to a heads-up banner. -->
