@@ -551,6 +551,8 @@ class TalonApplication : Application() {
         // typed-as-impl handle (the SettingsSync interface in commonMain
         // is intentionally narrow — push/clear methods etc. live on the
         // impl). repo gets it via constructor param.
+        // The one settings store moves to this ship's sync (attached below).
+        if (::settingsSync.isInitialized) settingsSync.detachUiSettings()
         settingsSync = io.nisfeb.talon.urbit.SettingsSyncImpl(
             db = db,
             aiSettings = aiSettings,
@@ -609,6 +611,13 @@ class TalonApplication : Application() {
         // returns (with `initialDb = db`).
         if (::uiSettings.isInitialized) {
             (uiSettings as? io.nisfeb.talon.ui.AndroidUiSettings)?.rebindDb(db)
+            // A sync is built for every ship moved to, the first signed in
+            // to among them, and only the one built at the process's start
+            // was given the store. On a new phone the ship's theme, fonts,
+            // bubbles and menu order were read at sign-in and put nowhere,
+            // and what was changed here went nowhere, until the app was
+            // started again (a user, 2026-11-21).
+            runCatching { settingsSync.attachUiSettings(uiSettings, appScope) }
         }
 
         if (priorDb != null || priorIndexer != null) {
