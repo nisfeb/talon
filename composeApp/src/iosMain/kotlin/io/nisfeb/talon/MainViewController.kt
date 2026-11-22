@@ -145,6 +145,7 @@ fun MainViewController(rtc: NativeRtcFactory?, models: io.nisfeb.talon.orrery.Na
             callEngineProvider = callEngineProvider,
             peerLinkFactory = peerLinkFactory,
             audioDevices = audioDevices,
+            callProximity = io.nisfeb.talon.call.IosCallProximity,
             callSounds = callSounds,
             // PushKit VoIP token → relay, so a backgrounded phone
             // gets an APNs VoIP ring. The token itself arrives from

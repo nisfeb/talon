@@ -179,6 +179,8 @@ fun App(
      *  routing — gate it, don't fake it. */
     audioDevices: io.nisfeb.talon.call.AudioDevices =
         io.nisfeb.talon.call.AudioDevices.Noop,
+    /** The screen off at the ear on a call: an iPhone's sensor; Noop where there is none. */
+    callProximity: io.nisfeb.talon.call.CallProximity = io.nisfeb.talon.call.CallProximity.Noop,
     videoDevices: io.nisfeb.talon.call.VideoDevices = io.nisfeb.talon.call.VideoDevices.Noop,
     /** A comet Talon runs on this machine; Noop where unsupported. */
     localShip: io.nisfeb.talon.comet.LocalShip = io.nisfeb.talon.comet.LocalShip.Noop,
@@ -1019,6 +1021,8 @@ fun App(
                 null
             }
         }
+        // The screen off at the ear on the earpiece, as TalonApp.kt does it.
+        io.nisfeb.talon.ui.CallProximityEffect(callController?.state, partyLine?.state, audioDevices, callProximity)
         LaunchedEffect(partyLine, callController) {
             // A 1:1 call and a party line can be live at the same time,
             // and every setMuted is per-track — CallController's mute

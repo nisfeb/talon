@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.automirrored.filled.StopScreenShare
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Archive
@@ -122,5 +123,6 @@ object TalonIconSources {
         "Forward" to Icons.AutoMirrored.Filled.Forward,
         "ScreenShare" to Icons.AutoMirrored.Filled.ScreenShare,
         "StopScreenShare" to Icons.AutoMirrored.Filled.StopScreenShare,
+        "VolumeUp" to Icons.AutoMirrored.Filled.VolumeUp,
     )
 }

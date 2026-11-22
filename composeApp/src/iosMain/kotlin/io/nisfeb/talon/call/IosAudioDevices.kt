@@ -10,6 +10,14 @@ import platform.AVFAudio.AVAudioSessionPortBuiltInMic
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.AVAudioSessionPortOverrideNone
 import platform.AVFAudio.AVAudioSessionPortOverrideSpeaker
+import platform.AVFAudio.AVAudioSessionPortBuiltInReceiver
+import platform.AVFAudio.AVAudioSessionPortBuiltInSpeaker
+import platform.AVFAudio.AVAudioSessionRouteChangeNotification
+import platform.AVFAudio.currentRoute
+import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSOperationQueue
+import platform.UIKit.UIDevice
+import platform.UIKit.UIUserInterfaceIdiomPhone
 
 /**
  * Call routing on iOS.
@@ -42,16 +50,47 @@ class IosAudioDevices : AudioDevices {
 
     private val session get() = AVAudioSession.sharedInstance()
 
+    /** An iPhone has an earpiece; an iPad's own route is its speaker, so it gets no speaker button. */
+    private val phone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone
+
+    private val _route = kotlinx.coroutines.flow.MutableStateFlow(AudioRouteKind.Other)
+    override val route: kotlinx.coroutines.flow.StateFlow<AudioRouteKind> = _route
+
+    init {
+        // The session's own word: a speaker override is dropped when a
+        // headset comes or goes, and a pick can be refused.
+        NSNotificationCenter.defaultCenter.addObserverForName(
+            AVAudioSessionRouteChangeNotification, null, NSOperationQueue.mainQueue,
+        ) { _ -> refreshRoute() }
+        refreshRoute()
+    }
+
+    private fun refreshRoute() {
+        _route.value = runCatching {
+            val out = session.currentRoute.outputs.filterIsInstance<AVAudioSessionPortDescription>().firstOrNull()?.portType
+            when (out) {
+                AVAudioSessionPortBuiltInReceiver -> AudioRouteKind.Earpiece
+                AVAudioSessionPortBuiltInSpeaker -> AudioRouteKind.Speaker
+                else -> AudioRouteKind.Other
+            }
+        }.getOrDefault(AudioRouteKind.Other)
+    }
+
     override fun inputs(): List<AudioDevice> = runCatching {
         val ports = session.availableInputs
             ?.filterIsInstance<AVAudioSessionPortDescription>()
             .orEmpty()
-            .map { AudioDevice(id = it.UID, label = it.portName) }
+            .map {
+                // The built-in mic is the earpiece's route: chosen, the sound
+                // goes back to the receiver (an iPhone's), not the speaker.
+                val own = phone && it.portType == AVAudioSessionPortBuiltInMic
+                AudioDevice(id = it.UID, label = it.portName, kind = if (own) AudioRouteKind.Earpiece else AudioRouteKind.Other)
+            }
         // The speaker is an output, so it never appears in
         // availableInputs — but it is the one route people reach for
         // most on a phone, and leaving it out would make the list look
         // broken.
-        ports + AudioDevice(id = SPEAKER_ID, label = "Speaker")
+        ports + AudioDevice(id = SPEAKER_ID, label = "Speaker", kind = if (phone) AudioRouteKind.Speaker else AudioRouteKind.Other)
     }.getOrElse {
         Log.w(TAG, "could not list audio routes", it)
         emptyList()
@@ -103,6 +142,7 @@ class IosAudioDevices : AudioDevices {
                 }
             }
         }.onFailure { Log.w(TAG, "could not set audio route", it) }
+        refreshRoute()
     }
 
     private companion object {
