@@ -22,6 +22,7 @@ import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -1480,6 +1481,86 @@ class AppShellTest {
             onNodeWithText("The Crew").performClick()
             waitUntil(timeoutMillis = 10_000) { present("Message actions") }
         }
+    }
+
+    // A user, 2026-11-24, on every client: "I need to search for a group,
+    // click it, have search go away and still be just looking at my
+    // previous view, and then search for it again and click it to then be
+    // anchor-scrolled to it."
+    private val manyGroups: suspend AppDatabase.() -> Unit = {
+        val flags = (1..40).map { "~bus/g${it.toString().padStart(2, '0')}" }
+        groups().upsertGroups(flags.mapIndexed { i, f -> io.nisfeb.talon.data.GroupEntity(f, "Group ${(i + 1).toString().padStart(2, '0')}", null) } +
+            io.nisfeb.talon.data.GroupEntity("~bus/zebra", "Zebra Lounge", null))
+        groups().upsertChannelGroups(flags.map { f -> io.nisfeb.talon.data.ChannelGroupEntity("chat/$f-chat", f, title = "chat") } +
+            io.nisfeb.talon.data.ChannelGroupEntity("chat/~bus/zebra-den", "~bus/zebra", title = "den"))
+        // Every other group newer, so the one searched for is far down the list.
+        flags.forEachIndexed { i, f ->
+            messages().upsert(MessageEntity("chat/$f-chat", "1701411845${(10 + i).toString()}", "~bus", 100_000L + i * 1_000, """[{"inline":["news $i"]}]""", "/chat"))
+        }
+        messages().upsert(MessageEntity("chat/~bus/zebra-den", "170141184500", "~bus", 1_000, """[{"inline":["stripes"]}]""", "/chat"))
+    }
+
+    /** The group's own row in the list: its preview, which a chat's header never shows. */
+    private fun ComposeUiTest.groupRowInView() =
+        onAllNodesWithText("~bus: stripes", substring = true).fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.pickGroupInSearch(name: String) {
+        onNodeWithContentDescription("Search messages").performClick()
+        waitUntil(timeoutMillis = 10_000) { onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        onAllNodes(hasSetTextAction()).onLast().performTextInput(name.substringBefore(' '))
+        waitUntil(timeoutMillis = 10_000) { onAllNodesWithText("GROUPS").fetchSemanticsNodes().isNotEmpty() && showing(name) }
+        onAllNodesWithText(name).onLast().performClick()
+    }
+
+    @Test
+    fun `a group picked in search is opened out and in view the first time`() = app(seed = manyGroups) {
+        home()
+        waitUntil(timeoutMillis = 10_000) { showing("Group 01") }
+        assertTrue(!groupRowInView(), "far down the list to begin with")
+        pickGroupInSearch("Zebra Lounge")
+        waitUntil(timeoutMillis = 10_000) { present("New message") }
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(groupRowInView(), "the group's own row in the list, the first time")
+    }
+
+    @Test
+    fun `on a phone-width window a group picked in search is in view the first time`() = app(seed = manyGroups, width = 600.dp) {
+        waitUntil(timeoutMillis = 20_000) { showing("Group 01") }
+        onNodeWithText("Groups").performClick()
+        waitForIdle()
+        assertTrue(!groupRowInView(), "far down the list to begin with")
+        pickGroupInSearch("Zebra Lounge")
+        waitUntil(timeoutMillis = 10_000) { present("New message") }
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(groupRowInView(), "the group's own row in the list, the first time")
+    }
+
+    @Test
+    fun `scrolled partway, a group picked in search is in view the first time`() = app(seed = manyGroups) {
+        home()
+        waitUntil(timeoutMillis = 10_000) { showing("Group 01") }
+        onAllNodes(androidx.compose.ui.test.hasScrollToIndexAction() and androidx.compose.ui.test.hasAnyDescendant(androidx.compose.ui.test.hasText("Group 01", substring = true))).onFirst().performScrollToIndex(12)
+        waitForIdle()
+        assertTrue(!groupRowInView(), "far down the list to begin with")
+        pickGroupInSearch("Zebra Lounge")
+        waitUntil(timeoutMillis = 10_000) { present("New message") }
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(groupRowInView(), "the group's own row in the list, the first time")
+    }
+
+    @Test
+    fun `a group picked in search from the people tab is in view the first time`() = app(seed = manyGroups) {
+        home()
+        onNodeWithText("DMs").performClick()
+        waitForIdle()
+        pickGroupInSearch("Zebra Lounge")
+        waitUntil(timeoutMillis = 10_000) { present("New message") }
+        Thread.sleep(1_500)
+        waitForIdle()
+        assertTrue(groupRowInView(), "the group's own row in the list, the first time")
     }
 
     // Reported on 1.8.39 desktop: a quote did not jump to the post it

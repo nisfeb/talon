@@ -692,7 +692,13 @@ fun DmListScreen(
                 is HomeRow.GroupChild -> Unit
             }
         }
-        if (idx >= 0) runCatching { listState.animateScrollToItem(idx) }
+        // Not runCatching: expanding the group changes the rows, which
+        // re-keys this effect and cancels the scroll. Caught, the cancelled
+        // run went on to clear the request, and the run that replaced it
+        // found nothing to do: the list stayed where it was, and only a
+        // second pick, the group already open, landed (a user, 2026-11-24,
+        // on every client). Let through, the next run scrolls.
+        if (idx >= 0) io.nisfeb.talon.util.runSuspendCatching { listState.animateScrollToItem(idx) }
         onRevealGroupHandled()
     }
     // Tracks what was touched during a drag so onDragStopped knows what
