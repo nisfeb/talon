@@ -269,3 +269,22 @@ fun buildFolderRows(
     }
     return out
 }
+
+/**
+ * The chat list narrowed to what is typed in its search bar: the
+ * conversations whose name holds [query] (a channel's "Group · channel",
+ * a person's name or their ship), newest first. A channel is not matched
+ * on its host's ship: "bus" would have found every channel ~bus keeps.
+ */
+fun filterConversations(
+    rows: List<Pair<MessageEntity, Int>>,
+    query: String,
+    labelOf: (String) -> String,
+): List<Pair<MessageEntity, Int>> {
+    val q = query.trim()
+    if (q.isEmpty()) return rows
+    return rows.filter { (m, _) ->
+        labelOf(m.whom).contains(q, ignoreCase = true) ||
+            (m.whom.startsWith("~") && m.whom.contains(q, ignoreCase = true))
+    }.sortedByDescending { it.first.sentMs }
+}
