@@ -22,9 +22,20 @@ class RevealOnPull(private val maxPx: Float) : NestedScrollConnection {
     var shownPx by mutableFloatStateOf(0f)
         private set
 
+    /**
+     * Held all the way out while the bar is in use (it has focus or text):
+     * a scroll of the results does not fold it. Folding underneath ate the
+     * scroll, and emptied, a folded bar left the screen under the typist.
+     */
+    var held = false
+        set(value) {
+            field = value
+            if (value) shownPx = maxPx
+        }
+
     override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
         // The list moving on (content going up): fold it first.
-        if (available.y >= 0f || shownPx <= 0f) return Offset.Zero
+        if (held || available.y >= 0f || shownPx <= 0f) return Offset.Zero
         val used = maxOf(available.y, -shownPx)
         shownPx += used
         return Offset(0f, used)
@@ -45,6 +56,7 @@ class RevealOnPull(private val maxPx: Float) : NestedScrollConnection {
 
     /** Open or shut, whichever it is nearer: never left half drawn. */
     fun settle() {
+        if (held) return
         shownPx = if (shownPx >= maxPx / 2) maxPx else 0f
     }
 }

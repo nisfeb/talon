@@ -53,6 +53,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.key
@@ -1306,9 +1308,25 @@ fun DmListScreen(
         // or the header's search.
         var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
         val filterQuery = searchText.text.trim()
-        val filtered = remember(filterQuery, rows, contactMap) {
-            if (filterQuery.isEmpty()) null else filterConversations(rows, filterQuery, contactMap::conversationLabel)
+        // Over the whole list, whatever tab or folder is chosen.
+        val filtered = remember(filterQuery, rows, contactMap, groupOrders, allUnreads, groupChannelOrder, folderItemOrder) {
+            if (filterQuery.isEmpty()) null
+            else filterHomeRows(
+                buildHomeRows(
+                    allConvs = rows,
+                    contactMap = contactMap,
+                    expandedGroups = emptySet(),
+                    allUnreads = allUnreads,
+                    groupOrderFlags = groupOrders.map { it.flag },
+                    groupChannelOrder = groupChannelOrder,
+                    folderItemOrder = folderItemOrder,
+                ),
+                filterQuery,
+                contactMap::conversationLabel,
+            )
         }
+        var barFocused by remember { mutableStateOf(false) }
+        SideEffect { searchReveal.held = searchText.text.isNotEmpty() || barFocused }
         val searchMessages: () -> Unit = {
             SearchDraft.query = searchText.text
             SearchDraft.fromBar = true
@@ -1336,7 +1354,7 @@ fun DmListScreen(
         // Over the list, not above it: only the list's top padding grows as
         // it slides in, so nothing moves under the finger that pulls it (a
         // layout that moved fed the drag its own movement, without end).
-        val shown = if (filtered != null) searchBarPx else searchReveal.shownPx
+        val shown = searchReveal.shownPx
         val shownDp = with(androidx.compose.ui.platform.LocalDensity.current) { shown.toDp() }
         Box {
         LazyColumn(
@@ -1345,8 +1363,8 @@ fun DmListScreen(
             contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            // Filtering: the matches alone, from every tab and folder, newest
-            // first, under a row that searches the messages for the same words.
+            // Filtering: the matches alone, from every tab and folder, in the
+            // list's order, under a row that searches the messages for the same words.
             if (filtered != null) {
                 item(key = "__search_messages", contentType = "search_messages") {
                     androidx.compose.foundation.layout.Row(
@@ -1365,18 +1383,40 @@ fun DmListScreen(
                 }
                 if (filtered.isEmpty()) {
                     item(key = "__filter_empty") { SpecialEmpty("No chats named \u201c$filterQuery\u201d.") }
-                } else {
-                    items(items = filtered, key = { "flt:${it.first.whom}" }, contentType = { "unr" }) { (m, unread) ->
+                }
+                for ((n, row) in filtered.withIndex()) when (row) {
+                    is HomeRow.GroupHead -> {
+                        val kids = filtered.drop(n + 1).takeWhile { it is HomeRow.GroupChild && it.groupFlag == row.flag }
+                            .filterIsInstance<HomeRow.GroupChild>()
+                        item(key = "flt:" + row.key, contentType = "GroupHead") {
+                            GroupCard(
+                                row = row,
+                                children = kids,
+                                contactMap = contactMap,
+                                ourShip = activeShip,
+                                draftOf = { drafts[it] },
+                                openWhom = openWhom,
+                                onOpen = onRowOpen,
+                                onShowAll = {},
+                                onLongClick = onGroupHeadLongPress,
+                                onChannelLongPress = onRowLongPress,
+                                editMode = false,
+                                dragHandleModifier = null,
+                            )
+                        }
+                    }
+                    is HomeRow.Flat -> item(key = "flt:" + row.key, contentType = "Flat") {
                         ConversationRow(
-                            m = m,
-                            unread = unread,
+                            m = row.m,
+                            unread = row.unread,
                             contactMap = contactMap,
-                            draft = drafts[m.whom],
+                            draft = drafts[row.m.whom],
                             onClick = onRowOpen,
                             onLongClick = onRowLongPress,
-                            open = m.whom == openWhom,
+                            open = row.m.whom == openWhom,
                         )
                     }
+                    is HomeRow.Header, is HomeRow.GroupChild -> Unit
                 }
                 return@LazyColumn
             }
@@ -1828,6 +1868,7 @@ fun DmListScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp)
                 .heightIn(min = 40.dp)
+                .onFocusChanged { barFocused = it.isFocused }
                 // Escape empties it, and the list comes back.
                 .onPreviewKeyEvent { e ->
                     if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && e.key == androidx.compose.ui.input.key.Key.Escape && searchText.text.isNotEmpty()) {
