@@ -52,6 +52,12 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -692,7 +698,13 @@ fun DmListScreen(
                 is HomeRow.GroupChild -> Unit
             }
         }
-        if (idx >= 0) runCatching { listState.animateScrollToItem(idx) }
+        // Not runCatching: expanding the group changes the rows, which
+        // re-keys this effect and cancels the scroll. Caught, the cancelled
+        // run went on to clear the request, and the run that replaced it
+        // found nothing to do: the list stayed where it was, and only a
+        // second pick, the group already open, landed (a user, 2026-11-24,
+        // on every client). Let through, the next run scrolls.
+        if (idx >= 0) io.nisfeb.talon.util.runSuspendCatching { listState.animateScrollToItem(idx) }
         onRevealGroupHandled()
     }
     // Tracks what was touched during a drag so onDragStopped knows what
@@ -1288,6 +1300,39 @@ fun DmListScreen(
         // edges share a box, so the chips sit against the list's own top
         // and bottom rather than a guessed distance from the screen's.
         Box(Modifier.weight(1f).fillMaxWidth()) {
+        // What the list's search bar holds: while it holds anything, the
+        // list is the conversations whose names hold it (a user, 2026-11-24:
+        // "the search being at the top of the list of groups begs to just be
+        // a search filter over the sidebar contents, not jumping out into the
+        // full screen mode"). Searching the messages is its first row, Enter,
+        // or the header's search.
+        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        val filterQuery = searchText.text.trim()
+        // Over the whole list, whatever tab or folder is chosen.
+        val filtered = remember(filterQuery, rows, contactMap, groupOrders, allUnreads, groupChannelOrder, folderItemOrder) {
+            if (filterQuery.isEmpty()) null
+            else filterHomeRows(
+                buildHomeRows(
+                    allConvs = rows,
+                    contactMap = contactMap,
+                    expandedGroups = emptySet(),
+                    allUnreads = allUnreads,
+                    groupOrderFlags = groupOrders.map { it.flag },
+                    groupChannelOrder = groupChannelOrder,
+                    folderItemOrder = folderItemOrder,
+                ),
+                filterQuery,
+                contactMap::conversationLabel,
+            )
+        }
+        var barFocused by remember { mutableStateOf(false) }
+        SideEffect { searchReveal.held = searchText.text.isNotEmpty() || barFocused }
+        val searchMessages: () -> Unit = {
+            SearchDraft.query = searchText.text
+            SearchDraft.fromBar = true
+            searchText = androidx.compose.ui.text.input.TextFieldValue()
+            onOpenSearch()
+        }
         // The party tab is a different list, not a slice of the home
         // rows, so it stands in for the whole LazyColumn. Guarded on the
         // view selectors too: selectedHomeTab survives a switch to a
@@ -1304,13 +1349,11 @@ fun DmListScreen(
         else {
         // A wheel's scroll ends with no fling: settle the bar when the list rests.
         LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) searchReveal.settle() }
-        // Message search, as a small rounded bar over the top of the list,
-        // tucked away until pulled for: the first letter typed opens the
-        // results with it, and emptying them comes back here. Over the list,
-        // not above it: only the list's top padding grows as it slides in,
-        // so nothing moves under the finger that pulls it (a layout that
-        // moved fed the drag its own movement, without end).
-        var searchText by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue()) }
+        // The list's search bar, a small rounded bar over the top of the
+        // list, tucked away until pulled for, and held out while it filters.
+        // Over the list, not above it: only the list's top padding grows as
+        // it slides in, so nothing moves under the finger that pulls it (a
+        // layout that moved fed the drag its own movement, without end).
         val shown = searchReveal.shownPx
         val shownDp = with(androidx.compose.ui.platform.LocalDensity.current) { shown.toDp() }
         Box {
@@ -1320,6 +1363,63 @@ fun DmListScreen(
             contentPadding = PaddingValues(top = 8.dp + shownDp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+            // Filtering: the matches alone, from every tab and folder, in the
+            // list's order, under a row that searches the messages for the same words.
+            if (filtered != null) {
+                item(key = "__search_messages", contentType = "search_messages") {
+                    androidx.compose.foundation.layout.Row(
+                        Modifier.fillMaxWidth().clickable(onClick = searchMessages).padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Search messages for \u201c$filterQuery\u201d",
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
+                if (filtered.isEmpty()) {
+                    item(key = "__filter_empty") { SpecialEmpty("No chats named \u201c$filterQuery\u201d.") }
+                }
+                for ((n, row) in filtered.withIndex()) when (row) {
+                    is HomeRow.GroupHead -> {
+                        val kids = filtered.drop(n + 1).takeWhile { it is HomeRow.GroupChild && it.groupFlag == row.flag }
+                            .filterIsInstance<HomeRow.GroupChild>()
+                        item(key = "flt:" + row.key, contentType = "GroupHead") {
+                            GroupCard(
+                                row = row,
+                                children = kids,
+                                contactMap = contactMap,
+                                ourShip = activeShip,
+                                draftOf = { drafts[it] },
+                                openWhom = openWhom,
+                                onOpen = onRowOpen,
+                                onShowAll = {},
+                                onLongClick = onGroupHeadLongPress,
+                                onChannelLongPress = onRowLongPress,
+                                editMode = false,
+                                dragHandleModifier = null,
+                            )
+                        }
+                    }
+                    is HomeRow.Flat -> item(key = "flt:" + row.key, contentType = "Flat") {
+                        ConversationRow(
+                            m = row.m,
+                            unread = row.unread,
+                            contactMap = contactMap,
+                            draft = drafts[row.m.whom],
+                            onClick = onRowOpen,
+                            onLongClick = onRowLongPress,
+                            open = row.m.whom == openWhom,
+                        )
+                    }
+                    is HomeRow.Header, is HomeRow.GroupChild -> Unit
+                }
+                return@LazyColumn
+            }
             // The people starred as favourites, a tap from their chat
             // (sneagan, 2026-11-09). Shown on every tab, as the requests are.
             if (reach.favourites.isNotEmpty()) {
@@ -1744,19 +1844,20 @@ fun DmListScreen(
         ) {
         OutlinedTextField(
             value = searchText,
-            onValueChange = { typed ->
-                // An input method's word goes over once it is committed:
-                // handed over while composing, its first keystroke went
-                // raw ("n" for に, a lone jamo) and the rest was lost.
-                if (typed.composition == null && typed.text.isNotBlank()) {
-                    SearchDraft.query = typed.text
-                    SearchDraft.fromBar = true
-                    searchText = androidx.compose.ui.text.input.TextFieldValue()
-                    onOpenSearch()
-                } else searchText = typed
-            },
+            // Typing filters the list here; it no longer jumps to the search page.
+            onValueChange = { searchText = it },
             placeholder = { Text("Search", maxLines = 1) },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            trailingIcon = if (searchText.text.isEmpty()) null else {
+                {
+                    io.nisfeb.talon.ui.IconButton(tip = "Clear", onClick = { searchText = androidx.compose.ui.text.input.TextFieldValue() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear the search", modifier = Modifier.size(18.dp))
+                    }
+                }
+            },
+            // Enter, or a keyboard's Search key, searches the messages.
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { if (filterQuery.isNotEmpty()) searchMessages() }),
             singleLine = true,
             shape = RoundedCornerShape(20.dp),
             textStyle = MaterialTheme.typography.bodyMedium,
@@ -1767,6 +1868,13 @@ fun DmListScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp)
                 .heightIn(min = 40.dp)
+                .onFocusChanged { barFocused = it.isFocused }
+                // Escape empties it, and the list comes back.
+                .onPreviewKeyEvent { e ->
+                    if (e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && e.key == androidx.compose.ui.input.key.Key.Escape && searchText.text.isNotEmpty()) {
+                        searchText = androidx.compose.ui.text.input.TextFieldValue(); true
+                    } else false
+                }
                 .semantics { contentDescription = "Search" },
         )
         }
@@ -1776,7 +1884,7 @@ fun DmListScreen(
         // a different flat list, so unreadIndices (built from homeRows)
         // would not line up with listState. Folder views are short
         // enough not to need the hint.
-        if (selectedFolderId == null && selectedSpecial == SpecialTab.All) {
+        if (selectedFolderId == null && selectedSpecial == SpecialTab.All && filtered == null) {
             UnreadOffscreenIndicators(
                 homeRows = visibleHomeRows,
                 listState = listState,

@@ -15,6 +15,11 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
@@ -225,6 +230,95 @@ class HomeListTest {
         onNodeWithContentDescription("Search messages").performClick()
         waitForIdle()
         assertTrue("Search" in did)
+    }
+
+    // A user, 2026-11-24, on desktop: "if you start typing into the search
+    // bar it jumps into the full screen view. This is jarring. the search
+    // being at the top of the list of groups begs to just be a search
+    // filter over the sidebar contents."
+    private val gardenAndFriends: suspend io.nisfeb.talon.data.AppDatabase.() -> Unit = {
+        groups().upsertGroups(listOf(GroupEntity("~bus/garden", "The Garden", null), GroupEntity("~bus/quiet", "Quiet Corner", null)))
+        groups().upsertChannelGroups(listOf(
+            ChannelGroupEntity("chat/~bus/general", "~bus/garden", title = "general"),
+            // A group nobody has written in yet: in the list all the same.
+            ChannelGroupEntity("chat/~bus/hush", "~bus/quiet", title = "hush"),
+        ))
+        messages().upsert(msg("chat/~bus/general", "170141184506", "~bus", "in the garden", 1_000))
+        messages().upsert(msg("~nec", "~nec/170141184507", "~nec", "lunch tomorrow?", 2_000))
+    }
+
+    private fun ComposeUiTest.has(text: String, substring: Boolean = false) =
+        onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
+
+    private fun ComposeUiTest.typeInTheBar(text: String) {
+        onAllNodesWithText("lunch tomorrow?", substring = true).onFirst().performTouchInput { swipeDown(startY = centerY, endY = centerY + 400f, durationMillis = 400) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction() and hasContentDescription("Search")).fetchSemanticsNodes().isNotEmpty() }
+        onNode(hasSetTextAction() and hasContentDescription("Search")).performTextInput(text)
+    }
+
+    @Test
+    fun `typing in the list's search bar narrows the list there, and the search page stays shut`() = home(seed = gardenAndFriends) {
+        tap("DMs", substring = true)
+        shows("lunch tomorrow?")
+        typeInTheBar("gard")
+        waitUntil(timeoutMillis = 5_000) { onAllNodesWithText("lunch tomorrow?").fetchSemanticsNodes().isEmpty() }
+        assertTrue(has("in the garden", substring = true), "the group's channel, from the DMs tab")
+        assertTrue(has("Search messages for \u201cgard\u201d"))
+        assertFalse("Search" in did, "the search page did not open")
+        // Escape empties it, and the list comes back.
+        onNode(hasSetTextAction() and hasContentDescription("Search")).performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Escape) }
+        waitUntil(timeoutMillis = 5_000) { has("lunch tomorrow?") }
+        assertFalse("Search" in did)
+    }
+
+    @Test
+    fun `the bar's first row, or Enter, searches the messages for what it holds`() = home(seed = gardenAndFriends) {
+        tap("DMs", substring = true)
+        shows("lunch tomorrow?")
+        typeInTheBar("lunch")
+        waitUntil(timeoutMillis = 5_000) { has("Search messages for \u201clunch\u201d") }
+        assertTrue(has("No chats named \u201clunch\u201d."), "names, not messages: ~nec is not named lunch")
+        tap("Search messages for \u201clunch\u201d")
+        assertTrue("Search" in did)
+        assertEquals("lunch", io.nisfeb.talon.ui.screens.SearchDraft.query)
+        did.clear()
+        typeInTheBar("nec")
+        waitUntil(timeoutMillis = 5_000) { has("lunch tomorrow?") && !has("in the garden", substring = true) }
+        // Enter itself, on desktop, where this was reported.
+        onNode(hasSetTextAction() and hasContentDescription("Search")).performKeyInput { pressKey(androidx.compose.ui.input.key.Key.Enter) }
+        waitUntil(timeoutMillis = 5_000) { "Search" in did }
+        assertEquals("nec", io.nisfeb.talon.ui.screens.SearchDraft.query)
+        io.nisfeb.talon.ui.screens.SearchDraft.query = ""
+        io.nisfeb.talon.ui.screens.SearchDraft.fromBar = false
+    }
+
+    @Test
+    fun `a group nobody has written in is found by its name`() = home(seed = gardenAndFriends) {
+        tap("DMs", substring = true)
+        shows("lunch tomorrow?")
+        typeInTheBar("quiet")
+        waitUntil(timeoutMillis = 5_000) { has("Quiet Corner", substring = true) }
+        assertFalse(has("No chats named", substring = true))
+    }
+
+    // The bar folded under the results as they scrolled, and once emptied
+    // it left the screen with the cursor in it.
+    @Test
+    fun `the bar stays out while in use, through a scroll, an emptying and a second word`() = home(seed = manyGroups) {
+        shows("Group 00")
+        onNodeWithText("Group 00").performTouchInput { swipeDown(startY = centerY, endY = centerY + 400f, durationMillis = 400) }
+        waitUntil(timeoutMillis = 5_000) { onAllNodes(hasSetTextAction() and hasContentDescription("Search")).fetchSemanticsNodes().isNotEmpty() }
+        val bar = hasSetTextAction() and hasContentDescription("Search")
+        onNode(bar).performTextInput("Group")
+        waitUntil(timeoutMillis = 5_000) { has("Search messages for \u201cGroup\u201d") }
+        onNodeWithText("Group 03").performTouchInput { swipeUp(startY = centerY, endY = centerY - 500f, durationMillis = 400) }
+        waitForIdle()
+        assertTrue(onAllNodes(bar).fetchSemanticsNodes().isNotEmpty(), "still out after the results scrolled")
+        onNode(bar).performTextClearance()
+        waitForIdle()
+        assertTrue(onAllNodes(bar).fetchSemanticsNodes().isNotEmpty(), "still out, emptied, while the cursor is in it")
+        onNode(bar).performTextInput("Group 39")
+        waitUntil(timeoutMillis = 5_000) { has("Search messages for \u201cGroup 39\u201d") && !has("Group 00") }
     }
 
     // A screen reader cannot pull a list: the header offers search itself.

@@ -269,3 +269,46 @@ fun buildFolderRows(
     }
     return out
 }
+
+/**
+ * The chat list narrowed to what is typed in its search bar, in the
+ * list's own order: a group whose name holds [query] with all its
+ * channels, else only its channels whose names hold it (opened, to show
+ * them), and the people whose name or ship holds it. Over the list's
+ * rows, not its conversations: a group or channel with no messages yet
+ * is in the list, and must be found. A channel is not matched on its
+ * host's ship: "bus" would have found every channel ~bus keeps.
+ */
+fun filterHomeRows(rows: List<HomeRow>, query: String, labelOf: (String) -> String): List<HomeRow> {
+    val q = query.trim()
+    if (q.isEmpty()) return rows
+    fun hit(s: String) = s.contains(q, ignoreCase = true)
+    val out = ArrayList<HomeRow>()
+    var i = 0
+    while (i < rows.size) {
+        when (val r = rows[i]) {
+            is HomeRow.GroupHead -> {
+                var j = i + 1
+                val kids = ArrayList<HomeRow.GroupChild>()
+                while (j < rows.size) {
+                    val n = rows[j]
+                    if (n is HomeRow.GroupChild && n.groupFlag == r.flag) { kids += n; j++ } else break
+                }
+                val named = hit(r.title)
+                val keep = if (named) kids else kids.filter { hit(labelOf(it.whom)) }
+                if (named || keep.isNotEmpty()) {
+                    out += r.copy(expanded = true)
+                    out += keep
+                }
+                i = j
+            }
+            is HomeRow.Flat -> {
+                if (hit(labelOf(r.m.whom)) || (r.m.whom.startsWith("~") && hit(r.m.whom))) out += r
+                i++
+            }
+            // Section headers say nothing here; a channel is taken with its head.
+            is HomeRow.Header, is HomeRow.GroupChild -> i++
+        }
+    }
+    return out
+}

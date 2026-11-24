@@ -56,8 +56,9 @@ import kotlinx.coroutines.flow.take
  */
 internal object SearchDraft {
     var query = ""
-    /** The query is the list's search bar's first letters, not one a
-     *  result brought back: only then does emptying it close Search. */
+    /** The query came from the list's search bar (its first row, or
+     *  Enter), not one a result brought back: only then does emptying it
+     *  close Search. */
     var fromBar = false
 }
 
