@@ -566,6 +566,28 @@ compose.desktop {
                 if (icnsFile.exists()) {
                     iconFile.set(icnsFile)
                 }
+                // The app's name to macOS: what a signature, and with it a
+                // Screen Recording or microphone permission, belongs to. The
+                // name every release so far has had (read from 1.8.48's
+                // Info.plist), which the plugin took from the main class's
+                // package: pinned, so moving that class cannot change it.
+                bundleID = "io.nisfeb.talon.compose"
+                // Signed with the owner's Developer ID where the release
+                // workflow imports it (APPLE_SIGNING_IDENTITY, the name
+                // after "Developer ID Application: ", and APPLE_KEYCHAIN);
+                // ad-hoc everywhere else. Unsigned, macOS ties a permission
+                // such as Screen Recording to one exact build, so an update
+                // can leave Talon shown as allowed and refused; suspected,
+                // not confirmed, in a Mac user's empty screen share
+                // (2026-11-25). The plugin signs the .dylib and .jnilib files
+                // inside the jars too, which notarization requires.
+                System.getenv("APPLE_SIGNING_IDENTITY")?.takeIf { it.isNotBlank() }?.let { who ->
+                    signing {
+                        sign.set(true)
+                        identity.set(who)
+                        System.getenv("APPLE_KEYCHAIN")?.takeIf { it.isNotBlank() }?.let { keychain.set(it) }
+                    }
+                }
                 // The usage string alone is NOT enough: jpackage signs
                 // the bundle ad-hoc WITH the hardened-runtime flag, and
                 // hardened runtime additionally requires the

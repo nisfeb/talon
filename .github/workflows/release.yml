@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # A hand-run builds every package as a tag would, signing included,
+  # and publishes nothing: how a change to the build is tried first.
+  workflow_dispatch:
 
 # Default to read-only for every job. Only the `release` job below
 # re-escalates to contents: write so it can publish the GitHub
@@ -26,6 +29,10 @@ jobs:
       - id: parse
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
+          # A hand-run has no tag: it builds whatever version is checked in.
+          if [ "${GITHUB_REF#refs/tags/}" = "$GITHUB_REF" ]; then
+            TAG=$(grep -E '^talon\.versionName=' gradle.properties | head -1 | cut -d= -f2 | tr -d ' ')
+          fi
           # The version lives in gradle.properties now, because two
           # modules and this workflow all need it: :composeApp bakes it
           # into TalonBuild and the desktop package, :androidApp uses it
@@ -234,6 +241,53 @@ jobs:
         if: runner.os == 'macOS'
         run: ./scripts/build-macos-icns.sh
         shell: bash
+      # The owner's Developer ID into a keychain of this run's own, where
+      # the build signs with it. The same secrets and formats as
+      # nisfeb/lattice: APPLE_CERTIFICATE (a base64 .p12 with the leaf and
+      # Apple's Developer ID G2 intermediate), APPLE_CERTIFICATE_PASSWORD,
+      # and for notarizing APPLE_API_KEY, APPLE_API_ISSUER and
+      # APPLE_API_KEY_P8 (the .p8's text). Without a certificate the
+      # package is built ad-hoc signed, as before, with a warning.
+      - name: Import the signing certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$CERT" ]; then
+            echo "::warning::no APPLE_CERTIFICATE secret: the macOS package is not signed with a Developer ID"
+            exit 0
+          fi
+          # Signed but not notarized, Gatekeeper refuses it as firmly as an unsigned one.
+          if [ -z "$API_KEY" ] || [ -z "$API_ISSUER" ] || [ -z "$API_KEY_P8" ]; then
+            echo "::error::APPLE_CERTIFICATE is set but nothing to notarize with: set APPLE_API_KEY, APPLE_API_ISSUER and APPLE_API_KEY_P8" >&2
+            exit 1
+          fi
+          kc="$RUNNER_TEMP/talon-signing.keychain-db"
+          kp=$(openssl rand -hex 24)
+          security create-keychain -p "$kp" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kp" "$kc"
+          p12="$RUNNER_TEMP/talon-signing.p12"
+          printf '%s' "$CERT" | base64 --decode > "$p12"
+          security import "$p12" -k "$kc" -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kp" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          # The name the build asks for, read from the certificate itself.
+          full=$(security find-identity -v -p codesigning "$kc" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"') || true
+          if [ -z "$full" ]; then
+            echo "::error::the imported certificate holds no Developer ID Application identity" >&2
+            exit 1
+          fi
+          echo "signing as: $full"
+          echo "APPLE_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=${full#Developer ID Application: }" >> "$GITHUB_ENV"
       - name: Build native package (${{ matrix.target }})
         env:
           TALON_DEFAULT_ICE: ${{ secrets.TALON_DEFAULT_ICE }}
@@ -243,6 +297,48 @@ jobs:
           TALON_RETIRED_SFU_BASE: ${{ secrets.TALON_RETIRED_SFU_BASE }}
         run: ./gradlew :composeApp:${{ matrix.target }}
         shell: bash
+      # Apple's notary checks the signed package, and its ticket is stapled
+      # to the .dmg so it opens without a network check. Then the checks a
+      # Mac makes when it is opened, here, before anyone downloads it.
+      - name: Notarize, staple and check (macOS, when signed)
+        if: runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != ''
+        env:
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(ls composeApp/build/compose/binaries/main-release/dmg/*.dmg)
+          p8="$RUNNER_TEMP/AuthKey_$API_KEY.p8"
+          printf '%s\n' "$API_KEY_P8" > "$p8"
+          # The disk image signed too: whether jpackage signs it or only the
+          # app inside is not something this workflow has seen yet.
+          codesign --force --timestamp --sign "Developer ID Application: $APPLE_SIGNING_IDENTITY" --keychain "$APPLE_KEYCHAIN" "$dmg"
+          # Guarded: a rejection must reach the log lines below, which name
+          # the files Apple refused, not end the step at this assignment.
+          out=$(xcrun notarytool submit "$dmg" --key "$p8" --key-id "$API_KEY" --issuer "$API_ISSUER" --wait --timeout 45m --output-format json) || true
+          echo "$out"
+          status=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null) || true
+          if [ "$status" != "Accepted" ]; then
+            id=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null) || true
+            [ -n "$id" ] && xcrun notarytool log "$id" --key "$p8" --key-id "$API_KEY" --issuer "$API_ISSUER" || true
+            rm -f "$p8"
+            echo "::error::notarization was not accepted: $status" >&2
+            exit 1
+          fi
+          rm -f "$p8"
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature -vv "$dmg"
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" >/dev/null
+          app=$(ls -d "$mnt"/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=2 "$app" 2>&1 | grep -E 'Authority=Developer ID Application|TeamIdentifier|Identifier=|flags=' || true
+          spctl --assess --type execute -vv "$app"
+          hdiutil detach "$mnt" >/dev/null
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -282,6 +378,8 @@ jobs:
 
   release:
     needs: [tagcheck, build-android, build-desktop]
+    # Only a tag publishes: a hand-run builds everything and stops here.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
