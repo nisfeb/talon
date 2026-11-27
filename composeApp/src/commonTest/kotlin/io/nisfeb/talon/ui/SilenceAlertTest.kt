@@ -84,6 +84,14 @@ class SilenceAlertTest {
     }
 
     @Test
+    fun `ticks slow but within the gap still count`() {
+        // Three minutes apart, the most a tick may lag (a busy phone).
+        val a = alert()
+        val steps = (0..20).mapNotNull { i -> val t = start + i * 3 * min; a.tick(t, start, listening = true).takeIf { it != SilenceStep.None }?.let { t to it } }
+        assertEquals(listOf(start + 30 * min to SilenceStep.Post(start)), steps)
+    }
+
+    @Test
     fun `never heard this run, it counts from when it began watching`() {
         val a = alert()
         assertEquals(listOf(start + 30 * min to SilenceStep.Post(start)), a.run(start, 45, heard = null))
