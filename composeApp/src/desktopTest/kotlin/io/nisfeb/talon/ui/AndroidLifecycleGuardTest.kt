@@ -33,7 +33,7 @@ class AndroidLifecycleGuardTest {
         assertTrue("""android:targetActivity="io.nisfeb.talon.MainActivity"""" in alias, alias)
         assertTrue(manifest.indexOf(alias) > manifest.indexOf("""android:name="io.nisfeb.talon.MainActivity""""), "an alias comes after its target")
         assertFalse("MainActivity::class" in notifications, "a notification opens the exported MainActivity")
-        assertEquals(8, Regex("""tapIntent\(context\)""").findAll(notifications).count(), "a notification tap was added or lost")
+        assertEquals(9, Regex("""tapIntent\(context\)""").findAll(notifications).count(), "a notification tap was added or lost")
         val redial = read("$android/call/TalonConnectionService.kt")
         assertTrue("Notifications.tapIntent(this)" in redial && "MainActivity::class" !in redial, "the telecom redial's call back no longer counts")
     }

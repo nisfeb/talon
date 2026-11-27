@@ -581,6 +581,42 @@ object Notifications {
 
     private const val SIGNED_OUT_TAG = "signed-out:"
 
+    /**
+     * Nothing from [ship] for thirty minutes (watchShipSilence says when).
+     * Silent: a ship that restarts at night is no reason to wake anyone.
+     * A tap opens the app on it, where the red line says the rest.
+     */
+    fun showUnreachable(context: Context, ship: String, title: String, body: String) {
+        ensureChannel(context)
+        val mgr = ContextCompat.getSystemService(context, NotificationManager::class.java) ?: return
+        val tap = PendingIntent.getActivity(
+            context, (UNREACHABLE_TAG + ship).hashCode(),
+            tapIntent(context).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_FOR_SHIP, ship)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_talon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        mgr.notify(UNREACHABLE_TAG + ship, NOTIFICATION_ID, n)
+    }
+
+    /** [ship] was heard from again, or is no longer watched: its notice goes. */
+    fun clearUnreachable(context: Context, ship: String) {
+        ContextCompat.getSystemService(context, NotificationManager::class.java)
+            ?.cancel(UNREACHABLE_TAG + ship, NOTIFICATION_ID)
+    }
+
+    private const val UNREACHABLE_TAG = "unreachable:"
+
     fun cancelIncomingCall(context: Context) {
         // Stop the noise first: the notification going away while the
         // phone keeps buzzing is worse than either alone.

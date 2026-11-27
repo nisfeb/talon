@@ -2385,6 +2385,61 @@ class AppShellTest {
         assertTrue(!showing("Can't reach") && !showing("Signed out of") && !syncMarkShown())
     }
 
+    // sneagan, 2026-11-27: "talon should alert the user if it hasn't been
+    // able to contact the ship for 30 minutes". Ten seconds here.
+
+    /** The notifications the app posts and takes back, by key. */
+    private class Notices : io.nisfeb.talon.notify.Notifier {
+        val posted = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+        val cleared = java.util.concurrent.CopyOnWriteArrayList<String>()
+        override fun notify(title: String, body: String, key: String?) { posted += (key ?: "") to title }
+        override fun clear(key: String) { cleared += key }
+        fun unreachable() = posted.filter { it.first == "unreachable:~zod" }.map { it.second }
+        fun unreachableCleared() = cleared.count { it == "unreachable:~zod" }
+    }
+
+    private val quickAlert = quickSync.copy(alertAfterMs = 10_000)
+
+    @Test
+    fun `a ship silent past the mark is said once, coming back to the app does not say it again, and its return takes it back`() {
+        val front = kotlinx.coroutines.flow.MutableStateFlow(true)
+        val notices = Notices()
+        app(sync = quickAlert, setup = { heartbeat(500) }, notifier = notices, foreground = front) { ship ->
+            home()
+            waitUntil(timeoutMillis = 15_000) { !syncMarkShown() }
+            ship.refuseStream = true
+            kotlinx.coroutines.runBlocking { ship.endStreams() }
+            waitUntil(timeoutMillis = 30_000) { notices.unreachable().isNotEmpty() }
+            assertTrue(notices.unreachable().single().startsWith("Can't reach ~zod since"), "${notices.unreachable()}")
+            // Away and back mid-outage: the list says Connecting a moment,
+            // and the notice is neither taken back nor posted again.
+            val clears = notices.unreachableCleared()
+            front.value = false
+            Thread.sleep(500)
+            front.value = true
+            Thread.sleep(5_000)
+            assertEquals(1, notices.unreachable().size, "${notices.unreachable()}")
+            assertEquals(clears, notices.unreachableCleared(), "taken back with the ship still silent")
+            // The ship answers again.
+            ship.refuseStream = false
+            waitUntil(timeoutMillis = 10_000) { showing("Try now") }
+            onNodeWithText("Try now").performClick()
+            waitUntil(timeoutMillis = 15_000) { notices.unreachableCleared() > clears }
+            assertEquals(1, notices.unreachable().size)
+        }
+    }
+
+    @Test
+    fun `a quiet ship that is there is never said to be out of reach`() {
+        val notices = Notices()
+        app(sync = quickAlert, setup = { heartbeat(500) }, notifier = notices) {
+            home()
+            Thread.sleep(15_000)
+            waitForIdle()
+            assertEquals(emptyList(), notices.unreachable())
+        }
+    }
+
     // ---- A 1:1 call's meeting view, cameras and share: what party lines had (sneagan, 2026-10-29) ----
 
     /** A call's media: a camera that opens or not, and a share, as the test says. */
