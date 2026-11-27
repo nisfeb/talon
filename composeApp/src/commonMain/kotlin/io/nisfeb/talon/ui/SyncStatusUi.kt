@@ -58,6 +58,45 @@ fun rememberSyncStatus(repo: TlonChatRepo): SyncStatus {
 private const val SYNC_TICK_MS = 3_000L
 
 /**
+ * [SilenceAlert] over [repo] for as long as this runs: [post] once the
+ * ship has said nothing for [alertAfterMs], [clear] when it speaks again,
+ * stops listening, or this ends. One left from a run before (the process
+ * died with it up) is cleared first. On real time, off the caller's
+ * clock: a test's virtual one would race it.
+ */
+suspend fun watchShipSilence(
+    repo: TlonChatRepo,
+    ship: String,
+    alertAfterMs: Long = SyncThresholds().alertAfterMs,
+    online: () -> Boolean = { true },
+    post: (title: String, body: String) -> Unit,
+    clear: () -> Unit,
+): Unit = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+    // ponytail: a minute's tick, so the post comes up to a minute after the mark.
+    val tickMs = minOf(60_000L, alertAfterMs / 10)
+    val alert = SilenceAlert(alertAfterMs, maxGapMs = tickMs * 3)
+    // A notifier that throws is not a reason to stop watching.
+    fun unsay() { runCatching(clear) }
+    unsay()
+    try {
+        while (true) {
+            val now = nowMs()
+            when (val step = alert.tick(now, repo.lastHeardMs(), repo.running && !repo.signedOut.value, online())) {
+                is SilenceStep.Post -> {
+                    val status = SyncStatus.Unreachable(step.sinceMs, pending = 0)
+                    runCatching { post(syncHeadline(status, shipHandle(ship), now), syncDetail(status)) }
+                }
+                SilenceStep.Clear -> unsay()
+                SilenceStep.None -> Unit
+            }
+            delay(tickMs)
+        }
+    } finally {
+        unsay()
+    }
+}
+
+/**
  * The header's sync mark: a cloud with a tick when connected, arrows
  * while syncing or sending, struck through when the ship is out of
  * reach or the login has lapsed. A tap says what it knows and offers

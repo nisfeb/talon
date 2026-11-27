@@ -135,4 +135,14 @@ class AndroidNoticesGuardTest {
         assertTrue("hideComposerButtons = app.uiSettings.hideComposerButtons" in thread, thread)
         assertTrue("LoginLapses.take(ship)" in talonApp && "notice = lapseNotice" in talonApp)
     }
+
+    // The thirty-minute silence notice: the rule and its loop are common
+    // (SilenceAlertTest, AppShellTest); this is Android's wiring of them.
+    @Test
+    fun `Android watches the ship's silence for the repo's life and posts and takes back its notice`() {
+        val watch = Regex("""silenceWatch = (.*?)\n            \}""", RegexOption.DOT_MATCHES_ALL).find(application)?.groupValues?.get(1)
+        assertTrue(watch != null && "watchShipSilence(" in watch, "no silence watch on the ship's repo: $watch")
+        assertTrue("showUnreachable" in watch && "clearUnreachable" in watch && "online = ::online" in watch, watch)
+        assertTrue("silenceWatch?.cancel()" in application, "a ship switch must end the old ship's watch")
+    }
 }

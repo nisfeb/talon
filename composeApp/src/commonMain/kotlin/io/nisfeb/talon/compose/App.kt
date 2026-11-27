@@ -848,6 +848,17 @@ fun App(
             val ship = loggedInShip ?: return@LaunchedEffect
             repo.signedOut.collect { if (it) io.nisfeb.talon.ui.screens.LoginLapses.lapsed(ship) }
         }
+        // Thirty minutes with nothing from the ship: a notification says
+        // so, once, where the chat list's red line goes unseen.
+        val alertAfterMs = io.nisfeb.talon.ui.LocalSyncThresholds.current.alertAfterMs
+        LaunchedEffect(repo, notifier, alertAfterMs) {
+            val ship = loggedInShip ?: return@LaunchedEffect
+            io.nisfeb.talon.ui.watchShipSilence(
+                repo, ship, alertAfterMs,
+                post = { title, body -> notifier.notify(title, body, "unreachable:$ship") },
+                clear = { notifier.clear("unreachable:$ship") },
+            )
+        }
         // iOS: notifications from the owner's own ship once its %trunk can
         // send them (wire 11), with the relay only the Apple hop. Again when
         // the phone's tokens change, so the gateway has the new ones.

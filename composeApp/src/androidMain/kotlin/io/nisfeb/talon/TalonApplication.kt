@@ -383,6 +383,20 @@ class TalonApplication : Application() {
     /** The current repo's lapsed-login watch, replaced with the repo on a ship switch. */
     private var lapseWatch: kotlinx.coroutines.Job? = null
 
+    /** The current repo's thirty-minute silence watch ([io.nisfeb.talon.ui.watchShipSilence]), replaced with it. */
+    private var silenceWatch: kotlinx.coroutines.Job? = null
+
+    /**
+     * A network this app may use, and one that reaches the internet. Doze,
+     * Data Saver and no signal leave the app none: the ship is not out of
+     * reach then, the phone is.
+     */
+    private fun online(): Boolean = runCatching {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)
+            ?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+    }.getOrDefault(true)
+
     /** When the signed-out notice posts and goes, across each ship's repos. */
     private val lapseNotices = io.nisfeb.talon.ui.screens.LapseNotices()
 
@@ -576,6 +590,16 @@ class TalonApplication : Application() {
             // A login that lapsed: TalonApp offers to sign in again (LoginLapses).
             // With Talon not in front, a notice says so, and the sync
             // service's line too.
+            // Thirty minutes with nothing from the ship, said once. Its
+            // finally takes the old ship's notice back on a switch.
+            silenceWatch?.cancel()
+            silenceWatch = if (ship == "none") null else appScope.launch {
+                io.nisfeb.talon.ui.watchShipSilence(
+                    r, ship, online = ::online,
+                    post = { title, body -> Notifications.showUnreachable(this@TalonApplication, ship, title, body) },
+                    clear = { Notifications.clearUnreachable(this@TalonApplication, ship) },
+                )
+            }
             lapseWatch?.cancel()
             lapseWatch = appScope.launch {
                 var before: Boolean? = null

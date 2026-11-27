@@ -170,6 +170,9 @@ class TlonChatRepo(
      */
     val pushScope = CoroutineScope(SupervisorJob() + ioDispatcher + backgroundExceptionHandler)
     @Volatile private var started = false
+
+    /** Started and not stopped: trying to hear from the ship. */
+    val running: Boolean get() = started
     private val channelNow = MutableStateFlow<UrbitChannel?>(null)
     private var channel: UrbitChannel?
         get() = channelNow.value

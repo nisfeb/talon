@@ -40,7 +40,56 @@ data class SyncThresholds(
     val heardRecentlyMs: Long = 5 * 60_000L,
     /** Nothing heard since it began trying (this run, or back at the app), connecting for this long before it is unreachable. */
     val connectGraceMs: Long = 20_000L,
+    /** Nothing heard for this long, and a notification says so outside the app ([SilenceAlert]). */
+    val alertAfterMs: Long = 30 * 60_000L,
 )
+
+/** What [SilenceAlert] does on a tick. */
+sealed interface SilenceStep {
+    /** Say it: nothing from the ship since [sinceMs]. */
+    data class Post(val sinceMs: Long) : SilenceStep
+    data object Clear : SilenceStep
+    data object None : SilenceStep
+}
+
+/**
+ * The notification for a ship that has said nothing for [alertAfterMs]
+ * (sneagan, 2026-11-27: thirty minutes). Posted once an outage, and taken
+ * back only when something comes from the ship again, or the repo stops
+ * listening. Not on the status going to Connecting: it does that for a
+ * moment each time the app comes to the front, mid-outage.
+ *
+ * Only time this run watched counts. A tick later than [maxGapMs] (a
+ * laptop asleep, a phone frozen or dozing, iOS behind), no network, or a
+ * repo not listening starts the count again: the last heard is from
+ * before, and nothing was trying meanwhile. Two complaints were of a
+ * "can't reach" said of a ship that was there.
+ */
+class SilenceAlert(private val alertAfterMs: Long, private val maxGapMs: Long) {
+    private var lastTickMs: Long? = null
+    private var watchingSinceMs = 0L
+    private var postedAtHeard: Long? = null
+
+    /**
+     * [heardMs]: the repo's last heard, null for nothing yet this run.
+     * [listening]: started and signed in. [online]: the device has a network.
+     */
+    fun tick(nowMs: Long, heardMs: Long?, listening: Boolean, online: Boolean = true): SilenceStep {
+        val late = lastTickMs.let { it == null || nowMs - it > maxGapMs }
+        lastTickMs = nowMs
+        if (late || !online || !listening) watchingSinceMs = nowMs
+        val heard = heardMs ?: 0L
+        postedAtHeard?.let { at ->
+            if (listening && heard <= at) return SilenceStep.None
+            postedAtHeard = null
+            return SilenceStep.Clear
+        }
+        val since = maxOf(heard, watchingSinceMs)
+        if (!listening || nowMs - since < alertAfterMs) return SilenceStep.None
+        postedAtHeard = heard
+        return SilenceStep.Post(heardMs ?: since)
+    }
+}
 
 /**
  * [lastHeardMs]: when anything last came from the ship on its event
